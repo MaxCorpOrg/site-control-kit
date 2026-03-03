@@ -1,0 +1,13 @@
+{
+  "issued_by": "example",
+  "timeout_ms": 30000,
+  "target": {
+    "client_id": "client-REPLACE",
+    "active": true
+  },
+  "command": {
+    "type": "run_script",
+    "script": "return { title: document.title, href: location.href };",
+    "args": {}
+  }
+}

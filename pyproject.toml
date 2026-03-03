@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "site-control-kit"
+version = "0.1.0"
+description = "Local website control hub with browser extension bridge"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Site Control Kit Contributors" }]
+keywords = ["automation", "browser", "extension", "playwright", "dom"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent"
+]
+dependencies = []
+
+[project.scripts]
+sitectl = "webcontrol.cli:main"
+
+[tool.setuptools]
+packages = ["webcontrol"]

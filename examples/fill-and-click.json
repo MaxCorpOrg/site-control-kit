@@ -1,0 +1,12 @@
+{
+  "issued_by": "example",
+  "timeout_ms": 30000,
+  "target": {
+    "client_id": "client-REPLACE"
+  },
+  "command": {
+    "type": "fill",
+    "selector": "#email",
+    "value": "user@example.com"
+  }
+}

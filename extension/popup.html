@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Site Control Bridge</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="container popup">
+      <h1>Site Control Bridge</h1>
+      <p class="muted" id="clientLine"></p>
+
+      <div class="status-grid">
+        <div>
+          <div class="label">Последний Poll</div>
+          <div id="lastPoll">-</div>
+        </div>
+        <div>
+          <div class="label">Последний Heartbeat</div>
+          <div id="lastHeartbeat">-</div>
+        </div>
+      </div>
+
+      <div class="status-grid">
+        <div>
+          <div class="label">Последняя команда</div>
+          <div id="lastCommand">-</div>
+        </div>
+        <div>
+          <div class="label">Результат</div>
+          <div id="lastResult">-</div>
+        </div>
+      </div>
+
+      <p id="errorLine" class="status error"></p>
+
+      <div class="actions">
+        <button id="pollNowBtn">Опросить сейчас</button>
+        <button id="heartbeatNowBtn" class="secondary">Heartbeat</button>
+      </div>
+      <div class="actions">
+        <button id="openOptionsBtn" class="secondary">Открыть настройки</button>
+      </div>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

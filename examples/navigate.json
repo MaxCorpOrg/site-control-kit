@@ -1,0 +1,11 @@
+{
+  "issued_by": "example",
+  "timeout_ms": 20000,
+  "target": {
+    "client_id": "client-REPLACE"
+  },
+  "command": {
+    "type": "navigate",
+    "url": "https://example.com"
+  }
+}

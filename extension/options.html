@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Site Control Bridge - Настройки</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <h1>Site Control Bridge</h1>
+      <p class="muted">Настройки подключения к локальному хабу управления.</p>
+      <p class="muted">Быстрый режим: по умолчанию используются локальные параметры, можно просто сохранить как есть.</p>
+
+      <label>Адрес хаба (Server URL)
+        <input id="serverUrl" type="text" placeholder="http://127.0.0.1:8765" />
+      </label>
+
+      <label>Токен доступа
+        <input id="token" type="password" placeholder="Локальный токен хаба" />
+      </label>
+
+      <label>ID клиента
+        <input id="clientId" type="text" placeholder="client-..." />
+      </label>
+
+      <label>Интервал опроса (мс)
+        <input id="pollIntervalMs" type="number" min="500" step="100" />
+      </label>
+
+      <label>Интервал heartbeat (мс)
+        <input id="heartbeatIntervalMs" type="number" min="1000" step="500" />
+      </label>
+
+      <div class="actions">
+        <button id="saveBtn">Сохранить</button>
+        <button id="resetBtn" class="secondary">Сбросить</button>
+      </div>
+
+      <p id="status" class="status"></p>
+    </main>
+
+    <script src="options.js"></script>
+  </body>
+</html>
