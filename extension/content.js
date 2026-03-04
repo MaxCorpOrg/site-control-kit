@@ -273,6 +273,29 @@ async function runCommand(command) {
       return { x, y, scrolled: true };
     }
 
+    case "scroll_by": {
+      const dx = Number.isFinite(command.delta_x) ? Number(command.delta_x) : 0;
+      const dy = Number.isFinite(command.delta_y) ? Number(command.delta_y) : 0;
+      if (command.selector) {
+        const el = queryElement(command.selector);
+        if (typeof el.scrollBy === "function") {
+          el.scrollBy({ left: dx, top: dy, behavior: "auto" });
+        } else {
+          el.scrollTop = Number(el.scrollTop || 0) + dy;
+          el.scrollLeft = Number(el.scrollLeft || 0) + dx;
+        }
+        return {
+          selector: command.selector,
+          delta_x: dx,
+          delta_y: dy,
+          scrollTop: Number(el.scrollTop || 0),
+          scrolled: true
+        };
+      }
+      window.scrollBy({ left: dx, top: dy, behavior: "auto" });
+      return { delta_x: dx, delta_y: dy, scrolled: true };
+    }
+
     case "run_script": {
       if (!command.script || typeof command.script !== "string") {
         throw new Error("script is required for run_script");

@@ -246,6 +246,25 @@ def _normalize_username(value: str) -> str:
     return "—"
 
 
+def _normalize_username_from_mention_input(value: str) -> str:
+    text = _compact(value)
+    if not text:
+        return "—"
+
+    for pattern in (
+        r"@([A-Za-z0-9_]{5,32})",
+        r"https?://t\.me/([A-Za-z0-9_]{5,32})",
+        r"t\.me/([A-Za-z0-9_]{5,32})",
+    ):
+        match = re.search(pattern, text, flags=re.I)
+        if not match:
+            continue
+        candidate = match.group(1)
+        if USERNAME_VALUE_RE.fullmatch(candidate):
+            return f"@{candidate}"
+    return "—"
+
+
 def _username_from_tg_url(url: str) -> str:
     text = (url or "").strip()
     if not text:
@@ -333,7 +352,7 @@ def _read_username_from_composer(
         )
         data = result.get("data") or {}
         text = str(data.get("text") or "").strip() if isinstance(data, dict) else ""
-        username = _normalize_username(text)
+        username = _normalize_username_from_mention_input(text)
         if username != "—":
             return username
     return "—"
@@ -381,7 +400,6 @@ def _try_username_via_mention_action(
     clicked_context = False
     for selector in (
         f'.bubbles .bubbles-group-avatar.user-avatar[data-peer-id="{peer_id}"] .avatar-photo',
-        f'.colored-name.name.floating-part[data-peer-id="{peer_id}"]',
         f'.bubbles .bubbles-group-avatar.user-avatar[data-peer-id="{peer_id}"]',
         f'.peer-title.bubble-name-first[data-peer-id="{peer_id}"]',
         f'.bubbles .peer-title[data-peer-id="{peer_id}"]',
@@ -414,7 +432,7 @@ def _try_username_via_mention_action(
             token=token,
             client_id=client_id,
             tab_id=tab_id,
-            timeout_sec=2,
+            timeout_sec=1,
             command={"type": "click", "selector": selector, "timeout_ms": 700},
             raise_on_fail=False,
         )
@@ -432,23 +450,19 @@ def _try_username_via_mention_action(
         "mencao",
     ]
     if not mention_click_ok:
-        for _ in range(8):
+        for _ in range(3):
             for root_selector in (
                 "#bubble-contextmenu.active",
                 "#bubble-contextmenu",
                 ".btn-menu.contextmenu.active",
                 ".btn-menu.contextmenu",
-                ".btn-menu",
-                "[role='menu']",
-                ".menu",
-                "body",
             ):
                 mention_click = _send_command_result(
                     server=server,
                     token=token,
                     client_id=client_id,
                     tab_id=tab_id,
-                    timeout_sec=2,
+                    timeout_sec=1,
                     command={
                         "type": "click_text",
                         "root_selector": root_selector,
@@ -871,6 +885,28 @@ def _parse_chat_members(html_payload: str) -> list[dict[str, str]]:
 
 
 def _scroll_chat_up(server: str, token: str, client_id: str, tab_id: int, timeout_sec: int) -> bool:
+    for selector in (
+        ".bubbles .scrollable.scrollable-y",
+        ".chat.tabs-tab.active .bubbles .scrollable-y",
+        "#column-center .bubbles .scrollable-y",
+    ):
+        result = _send_command_result(
+            server=server,
+            token=token,
+            client_id=client_id,
+            tab_id=tab_id,
+            timeout_sec=timeout_sec,
+            command={
+                "type": "scroll_by",
+                "selector": selector,
+                "delta_y": -900,
+                "delta_x": 0,
+            },
+            raise_on_fail=False,
+        )
+        if result.get("ok"):
+            return True
+
     for selector in CHAT_SCROLL_SELECTORS:
         result = _send_command_result(
             server=server,
@@ -1316,6 +1352,8 @@ def _enrich_usernames_deep_chat(
             print("WARN: deep chat step budget exhausted, continue with next scroll step")
             break
         attempted += 1
+        # Mark as processed for this run to avoid re-clicking the same peer again and again.
+        opened_peer_ids.append(peer_id)
         if not _is_specific_tg_dialog_url(group_url):
             break
 
@@ -1404,7 +1442,6 @@ def _enrich_usernames_deep_chat(
             continue
 
         opened += 1
-        opened_peer_ids.append(peer_id)
 
         # Fast path: Telegram often switches URL to /#@username immediately.
         quick_username, _quick_url = _poll_username_from_tab_url(
@@ -2301,13 +2338,17 @@ def main() -> int:
         if args.source in ("chat", "both"):
             # If deep mode requested, apply it to chat collection for both chat and both modes.
             chat_deep = bool(args.deep_usernames)
+            chat_scroll_steps_effective = max(args.chat_scroll_steps, 0)
+            if chat_deep and chat_scroll_steps_effective < 2:
+                chat_scroll_steps_effective = 2
+                print("INFO: deep mode -> using 3 chat passes (2 upward scrolls) to refresh visible users")
             chat_members, chat_stats = _collect_members_from_chat(
                 server=server,
                 token=token,
                 client_id=client_id,
                 tab_id=tab_id,
                 timeout_sec=max(args.timeout, 5),
-                scroll_steps=max(args.chat_scroll_steps, 0),
+                scroll_steps=chat_scroll_steps_effective,
                 group_url=group_url,
                 deep_usernames=chat_deep,
                 chat_deep_limit=max(args.chat_deep_limit, 0),
@@ -2354,7 +2395,7 @@ def main() -> int:
                 mention_attempted = 0
                 mention_updated = 0
                 unresolved = sum(1 for item in members if str(item.get("username") or "—").strip() == "—")
-                if unresolved > 0 and not runtime_limited:
+                if unresolved > 0 and not runtime_limited and args.chat_deep_mode in ("url", "full"):
                     mention_attempted, mention_updated = _enrich_chat_usernames_via_mentions(
                         server=server,
                         token=token,
@@ -2372,6 +2413,8 @@ def main() -> int:
                         )
                 elif runtime_limited:
                     print("INFO: skip mention deep because chat runtime limit was reached")
+                elif unresolved > 0 and args.chat_deep_mode == "mention":
+                    print("INFO: skip extra mention-deep pass in mention mode")
 
                 attempted += chat_attempted + mention_attempted
                 updated += chat_updated + mention_updated
