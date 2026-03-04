@@ -108,6 +108,45 @@ function tabsSendMessage(tabId, message) {
   });
 }
 
+function tabsExecuteScript(tabId, files) {
+  return new Promise((resolve, reject) => {
+    chrome.scripting.executeScript({ target: { tabId }, files }, (results) => {
+      const err = chrome.runtime.lastError;
+      if (err) {
+        reject(new Error(err.message));
+        return;
+      }
+      resolve(results || []);
+    });
+  });
+}
+
+async function sendCommandToTabWithAutoInject(tabId, command) {
+  try {
+    const response = await tabsSendMessage(tabId, {
+      type: "site-control-command",
+      command
+    });
+    return response;
+  } catch (error) {
+    const message = String(error?.message || error || "");
+    const recoverable =
+      message.includes("Receiving end does not exist") ||
+      message.includes("Could not establish connection") ||
+      message.includes("The message port closed before a response was received");
+    if (!recoverable) {
+      throw error;
+    }
+
+    await tabsExecuteScript(tabId, ["content.js"]);
+    const retryResponse = await tabsSendMessage(tabId, {
+      type: "site-control-command",
+      command
+    });
+    return retryResponse;
+  }
+}
+
 function captureVisibleTab(windowId) {
   return new Promise((resolve, reject) => {
     chrome.tabs.captureVisibleTab(windowId, { format: "png" }, (dataUrl) => {
@@ -255,10 +294,7 @@ async function executeCommandEnvelope(envelope) {
   }
 
   try {
-    const response = await tabsSendMessage(tab.id, {
-      type: "site-control-command",
-      command
-    });
+    const response = await sendCommandToTabWithAutoInject(tab.id, command);
 
     if (!response) {
       return { ok: false, status: "failed", error: { message: "No response from content script" } };

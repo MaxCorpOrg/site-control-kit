@@ -6,11 +6,44 @@ function queryElement(selector) {
   if (!selector || typeof selector !== "string") {
     throw new Error("selector is required");
   }
-  const node = document.querySelector(selector);
-  if (!node) {
+  const nodes = Array.from(document.querySelectorAll(selector));
+  if (!nodes.length) {
     throw new Error(`Element not found for selector: ${selector}`);
   }
-  return node;
+  if (nodes.length === 1) {
+    return nodes[0];
+  }
+
+  const cx = window.innerWidth / 2;
+  const cy = window.innerHeight / 2;
+  const visible = [];
+  for (const node of nodes) {
+    const rect = node.getBoundingClientRect();
+    if (
+      rect.width < 2 ||
+      rect.height < 2 ||
+      rect.bottom <= 0 ||
+      rect.right <= 0 ||
+      rect.top >= window.innerHeight ||
+      rect.left >= window.innerWidth
+    ) {
+      continue;
+    }
+    const style = window.getComputedStyle(node);
+    if (!style || style.display === "none" || style.visibility === "hidden" || style.pointerEvents === "none" || Number(style.opacity || "1") === 0) {
+      continue;
+    }
+    const dx = rect.left + rect.width / 2 - cx;
+    const dy = rect.top + rect.height / 2 - cy;
+    const dist = Math.abs(dx) + Math.abs(dy);
+    const z = Number(style.zIndex) || 0;
+    visible.push({ node, dist, z });
+  }
+  if (!visible.length) {
+    return nodes[nodes.length - 1];
+  }
+  visible.sort((a, b) => (b.z - a.z) || (a.dist - b.dist));
+  return visible[0].node;
 }
 
 function isVisible(element) {
@@ -24,6 +57,60 @@ function isVisible(element) {
 function dispatchInputEvents(element) {
   element.dispatchEvent(new Event("input", { bubbles: true }));
   element.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+function normalizedText(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+let lastContextPoint = null;
+
+function findByText(terms, rootSelector, nearLastContext = false) {
+  const root = rootSelector ? document.querySelector(rootSelector) : document;
+  if (!root) {
+    return null;
+  }
+  const needles = (Array.isArray(terms) ? terms : [terms]).map(normalizedText).filter(Boolean);
+  if (!needles.length) {
+    return null;
+  }
+  const nodes = Array.from(
+    root.querySelectorAll(
+      "button, a, [role='menuitem'], [role='button'], .btn-menu-item, .MenuItem, .menu-item, [class*='menu-item'], .row"
+    )
+  );
+  const cx =
+    nearLastContext && lastContextPoint ? Number(lastContextPoint.x || window.innerWidth / 2) : window.innerWidth / 2;
+  const cy =
+    nearLastContext && lastContextPoint ? Number(lastContextPoint.y || window.innerHeight / 2) : window.innerHeight / 2;
+  const candidates = [];
+  for (const node of nodes) {
+    const txt = normalizedText(node.textContent);
+    if (!txt) {
+      continue;
+    }
+    if (!needles.some((needle) => txt.includes(needle))) {
+      continue;
+    }
+    const rect = node.getBoundingClientRect();
+    if (rect.width < 2 || rect.height < 2 || rect.bottom <= 0 || rect.right <= 0 || rect.top >= window.innerHeight || rect.left >= window.innerWidth) {
+      continue;
+    }
+    const style = window.getComputedStyle(node);
+    if (!style || style.display === "none" || style.visibility === "hidden" || style.pointerEvents === "none" || Number(style.opacity || "1") === 0) {
+      continue;
+    }
+    const z = Number(style.zIndex) || 0;
+    const dx = rect.left + rect.width / 2 - cx;
+    const dy = rect.top + rect.height / 2 - cy;
+    const dist = Math.abs(dx) + Math.abs(dy);
+    candidates.push({ node, z, dist });
+  }
+  if (!candidates.length) {
+    return null;
+  }
+  candidates.sort((a, b) => (b.z - a.z) || (a.dist - b.dist));
+  return candidates[0].node;
 }
 
 async function waitForSelector(selector, timeoutMs = 10000, visibleOnly = false) {
@@ -47,6 +134,76 @@ async function runCommand(command) {
   }
 
   switch (type) {
+    case "back": {
+      history.back();
+      return { back: true };
+    }
+
+    case "get_page_url": {
+      return { url: String(window.location.href || "") };
+    }
+
+    case "context_click": {
+      const el = queryElement(command.selector);
+      const rect = el.getBoundingClientRect();
+      const x = Math.round(rect.left + rect.width / 2);
+      const y = Math.round(rect.top + rect.height / 2);
+      lastContextPoint = { x, y };
+      for (const evt of ["mousedown", "mouseup", "contextmenu"]) {
+        el.dispatchEvent(
+          new MouseEvent(evt, {
+            bubbles: true,
+            cancelable: true,
+            view: window,
+            button: 2,
+            buttons: 2,
+            clientX: x,
+            clientY: y
+          })
+        );
+      }
+      return { selector: command.selector, context_clicked: true };
+    }
+
+    case "click_text": {
+      const node = findByText(
+        command.terms || command.text || [],
+        command.root_selector || "",
+        Boolean(command.near_last_context)
+      );
+      if (!node) {
+        throw new Error("No clickable element found by text");
+      }
+      node.scrollIntoView({ block: "center", inline: "nearest", behavior: "auto" });
+      node.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));
+      node.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window }));
+      node.click();
+      return { clicked: true, text: String(node.textContent || "").trim() };
+    }
+
+    case "clear_editable": {
+      const selectors = Array.isArray(command.selectors) ? command.selectors : [];
+      for (const selector of selectors) {
+        const el = document.querySelector(selector);
+        if (!el) {
+          continue;
+        }
+        el.focus();
+        if (el.isContentEditable) {
+          el.innerHTML = "";
+          el.textContent = "";
+          dispatchInputEvents(el);
+          return { selector, cleared: true };
+        }
+        if ("value" in el) {
+          el.value = "";
+          dispatchInputEvents(el);
+          return { selector, cleared: true };
+        }
+      }
+      return { cleared: false };
+    }
+
     case "click": {
       const el = queryElement(command.selector);
       el.click();
