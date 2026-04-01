@@ -95,6 +95,58 @@ function tabsUpdate(tabId, updateProperties) {
   });
 }
 
+function tabsCreate(createProperties) {
+  return new Promise((resolve, reject) => {
+    chrome.tabs.create(createProperties, (tab) => {
+      const err = chrome.runtime.lastError;
+      if (err) {
+        reject(new Error(err.message));
+        return;
+      }
+      resolve(tab || null);
+    });
+  });
+}
+
+function tabsReload(tabId, reloadProperties = {}) {
+  return new Promise((resolve, reject) => {
+    chrome.tabs.reload(tabId, reloadProperties, () => {
+      const err = chrome.runtime.lastError;
+      if (err) {
+        reject(new Error(err.message));
+        return;
+      }
+      resolve(true);
+    });
+  });
+}
+
+function tabsRemove(tabId) {
+  return new Promise((resolve, reject) => {
+    chrome.tabs.remove(tabId, () => {
+      const err = chrome.runtime.lastError;
+      if (err) {
+        reject(new Error(err.message));
+        return;
+      }
+      resolve(true);
+    });
+  });
+}
+
+function windowsUpdate(windowId, updateInfo) {
+  return new Promise((resolve, reject) => {
+    chrome.windows.update(windowId, updateInfo, (window) => {
+      const err = chrome.runtime.lastError;
+      if (err) {
+        reject(new Error(err.message));
+        return;
+      }
+      resolve(window || null);
+    });
+  });
+}
+
 function tabsSendMessage(tabId, message) {
   return new Promise((resolve, reject) => {
     chrome.tabs.sendMessage(tabId, message, (response) => {
@@ -272,6 +324,23 @@ async function executeCommandEnvelope(envelope) {
     };
   }
 
+  if (type === "new_tab") {
+    const created = await tabsCreate({
+      url: command.url || "about:blank",
+      active: command.active !== false
+    });
+    return {
+      ok: true,
+      status: "completed",
+      data: {
+        tabId: created?.id ?? null,
+        windowId: created?.windowId ?? null,
+        url: created?.url || command.url || "about:blank",
+        active: Boolean(created?.active)
+      }
+    };
+  }
+
   if (type === "screenshot") {
     const tab = await resolveTargetTab(target);
     if (!tab || !Number.isInteger(tab.windowId)) {
@@ -291,6 +360,45 @@ async function executeCommandEnvelope(envelope) {
   const tab = await resolveTargetTab(target);
   if (!tab || !Number.isInteger(tab.id)) {
     return { ok: false, status: "failed", error: { message: "No target tab found" } };
+  }
+
+  if (type === "reload") {
+    await tabsReload(tab.id, { bypassCache: Boolean(command.ignore_cache) });
+    return {
+      ok: true,
+      status: "completed",
+      data: {
+        tabId: tab.id,
+        reloaded: true
+      }
+    };
+  }
+
+  if (type === "activate_tab") {
+    const updated = await tabsUpdate(tab.id, { active: true });
+    if (Number.isInteger(updated?.windowId)) {
+      await windowsUpdate(updated.windowId, { focused: true });
+    }
+    return {
+      ok: true,
+      status: "completed",
+      data: {
+        tabId: updated?.id ?? tab.id,
+        active: true
+      }
+    };
+  }
+
+  if (type === "close_tab") {
+    await tabsRemove(tab.id);
+    return {
+      ok: true,
+      status: "completed",
+      data: {
+        tabId: tab.id,
+        closed: true
+      }
+    };
   }
 
   try {

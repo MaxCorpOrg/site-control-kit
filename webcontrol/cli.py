@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import os
 import sys
@@ -86,6 +87,264 @@ def _extract_runtime(args: argparse.Namespace) -> tuple[str, str]:
     token = args.token or os.getenv(DEFAULT_TOKEN_ENV, "") or DEFAULT_QUICKSTART_TOKEN
     server = _norm_server(args.server or DEFAULT_SERVER)
     return server, token
+
+
+def _get_clients(server: str, token: str) -> list[dict[str, Any]]:
+    response = _http_json(server=server, token=token, method="GET", path="/api/clients")
+    clients = response.get("clients")
+    if not isinstance(clients, list):
+        return []
+    return clients
+
+
+def _pick_client(clients: list[dict[str, Any]], requested_client_id: str | None = None) -> dict[str, Any]:
+    if not clients:
+        raise RuntimeError("No connected browser clients. Check the extension and run `sitectl clients`.")
+
+    if requested_client_id:
+        requested = requested_client_id.strip()
+        for client in clients:
+            if str(client.get("client_id", "")).strip() == requested:
+                return client
+        raise RuntimeError(f"Browser client not found: {requested}")
+
+    ordered = sorted(clients, key=lambda item: str(item.get("last_seen", "")), reverse=True)
+    return ordered[0]
+
+
+def _extract_command_result(command: dict[str, Any], client_id: str) -> dict[str, Any]:
+    deliveries = command.get("deliveries")
+    if not isinstance(deliveries, dict):
+        return {}
+    delivery = deliveries.get(client_id)
+    if not isinstance(delivery, dict):
+        return {}
+    result = delivery.get("result")
+    return result if isinstance(result, dict) else {}
+
+
+def _write_data_url_to_file(data_url: str, output_path: str) -> str:
+    prefix = "data:image/png;base64,"
+    if not data_url.startswith(prefix):
+        raise ValueError("Screenshot payload is not a PNG data URL")
+
+    raw = base64.b64decode(data_url[len(prefix) :])
+    path = Path(output_path).expanduser()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(raw)
+    return str(path)
+
+
+def _browser_target(args: argparse.Namespace, client_id: str) -> dict[str, Any]:
+    return compact(
+        {
+            "client_id": client_id,
+            "tab_id": args.tab_id,
+            "url_pattern": args.url_pattern,
+            "active": args.active,
+        }
+    )
+
+
+def _browser_send_command(
+    *,
+    server: str,
+    token: str,
+    client_id: str,
+    target: dict[str, Any],
+    command: dict[str, Any],
+    timeout_ms: int,
+    wait_sec: int,
+    poll_interval: float,
+) -> dict[str, Any]:
+    response = _http_json(
+        server=server,
+        token=token,
+        method="POST",
+        path="/api/commands",
+        payload={
+            "issued_by": "browser-cli",
+            "timeout_ms": timeout_ms,
+            "target": target,
+            "command": command,
+        },
+    )
+    if not response.get("ok"):
+        raise RuntimeError(str(response))
+
+    command_id = str(response.get("command_id", "")).strip()
+    if not command_id:
+        raise RuntimeError("Hub did not return command_id")
+
+    return _wait_command(server, token, command_id, timeout_sec=wait_sec, interval_sec=max(poll_interval, 0.1))
+
+
+def _print_browser_summary(
+    *,
+    action: str,
+    client: dict[str, Any],
+    command: dict[str, Any],
+    raw: bool,
+    output_path: str | None = None,
+) -> None:
+    success_statuses = {"completed"}
+    if raw:
+        _print_json(command)
+        return
+
+    client_id = str(client.get("client_id", ""))
+    result = _extract_command_result(command, client_id)
+    data = result.get("data")
+    if action == "screenshot" and isinstance(data, dict) and "imageDataUrl" in data:
+        data = {
+            "tabId": data.get("tabId"),
+            "imageDataUrl": "<omitted; use --output to save PNG>",
+        }
+    payload: dict[str, Any] = {
+        "ok": command.get("status") in success_statuses,
+        "action": action,
+        "client_id": client_id,
+        "status": command.get("status"),
+        "data": data,
+        "error": result.get("error"),
+    }
+    if output_path:
+        payload["output"] = output_path
+    _print_json(payload)
+
+
+def cmd_browser(args: argparse.Namespace) -> int:
+    try:
+        server, token = _extract_runtime(args)
+
+        if args.browser_action == "clients":
+            _print_json({"ok": True, "clients": _get_clients(server, token)})
+            return 0
+
+        clients = _get_clients(server, token)
+
+        if args.browser_action == "status":
+            selected = _pick_client(clients, args.client_id)
+            _print_json(
+                {
+                    "ok": True,
+                    "client": selected,
+                    "clients": clients,
+                }
+            )
+            return 0
+
+        if args.browser_action == "tabs":
+            selected = _pick_client(clients, args.client_id)
+            _print_json(
+                {
+                    "ok": True,
+                    "client_id": selected.get("client_id"),
+                    "tabs": selected.get("tabs", []),
+                }
+            )
+            return 0
+
+        client = _pick_client(clients, args.client_id)
+        target = _browser_target(args, str(client.get("client_id", "")).strip())
+
+        action = args.browser_action
+        command: dict[str, Any]
+        output_path: str | None = None
+
+        if action == "open":
+            command = {"type": "navigate", "url": args.url}
+        elif action == "new-tab":
+            command = {"type": "new_tab", "url": args.url, "active": not args.background}
+        elif action == "click":
+            command = {"type": "click", "selector": args.selector}
+        elif action == "click-text":
+            command = {
+                "type": "click_text",
+                "text": args.text,
+                "root_selector": args.root_selector,
+                "near_last_context": args.near_last_context,
+            }
+        elif action == "fill":
+            command = {"type": "fill", "selector": args.selector, "value": args.value}
+        elif action == "focus":
+            command = {"type": "focus", "selector": args.selector}
+        elif action == "wait":
+            command = {
+                "type": "wait_selector",
+                "selector": args.selector,
+                "timeout_ms": args.command_timeout_ms,
+                "visible_only": args.visible_only,
+            }
+        elif action == "text":
+            command = {"type": "extract_text", "selector": args.selector}
+        elif action == "html":
+            command = {"type": "get_html", "selector": args.selector}
+        elif action == "attr":
+            command = {"type": "get_attribute", "selector": args.selector, "attribute": args.attribute}
+        elif action == "page-url":
+            command = {"type": "get_page_url"}
+        elif action == "back":
+            command = {"type": "back"}
+        elif action == "forward":
+            command = {"type": "forward"}
+        elif action == "reload":
+            command = {"type": "reload", "ignore_cache": args.ignore_cache}
+        elif action == "activate":
+            command = {"type": "activate_tab"}
+        elif action == "close-tab":
+            command = {"type": "close_tab"}
+        elif action == "scroll":
+            command = {"type": "scroll", "selector": args.selector, "x": args.x, "y": args.y}
+        elif action == "scroll-by":
+            command = {"type": "scroll_by", "selector": args.selector, "delta_x": args.dx, "delta_y": args.dy}
+        elif action == "press":
+            command = {
+                "type": "press_key",
+                "selector": args.selector,
+                "key": args.key,
+                "ctrl": args.ctrl,
+                "alt": args.alt,
+                "shift": args.shift,
+                "meta": args.meta,
+            }
+        elif action == "js":
+            command = {"type": "run_script", "script": args.script}
+            if args.script_args:
+                command["args"] = json.loads(args.script_args)
+        elif action == "screenshot":
+            command = {"type": "screenshot"}
+        else:
+            raise ValueError(f"Unsupported browser action: {action}")
+
+        command_record = _browser_send_command(
+            server=server,
+            token=token,
+            client_id=str(client.get("client_id", "")).strip(),
+            target=target,
+            command=compact(command),
+            timeout_ms=args.timeout_ms,
+            wait_sec=args.wait,
+            poll_interval=args.poll_interval,
+        )
+
+        if action == "screenshot" and args.output:
+            result = _extract_command_result(command_record, str(client.get("client_id", "")).strip())
+            data = result.get("data") if isinstance(result, dict) else None
+            if isinstance(data, dict) and isinstance(data.get("imageDataUrl"), str):
+                output_path = _write_data_url_to_file(data["imageDataUrl"], args.output)
+
+        _print_browser_summary(
+            action=action,
+            client=client,
+            command=command_record,
+            raw=args.raw,
+            output_path=output_path,
+        )
+        return 0 if command_record.get("status") == "completed" else 1
+    except (RuntimeError, ValueError, json.JSONDecodeError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
 
 
 def cmd_serve(args: argparse.Namespace) -> int:
@@ -333,6 +592,128 @@ def build_parser() -> argparse.ArgumentParser:
     cancel.add_argument("command_id")
     cancel.add_argument("--reason", default="manual cancel")
     cancel.set_defaults(func=cmd_cancel)
+
+    browser = sub.add_parser("browser", help="Simple browser control wrapper")
+    add_runtime_options(browser)
+    browser.add_argument("--client-id", help="Target one browser client; by default the freshest client is used")
+    browser.add_argument("--tab-id", type=int, help="Explicit browser tab id")
+    browser.add_argument("--url-pattern", help="Target tab where URL contains this text")
+    browser.add_argument(
+        "--active",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Prefer active tab when tab_id/url_pattern are not set",
+    )
+    browser.add_argument("--timeout-ms", type=int, default=20000, help="Hub queue timeout")
+    browser.add_argument("--command-timeout-ms", type=int, default=10000, help="Command timeout in the browser")
+    browser.add_argument("--wait", type=int, default=20, help="Wait up to N seconds for a result")
+    browser.add_argument("--poll-interval", type=float, default=0.5, help="Polling interval while waiting")
+    browser.add_argument("--raw", action="store_true", help="Print full raw command state")
+    browser_sub = browser.add_subparsers(dest="browser_action", required=True)
+
+    browser_status = browser_sub.add_parser("status", help="Show selected client and current hub-visible state")
+    browser_status.set_defaults(func=cmd_browser)
+
+    browser_clients = browser_sub.add_parser("clients", help="List connected browser clients")
+    browser_clients.set_defaults(func=cmd_browser)
+
+    browser_tabs = browser_sub.add_parser("tabs", help="List tabs for the selected client")
+    browser_tabs.set_defaults(func=cmd_browser)
+
+    browser_open = browser_sub.add_parser("open", help="Open URL in the selected tab")
+    browser_open.add_argument("url")
+    browser_open.set_defaults(func=cmd_browser)
+
+    browser_new_tab = browser_sub.add_parser("new-tab", help="Create a new browser tab")
+    browser_new_tab.add_argument("url")
+    browser_new_tab.add_argument("--background", action="store_true", help="Create the tab without focusing it")
+    browser_new_tab.set_defaults(func=cmd_browser)
+
+    browser_click = browser_sub.add_parser("click", help="Click element by CSS selector")
+    browser_click.add_argument("selector")
+    browser_click.set_defaults(func=cmd_browser)
+
+    browser_click_text = browser_sub.add_parser("click-text", help="Click visible element by text")
+    browser_click_text.add_argument("text")
+    browser_click_text.add_argument("--root-selector", default="", help="Limit search to a subtree")
+    browser_click_text.add_argument("--near-last-context", action="store_true", help="Prefer matches near last context click")
+    browser_click_text.set_defaults(func=cmd_browser)
+
+    browser_fill = browser_sub.add_parser("fill", help="Fill input by selector")
+    browser_fill.add_argument("selector")
+    browser_fill.add_argument("value")
+    browser_fill.set_defaults(func=cmd_browser)
+
+    browser_focus = browser_sub.add_parser("focus", help="Focus element by selector")
+    browser_focus.add_argument("selector")
+    browser_focus.set_defaults(func=cmd_browser)
+
+    browser_wait = browser_sub.add_parser("wait", help="Wait for selector")
+    browser_wait.add_argument("selector")
+    browser_wait.add_argument("--visible-only", action="store_true")
+    browser_wait.set_defaults(func=cmd_browser)
+
+    browser_text = browser_sub.add_parser("text", help="Extract text from selector or full page")
+    browser_text.add_argument("selector", nargs="?")
+    browser_text.set_defaults(func=cmd_browser)
+
+    browser_html = browser_sub.add_parser("html", help="Extract HTML from selector or full page")
+    browser_html.add_argument("selector", nargs="?")
+    browser_html.set_defaults(func=cmd_browser)
+
+    browser_attr = browser_sub.add_parser("attr", help="Get attribute from selector")
+    browser_attr.add_argument("selector")
+    browser_attr.add_argument("attribute")
+    browser_attr.set_defaults(func=cmd_browser)
+
+    browser_page_url = browser_sub.add_parser("page-url", help="Return current page URL")
+    browser_page_url.set_defaults(func=cmd_browser)
+
+    browser_back = browser_sub.add_parser("back", help="Go back in history")
+    browser_back.set_defaults(func=cmd_browser)
+
+    browser_forward = browser_sub.add_parser("forward", help="Go forward in history")
+    browser_forward.set_defaults(func=cmd_browser)
+
+    browser_reload = browser_sub.add_parser("reload", help="Reload the selected tab")
+    browser_reload.add_argument("--ignore-cache", action="store_true")
+    browser_reload.set_defaults(func=cmd_browser)
+
+    browser_activate = browser_sub.add_parser("activate", help="Activate the selected tab")
+    browser_activate.set_defaults(func=cmd_browser)
+
+    browser_close = browser_sub.add_parser("close-tab", help="Close the selected tab")
+    browser_close.set_defaults(func=cmd_browser)
+
+    browser_scroll = browser_sub.add_parser("scroll", help="Scroll to selector or coordinates")
+    browser_scroll.add_argument("--selector")
+    browser_scroll.add_argument("--x", type=int)
+    browser_scroll.add_argument("--y", type=int)
+    browser_scroll.set_defaults(func=cmd_browser)
+
+    browser_scroll_by = browser_sub.add_parser("scroll-by", help="Scroll by delta")
+    browser_scroll_by.add_argument("--selector")
+    browser_scroll_by.add_argument("--dx", type=int, default=0)
+    browser_scroll_by.add_argument("--dy", type=int, default=0)
+    browser_scroll_by.set_defaults(func=cmd_browser)
+
+    browser_press = browser_sub.add_parser("press", help="Press a keyboard key")
+    browser_press.add_argument("key")
+    browser_press.add_argument("--selector")
+    browser_press.add_argument("--ctrl", action="store_true")
+    browser_press.add_argument("--alt", action="store_true")
+    browser_press.add_argument("--shift", action="store_true")
+    browser_press.add_argument("--meta", action="store_true")
+    browser_press.set_defaults(func=cmd_browser)
+
+    browser_js = browser_sub.add_parser("js", help="Run JavaScript in the page context")
+    browser_js.add_argument("script")
+    browser_js.add_argument("--script-args", help="JSON args for run_script")
+    browser_js.set_defaults(func=cmd_browser)
+
+    browser_screenshot = browser_sub.add_parser("screenshot", help="Capture screenshot of the visible tab")
+    browser_screenshot.add_argument("--output", help="Write PNG to a file")
+    browser_screenshot.set_defaults(func=cmd_browser)
 
     return parser
 

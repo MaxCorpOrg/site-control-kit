@@ -1,0 +1,12 @@
+{
+  "issued_by": "example",
+  "timeout_ms": 20000,
+  "target": {
+    "client_id": "client-REPLACE"
+  },
+  "command": {
+    "type": "new_tab",
+    "url": "https://example.com",
+    "active": true
+  }
+}

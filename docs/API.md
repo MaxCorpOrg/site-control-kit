@@ -152,20 +152,42 @@
 
 - `navigate`
   - поля: `url`
+- `new_tab`
+  - поля: `url`, опционально `active`
 - `click`
   - поля: `selector`
+- `click_text`
+  - поля: `text`, опционально `root_selector`, `near_last_context`
 - `fill`
   - поля: `selector`, `value`
+- `focus`
+  - поля: `selector`
 - `extract_text`
   - опционально: `selector`
 - `get_html`
   - опционально: `selector`
+- `get_page_url`
+  - без обязательных полей
 - `get_attribute`
   - поля: `selector`, `attribute`
 - `wait_selector`
   - поля: `selector`, опционально `timeout_ms`, `visible_only`
 - `scroll`
   - или `selector`, или координаты `x`, `y`
+- `scroll_by`
+  - поля: `delta_x`, `delta_y`, опционально `selector`
+- `back`
+  - без обязательных полей
+- `forward`
+  - без обязательных полей
+- `reload`
+  - опционально: `ignore_cache`
+- `activate_tab`
+  - без обязательных полей
+- `close_tab`
+  - без обязательных полей
+- `press_key`
+  - поля: `key`, опционально `selector`, `ctrl`, `alt`, `shift`, `meta`
 - `run_script`
   - поля: `script`, опционально `args`
 - `screenshot`

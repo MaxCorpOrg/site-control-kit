@@ -1,0 +1,12 @@
+{
+  "issued_by": "example",
+  "timeout_ms": 20000,
+  "target": {
+    "client_id": "client-REPLACE",
+    "active": true
+  },
+  "command": {
+    "type": "reload",
+    "ignore_cache": false
+  }
+}

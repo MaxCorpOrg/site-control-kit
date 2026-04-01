@@ -8,6 +8,36 @@
 - Расширение браузера (Manifest V3) для выполнения команд в реальных вкладках.
 - Подробная документация для пользователя и ИИ-агентов сопровождения.
 
+## Быстрый Вход В Браузерный Контур
+
+Кратчайший поддерживаемый сценарий: [BROWSER_QUICKSTART.md](BROWSER_QUICKSTART.md)
+
+Из корня репозитория на Windows:
+
+```cmd
+start-hub.cmd
+browser.cmd status
+browser.cmd tabs
+browser.cmd open https://example.com
+```
+
+## Для Агентов И Автоматизации
+
+Если репозиторий открыт в рабочей папке агента, считайте `site-control-kit` основным локальным инструментом управления браузером.
+
+Что читать агенту:
+- [BROWSER_QUICKSTART.md](BROWSER_QUICKSTART.md) — короткий вход и рабочие команды.
+- [AGENTS.md](AGENTS.md) — правила и политика использования инструмента в репозитории.
+- [docs/AI_MAINTAINER_GUIDE.md](docs/AI_MAINTAINER_GUIDE.md) — как использовать, изменять и улучшать инструмент.
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — поток команд и роли компонентов.
+- [docs/API.md](docs/API.md) — контракт команд и результатов.
+
+Практическое правило:
+1. Запустить хаб.
+2. Проверить `browser.cmd status`.
+3. Проверить `browser.cmd tabs`.
+4. Только потом выполнять реальную задачу в браузере.
+
 ## Основные сценарии
 - Открывать нужные URL во вкладках.
 - Кликать по элементам, заполнять поля, ждать появления селекторов.
@@ -24,7 +54,40 @@ CLI (sitectl) <----HTTP----> Локальный хаб (Python) <----HTTP poll--
 
 Хаб — единый источник правды: клиенты, очередь команд, результаты выполнения.
 
-## Быстрый старт (локальный режим)
+## Быстрый старт
+
+### Windows
+
+1. Откройте PowerShell в корне проекта.
+2. Установите пакет в editable-режиме:
+
+```powershell
+python -m pip install -e .
+```
+
+3. Запустите хаб:
+
+```cmd
+scripts\start_hub.cmd
+```
+
+4. В Chrome/Edge откройте `chrome://extensions` или `edge://extensions`.
+5. Включите `Developer mode`.
+6. Нажмите `Load unpacked`.
+7. Выберите папку `C:\site-control-kit\extension`.
+8. Откройте `Options` расширения и задайте:
+   - `Server URL`: `http://127.0.0.1:8765`
+   - `Access Token`: тот же токен, что у хаба.
+
+### Упаковка расширения в Windows
+
+```cmd
+scripts\package_extension.cmd
+```
+
+Готовый архив: `dist\site-control-bridge-extension.zip`
+
+### Linux/macOS
 
 ## 1) Запуск хаба
 
@@ -68,6 +131,30 @@ cd /home/max/site-control-kit
 cd /home/max/site-control-kit
 python3 -m webcontrol health
 python3 -m webcontrol clients
+```
+
+## Простое управление браузером
+
+После установки расширения и запуска хаба можно использовать упрощённую команду:
+
+```cmd
+scripts\browser.cmd status
+scripts\browser.cmd tabs
+scripts\browser.cmd open https://example.com
+scripts\browser.cmd click "button[type='submit']"
+scripts\browser.cmd fill "#email" "user@example.com"
+scripts\browser.cmd text main
+scripts\browser.cmd screenshot --output .\shot.png
+```
+
+Если клиент один, он выбирается автоматически. Если клиентов несколько, по умолчанию берётся самый свежий, либо можно указать `--client-id`.
+
+CLI внутри Python-пакета:
+
+```bash
+sitectl browser status
+sitectl browser open https://example.com
+sitectl browser press Enter
 ```
 
 ## 4) Примеры команд
@@ -143,8 +230,8 @@ sitectl send --type navigate --client-id client-... --url https://example.com --
 - [EXTENSION.md](docs/EXTENSION.md) — внутренняя логика расширения.
 - [SECURITY.md](docs/SECURITY.md) — безопасность и рекомендации.
 - [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) — диагностика проблем.
-- [AI_MAINTAINER_GUIDE.md](docs/AI_MAINTAINER_GUIDE.md) — гайд для ИИ-сопровождения.
-- [AGENTS.md](AGENTS.md) — правила для ИИ-агентов в репозитории.
+- [AI_MAINTAINER_GUIDE.md](docs/AI_MAINTAINER_GUIDE.md) — как агенту использовать, изменять и улучшать инструмент.
+- [AGENTS.md](AGENTS.md) — правила для ИИ-агентов и политика применения `site-control-kit` как основного браузерного инструмента.
 
 ## Структура проекта
 

@@ -11,6 +11,10 @@
 
 ## 1) Команды, выполняемые в background
 - `navigate`
+- `new_tab`
+- `reload`
+- `activate_tab`
+- `close_tab`
 - `screenshot`
 
 ## 2) Команды через content script
@@ -27,6 +31,12 @@
 ```js
 { ok: false, error: {...} }
 ```
+
+Ключевые DOM-команды:
+- `click`, `click_text`, `fill`, `focus`
+- `extract_text`, `get_html`, `get_attribute`, `get_page_url`
+- `wait_selector`, `scroll`, `scroll_by`
+- `back`, `forward`, `press_key`, `run_script`
 
 ## Логика выбора вкладки
 1. `target.tab_id`

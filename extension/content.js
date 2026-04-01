@@ -59,6 +59,59 @@ function dispatchInputEvents(element) {
   element.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
+function focusElement(element) {
+  if (typeof element.scrollIntoView === "function") {
+    element.scrollIntoView({ block: "center", inline: "nearest", behavior: "auto" });
+  }
+  if (typeof element.focus === "function") {
+    element.focus();
+  }
+}
+
+function keyCodeForKey(key) {
+  const normalized = String(key || "");
+  if (normalized.length === 1) {
+    return normalized.toUpperCase().charCodeAt(0);
+  }
+  const mapping = {
+    Enter: 13,
+    Escape: 27,
+    Tab: 9,
+    Space: 32,
+    ArrowUp: 38,
+    ArrowDown: 40,
+    ArrowLeft: 37,
+    ArrowRight: 39,
+    Backspace: 8,
+    Delete: 46
+  };
+  return mapping[normalized] || 0;
+}
+
+function dispatchKeyboardSequence(target, command) {
+  const key = String(command.key || "");
+  if (!key) {
+    throw new Error("key is required");
+  }
+
+  const eventInit = {
+    key,
+    code: command.code || key,
+    ctrlKey: Boolean(command.ctrl),
+    altKey: Boolean(command.alt),
+    shiftKey: Boolean(command.shift),
+    metaKey: Boolean(command.meta),
+    bubbles: true,
+    cancelable: true,
+    keyCode: keyCodeForKey(key),
+    which: keyCodeForKey(key)
+  };
+
+  target.dispatchEvent(new KeyboardEvent("keydown", eventInit));
+  target.dispatchEvent(new KeyboardEvent("keypress", eventInit));
+  target.dispatchEvent(new KeyboardEvent("keyup", eventInit));
+}
+
 function normalizedText(value) {
   return String(value || "").trim().toLowerCase();
 }
@@ -139,6 +192,11 @@ async function runCommand(command) {
       return { back: true };
     }
 
+    case "forward": {
+      history.forward();
+      return { forward: true };
+    }
+
     case "get_page_url": {
       return { url: String(window.location.href || "") };
     }
@@ -215,10 +273,16 @@ async function runCommand(command) {
       if (!("value" in el)) {
         throw new Error("Target element does not support value");
       }
-      el.focus();
+      focusElement(el);
       el.value = command.value ?? "";
       dispatchInputEvents(el);
       return { selector: command.selector, value: el.value };
+    }
+
+    case "focus": {
+      const el = queryElement(command.selector);
+      focusElement(el);
+      return { selector: command.selector, focused: true };
     }
 
     case "extract_text": {
@@ -303,6 +367,22 @@ async function runCommand(command) {
       const fn = new Function("command", "args", command.script);
       const value = await fn(command, command.args ?? {});
       return { value: value ?? null };
+    }
+
+    case "press_key": {
+      const target = command.selector
+        ? queryElement(command.selector)
+        : document.activeElement || document.body || document.documentElement;
+      if (!target) {
+        throw new Error("No keyboard target found");
+      }
+      focusElement(target);
+      dispatchKeyboardSequence(target, command);
+      return {
+        key: String(command.key || ""),
+        selector: command.selector || null,
+        pressed: true
+      };
     }
 
     default:

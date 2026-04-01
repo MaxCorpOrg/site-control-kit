@@ -20,6 +20,22 @@
 
 ## 3. Установка проекта на новое устройство
 
+### Windows
+
+```powershell
+git clone <URL_вашего_репозитория> site-control-kit
+cd site-control-kit
+python -m pip install -e .
+```
+
+Проверка CLI:
+
+```powershell
+sitectl --help
+```
+
+### Linux / macOS
+
 ```bash
 cd ~
 git clone <URL_вашего_репозитория> site-control-kit
@@ -34,6 +50,22 @@ sitectl --help
 ```
 
 ## 4. Запуск хаба
+
+### Windows
+
+```cmd
+cd C:\site-control-kit
+scripts\start_hub.cmd
+```
+
+Если нужен собственный токен:
+
+```powershell
+$env:SITECTL_TOKEN = "очень-длинный-случайный-токен"
+.\scripts\start_hub.ps1
+```
+
+### Linux / macOS
 
 ### 4.1 Локальный быстрый режим
 
@@ -85,6 +117,10 @@ export SITECTL_TOKEN='очень-длинный-случайный-токен'
 3. Нажмите `Load unpacked` (или аналог).
 4. Выберите папку `.../site-control-kit/extension`.
 
+### Windows
+
+Для Windows путь такой же, только выбирайте папку `C:\site-control-kit\extension`.
+
 ## Edge
 Шаги те же, только страница `edge://extensions`.
 
@@ -126,6 +162,20 @@ sitectl send --type navigate --client-id client-REPLACE_ME --url https://example
 - для точной маршрутизации всегда указывайте `--client-id`.
 
 ## 9. Обновление проекта на устройствах
+
+### Windows
+
+```powershell
+cd C:\site-control-kit
+git pull
+python -m pip install -e .
+```
+
+Если менялся код расширения:
+- откройте страницу расширений браузера;
+- нажмите `Reload` для `Site Control Bridge`.
+
+### Linux / macOS
 
 ```bash
 cd ~/site-control-kit
