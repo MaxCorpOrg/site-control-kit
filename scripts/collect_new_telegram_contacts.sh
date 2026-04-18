@@ -51,11 +51,13 @@ bash "${AUTO_SCRIPT}" "${GROUP_URL}" "${temp_md}"
 cp "${temp_md}" "${chat_dir}/latest_full.md"
 cp "${temp_txt}" "${chat_dir}/latest_full.txt"
 
-helper_output="$(python3 "${BATCH_HELPER}" --source "${temp_txt}" --directory "${chat_dir}")"
+helper_output="$(python3 "${BATCH_HELPER}" --source "${temp_txt}" --directory "${chat_dir}" --full-md "${temp_md}")"
 
 created="$(printf '%s\n' "${helper_output}" | sed -n 's/^created=//p')"
 count="$(printf '%s\n' "${helper_output}" | sed -n 's/^count=//p')"
 path="$(printf '%s\n' "${helper_output}" | sed -n 's/^path=//p')"
+review_count="$(printf '%s\n' "${helper_output}" | sed -n 's/^review_count=//p')"
+review_path="$(printf '%s\n' "${helper_output}" | sed -n 's/^review_path=//p')"
 
 if [[ "${created}" == "1" && -n "${path}" ]]; then
   echo "DONE: saved ${count} new usernames"
@@ -66,4 +68,8 @@ else
   echo "DONE: no new usernames found"
   echo "  Chat dir: ${chat_dir}"
   echo "  Latest:   ${chat_dir}/latest_full.txt"
+fi
+
+if [[ -n "${review_count}" && "${review_count}" != "0" && -n "${review_path}" ]]; then
+  echo "  Review:   ${review_path} (${review_count} conflict(s))"
 fi
