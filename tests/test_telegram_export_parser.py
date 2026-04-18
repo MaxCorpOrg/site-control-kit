@@ -150,6 +150,20 @@ class TelegramExportParserTests(unittest.TestCase):
         self.assertEqual(reason, "historical_username_owner")
         self.assertEqual(members["222"]["username"], "—")
 
+    def test_url_matches_expected_dialog_by_exact_fragment(self) -> None:
+        matched = self.mod._url_matches_expected_dialog(
+            "https://web.telegram.org/k/#-2465948544",
+            "https://web.telegram.org/a/#-2465948544",
+        )
+        self.assertTrue(matched)
+
+    def test_url_matches_expected_dialog_rejects_other_fragment(self) -> None:
+        matched = self.mod._url_matches_expected_dialog(
+            "https://web.telegram.org/k/#-2465948544",
+            "https://web.telegram.org/k/#@NoogasV",
+        )
+        self.assertFalse(matched)
+
 
 if __name__ == "__main__":
     unittest.main()

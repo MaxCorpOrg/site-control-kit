@@ -702,6 +702,55 @@ def _return_to_group_dialog_reliable(
     )
 
 
+def _url_matches_expected_dialog(expected_url: str, current_url: str) -> bool:
+    expected = str(expected_url or "").strip()
+    current = str(current_url or "").strip()
+    if not expected:
+        return True
+    if current == expected:
+        return True
+    if _is_specific_tg_dialog_url(expected):
+        expected_fragment = expected.split("#", 1)[1] if "#" in expected else ""
+        current_fragment = current.split("#", 1)[1] if "#" in current else ""
+        return bool(expected_fragment and current_fragment and expected_fragment == current_fragment)
+    return False
+
+
+def _restore_tab_url_from_history(
+    server: str,
+    token: str,
+    client_id: str,
+    tab_id: int,
+    expected_url: str,
+    timeout_sec: int,
+    attempts: int = 3,
+) -> bool:
+    if not expected_url:
+        return True
+    current_url = _get_tab_url(server, token, client_id, tab_id)
+    if _url_matches_expected_dialog(expected_url, current_url):
+        return True
+
+    for _ in range(max(attempts, 1)):
+        _close_profile_card(server, token, client_id, tab_id)
+        _send_command_result(
+            server=server,
+            token=token,
+            client_id=client_id,
+            tab_id=tab_id,
+            timeout_sec=min(max(timeout_sec, 2), 4),
+            command={"type": "back"},
+            raise_on_fail=False,
+        )
+        deadline = time.time() + min(max(timeout_sec, 2), 4)
+        while time.time() < deadline:
+            current_url = _get_tab_url(server, token, client_id, tab_id)
+            if _url_matches_expected_dialog(expected_url, current_url):
+                return True
+            time.sleep(0.15)
+    return False
+
+
 def _get_current_opened_peer_id(
     server: str,
     token: str,
@@ -2144,14 +2193,18 @@ def _open_info_members_view(
     tab_id: int,
     timeout_sec: int,
 ) -> bool:
-    html_right = _send_get_html(
-        server=server,
-        token=token,
-        client_id=client_id,
-        tab_id=tab_id,
-        timeout_sec=max(timeout_sec, 5),
-        selector="#column-right",
-    )
+    html_right = ""
+    try:
+        html_right = _send_get_html(
+            server=server,
+            token=token,
+            client_id=client_id,
+            tab_id=tab_id,
+            timeout_sec=max(timeout_sec, 5),
+            selector="#column-right",
+        )
+    except RuntimeError:
+        html_right = ""
     if _parse_members(html_right):
         return True
 
@@ -2220,14 +2273,17 @@ def _open_info_members_view(
     )
     time.sleep(0.8)
 
-    html_right = _send_get_html(
-        server=server,
-        token=token,
-        client_id=client_id,
-        tab_id=tab_id,
-        timeout_sec=max(timeout_sec, 5),
-        selector="#column-right",
-    )
+    try:
+        html_right = _send_get_html(
+            server=server,
+            token=token,
+            client_id=client_id,
+            tab_id=tab_id,
+            timeout_sec=max(timeout_sec, 5),
+            selector="#column-right",
+        )
+    except RuntimeError:
+        html_right = ""
     return bool(_parse_members(html_right))
 
 
@@ -2394,6 +2450,7 @@ def _enrich_usernames_deep(
 
     for peer_id in pending_peer_ids:
         attempted += 1
+        origin_url = _get_tab_url(server, token, client_id, tab_id)
 
         click_result = {"ok": False}
         for selector in (
@@ -2463,6 +2520,16 @@ def _enrich_usernames_deep(
         finally:
             _close_profile_card(server, token, client_id, tab_id)
             time.sleep(0.15)
+            if not _restore_tab_url_from_history(
+                server=server,
+                token=token,
+                client_id=client_id,
+                tab_id=tab_id,
+                expected_url=origin_url,
+                timeout_sec=min(timeout_sec, 6),
+            ):
+                print("WARN: info deep failed to restore original tab URL, stopping")
+                break
 
     return attempted, updated, opened_peer_ids
 
