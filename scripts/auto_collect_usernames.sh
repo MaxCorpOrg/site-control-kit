@@ -16,6 +16,8 @@ CHAT_MAX_RUNTIME="${CHAT_MAX_RUNTIME:-900}"
 CHAT_DEEP_MODE="${CHAT_DEEP_MODE:-full}"
 CHAT_MIN_MEMBERS="${CHAT_MIN_MEMBERS:-0}"
 WAIT_CLIENT_SEC="${WAIT_CLIENT_SEC:-120}"
+CHAT_CLIENT_ID="${CHAT_CLIENT_ID:-}"
+CHAT_TAB_ID="${CHAT_TAB_ID:-}"
 
 if [[ ! -f "${EXPORT_SCRIPT}" ]]; then
   echo "ERROR: export script not found: ${EXPORT_SCRIPT}" >&2
@@ -143,6 +145,57 @@ PY
   exit 1
 }
 
+resolve_target_tab() {
+  python3 - "$HUB_URL" "$TOKEN" "$GROUP_URL" "$CHAT_CLIENT_ID" "$CHAT_TAB_ID" <<'PY'
+import json
+import sys
+from urllib.request import Request, urlopen
+
+hub_url, token, group_url, forced_client_id, forced_tab_id = sys.argv[1:6]
+target_fragment = group_url.split("#", 1)[1] if "#" in group_url else ""
+
+if forced_tab_id.strip():
+    print(f"{forced_client_id.strip()}\t{forced_tab_id.strip()}")
+    raise SystemExit(0)
+
+req = Request(
+    f"{hub_url}/api/clients",
+    headers={"Accept": "application/json", "X-Access-Token": token},
+)
+try:
+    with urlopen(req, timeout=3) as r:
+        payload = json.loads(r.read().decode("utf-8"))
+except Exception:
+    raise SystemExit(0)
+
+clients = payload.get("clients") or []
+for client in clients:
+    client_id = str(client.get("client_id") or "").strip()
+    if forced_client_id and client_id != forced_client_id.strip():
+        continue
+    for tab in client.get("tabs") or []:
+        tab_id = tab.get("id")
+        url = str(tab.get("url") or "")
+        fragment = url.split("#", 1)[1] if "#" in url else ""
+        if target_fragment and fragment == target_fragment and isinstance(tab_id, int):
+            print(f"{client_id}\t{tab_id}")
+            raise SystemExit(0)
+
+for client in clients:
+    client_id = str(client.get("client_id") or "").strip()
+    if forced_client_id and client_id != forced_client_id.strip():
+        continue
+    for tab in client.get("tabs") or []:
+        tab_id = tab.get("id")
+        url = str(tab.get("url") or "")
+        if "web.telegram.org" in url and isinstance(tab_id, int):
+            print(f"{client_id}\t{tab_id}")
+            raise SystemExit(0)
+
+raise SystemExit(0)
+PY
+}
+
 extract_usernames_txt() {
   local md_file="$1"
   local txt_file="$2"
@@ -176,8 +229,26 @@ start_hub_if_needed
 open_telegram_tab
 wait_for_telegram_client
 
+resolved_client_id=""
+resolved_tab_id=""
+resolved_target="$(resolve_target_tab || true)"
+if [[ -n "${resolved_target}" ]]; then
+  IFS=$'\t' read -r resolved_client_id resolved_tab_id <<<"${resolved_target}"
+fi
+
 mkdir -p "$(dirname "${OUT_MD}")"
 echo "INFO: collecting usernames from ${GROUP_URL}"
+extra_args=()
+if [[ -n "${resolved_client_id}" ]]; then
+  extra_args+=(--client-id "${resolved_client_id}")
+fi
+if [[ -n "${resolved_tab_id}" ]]; then
+  extra_args+=(--tab-id "${resolved_tab_id}")
+fi
+if [[ -n "${resolved_client_id}" || -n "${resolved_tab_id}" ]]; then
+  echo "INFO: using Telegram target client=${resolved_client_id:-auto} tab=${resolved_tab_id:-auto}"
+fi
+
 python3 -u "${EXPORT_SCRIPT}" \
   --token "${TOKEN}" \
   --group-url "${GROUP_URL}" \
@@ -190,6 +261,7 @@ python3 -u "${EXPORT_SCRIPT}" \
   --chat-scroll-steps "${CHAT_STEPS}" \
   --deep-usernames \
   --chat-deep-limit "${CHAT_DEEP_LIMIT}" \
+  "${extra_args[@]}" \
   --output "${OUT_MD}"
 
 OUT_TXT="${OUT_MD%.md}_usernames.txt"
