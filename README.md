@@ -57,6 +57,7 @@ cd /home/max/site-control-kit
 Что он делает:
 - создаёт папку `~/telegram_contact_batches/chat_<id>`;
 - сохраняет полный последний снимок в `latest_full.md` и `latest_full.txt`;
+- сохраняет отдельный лог запуска в `runs/<timestamp>/` с `run.json`, `export.log`, `snapshot.md`, `snapshot.txt`;
 - пишет только новые контакты в `1.txt`, `2.txt`, `3.txt` и так далее;
 - если `@username` внезапно сменил владельца (`peer_id`) между запусками, не пишет его в numbered batch, а кладёт случай в `review.txt` и `conflicts.json`.
 
