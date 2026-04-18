@@ -1,0 +1,199 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="/home/max/site-control-kit"
+EXPORT_SCRIPT="${ROOT_DIR}/scripts/export_telegram_members_non_pii.py"
+HUB_URL="http://127.0.0.1:8765"
+TOKEN="${SITECTL_TOKEN:-local-bridge-quickstart-2026}"
+
+GROUP_URL="${1:-https://web.telegram.org/k/#-1288116010}"
+OUT_MD="${2:-${HOME}/Загрузки/Telegram Desktop/telegram_usernames_auto.md}"
+
+CHAT_STEPS="${CHAT_SCROLL_STEPS:-120}"
+CHAT_DEEP_LIMIT="${CHAT_DEEP_LIMIT:-120}"
+CHAT_TIMEOUT_SEC="${CHAT_TIMEOUT_SEC:-12}"
+CHAT_MAX_RUNTIME="${CHAT_MAX_RUNTIME:-900}"
+CHAT_DEEP_MODE="${CHAT_DEEP_MODE:-full}"
+CHAT_MIN_MEMBERS="${CHAT_MIN_MEMBERS:-0}"
+WAIT_CLIENT_SEC="${WAIT_CLIENT_SEC:-120}"
+
+if [[ ! -f "${EXPORT_SCRIPT}" ]]; then
+  echo "ERROR: export script not found: ${EXPORT_SCRIPT}" >&2
+  exit 1
+fi
+
+start_hub_if_needed() {
+  if curl -fsS --max-time 2 "${HUB_URL}/health" >/dev/null 2>&1; then
+    return
+  fi
+
+  echo "INFO: starting hub on ${HUB_URL}"
+  nohup python3 -m webcontrol serve \
+    --host 127.0.0.1 \
+    --port 8765 \
+    --token "${TOKEN}" \
+    --state-file "${HOME}/.site-control-kit/state.json" \
+    >/tmp/telegram_auto_hub.log 2>&1 &
+
+  for _ in {1..80}; do
+    if curl -fsS --max-time 2 "${HUB_URL}/health" >/dev/null 2>&1; then
+      return
+    fi
+    sleep 0.25
+  done
+
+  echo "ERROR: hub failed to start. Log: /tmp/telegram_auto_hub.log" >&2
+  exit 1
+}
+
+open_telegram_tab() {
+  if ! command -v xdg-open >/dev/null 2>&1; then
+    return
+  fi
+
+  if python3 - "$HUB_URL" "$TOKEN" "$GROUP_URL" <<'PY'
+import json
+import sys
+from urllib.request import Request, urlopen
+
+hub_url, token, group_url = sys.argv[1], sys.argv[2], sys.argv[3]
+target_fragment = group_url.split("#", 1)[1] if "#" in group_url else ""
+req = Request(
+    f"{hub_url}/api/clients",
+    headers={"Accept": "application/json", "X-Access-Token": token},
+)
+try:
+    with urlopen(req, timeout=3) as r:
+        payload = json.loads(r.read().decode("utf-8"))
+except Exception:
+    raise SystemExit(1)
+
+for client in payload.get("clients") or []:
+    for tab in client.get("tabs") or []:
+        url = str(tab.get("url") or "")
+        if "web.telegram.org" not in url:
+            continue
+        fragment = url.split("#", 1)[1] if "#" in url else ""
+        if target_fragment and fragment == target_fragment:
+            raise SystemExit(0)
+
+raise SystemExit(1)
+PY
+  then
+    echo "INFO: target Telegram tab already visible in hub state"
+    return
+  fi
+
+  xdg-open "${GROUP_URL}" >/dev/null 2>&1 || true
+}
+
+wait_for_telegram_client() {
+  local deadline
+  deadline=$((SECONDS + WAIT_CLIENT_SEC))
+
+  while (( SECONDS < deadline )); do
+    if python3 - "$HUB_URL" "$TOKEN" <<'PY'
+import json
+import sys
+from datetime import datetime, timezone
+from urllib.request import Request, urlopen
+
+hub_url, token = sys.argv[1], sys.argv[2]
+req = Request(
+    f"{hub_url}/api/clients",
+    headers={"Accept": "application/json", "X-Access-Token": token},
+)
+try:
+    with urlopen(req, timeout=3) as r:
+        payload = json.loads(r.read().decode("utf-8"))
+except Exception:
+    raise SystemExit(1)
+
+now = datetime.now(timezone.utc)
+clients = payload.get("clients") or []
+for client in clients:
+    seen = str(client.get("last_seen") or "").strip()
+    tabs = client.get("tabs") or []
+    if not tabs:
+        continue
+    has_telegram = any("web.telegram.org" in str(tab.get("url") or "") for tab in tabs)
+    if not has_telegram:
+        continue
+    if seen:
+        try:
+            dt = datetime.fromisoformat(seen)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            if (now - dt).total_seconds() > 120:
+                continue
+        except Exception:
+            pass
+    raise SystemExit(0)
+
+raise SystemExit(1)
+PY
+    then
+      return
+    fi
+    sleep 1
+  done
+
+  echo "ERROR: telegram bridge client not detected in ${WAIT_CLIENT_SEC}s." >&2
+  echo "Open Telegram Web with extension enabled and logged in." >&2
+  exit 1
+}
+
+extract_usernames_txt() {
+  local md_file="$1"
+  local txt_file="$2"
+  python3 - "$md_file" "$txt_file" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+md = Path(sys.argv[1])
+out = Path(sys.argv[2])
+text = md.read_text(encoding="utf-8", errors="ignore")
+seen = set()
+rows = []
+for line in text.splitlines():
+    m = re.search(r"\|\s*\d+\s*\|.*\|\s*(@[A-Za-z0-9_]{5,32})\s*\|", line)
+    if not m:
+        continue
+    u = m.group(1)
+    k = u.lower()
+    if k in seen:
+        continue
+    seen.add(k)
+    rows.append(u)
+out.write_text("\n".join(rows) + ("\n" if rows else ""), encoding="utf-8")
+print(f"OK: saved {len(rows)} usernames to {out}")
+PY
+}
+
+cd "${ROOT_DIR}"
+start_hub_if_needed
+open_telegram_tab
+wait_for_telegram_client
+
+mkdir -p "$(dirname "${OUT_MD}")"
+echo "INFO: collecting usernames from ${GROUP_URL}"
+python3 -u "${EXPORT_SCRIPT}" \
+  --token "${TOKEN}" \
+  --group-url "${GROUP_URL}" \
+  --source chat \
+  --force-navigate \
+  --timeout "${CHAT_TIMEOUT_SEC}" \
+  --chat-max-runtime "${CHAT_MAX_RUNTIME}" \
+  --chat-deep-mode "${CHAT_DEEP_MODE}" \
+  --chat-min-members "${CHAT_MIN_MEMBERS}" \
+  --chat-scroll-steps "${CHAT_STEPS}" \
+  --deep-usernames \
+  --chat-deep-limit "${CHAT_DEEP_LIMIT}" \
+  --output "${OUT_MD}"
+
+OUT_TXT="${OUT_MD%.md}_usernames.txt"
+extract_usernames_txt "${OUT_MD}" "${OUT_TXT}"
+echo "DONE:"
+echo "  MD:  ${OUT_MD}"
+echo "  TXT: ${OUT_TXT}"

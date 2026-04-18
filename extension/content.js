@@ -342,17 +342,28 @@ async function runCommand(command) {
       const dy = Number.isFinite(command.delta_y) ? Number(command.delta_y) : 0;
       if (command.selector) {
         const el = queryElement(command.selector);
+        const beforeTop = Number(el.scrollTop || 0);
+        const beforeLeft = Number(el.scrollLeft || 0);
         if (typeof el.scrollBy === "function") {
           el.scrollBy({ left: dx, top: dy, behavior: "auto" });
         } else {
-          el.scrollTop = Number(el.scrollTop || 0) + dy;
-          el.scrollLeft = Number(el.scrollLeft || 0) + dx;
+          el.scrollTop = beforeTop + dy;
+          el.scrollLeft = beforeLeft + dx;
         }
+        const afterTop = Number(el.scrollTop || 0);
+        const afterLeft = Number(el.scrollLeft || 0);
         return {
           selector: command.selector,
           delta_x: dx,
           delta_y: dy,
-          scrollTop: Number(el.scrollTop || 0),
+          beforeTop,
+          beforeLeft,
+          afterTop,
+          afterLeft,
+          scrollTop: afterTop,
+          scrollHeight: Number(el.scrollHeight || 0),
+          clientHeight: Number(el.clientHeight || 0),
+          moved: Math.abs(afterTop - beforeTop) >= 1 || Math.abs(afterLeft - beforeLeft) >= 1,
           scrolled: true
         };
       }

@@ -13,7 +13,8 @@ CHAT_STEPS="${4:-20}"
 CHAT_DEEP_LIMIT="${5:-10}"
 TIMEOUT_SEC="${6:-8}"
 CHAT_MAX_RUNTIME="${7:-180}"
-CHAT_DEEP_MODE="${8:-url}"
+CHAT_DEEP_MODE="${8:-mention}"
+CHAT_MIN_MEMBERS="${9:-0}"
 
 ROOT="/home/max/site-control-kit"
 HUB_URL="http://127.0.0.1:8765"
@@ -59,15 +60,22 @@ if ! curl -fsS --max-time 1 "$HUB_URL/health" >/dev/null 2>&1; then
   fi
 fi
 
+clients_payload=""
 for _ in {1..40}; do
-  if curl -fsS --max-time 2 -H "X-Access-Token: ${TOKEN}" "${HUB_URL}/api/clients" | rg -q '"client_id"'; then
+  clients_payload="$(curl -sS --max-time 2 -H "X-Access-Token: ${TOKEN}" "${HUB_URL}/api/clients" || true)"
+  if printf '%s' "$clients_payload" | grep -q '"client_id"'; then
     break
   fi
   sleep 0.25
 done
 
-if ! curl -fsS --max-time 2 -H "X-Access-Token: ${TOKEN}" "${HUB_URL}/api/clients" | rg -q '"client_id"'; then
-  echo "ERROR: no connected bridge clients. Open Telegram Web tab and wait 2-3s." >&2
+clients_payload="$(curl -sS --max-time 2 -H "X-Access-Token: ${TOKEN}" "${HUB_URL}/api/clients" || true)"
+if ! printf '%s' "$clients_payload" | grep -q '"client_id"'; then
+  if printf '%s' "$clients_payload" | grep -q 'unauthorized'; then
+    echo "ERROR: unauthorized on /api/clients (token mismatch). Align SITECTL_TOKEN in hub and extension." >&2
+  else
+    echo "ERROR: no connected bridge clients. Open Telegram Web tab and wait 2-3s." >&2
+  fi
   exit 1
 fi
 
@@ -76,9 +84,11 @@ python3 -u "$ROOT/scripts/export_telegram_members_non_pii.py" \
   --token "$TOKEN" \
   --group-url "$GROUP_URL" \
   --source chat \
+  --force-navigate \
   --timeout "$TIMEOUT_SEC" \
   --chat-max-runtime "$CHAT_MAX_RUNTIME" \
   --chat-deep-mode "$CHAT_DEEP_MODE" \
+  --chat-min-members "$CHAT_MIN_MEMBERS" \
   --chat-scroll-steps "$CHAT_STEPS" \
   --deep-usernames \
   --chat-deep-limit "$CHAT_DEEP_LIMIT" \

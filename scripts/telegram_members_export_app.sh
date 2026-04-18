@@ -10,6 +10,16 @@ if ! command -v zenity >/dev/null 2>&1; then
   exit 1
 fi
 
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "ERROR: python3 is not installed." >&2
+  exit 1
+fi
+
+if ! command -v curl >/dev/null 2>&1; then
+  echo "ERROR: curl is not installed." >&2
+  exit 1
+fi
+
 if [[ ! -f "${EXPORT_SCRIPT}" ]]; then
   zenity --error --title="Telegram Members Export" --text="Скрипт экспорта не найден:\n${EXPORT_SCRIPT}"
   exit 1
@@ -18,12 +28,12 @@ fi
 default_server="http://127.0.0.1:8765"
 default_group_url="https://web.telegram.org/k/#-"
 default_timeout="12"
-default_chat_scroll_steps="20"
-default_info_scroll_steps="0"
-default_chat_deep_limit="10"
-default_chat_max_runtime="180"
-default_chat_deep_mode="url"
-default_output="${HOME}/Загрузки/Telegram Desktop/MadCoreChat_members_non_pii.md"
+default_chat_scroll_steps="120"
+default_chat_deep_limit="60"
+default_chat_max_runtime="900"
+default_chat_deep_mode="full"
+default_target_users="0"
+default_output="${HOME}/Загрузки/Telegram Desktop/telegram_usernames.txt"
 default_token="local-bridge-quickstart-2026"
 
 detect_token() {
@@ -56,6 +66,38 @@ detect_token() {
 hub_is_alive() {
   local url="$1"
   curl -fsS "${url}/health" >/dev/null 2>&1
+}
+
+is_uint() {
+  [[ "${1:-}" =~ ^[0-9]+$ ]]
+}
+
+extract_usernames_from_markdown() {
+  local input_md="$1"
+  local output_txt="$2"
+  python3 - "$input_md" "$output_txt" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+src = Path(sys.argv[1])
+dst = Path(sys.argv[2])
+text = src.read_text(encoding="utf-8", errors="ignore")
+seen = set()
+rows = []
+for line in text.splitlines():
+    match = re.search(r"\|\s*\d+\s*\|.*\|\s*(@[A-Za-z0-9_]{5,32})\s*\|", line)
+    if not match:
+        continue
+    username = match.group(1)
+    key = username.lower()
+    if key in seen:
+        continue
+    seen.add(key)
+    rows.append(username)
+dst.write_text("\n".join(rows) + ("\n" if rows else ""), encoding="utf-8")
+print(len(rows))
+PY
 }
 
 list_open_telegram_dialogs() {
@@ -114,7 +156,7 @@ output_path="$(
     --file-selection \
     --save \
     --confirm-overwrite \
-    --title="Куда сохранить .md файл" \
+    --title="Куда сохранить результат (.txt или .md)" \
     --filename="${default_output}"
 )"
 
@@ -122,31 +164,16 @@ if [[ -z "${output_path:-}" ]]; then
   exit 0
 fi
 
-mode_choice="$(
-  zenity \
-    --list \
-    --radiolist \
-    --title="Режим сбора" \
-    --text="Выберите источник участников:" \
-    --column="" \
-    --column="Режим" \
-    TRUE "Взять из инфо группы" \
-    FALSE "Взять из чата группы" \
-    FALSE "Объединить: чат + инфо" \
-    --height=260 \
-    --width=420
-)"
-
-if [[ -z "${mode_choice:-}" ]]; then
-  exit 0
+source_mode="chat"
+output_mode="md"
+output_path_lower="$(printf '%s' "${output_path}" | tr '[:upper:]' '[:lower:]')"
+if [[ "${output_path_lower}" == *.txt ]]; then
+  output_mode="txt"
+elif [[ "${output_path_lower}" != *.md ]]; then
+  output_mode="txt"
+  output_path="${output_path}.txt"
 fi
-
-source_mode="info"
-if [[ "${mode_choice}" == "Взять из чата группы" ]]; then
-  source_mode="chat"
-elif [[ "${mode_choice}" == "Объединить: чат + инфо" ]]; then
-  source_mode="both"
-fi
+mkdir -p "$(dirname "${output_path}")"
 
 group_url=""
 mapfile -t dialog_rows < <(list_open_telegram_dialogs "${server}" "${token}")
@@ -203,47 +230,64 @@ chat_scroll_steps="${default_chat_scroll_steps}"
 chat_deep_limit="${default_chat_deep_limit}"
 chat_max_runtime="${default_chat_max_runtime}"
 chat_deep_mode="${default_chat_deep_mode}"
-if [[ "${source_mode}" == "chat" || "${source_mode}" == "both" ]]; then
-  run_params="$(
-    zenity \
-      --entry \
-      --title="Параметры сбора" \
-      --text="Введите: шаги_скролла|deep_лимит|таймаут_сек|макс_время_чата\nПример: 20|3|12|40" \
-      --entry-text "${chat_scroll_steps}|${chat_deep_limit}|${timeout_value}|${chat_max_runtime}"
-  )"
-  if [[ -z "${run_params:-}" ]]; then
-    exit 0
-  fi
-  IFS='|' read -r chat_scroll_steps chat_deep_limit timeout_value chat_max_runtime <<<"${run_params}"
-  [[ "${chat_scroll_steps}" =~ ^[0-9]+$ ]] || chat_scroll_steps="${default_chat_scroll_steps}"
-  [[ "${chat_deep_limit}" =~ ^[0-9]+$ ]] || chat_deep_limit="${default_chat_deep_limit}"
-  [[ "${timeout_value}" =~ ^[0-9]+$ ]] || timeout_value="${default_timeout}"
-  [[ "${chat_max_runtime}" =~ ^[0-9]+$ ]] || chat_max_runtime="${default_chat_max_runtime}"
+target_users="${default_target_users}"
+run_params="$(
+  zenity \
+    --entry \
+    --title="Параметры сбора чата" \
+    --text="Введите: шаги_скролла|deep_лимит|таймаут_сек|макс_время_чата|лимит_пользователей\nПример: 120|60|12|900|0 (0 = без лимита)" \
+    --entry-text "${chat_scroll_steps}|${chat_deep_limit}|${timeout_value}|${chat_max_runtime}|${target_users}"
+)"
+if [[ -z "${run_params:-}" ]]; then
+  exit 0
+fi
+IFS='|' read -r chat_scroll_steps chat_deep_limit timeout_value chat_max_runtime target_users <<<"${run_params}"
+is_uint "${chat_scroll_steps}" || chat_scroll_steps="${default_chat_scroll_steps}"
+is_uint "${chat_deep_limit}" || chat_deep_limit="${default_chat_deep_limit}"
+is_uint "${timeout_value}" || timeout_value="${default_timeout}"
+is_uint "${chat_max_runtime}" || chat_max_runtime="${default_chat_max_runtime}"
+is_uint "${target_users}" || target_users="${default_target_users}"
 
-  deep_mode_choice="$(
-    zenity \
-      --list \
-      --radiolist \
-      --title="Режим извлечения @username" \
-      --text="Как собирать @username из чата:" \
-      --column="" \
-      --column="Режим" \
-      TRUE "URL (рекомендуется)" \
-      FALSE "Полный (URL + профиль)" \
-      FALSE "Mention (ПКМ -> Mention)" \
-      --height=260 \
-      --width=460
-  )"
-  if [[ -z "${deep_mode_choice:-}" ]]; then
-    exit 0
-  fi
-  if [[ "${deep_mode_choice}" == "Полный (URL + профиль)" ]]; then
-    chat_deep_mode="full"
-  elif [[ "${deep_mode_choice}" == "Mention (ПКМ -> Mention)" ]]; then
-    chat_deep_mode="mention"
-  else
-    chat_deep_mode="url"
-  fi
+deep_mode_choice="$(
+  zenity \
+    --list \
+    --radiolist \
+    --title="Режим извлечения @username" \
+    --text="Как собирать @username из чата:" \
+    --column="" \
+    --column="Режим" \
+    TRUE "Полный (URL + профиль, максимально полно)" \
+    FALSE "Mention (ПКМ -> Mention, быстрее)" \
+    FALSE "URL (через профиль URL)" \
+    --height=280 \
+    --width=560
+)"
+if [[ -z "${deep_mode_choice:-}" ]]; then
+  exit 0
+fi
+if [[ "${deep_mode_choice}" == "Полный (URL + профиль, максимально полно)" ]]; then
+  chat_deep_mode="full"
+elif [[ "${deep_mode_choice}" == "URL (через профиль URL)" ]]; then
+  chat_deep_mode="url"
+else
+  chat_deep_mode="mention"
+fi
+
+chat_min_members="0"
+max_members="0"
+if is_uint "${target_users}" && [[ "${target_users}" -gt 0 ]]; then
+  chat_min_members="${target_users}"
+  max_members="${target_users}"
+else
+  # Disable early unchanged-stop when user wants "collect all possible from chat".
+  chat_min_members="999999999"
+fi
+
+export_output_path="${output_path}"
+temp_export_path=""
+if [[ "${output_mode}" == "txt" ]]; then
+  temp_export_path="$(mktemp /tmp/telegram_members_export.XXXXXX.md)"
+  export_output_path="${temp_export_path}"
 fi
 
 cmd=(
@@ -252,31 +296,27 @@ cmd=(
   --server "${server}"
   --token "${token}"
   --group-url "${group_url}"
-  --timeout "${timeout_value}"
-  --output "${output_path}"
   --source "${source_mode}"
+  --force-navigate
+  --timeout "${timeout_value}"
+  --chat-scroll-steps "${chat_scroll_steps}"
+  --chat-deep-limit "${chat_deep_limit}"
+  --chat-max-runtime "${chat_max_runtime}"
+  --chat-deep-mode "${chat_deep_mode}"
+  --chat-min-members "${chat_min_members}"
+  --max-members "${max_members}"
+  --deep-usernames
+  --output "${export_output_path}"
 )
 
-if [[ "${source_mode}" == "chat" ]]; then
-  cmd+=(--chat-scroll-steps "${chat_scroll_steps}")
-  cmd+=(--chat-deep-limit "${chat_deep_limit}")
-  cmd+=(--chat-max-runtime "${chat_max_runtime}")
-  cmd+=(--chat-deep-mode "${chat_deep_mode}")
-  cmd+=(--info-scroll-steps "${default_info_scroll_steps}")
-  cmd+=(--deep-usernames)
-elif [[ "${source_mode}" == "both" ]]; then
-  cmd+=(--chat-scroll-steps "${chat_scroll_steps}")
-  cmd+=(--chat-deep-limit "${chat_deep_limit}")
-  cmd+=(--chat-max-runtime "${chat_max_runtime}")
-  cmd+=(--chat-deep-mode "${chat_deep_mode}")
-  cmd+=(--info-scroll-steps "${default_info_scroll_steps}")
-  cmd+=(--deep-usernames)
-else
-  cmd+=(--info-scroll-steps "${default_info_scroll_steps}")
-  cmd+=(--deep-usernames)
-fi
-
 log_file="$(mktemp /tmp/telegram_members_export.XXXXXX.log)"
+cleanup() {
+  rm -f "${log_file}"
+  if [[ -n "${temp_export_path}" ]]; then
+    rm -f "${temp_export_path}"
+  fi
+}
+trap cleanup EXIT
 
 set +e
 "${cmd[@]}" >"${log_file}" 2>&1
@@ -284,11 +324,22 @@ exit_code=$?
 set -e
 
 if [[ ${exit_code} -eq 0 ]]; then
-  zenity --info --title="Telegram Members Export" --text="Готово.\n\nФайл сохранен в:\n${output_path}"
+  if [[ "${output_mode}" == "txt" ]]; then
+    set +e
+    usernames_count="$(extract_usernames_from_markdown "${export_output_path}" "${output_path}")"
+    extract_exit_code=$?
+    set -e
+    if [[ ${extract_exit_code} -ne 0 ]]; then
+      zenity --error --title="Telegram Members Export" --text="Экспорт прошел, но не удалось собрать .txt с @username.\nПроверьте лог:\n${log_file}"
+      exit 1
+    fi
+    zenity --info --title="Telegram Members Export" --text="Готово.\n\nСобрано @username: ${usernames_count}\nФайл сохранен в:\n${output_path}"
+  else
+    zenity --info --title="Telegram Members Export" --text="Готово.\n\nФайл сохранен в:\n${output_path}"
+  fi
 else
   error_text="$(tail -n 25 "${log_file}")"
   zenity --error --title="Telegram Members Export" --text="Ошибка выгрузки.\n\n${error_text}"
 fi
 
-rm -f "${log_file}"
 exit "${exit_code}"

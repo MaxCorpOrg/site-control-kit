@@ -9,8 +9,9 @@ import os
 import re
 import sys
 import time
+import webbrowser
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -49,6 +50,9 @@ CHAT_SCROLL_DISTANCE_PX = 900
 INFO_SCROLL_SETTLE_SEC = 0.8
 CHAT_DEEP_DEFAULT_LIMIT = 3
 SPECIFIC_TG_DIALOG_URL_RE = re.compile(r"^https?://web\.telegram\.org/(k|a)/#[^#\s]+$", flags=re.I)
+ACTIVE_CLIENT_MAX_AGE_SEC = 90
+ACTIVE_CLIENT_WAIT_SEC = 25
+HTTP_REQUEST_TIMEOUT_SEC = 8
 
 
 def _norm_server(url: str) -> str:
@@ -74,7 +78,7 @@ def _http_json(
 
     request = Request(endpoint, data=body, method=method, headers=headers)
     try:
-        with urlopen(request, timeout=30) as response:
+        with urlopen(request, timeout=HTTP_REQUEST_TIMEOUT_SEC) as response:
             raw = response.read().decode("utf-8")
             if not raw:
                 return {"ok": True}
@@ -110,6 +114,86 @@ def _compact(value: str) -> str:
     value = html_lib.unescape(value)
     value = re.sub(r"<[^>]+>", " ", value)
     return " ".join(value.split()).strip()
+
+
+def _parse_iso_datetime(value: str) -> dt.datetime | None:
+    text = (value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = dt.datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=dt.timezone.utc)
+    return parsed
+
+
+def _format_command_error(error: Any) -> str:
+    if isinstance(error, dict):
+        for key in ("message", "error", "detail", "reason"):
+            value = str(error.get(key) or "").strip()
+            if value:
+                return value
+        try:
+            return json.dumps(error, ensure_ascii=False)
+        except Exception:  # noqa: BLE001
+            return str(error)
+    if error is None:
+        return ""
+    return str(error).strip()
+
+
+def _fresh_clients(clients: list[dict[str, Any]], max_age_sec: int) -> tuple[list[dict[str, Any]], str]:
+    now = dt.datetime.now(dt.timezone.utc)
+    max_age = max(5, int(max_age_sec))
+    fresh: list[dict[str, Any]] = []
+    newest_seen_text = ""
+    newest_seen_dt: dt.datetime | None = None
+
+    for client in clients:
+        if not isinstance(client, dict):
+            continue
+        seen_raw = str(client.get("last_seen") or "").strip()
+        seen_dt = _parse_iso_datetime(seen_raw)
+        if seen_dt is None:
+            fresh.append(client)
+            continue
+        if seen_dt and (newest_seen_dt is None or seen_dt > newest_seen_dt):
+            newest_seen_dt = seen_dt
+            newest_seen_text = seen_raw
+        age_sec = (now - seen_dt).total_seconds()
+        if age_sec <= max_age:
+            fresh.append(client)
+
+    return fresh, newest_seen_text
+
+
+def _load_clients(server: str, token: str) -> list[dict[str, Any]]:
+    clients_response = _http_json_retry(server, token, "GET", "/api/clients")
+    clients_all = clients_response.get("clients") or []
+    if not isinstance(clients_all, list):
+        raise RuntimeError("Invalid clients payload from hub")
+    return clients_all
+
+
+def _wait_for_fresh_clients(
+    server: str,
+    token: str,
+    *,
+    max_age_sec: int = ACTIVE_CLIENT_MAX_AGE_SEC,
+    wait_sec: int = ACTIVE_CLIENT_WAIT_SEC,
+) -> tuple[list[dict[str, Any]], str]:
+    started_at = time.time()
+    newest_seen = ""
+    while True:
+        clients_all = _load_clients(server, token)
+        clients, newest_seen = _fresh_clients(clients_all, max_age_sec)
+        if clients:
+            return clients, newest_seen
+        if time.time() - started_at >= max(0, int(wait_sec)):
+            return [], newest_seen
+        time.sleep(0.5)
 
 
 def _is_specific_tg_dialog_url(value: str) -> bool:
@@ -421,25 +505,6 @@ def _try_username_via_mention_action(
         return "—"
 
     mention_click_ok = False
-    for selector in (
-        "#bubble-contextmenu.active .btn-menu-item:nth-child(2)",
-        "#bubble-contextmenu .btn-menu-item:nth-child(2)",
-        ".btn-menu.contextmenu.active .btn-menu-item:nth-child(2)",
-        ".btn-menu.contextmenu .btn-menu-item:nth-child(2)",
-    ):
-        direct_click = _send_command_result(
-            server=server,
-            token=token,
-            client_id=client_id,
-            tab_id=tab_id,
-            timeout_sec=1,
-            command={"type": "click", "selector": selector, "timeout_ms": 700},
-            raise_on_fail=False,
-        )
-        if direct_click.get("ok"):
-            mention_click_ok = True
-            break
-
     mention_terms = [
         "mention",
         "упомянуть",
@@ -450,7 +515,9 @@ def _try_username_via_mention_action(
         "mencao",
     ]
     if not mention_click_ok:
-        for _ in range(3):
+        # Single pass is enough here: repeating menu search tends to stall progress
+        # when UI is unstable during continuous chat scrolling.
+        for _ in range(1):
             for root_selector in (
                 "#bubble-contextmenu.active",
                 "#bubble-contextmenu",
@@ -889,6 +956,7 @@ def _scroll_chat_up(server: str, token: str, client_id: str, tab_id: int, timeou
         ".bubbles .scrollable.scrollable-y",
         ".chat.tabs-tab.active .bubbles .scrollable-y",
         "#column-center .bubbles .scrollable-y",
+        "#column-center .scrollable-y",
     ):
         result = _send_command_result(
             server=server,
@@ -899,30 +967,51 @@ def _scroll_chat_up(server: str, token: str, client_id: str, tab_id: int, timeou
             command={
                 "type": "scroll_by",
                 "selector": selector,
-                "delta_y": -900,
+                "delta_y": -CHAT_SCROLL_DISTANCE_PX,
                 "delta_x": 0,
             },
             raise_on_fail=False,
         )
-        if result.get("ok"):
+        if not result.get("ok"):
+            continue
+        data = result.get("data") or {}
+        before_top = data.get("beforeTop")
+        after_top = data.get("afterTop")
+        moved = data.get("moved")
+        if isinstance(moved, bool):
+            if moved:
+                return True
+        elif isinstance(before_top, (int, float)) and isinstance(after_top, (int, float)):
+            if abs(float(after_top) - float(before_top)) >= 1:
+                return True
+        else:
+            # Older extension builds don't report before/after; treat as success.
             return True
 
-    for selector in CHAT_SCROLL_SELECTORS:
-        result = _send_command_result(
-            server=server,
-            token=token,
-            client_id=client_id,
-            tab_id=tab_id,
-            timeout_sec=timeout_sec,
-            command={
-                "type": "scroll",
-                "selector": selector,
-                "timeout_ms": 2200,
-            },
-            raise_on_fail=False,
+        print(
+            "INFO: chat scroll no immediate movement "
+            f"(selector={selector}, top={before_top}->{after_top}, "
+            f"height={data.get('scrollHeight')}, client={data.get('clientHeight')})"
         )
-        if result.get("ok"):
-            return True
+
+        for anchor_selector in CHAT_SCROLL_SELECTORS:
+            fallback = _send_command_result(
+                server=server,
+                token=token,
+                client_id=client_id,
+                tab_id=tab_id,
+                timeout_sec=timeout_sec,
+                command={
+                    "type": "scroll",
+                    "selector": anchor_selector,
+                    "timeout_ms": 1800,
+                },
+                raise_on_fail=False,
+            )
+            if fallback.get("ok"):
+                return True
+        return True
+
     return False
 
 
@@ -961,8 +1050,11 @@ def _collect_members_from_info(
     timeout_sec: int,
     scroll_steps: int,
     deep_usernames: bool = False,
+    max_members: int = 0,
+    on_progress: Callable[[list[dict[str, str]], str], None] | None = None,
 ) -> tuple[list[dict[str, str]], dict[str, int]]:
     members: list[dict[str, str]] = []
+    max_members_effective = max(int(max_members), 0)
     scroll_steps_done = 0
     no_growth_steps = 0
     total_hint: int | None = None
@@ -1008,6 +1100,7 @@ def _collect_members_from_info(
                     tab_id=tab_id,
                     timeout_sec=max(timeout_sec, 5),
                     members=deep_targets,
+                    all_members=members,
                 )
                 deep_attempted_total += attempted
                 deep_updated_total += updated
@@ -1018,9 +1111,17 @@ def _collect_members_from_info(
                     f"filled {updated}, total_filled {deep_updated_total}"
                 )
 
+        if max_members_effective and len(members) > max_members_effective:
+            members = members[:max_members_effective]
+
         hint_text = str(total_hint) if total_hint else "unknown"
         print(f"INFO: info step {step} collected {len(members)} unique users (hint {hint_text})")
+        if on_progress is not None:
+            on_progress(members, f"info step {step}")
 
+        if max_members_effective and len(members) >= max_members_effective:
+            print(f"INFO: info max-members reached ({max_members_effective}), stopping")
+            break
         if step >= scroll_steps:
             break
         if total_hint and len(members) >= total_hint:
@@ -1044,6 +1145,42 @@ def _collect_members_from_info(
         "deep_updated": deep_updated_total,
     }
     return members, stats
+
+
+def _seed_username_to_peer(members: list[dict[str, str]]) -> dict[str, str]:
+    username_to_peer: dict[str, str] = {}
+    for item in members:
+        username = str(item.get("username") or "").strip()
+        peer_id = str(item.get("peer_id") or "").strip()
+        if not username or username == "—" or not peer_id:
+            continue
+        username_to_peer.setdefault(username.lower(), peer_id)
+    return username_to_peer
+
+
+def _assign_username_if_unique(
+    *,
+    members_by_peer: dict[str, dict[str, str]],
+    username_to_peer: dict[str, str],
+    peer_id: str,
+    username: str,
+) -> tuple[bool, str | None]:
+    normalized = _normalize_username(username)
+    if normalized == "—":
+        return False, ""
+
+    key = normalized.lower()
+    existing_peer = username_to_peer.get(key)
+    if existing_peer and existing_peer != peer_id:
+        return False, existing_peer
+
+    member = members_by_peer.get(peer_id)
+    if member is None:
+        return False, existing_peer
+
+    member["username"] = normalized
+    username_to_peer[key] = peer_id
+    return True, existing_peer
 
 
 def _enrich_chat_usernames_via_info(
@@ -1123,6 +1260,7 @@ def _enrich_chat_usernames_via_mentions(
         return 0, 0
 
     members_by_peer = {str(item.get("peer_id") or "").strip(): item for item in members}
+    username_to_peer = _seed_username_to_peer(members)
     tg_mode = _tg_web_mode_from_url(group_url)
     attempted = 0
     updated = 0
@@ -1157,9 +1295,17 @@ def _enrich_chat_usernames_via_mentions(
         )
         peer_id = peer_match.group(1) if peer_match else ""
         if peer_id and peer_id in members_by_peer and members_by_peer[peer_id].get("username") == "—":
-            members_by_peer[peer_id]["username"] = username
-            updated += 1
-            print(f"INFO: chat mention deep mapped {username} -> peer {peer_id}")
+            assigned, existing_peer = _assign_username_if_unique(
+                members_by_peer=members_by_peer,
+                username_to_peer=username_to_peer,
+                peer_id=peer_id,
+                username=username,
+            )
+            if assigned:
+                updated += 1
+                print(f"INFO: chat mention deep mapped {username} -> peer {peer_id}")
+            elif existing_peer and existing_peer != peer_id:
+                print(f"WARN: skip duplicate username {username} for peer {peer_id} (already {existing_peer})")
 
         if _is_specific_tg_dialog_url(group_url):
             _send_command_result(
@@ -1203,13 +1349,18 @@ def _collect_members_from_chat(
     chat_deep_mode: str = "mention",
     chat_target_peer_id: str = "",
     chat_target_name: str = "",
+    min_members_target: int = 0,
+    max_members: int = 0,
+    on_progress: Callable[[list[dict[str, str]], str], None] | None = None,
 ) -> tuple[list[dict[str, str]], dict[str, int]]:
     members: list[dict[str, str]] = []
+    max_members_effective = max(int(max_members), 0)
     chat_html_timeout = max(5, min(timeout_sec, 8))
     started_at = time.time()
     previous_min_ts: int | None = None
     unchanged_steps = 0
     empty_steps = 0
+    no_scroll_steps = 0
     scroll_steps_done = 0
     deep_seen_peer_ids: set[str] = set()
     deep_attempted_total = 0
@@ -1221,6 +1372,17 @@ def _collect_members_from_chat(
             print(f"WARN: chat runtime limit reached ({max_runtime_sec}s), stopping")
             runtime_limited = True
             break
+        if _is_specific_tg_dialog_url(group_url):
+            if not _return_to_group_dialog_reliable(
+                server=server,
+                token=token,
+                client_id=client_id,
+                tab_id=tab_id,
+                group_url=group_url,
+                timeout_sec=min(timeout_sec, 8),
+            ):
+                print("WARN: cannot restore target group dialog, stopping chat export")
+                break
 
         html_payload = _send_get_html(
             server=server,
@@ -1239,18 +1401,37 @@ def _collect_members_from_chat(
         else:
             empty_steps += 1
 
+        # Write intermediate snapshot as soon as visible members are parsed,
+        # before potentially slow deep-username enrichment starts.
+        if on_progress is not None:
+            on_progress(members, f"chat step {step} collecting")
+
         if deep_usernames and members and chat_members:
             if time.time() - started_at > max(max_runtime_sec, 5):
                 print(f"WARN: skip deep (runtime limit {max_runtime_sec}s reached)")
             else:
-                visible_peer_ids = {item["peer_id"] for item in chat_members if item.get("peer_id")}
-                deep_targets = [
-                    item
-                    for item in members
-                    if item.get("peer_id") in visible_peer_ids
-                    and item.get("username") == "—"
-                    and item.get("peer_id") not in deep_seen_peer_ids
-                ]
+                # Process visible users bottom->top and only one deep target per scroll step.
+                # This avoids repeatedly hitting a "sticky" avatar while chat is being scrolled.
+                members_by_peer = {str(item.get("peer_id") or ""): item for item in members if item.get("peer_id")}
+                ordered_visible_peer_ids: list[str] = []
+                seen_visible_peer_ids: set[str] = set()
+                for item in reversed(chat_members):
+                    peer_id = str(item.get("peer_id") or "").strip()
+                    if not peer_id or peer_id in seen_visible_peer_ids:
+                        continue
+                    seen_visible_peer_ids.add(peer_id)
+                    ordered_visible_peer_ids.append(peer_id)
+
+                deep_targets = []
+                for peer_id in ordered_visible_peer_ids:
+                    member = members_by_peer.get(peer_id)
+                    if member is None:
+                        continue
+                    if member.get("username") != "—":
+                        continue
+                    if peer_id in deep_seen_peer_ids:
+                        continue
+                    deep_targets.append(member)
                 if chat_target_peer_id:
                     deep_targets = [item for item in deep_targets if str(item.get("peer_id") or "").strip() == chat_target_peer_id]
                 if chat_target_name:
@@ -1263,6 +1444,8 @@ def _collect_members_from_chat(
                 else:
                     deep_targets = deep_targets[:limit]
                 if deep_targets:
+                    deep_targets = deep_targets[:1]
+                if deep_targets:
                     elapsed = time.time() - started_at
                     remaining_runtime = max(2.0, float(max_runtime_sec) - elapsed - 2.0)
                     deep_runtime_budget = remaining_runtime
@@ -1273,6 +1456,7 @@ def _collect_members_from_chat(
                         tab_id=tab_id,
                         timeout_sec=max(timeout_sec, 5),
                         members=deep_targets,
+                        all_members=members,
                         group_url=group_url,
                         max_runtime_sec=deep_runtime_budget,
                         mode=chat_deep_mode,
@@ -1286,7 +1470,16 @@ def _collect_members_from_chat(
                         f"opened {opened}, filled {updated}, total_filled {deep_updated_total}"
                     )
 
+        if max_members_effective and len(members) > max_members_effective:
+            members = members[:max_members_effective]
+
         print(f"INFO: chat step {step} collected {len(members)} unique users")
+        if on_progress is not None:
+            on_progress(members, f"chat step {step}")
+
+        if max_members_effective and len(members) >= max_members_effective:
+            print(f"INFO: chat max-members reached ({max_members_effective}), stopping")
+            break
 
         timestamps = [int(value) for value in re.findall(r'data-timestamp="(\d+)"', html_payload)]
         min_ts = min(timestamps) if timestamps else None
@@ -1301,11 +1494,17 @@ def _collect_members_from_chat(
         if empty_steps >= 2 and not members:
             print("WARN: чат не читается (пустой DOM/не открыт диалог), останавливаюсь")
             break
-        if unchanged_steps >= 2:
+        if unchanged_steps >= 2 and len(members) >= max(0, int(min_members_target)):
             break
 
         if not _scroll_chat_up(server, token, client_id, tab_id, timeout_sec=min(timeout_sec, 10)):
-            break
+            no_scroll_steps += 1
+            if no_scroll_steps >= 3:
+                print("WARN: chat scroll stuck after 3 attempts, stopping")
+                break
+            time.sleep(CHAT_SCROLL_SETTLE_SEC)
+            continue
+        no_scroll_steps = 0
         scroll_steps_done += 1
         time.sleep(CHAT_SCROLL_SETTLE_SEC)
 
@@ -1326,18 +1525,14 @@ def _enrich_usernames_deep_chat(
     tab_id: int,
     timeout_sec: int,
     members: list[dict[str, str]],
+    all_members: list[dict[str, str]] | None = None,
     group_url: str = "",
     max_runtime_sec: float = 12.0,
     mode: str = "url",
 ) -> tuple[int, int, int, list[str]]:
     members_by_peer = {item["peer_id"]: item for item in members}
     pending_peer_ids = [item["peer_id"] for item in members if item.get("username") == "—"]
-    username_to_peer: dict[str, str] = {}
-    for item in members:
-        u = str(item.get("username") or "").strip()
-        p = str(item.get("peer_id") or "").strip()
-        if u and u != "—" and p:
-            username_to_peer[u.lower()] = p
+    username_to_peer = _seed_username_to_peer(all_members or members)
     target_fragment = group_url.split("#", 1)[1] if "#" in group_url else ""
     tg_mode = _tg_web_mode_from_url(group_url)
 
@@ -1383,15 +1578,18 @@ def _enrich_usernames_deep_chat(
                 peer_id=peer_id,
             )
             if mention_username != "—":
-                key = mention_username.lower()
-                existing_peer = username_to_peer.get(key)
-                if existing_peer and existing_peer != peer_id:
+                assigned, existing_peer = _assign_username_if_unique(
+                    members_by_peer=members_by_peer,
+                    username_to_peer=username_to_peer,
+                    peer_id=peer_id,
+                    username=mention_username,
+                )
+                if not assigned and existing_peer and existing_peer != peer_id:
                     print(f"WARN: skip duplicate username {mention_username} for peer {peer_id} (already {existing_peer})")
                     continue
-                members_by_peer[peer_id]["username"] = mention_username
-                username_to_peer[key] = peer_id
-                updated += 1
-                print(f"INFO: chat mention {peer_id} -> {mention_username}")
+                if assigned:
+                    updated += 1
+                    print(f"INFO: chat mention {peer_id} -> {mention_username}")
                 _return_to_group_dialog_reliable(
                     server=server,
                     token=token,
@@ -1452,13 +1650,15 @@ def _enrich_usernames_deep_chat(
             timeout_sec=1.2,
         )
         if quick_username != "—":
-            key = quick_username.lower()
-            existing_peer = username_to_peer.get(key)
-            if existing_peer and existing_peer != peer_id:
+            assigned, existing_peer = _assign_username_if_unique(
+                members_by_peer=members_by_peer,
+                username_to_peer=username_to_peer,
+                peer_id=peer_id,
+                username=quick_username,
+            )
+            if not assigned and existing_peer and existing_peer != peer_id:
                 print(f"WARN: skip duplicate username {quick_username} for peer {peer_id} (already {existing_peer})")
-            else:
-                members_by_peer[peer_id]["username"] = quick_username
-                username_to_peer[key] = peer_id
+            elif assigned:
                 updated += 1
                 print(f"INFO: chat url {peer_id} -> {quick_username}")
             _return_to_group_dialog_reliable(
@@ -1508,13 +1708,15 @@ def _enrich_usernames_deep_chat(
         )
 
         if username != "—":
-            key = username.lower()
-            existing_peer = username_to_peer.get(key)
-            if existing_peer and existing_peer != peer_id:
+            assigned, existing_peer = _assign_username_if_unique(
+                members_by_peer=members_by_peer,
+                username_to_peer=username_to_peer,
+                peer_id=peer_id,
+                username=username,
+            )
+            if not assigned and existing_peer and existing_peer != peer_id:
                 print(f"WARN: skip duplicate username {username} for peer {peer_id} (already {existing_peer})")
-            else:
-                members_by_peer[peer_id]["username"] = username
-                username_to_peer[key] = peer_id
+            elif assigned:
                 updated += 1
                 print(f"INFO: chat deep {peer_id} -> {username}")
 
@@ -1911,10 +2113,36 @@ def _send_command_result(
         command_state = response.get("command") or {}
         status = str(command_state.get("status") or "")
         if status in TERMINAL_STATUSES:
-            delivery = ((command_state.get("deliveries") or {}).get(client_id) or {}).get("result") or {}
+            deliveries = command_state.get("deliveries") or {}
+            delivery: dict[str, Any] = {}
+            if isinstance(deliveries, dict):
+                candidate = (deliveries.get(client_id) or {}).get("result")
+                if isinstance(candidate, dict):
+                    delivery = dict(candidate)
+                else:
+                    for payload in deliveries.values():
+                        if not isinstance(payload, dict):
+                            continue
+                        result_payload = payload.get("result")
+                        if isinstance(result_payload, dict):
+                            delivery = dict(result_payload)
+                            break
+
+            if "ok" not in delivery:
+                delivery["ok"] = False
+            if "status" not in delivery and status:
+                delivery["status"] = status
+            if not delivery.get("ok") and not delivery.get("error"):
+                delivery["error"] = {
+                    "message": (
+                        f"command={command.get('type')} status={status} "
+                        f"no delivery result for client_id={client_id}"
+                    )
+                }
+
             if raise_on_fail and not delivery.get("ok"):
                 err = delivery.get("error") or {}
-                msg = str((err.get("message") if isinstance(err, dict) else err) or "")
+                msg = _format_command_error(err)
                 if "Receiving end does not exist" in msg and command.get("type") != "navigate":
                     # Content script not attached yet; refresh dialog and retry once.
                     _send_command_result(
@@ -1938,7 +2166,7 @@ def _send_command_result(
                     )
                     if retry.get("ok"):
                         return retry
-                raise RuntimeError(f"Command failed: {delivery.get('error')}")
+                raise RuntimeError(f"Command failed ({command.get('type')}): {msg or 'unknown error'}")
             return delivery
         if time.time() >= deadline:
             if raise_on_fail:
@@ -2003,9 +2231,11 @@ def _enrich_usernames_deep(
     tab_id: int,
     timeout_sec: int,
     members: list[dict[str, str]],
+    all_members: list[dict[str, str]] | None = None,
 ) -> tuple[int, int, list[str]]:
     members_by_peer = {item["peer_id"]: item for item in members}
     pending_peer_ids = [item["peer_id"] for item in members if item.get("username") == "—"]
+    username_to_peer = _seed_username_to_peer(all_members or members)
 
     attempted = 0
     updated = 0
@@ -2067,8 +2297,16 @@ def _enrich_usernames_deep(
             )
             username = _extract_username_from_profile_html(profile_html)
             if username != "—":
-                members_by_peer[peer_id]["username"] = username
-                updated += 1
+                assigned, existing_peer = _assign_username_if_unique(
+                    members_by_peer=members_by_peer,
+                    username_to_peer=username_to_peer,
+                    peer_id=peer_id,
+                    username=username,
+                )
+                if assigned:
+                    updated += 1
+                elif existing_peer and existing_peer != peer_id:
+                    print(f"WARN: skip duplicate username {username} for peer {peer_id} (already {existing_peer})")
         finally:
             _close_profile_card(server, token, client_id, tab_id)
             time.sleep(0.15)
@@ -2131,13 +2369,21 @@ def _parse_members(html_payload: str) -> list[dict[str, str]]:
     return members
 
 
-def _write_markdown(path: Path, members: list[dict[str, str]], group_url: str, source_mode: str) -> None:
+def _write_markdown(
+    path: Path,
+    members: list[dict[str, str]],
+    group_url: str,
+    source_mode: str,
+    progress_note: str = "",
+) -> None:
     ts = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     lines: list[str] = []
     lines.append("# Участники Telegram-группы")
     lines.append("")
     lines.append(f"Источник: `{group_url}`")
     lines.append(f"Режим сбора: `{source_mode}`")
+    if progress_note:
+        lines.append(f"Статус: **в процессе** ({progress_note})")
     lines.append(f"Дата выгрузки: {ts}")
     lines.append(f"Количество участников в текущем видимом списке: **{len(members)}**")
     lines.append("")
@@ -2192,6 +2438,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Источник участников: info, chat, или both (объединить info + chat без дублей).",
     )
     parser.add_argument(
+        "--max-members",
+        type=int,
+        default=0,
+        help="Максимум пользователей в результате (0 = без лимита).",
+    )
+    parser.add_argument(
         "--chat-scroll-steps",
         type=int,
         default=10,
@@ -2223,7 +2475,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--chat-deep-mode",
         choices=("mention", "url", "full"),
-        default="url",
+        default="mention",
         help="Режим chat deep: mention (ПКМ->Mention), url (переход в профиль и чтение @ из URL), full (url + профиль справа).",
     )
     parser.add_argument(
@@ -2235,6 +2487,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--chat-target-name",
         default="",
         help="Для точечного теста chat deep: обрабатывать только имя (подстрока, без учета регистра/символов).",
+    )
+    parser.add_argument(
+        "--chat-min-members",
+        type=int,
+        default=0,
+        help="Минимум уникальных людей в chat-режиме; пока меньше, ранняя остановка по unchanged отключается.",
     )
     parser.add_argument(
         "--force-navigate",
@@ -2251,12 +2509,54 @@ def main() -> int:
     token = args.token or os.getenv(TOKEN_ENV, "") or DEFAULT_TOKEN
     server = _norm_server(args.server)
     group_url = args.group_url
+    out_path = Path(args.output).expanduser()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    def _write_progress_snapshot(current_members: list[dict[str, str]], mode_label: str, stage: str) -> None:
+        snapshot = _dedupe_members(current_members)
+        try:
+            _write_markdown(out_path, snapshot, group_url, mode_label, progress_note=stage)
+        except Exception as progress_exc:  # noqa: BLE001
+            print(f"WARN: cannot write progress snapshot: {progress_exc}", file=sys.stderr)
 
     try:
-        clients_response = _http_json_retry(server, token, "GET", "/api/clients")
-        clients = clients_response.get("clients") or []
-        if not isinstance(clients, list):
-            raise RuntimeError("Invalid clients payload from hub")
+        clients_all_initial = _load_clients(server, token)
+        initial_fresh, initial_newest_seen = _fresh_clients(clients_all_initial, ACTIVE_CLIENT_MAX_AGE_SEC)
+        if not initial_fresh and _is_specific_tg_dialog_url(group_url):
+            try:
+                if webbrowser.open(group_url, new=2, autoraise=True):
+                    print(f"INFO: opened browser tab for heartbeat wake-up: {group_url}")
+            except Exception as browser_exc:  # noqa: BLE001
+                print(f"WARN: cannot auto-open browser tab: {browser_exc}")
+        if not initial_fresh and clients_all_initial:
+            print(
+                f"INFO: waiting up to {ACTIVE_CLIENT_WAIT_SEC}s for fresh bridge heartbeat "
+                f"(last seen: {initial_newest_seen or 'unknown'})"
+            )
+        clients, newest_seen = _wait_for_fresh_clients(
+            server=server,
+            token=token,
+            max_age_sec=ACTIVE_CLIENT_MAX_AGE_SEC,
+            wait_sec=ACTIVE_CLIENT_WAIT_SEC,
+        )
+        if not clients:
+            if clients_all_initial:
+                print(
+                    "WARN: no fresh clients after wait; using stale client list. "
+                    "If commands fail, click Heartbeat in extension popup and retry."
+                )
+                clients = clients_all_initial
+            else:
+                hint = (
+                    f" Последний heartbeat: {newest_seen}."
+                    if newest_seen
+                    else ""
+                )
+                raise RuntimeError(
+                    "Нет активных bridge-клиентов (старые/неактуальные сессии). "
+                    "Откройте Telegram Web, убедитесь что расширение подключено, нажмите Heartbeat в popup расширения и повторите."
+                    f"{hint}"
+                )
 
         client_id, tab_id = _find_tab(
             clients=clients,
@@ -2297,7 +2597,13 @@ def main() -> int:
         info_members: list[dict[str, str]] = []
         chat_members: list[dict[str, str]] = []
 
+        _write_progress_snapshot([], source_label, "start")
+
         if args.source in ("info", "both"):
+            def _on_info_progress(current_info_members: list[dict[str, str]], stage: str) -> None:
+                mode_label = "info" if args.source == "info" else "both(info+chat)"
+                _write_progress_snapshot(current_info_members, mode_label, stage)
+
             if not _open_info_members_view(
                 server=server,
                 token=token,
@@ -2317,6 +2623,8 @@ def main() -> int:
                 timeout_sec=max(args.timeout, 5),
                 scroll_steps=max(args.info_scroll_steps, 0),
                 deep_usernames=bool(args.deep_usernames),
+                max_members=max(args.max_members, 0),
+                on_progress=_on_info_progress,
             )
             if not info_members:
                 raise RuntimeError(
@@ -2336,6 +2644,13 @@ def main() -> int:
             )
 
         if args.source in ("chat", "both"):
+            def _on_chat_progress(current_chat_members: list[dict[str, str]], stage: str) -> None:
+                if args.source == "both":
+                    merged = _dedupe_members(info_members + current_chat_members)
+                    _write_progress_snapshot(merged, "both(info+chat)", stage)
+                    return
+                _write_progress_snapshot(current_chat_members, "chat", stage)
+
             # If deep mode requested, apply it to chat collection for both chat and both modes.
             chat_deep = bool(args.deep_usernames)
             chat_scroll_steps_effective = max(args.chat_scroll_steps, 0)
@@ -2356,6 +2671,9 @@ def main() -> int:
                 chat_deep_mode=args.chat_deep_mode,
                 chat_target_peer_id=str(args.chat_target_peer_id or "").strip(),
                 chat_target_name=str(args.chat_target_name or "").strip(),
+                min_members_target=max(args.chat_min_members, 0),
+                max_members=max(args.max_members, 0),
+                on_progress=_on_chat_progress,
             )
             if not chat_members:
                 raise RuntimeError(
@@ -2383,6 +2701,8 @@ def main() -> int:
             )
 
         members = _dedupe_members(members)
+        if args.max_members > 0 and len(members) > args.max_members:
+            members = members[: args.max_members]
 
         if args.deep_usernames:
             attempted = 0
@@ -2426,8 +2746,6 @@ def main() -> int:
 
             print(f"INFO: deep mode processed {attempted} profiles, filled {updated} usernames")
 
-        out_path = Path(args.output).expanduser()
-        out_path.parent.mkdir(parents=True, exist_ok=True)
         _write_markdown(out_path, members, group_url, source_label)
 
         print(f"OK: saved {len(members)} members to {out_path}")

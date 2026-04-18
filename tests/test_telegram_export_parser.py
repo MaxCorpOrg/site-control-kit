@@ -52,6 +52,41 @@ class TelegramExportParserTests(unittest.TestCase):
         members = self.mod._parse_chat_members(html)
         self.assertEqual(members, [])
 
+    def test_assign_username_if_unique_rejects_duplicate_owner(self) -> None:
+        members = {
+            "111": {"peer_id": "111", "name": "Alice", "username": "@alice_111", "status": "—", "role": "—"},
+            "222": {"peer_id": "222", "name": "Bob", "username": "—", "status": "—", "role": "—"},
+        }
+        username_to_peer = self.mod._seed_username_to_peer(list(members.values()))
+
+        assigned, existing_peer = self.mod._assign_username_if_unique(
+            members_by_peer=members,
+            username_to_peer=username_to_peer,
+            peer_id="222",
+            username="@alice_111",
+        )
+
+        self.assertFalse(assigned)
+        self.assertEqual(existing_peer, "111")
+        self.assertEqual(members["222"]["username"], "—")
+
+    def test_assign_username_if_unique_sets_username_for_new_peer(self) -> None:
+        members = {
+            "111": {"peer_id": "111", "name": "Alice", "username": "—", "status": "—", "role": "—"},
+        }
+        username_to_peer = self.mod._seed_username_to_peer(list(members.values()))
+
+        assigned, existing_peer = self.mod._assign_username_if_unique(
+            members_by_peer=members,
+            username_to_peer=username_to_peer,
+            peer_id="111",
+            username="@Alice_111",
+        )
+
+        self.assertTrue(assigned)
+        self.assertIsNone(existing_peer)
+        self.assertEqual(members["111"]["username"], "@Alice_111")
+
 
 if __name__ == "__main__":
     unittest.main()

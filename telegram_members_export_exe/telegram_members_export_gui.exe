@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd "${BASE_DIR}/.." && pwd)"
+GUI_SCRIPT="${PROJECT_DIR}/scripts/telegram_members_export_gui.sh"
+
+if [[ ! -x "${GUI_SCRIPT}" ]]; then
+  echo "ERROR: ${GUI_SCRIPT} not found or not executable." >&2
+  exit 1
+fi
+
+exec bash "${GUI_SCRIPT}"
