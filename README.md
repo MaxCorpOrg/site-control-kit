@@ -57,7 +57,9 @@ cd /home/max/site-control-kit
 Что он делает:
 - создаёт папку `~/telegram_contact_batches/chat_<id>`;
 - старается переиспользовать точную Telegram-вкладку по URL-фрагменту и передаёт её `tab_id` в экспортёр;
+- если нужная Telegram-вкладка уже открыта на этом же `#chat`, больше не перезагружает её через `navigate`, чтобы не терять текущую позицию в истории сообщений;
 - передаёт в экспортёр `identity_history.json`, чтобы deep-сбор не переназначал `@username` между разными `peer_id`, если история уже знает стабильную связку;
+- парсит не только явные sender-label блоки, но и avatar-only группы сообщений, поэтому видимых участников из текущего DOM собирается больше;
 - сохраняет полный последний снимок в `latest_full.md` и `latest_full.txt`;
 - сохраняет отдельный лог запуска в `runs/<timestamp>/` с `run.json`, `export.log`, `snapshot.md`, `snapshot.txt`;
 - пишет только новые контакты в `1.txt`, `2.txt`, `3.txt` и так далее;
@@ -71,6 +73,8 @@ CHAT_MIN_MEMBERS=10 CHAT_MAX_MEMBERS=10 CHAT_SCROLL_STEPS=40 CHAT_DEEP_LIMIT=20 
 ```
 
 Если Telegram Web перестал реально прокручиваться, chat-экспорт теперь завершится предупреждением `chat scroll stuck after 3 attempts`, вместо длинного пустого прогона.
+
+После обновления файлов в `extension/` Chrome обычно требует `Reload` для unpacked extension на странице `chrome://extensions`, иначе новая логика content-script не подхватится в уже установленном расширении.
 
 ## Архитектура
 

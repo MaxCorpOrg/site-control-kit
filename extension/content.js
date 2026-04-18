@@ -371,6 +371,46 @@ async function runCommand(command) {
       return { delta_x: dx, delta_y: dy, scrolled: true };
     }
 
+    case "wheel": {
+      const dx = Number.isFinite(command.delta_x) ? Number(command.delta_x) : 0;
+      const dy = Number.isFinite(command.delta_y) ? Number(command.delta_y) : 0;
+      const el = command.selector
+        ? queryElement(command.selector)
+        : document.elementFromPoint(window.innerWidth / 2, window.innerHeight / 2) || document.body;
+      const rect = el.getBoundingClientRect();
+      const clientX = Math.round(rect.left + Math.max(1, Math.min(rect.width / 2, Math.max(rect.width - 1, 1))));
+      const clientY = Math.round(rect.top + Math.max(1, Math.min(rect.height / 2, Math.max(rect.height - 1, 1))));
+      const beforeTop = Number(el.scrollTop || 0);
+      const beforeLeft = Number(el.scrollLeft || 0);
+      el.dispatchEvent(
+        new WheelEvent("wheel", {
+          bubbles: true,
+          cancelable: true,
+          view: window,
+          deltaX: dx,
+          deltaY: dy,
+          deltaMode: 0,
+          clientX,
+          clientY
+        })
+      );
+      const afterTop = Number(el.scrollTop || 0);
+      const afterLeft = Number(el.scrollLeft || 0);
+      return {
+        selector: command.selector || null,
+        delta_x: dx,
+        delta_y: dy,
+        clientX,
+        clientY,
+        beforeTop,
+        beforeLeft,
+        afterTop,
+        afterLeft,
+        moved: Math.abs(afterTop - beforeTop) >= 1 || Math.abs(afterLeft - beforeLeft) >= 1,
+        wheeled: true
+      };
+    }
+
     case "run_script": {
       if (!command.script || typeof command.script !== "string") {
         throw new Error("script is required for run_script");

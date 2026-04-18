@@ -47,6 +47,7 @@ CHAT_SCROLL_SELECTORS = (
 )
 CHAT_SCROLL_SETTLE_SEC = 0.35
 CHAT_SCROLL_DISTANCE_PX = 900
+CHAT_UNCHANGED_STEPS_LIMIT = 6
 INFO_SCROLL_SETTLE_SEC = 0.8
 CHAT_DEEP_DEFAULT_LIMIT = 3
 SPECIFIC_TG_DIALOG_URL_RE = re.compile(r"^https?://web\.telegram\.org/(k|a)/#[^#\s]+$", flags=re.I)
@@ -670,6 +671,7 @@ def _return_to_group_dialog_reliable(
     tab_id: int,
     group_url: str,
     timeout_sec: int,
+    allow_navigate_fallback: bool = True,
 ) -> bool:
     if _is_specific_tg_dialog_url(group_url):
         target_fragment = group_url.split("#", 1)[1] if "#" in group_url else ""
@@ -688,6 +690,8 @@ def _return_to_group_dialog_reliable(
         timeout_sec=min(max(timeout_sec, 2), 5),
     ):
         return True
+    if not allow_navigate_fallback:
+        return False
     return _ensure_group_dialog_url(
         server=server,
         token=token,
@@ -872,6 +876,8 @@ def _dedupe_members(members: list[dict[str, str]]) -> list[dict[str, str]]:
             continue
 
         current = merged[dedupe_key]
+        if current.get("name") in ("", "—") and name and name != "—":
+            current["name"] = name
         if current.get("username") == "—" and username and username != "—":
             current["username"] = username
         if current.get("role") == "—" and item.get("role") and item.get("role") != "—":
@@ -882,9 +888,35 @@ def _dedupe_members(members: list[dict[str, str]]) -> list[dict[str, str]]:
     return [merged[key] for key in order]
 
 
+def _extract_chat_name_from_block(block_html: str, peer_id: str) -> str:
+    peer_id_re = re.escape(peer_id)
+    patterns = (
+        rf'<(?:div|span)[^>]*class="(?=[^"]*colored-name)(?=[^"]*floating-part)[^"]*"[^>]*data-peer-id="{peer_id_re}"[^>]*>(.*?)</(?:div|span)>',
+        rf'<span[^>]*class="(?=[^"]*peer-title)(?=[^"]*bubble-name-first)[^"]*"[^>]*data-peer-id="{peer_id_re}"[^>]*>(.*?)</span>',
+        rf'<span[^>]*class="(?=[^"]*peer-title)[^"]*"[^>]*data-peer-id="{peer_id_re}"[^>]*>(.*?)</span>',
+    )
+    for pattern in patterns:
+        match = re.search(pattern, block_html, flags=re.S)
+        if not match:
+            continue
+        raw = match.group(1)
+        inner = re.search(r'<span class="peer-title-inner"[^>]*>(.*?)</span>', raw, flags=re.S)
+        if inner:
+            name = _compact(inner.group(1))
+            if name:
+                return name
+        cleaned = re.sub(r'<span class="bubble-name-rank"[^>]*>.*?</span>', " ", raw, flags=re.S)
+        cleaned = re.sub(r'<span class="bubble-name-boosts"[^>]*>.*?</span>', " ", cleaned, flags=re.S)
+        cleaned = re.sub(r'<[^>]+>', " ", cleaned)
+        name = _compact(cleaned)
+        if name:
+            return name
+    return ""
+
+
 def _parse_chat_members(html_payload: str) -> list[dict[str, str]]:
     # Telegram Web markup for sender labels varies between releases.
-    sender_openings: list[tuple[int, str]] = []
+    sender_openings: list[tuple[int, int, str, str]] = []
     sender_patterns = (
         r'<(?:div|span)([^>]*)class="(?=[^"]*colored-name)(?=[^"]*floating-part)[^"]*"([^>]*)>',
         r'<span([^>]*)class="(?=[^"]*peer-title)(?=[^"]*bubble-name-first)[^"]*"([^>]*)>',
@@ -892,43 +924,29 @@ def _parse_chat_members(html_payload: str) -> list[dict[str, str]]:
     for pattern in sender_patterns:
         for match in re.finditer(pattern, html_payload, flags=re.S):
             attrs = f"{match.group(1)} {match.group(2)}"
-            sender_openings.append((match.start(), attrs))
-    sender_openings.sort(key=lambda item: item[0])
+            sender_openings.append((match.start(), 0, attrs, ""))
+    avatar_pattern = r'<div([^>]*)class="(?=[^"]*bubbles-group-avatar)(?=[^"]*user-avatar)[^"]*"([^>]*)>(.*?)</div>'
+    for match in re.finditer(avatar_pattern, html_payload, flags=re.S):
+        attrs = f"{match.group(1)} {match.group(2)}"
+        sender_openings.append((match.start(), 1, attrs, match.group(3)))
+    sender_openings.sort(key=lambda item: (item[0], item[1]))
 
     members: list[dict[str, str]] = []
-    seen_peer_ids: set[str] = set()
 
-    for start_pos, attrs in sender_openings:
+    for start_pos, _priority, attrs, avatar_inner in sender_openings:
         peer_match = re.search(r'data-peer-id="([^"]+)"', attrs)
         if not peer_match:
             continue
         peer_id = peer_match.group(1)
         if peer_id.startswith("-"):
             continue
-        if peer_id in seen_peer_ids:
-            continue
 
-        block_html = html_payload[start_pos : start_pos + 1800]
-        name = ""
-        with_icons = re.search(
-            r'<span class="(?=[^"]*peer-title)(?=[^"]*with-icons)[^"]*"[^>]*>(.*?)</span>',
-            block_html,
-            flags=re.S,
-        )
-        if with_icons:
-            inner = re.search(r'<span class="peer-title-inner"[^>]*>(.*?)</span>', with_icons.group(1), flags=re.S)
-            name = _compact(inner.group(1) if inner else with_icons.group(1))
-        else:
-            plain = re.search(r'<span class="peer-title(?: bubble-name-first)?"[^>]*>(.*?)</span>', block_html, flags=re.S)
-            if plain:
-                name = _compact(plain.group(1))
-            else:
-                inner = re.search(r'<span[^>]*>(.*?)</span>', block_html, flags=re.S)
-                if inner and "peer-title" in attrs:
-                    name = _compact(inner.group(1))
-
-        if not name:
-            continue
+        block_html = html_payload[start_pos : start_pos + 2400]
+        name = _extract_chat_name_from_block(block_html, peer_id)
+        if not name and avatar_inner:
+            initials = _compact(re.sub(r"<[^>]+>", " ", avatar_inner))
+            if initials:
+                name = initials
 
         role = "—"
         role_match = re.search(r'<span class="bubble-name-rank"[^>]*>(.*?)</span>', block_html, flags=re.S)
@@ -940,15 +958,13 @@ def _parse_chat_members(html_payload: str) -> list[dict[str, str]]:
         members.append(
             {
                 "peer_id": peer_id,
-                "name": name,
+                "name": name or "—",
                 "status": "из чата",
                 "role": role,
                 "username": _extract_username(block_html),
             }
         )
-        seen_peer_ids.add(peer_id)
-
-    return members
+    return _dedupe_members(members)
 
 
 def _scroll_chat_up(server: str, token: str, client_id: str, tab_id: int, timeout_sec: int) -> bool:
@@ -993,6 +1009,25 @@ def _scroll_chat_up(server: str, token: str, client_id: str, tab_id: int, timeou
             f"(selector={selector}, top={before_top}->{after_top}, "
             f"height={data.get('scrollHeight')}, client={data.get('clientHeight')})"
         )
+
+        wheel_result = _send_command_result(
+            server=server,
+            token=token,
+            client_id=client_id,
+            tab_id=tab_id,
+            timeout_sec=timeout_sec,
+            command={
+                "type": "wheel",
+                "selector": selector,
+                "delta_y": -CHAT_SCROLL_DISTANCE_PX,
+                "delta_x": 0,
+            },
+            raise_on_fail=False,
+        )
+        if wheel_result.get("ok"):
+            print(f"INFO: chat wheel dispatched for selector={selector}")
+            time.sleep(0.22)
+            return True
 
         for anchor_selector in CHAT_SCROLL_SELECTORS:
             fallback = _send_command_result(
@@ -1447,6 +1482,7 @@ def _collect_members_from_chat(
     chat_html_timeout = max(5, min(timeout_sec, 8))
     started_at = time.time()
     previous_min_ts: int | None = None
+    previous_member_count: int | None = None
     unchanged_steps = 0
     empty_steps = 0
     no_scroll_steps = 0
@@ -1469,6 +1505,7 @@ def _collect_members_from_chat(
                 tab_id=tab_id,
                 group_url=group_url,
                 timeout_sec=min(timeout_sec, 8),
+                allow_navigate_fallback=False,
             ):
                 print("WARN: cannot restore target group dialog, stopping chat export")
                 break
@@ -1574,18 +1611,21 @@ def _collect_members_from_chat(
 
         timestamps = [int(value) for value in re.findall(r'data-timestamp="(\d+)"', html_payload)]
         min_ts = min(timestamps) if timestamps else None
-        if min_ts is not None and min_ts == previous_min_ts:
+        current_member_count = len(members)
+        if min_ts is not None and min_ts == previous_min_ts and current_member_count == previous_member_count:
             unchanged_steps += 1
         else:
             unchanged_steps = 0
         previous_min_ts = min_ts
+        previous_member_count = current_member_count
 
         if step >= scroll_steps:
             break
         if empty_steps >= 2 and not members:
             print("WARN: чат не читается (пустой DOM/не открыт диалог), останавливаюсь")
             break
-        if unchanged_steps >= 2 and len(members) >= max(0, int(min_members_target)):
+        if unchanged_steps >= CHAT_UNCHANGED_STEPS_LIMIT and len(members) >= max(0, int(min_members_target)):
+            print(f"INFO: chat content unchanged for {unchanged_steps} steps, stopping")
             break
 
         if not _scroll_chat_up(server, token, client_id, tab_id, timeout_sec=min(timeout_sec, 10)):
@@ -1652,6 +1692,7 @@ def _enrich_usernames_deep_chat(
             tab_id=tab_id,
             group_url=group_url,
             timeout_sec=min(timeout_sec, 3),
+            allow_navigate_fallback=False,
         ):
             print("WARN: deep chat could not restore group dialog, skipping user")
             continue
@@ -1692,6 +1733,7 @@ def _enrich_usernames_deep_chat(
                     tab_id=tab_id,
                     group_url=group_url,
                     timeout_sec=min(timeout_sec, 2),
+                    allow_navigate_fallback=False,
                 )
                 time.sleep(0.03)
                 continue
@@ -1730,6 +1772,7 @@ def _enrich_usernames_deep_chat(
                 tab_id=tab_id,
                 group_url=group_url,
                 timeout_sec=min(timeout_sec, 3),
+                allow_navigate_fallback=False,
             )
             time.sleep(0.05)
             continue
@@ -1765,6 +1808,7 @@ def _enrich_usernames_deep_chat(
                 tab_id=tab_id,
                 group_url=group_url,
                 timeout_sec=min(timeout_sec, 3),
+                allow_navigate_fallback=False,
             )
             time.sleep(0.05)
             continue
@@ -1777,6 +1821,7 @@ def _enrich_usernames_deep_chat(
                 tab_id=tab_id,
                 group_url=group_url,
                 timeout_sec=min(timeout_sec, 3),
+                allow_navigate_fallback=False,
             )
             time.sleep(0.05)
             continue
@@ -1826,6 +1871,7 @@ def _enrich_usernames_deep_chat(
             tab_id=tab_id,
             group_url=group_url,
             timeout_sec=min(timeout_sec, 4),
+            allow_navigate_fallback=False,
         ):
             print("WARN: deep chat failed to return to group dialog; continue")
             continue
@@ -1934,6 +1980,11 @@ def _navigate_to_group_if_requested(
     # If caller passed explicit dialog URL, force target tab to this dialog first.
     if not _is_specific_tg_dialog_url(group_url):
         return
+    current_url = _get_tab_url(server, token, client_id, tab_id)
+    target_fragment = group_url.split("#", 1)[1] if "#" in group_url else ""
+    current_fragment = current_url.split("#", 1)[1] if "#" in current_url else ""
+    if current_url and current_fragment and (not target_fragment or target_fragment in current_fragment):
+        return
 
     def _navigate_once(url: str) -> str:
         nav_result = _send_command_result(
@@ -1985,7 +2036,6 @@ def _navigate_to_group_if_requested(
         return current_url
 
     current_url = _navigate_once(group_url)
-    target_fragment = group_url.split("#", 1)[1] if "#" in group_url else ""
     current_fragment = current_url.split("#", 1)[1] if "#" in current_url else ""
     if current_url and current_fragment and (not target_fragment or target_fragment in current_fragment):
         return

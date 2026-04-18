@@ -52,6 +52,31 @@ class TelegramExportParserTests(unittest.TestCase):
         members = self.mod._parse_chat_members(html)
         self.assertEqual(members, [])
 
+    def test_parse_chat_members_includes_avatar_only_group(self) -> None:
+        html = (
+            '<div class="avatar avatar-like bubbles-group-avatar user-avatar" data-peer-id="789">AB</div>'
+            '<div data-mid="1" data-timestamp="1776505277" class="bubble hide-name is-in"></div>'
+        )
+        members = self.mod._parse_chat_members(html)
+        self.assertEqual(len(members), 1)
+        self.assertEqual(members[0]["peer_id"], "789")
+        self.assertEqual(members[0]["name"], "AB")
+
+    def test_parse_chat_members_merges_avatar_only_with_named_sender(self) -> None:
+        html = (
+            '<div class="avatar avatar-like bubbles-group-avatar user-avatar" data-peer-id="789">AB</div>'
+            '<div data-mid="1" data-timestamp="1776505277" class="bubble hide-name is-in"></div>'
+            '<div class="colored-name name floating-part" data-peer-id="789">'
+            '<span class="peer-title with-icons bubble-name-first">'
+            '<span class="peer-title-inner">Alice Brown</span>'
+            "</span>"
+            "</div>"
+        )
+        members = self.mod._parse_chat_members(html)
+        self.assertEqual(len(members), 1)
+        self.assertEqual(members[0]["peer_id"], "789")
+        self.assertEqual(members[0]["name"], "Alice Brown")
+
     def test_assign_username_if_unique_rejects_duplicate_owner(self) -> None:
         members = {
             "111": {"peer_id": "111", "name": "Alice", "username": "@alice_111", "status": "—", "role": "—"},
