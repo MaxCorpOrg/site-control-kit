@@ -18,6 +18,7 @@ CHAT_MIN_MEMBERS="${CHAT_MIN_MEMBERS:-0}"
 WAIT_CLIENT_SEC="${WAIT_CLIENT_SEC:-120}"
 CHAT_CLIENT_ID="${CHAT_CLIENT_ID:-}"
 CHAT_TAB_ID="${CHAT_TAB_ID:-}"
+CHAT_IDENTITY_HISTORY="${CHAT_IDENTITY_HISTORY:-}"
 
 if [[ ! -f "${EXPORT_SCRIPT}" ]]; then
   echo "ERROR: export script not found: ${EXPORT_SCRIPT}" >&2
@@ -239,11 +240,15 @@ fi
 mkdir -p "$(dirname "${OUT_MD}")"
 echo "INFO: collecting usernames from ${GROUP_URL}"
 extra_args=()
+identity_args=()
 if [[ -n "${resolved_client_id}" ]]; then
   extra_args+=(--client-id "${resolved_client_id}")
 fi
 if [[ -n "${resolved_tab_id}" ]]; then
   extra_args+=(--tab-id "${resolved_tab_id}")
+fi
+if [[ -n "${CHAT_IDENTITY_HISTORY}" ]]; then
+  identity_args+=(--identity-history "${CHAT_IDENTITY_HISTORY}")
 fi
 if [[ -n "${resolved_client_id}" || -n "${resolved_tab_id}" ]]; then
   echo "INFO: using Telegram target client=${resolved_client_id:-auto} tab=${resolved_tab_id:-auto}"
@@ -261,6 +266,7 @@ python3 -u "${EXPORT_SCRIPT}" \
   --chat-scroll-steps "${CHAT_STEPS}" \
   --deep-usernames \
   --chat-deep-limit "${CHAT_DEEP_LIMIT}" \
+  "${identity_args[@]}" \
   "${extra_args[@]}" \
   --output "${OUT_MD}"
 

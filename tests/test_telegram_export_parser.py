@@ -59,7 +59,7 @@ class TelegramExportParserTests(unittest.TestCase):
         }
         username_to_peer = self.mod._seed_username_to_peer(list(members.values()))
 
-        assigned, existing_peer = self.mod._assign_username_if_unique(
+        assigned, existing_peer, reason = self.mod._assign_username_if_unique(
             members_by_peer=members,
             username_to_peer=username_to_peer,
             peer_id="222",
@@ -68,6 +68,7 @@ class TelegramExportParserTests(unittest.TestCase):
 
         self.assertFalse(assigned)
         self.assertEqual(existing_peer, "111")
+        self.assertEqual(reason, "runtime_duplicate")
         self.assertEqual(members["222"]["username"], "—")
 
     def test_assign_username_if_unique_sets_username_for_new_peer(self) -> None:
@@ -76,7 +77,7 @@ class TelegramExportParserTests(unittest.TestCase):
         }
         username_to_peer = self.mod._seed_username_to_peer(list(members.values()))
 
-        assigned, existing_peer = self.mod._assign_username_if_unique(
+        assigned, existing_peer, reason = self.mod._assign_username_if_unique(
             members_by_peer=members,
             username_to_peer=username_to_peer,
             peer_id="111",
@@ -85,7 +86,44 @@ class TelegramExportParserTests(unittest.TestCase):
 
         self.assertTrue(assigned)
         self.assertIsNone(existing_peer)
+        self.assertIsNone(reason)
         self.assertEqual(members["111"]["username"], "@Alice_111")
+
+    def test_assign_username_if_unique_rejects_historical_peer_username_change(self) -> None:
+        members = {
+            "111": {"peer_id": "111", "name": "Alice", "username": "—", "status": "—", "role": "—"},
+        }
+
+        assigned, existing_peer, reason = self.mod._assign_username_if_unique(
+            members_by_peer=members,
+            username_to_peer={},
+            peer_id="111",
+            username="@alice_new",
+            historical_peer_to_username={"111": "@alice_old"},
+        )
+
+        self.assertFalse(assigned)
+        self.assertEqual(existing_peer, "@alice_old")
+        self.assertEqual(reason, "historical_peer_username")
+        self.assertEqual(members["111"]["username"], "—")
+
+    def test_assign_username_if_unique_rejects_historical_username_owner_change(self) -> None:
+        members = {
+            "222": {"peer_id": "222", "name": "Bob", "username": "—", "status": "—", "role": "—"},
+        }
+
+        assigned, existing_peer, reason = self.mod._assign_username_if_unique(
+            members_by_peer=members,
+            username_to_peer={},
+            peer_id="222",
+            username="@alice_old",
+            historical_username_to_peer={"@alice_old": "111"},
+        )
+
+        self.assertFalse(assigned)
+        self.assertEqual(existing_peer, "111")
+        self.assertEqual(reason, "historical_username_owner")
+        self.assertEqual(members["222"]["username"], "—")
 
 
 if __name__ == "__main__":

@@ -1051,6 +1051,8 @@ def _collect_members_from_info(
     scroll_steps: int,
     deep_usernames: bool = False,
     max_members: int = 0,
+    historical_username_to_peer: dict[str, str] | None = None,
+    historical_peer_to_username: dict[str, str] | None = None,
     on_progress: Callable[[list[dict[str, str]], str], None] | None = None,
 ) -> tuple[list[dict[str, str]], dict[str, int]]:
     members: list[dict[str, str]] = []
@@ -1101,6 +1103,8 @@ def _collect_members_from_info(
                     timeout_sec=max(timeout_sec, 5),
                     members=deep_targets,
                     all_members=members,
+                    historical_username_to_peer=historical_username_to_peer,
+                    historical_peer_to_username=historical_peer_to_username,
                 )
                 deep_attempted_total += attempted
                 deep_updated_total += updated
@@ -1158,29 +1162,82 @@ def _seed_username_to_peer(members: list[dict[str, str]]) -> dict[str, str]:
     return username_to_peer
 
 
+def _load_identity_history(history_path: Path | None) -> tuple[dict[str, str], dict[str, str]]:
+    if history_path is None or not history_path.exists():
+        return {}, {}
+    try:
+        payload = json.loads(history_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}, {}
+    if not isinstance(payload, dict):
+        return {}, {}
+    username_to_peer_raw = payload.get("username_to_peer")
+    peer_to_username_raw = payload.get("peer_to_username")
+    username_to_peer = {
+        str(key).strip().lower(): str(value).strip()
+        for key, value in (username_to_peer_raw.items() if isinstance(username_to_peer_raw, dict) else [])
+        if str(key).strip() and str(value).strip()
+    }
+    peer_to_username = {
+        str(key).strip(): _normalize_username(str(value))
+        for key, value in (peer_to_username_raw.items() if isinstance(peer_to_username_raw, dict) else [])
+        if str(key).strip() and _normalize_username(str(value)) != "—"
+    }
+    return username_to_peer, peer_to_username
+
+
+def _log_username_assignment_conflict(username: str, peer_id: str, conflict_value: str | None, reason: str | None) -> None:
+    if reason == "historical_username_owner":
+        print(
+            f"WARN: skip historical username-owner conflict {username} for peer {peer_id} "
+            f"(known owner {conflict_value or 'unknown'})"
+        )
+        return
+    if reason == "historical_peer_username":
+        print(
+            f"WARN: skip historical peer-username conflict {username} for peer {peer_id} "
+            f"(known username {conflict_value or 'unknown'})"
+        )
+        return
+    if reason == "runtime_duplicate" and conflict_value and conflict_value != peer_id:
+        print(f"WARN: skip duplicate username {username} for peer {peer_id} (already {conflict_value})")
+        return
+    print(f"WARN: skip username {username} for peer {peer_id}")
+
+
 def _assign_username_if_unique(
     *,
     members_by_peer: dict[str, dict[str, str]],
     username_to_peer: dict[str, str],
     peer_id: str,
     username: str,
-) -> tuple[bool, str | None]:
+    historical_username_to_peer: dict[str, str] | None = None,
+    historical_peer_to_username: dict[str, str] | None = None,
+) -> tuple[bool, str | None, str | None]:
     normalized = _normalize_username(username)
     if normalized == "—":
-        return False, ""
+        return False, "", "empty"
 
     key = normalized.lower()
+    historical_owner = str((historical_username_to_peer or {}).get(key) or "").strip()
+    if historical_owner and historical_owner != peer_id:
+        return False, historical_owner, "historical_username_owner"
+
+    historical_username = _normalize_username(str((historical_peer_to_username or {}).get(peer_id) or ""))
+    if historical_username != "—" and historical_username.lower() != key:
+        return False, historical_username, "historical_peer_username"
+
     existing_peer = username_to_peer.get(key)
     if existing_peer and existing_peer != peer_id:
-        return False, existing_peer
+        return False, existing_peer, "runtime_duplicate"
 
     member = members_by_peer.get(peer_id)
     if member is None:
-        return False, existing_peer
+        return False, existing_peer, "missing_member"
 
     member["username"] = normalized
     username_to_peer[key] = peer_id
-    return True, existing_peer
+    return True, existing_peer, None
 
 
 def _enrich_chat_usernames_via_info(
@@ -1244,6 +1301,8 @@ def _enrich_chat_usernames_via_mentions(
     group_url: str,
     members: list[dict[str, str]],
     deep_limit: int,
+    historical_username_to_peer: dict[str, str] | None = None,
+    historical_peer_to_username: dict[str, str] | None = None,
 ) -> tuple[int, int]:
     if deep_limit <= 0 or not members:
         return 0, 0
@@ -1295,17 +1354,19 @@ def _enrich_chat_usernames_via_mentions(
         )
         peer_id = peer_match.group(1) if peer_match else ""
         if peer_id and peer_id in members_by_peer and members_by_peer[peer_id].get("username") == "—":
-            assigned, existing_peer = _assign_username_if_unique(
+            assigned, existing_peer, conflict_reason = _assign_username_if_unique(
                 members_by_peer=members_by_peer,
                 username_to_peer=username_to_peer,
                 peer_id=peer_id,
                 username=username,
+                historical_username_to_peer=historical_username_to_peer,
+                historical_peer_to_username=historical_peer_to_username,
             )
             if assigned:
                 updated += 1
                 print(f"INFO: chat mention deep mapped {username} -> peer {peer_id}")
-            elif existing_peer and existing_peer != peer_id:
-                print(f"WARN: skip duplicate username {username} for peer {peer_id} (already {existing_peer})")
+            else:
+                _log_username_assignment_conflict(username, peer_id, existing_peer, conflict_reason)
 
         if _is_specific_tg_dialog_url(group_url):
             _send_command_result(
@@ -1351,6 +1412,8 @@ def _collect_members_from_chat(
     chat_target_name: str = "",
     min_members_target: int = 0,
     max_members: int = 0,
+    historical_username_to_peer: dict[str, str] | None = None,
+    historical_peer_to_username: dict[str, str] | None = None,
     on_progress: Callable[[list[dict[str, str]], str], None] | None = None,
 ) -> tuple[list[dict[str, str]], dict[str, int]]:
     members: list[dict[str, str]] = []
@@ -1460,6 +1523,8 @@ def _collect_members_from_chat(
                         group_url=group_url,
                         max_runtime_sec=deep_runtime_budget,
                         mode=chat_deep_mode,
+                        historical_username_to_peer=historical_username_to_peer,
+                        historical_peer_to_username=historical_peer_to_username,
                     )
                     deep_attempted_total += attempted
                     deep_updated_total += updated
@@ -1529,6 +1594,8 @@ def _enrich_usernames_deep_chat(
     group_url: str = "",
     max_runtime_sec: float = 12.0,
     mode: str = "url",
+    historical_username_to_peer: dict[str, str] | None = None,
+    historical_peer_to_username: dict[str, str] | None = None,
 ) -> tuple[int, int, int, list[str]]:
     members_by_peer = {item["peer_id"]: item for item in members}
     pending_peer_ids = [item["peer_id"] for item in members if item.get("username") == "—"]
@@ -1578,14 +1645,16 @@ def _enrich_usernames_deep_chat(
                 peer_id=peer_id,
             )
             if mention_username != "—":
-                assigned, existing_peer = _assign_username_if_unique(
+                assigned, existing_peer, conflict_reason = _assign_username_if_unique(
                     members_by_peer=members_by_peer,
                     username_to_peer=username_to_peer,
                     peer_id=peer_id,
                     username=mention_username,
+                    historical_username_to_peer=historical_username_to_peer,
+                    historical_peer_to_username=historical_peer_to_username,
                 )
-                if not assigned and existing_peer and existing_peer != peer_id:
-                    print(f"WARN: skip duplicate username {mention_username} for peer {peer_id} (already {existing_peer})")
+                if not assigned:
+                    _log_username_assignment_conflict(mention_username, peer_id, existing_peer, conflict_reason)
                     continue
                 if assigned:
                     updated += 1
@@ -1650,14 +1719,16 @@ def _enrich_usernames_deep_chat(
             timeout_sec=1.2,
         )
         if quick_username != "—":
-            assigned, existing_peer = _assign_username_if_unique(
+            assigned, existing_peer, conflict_reason = _assign_username_if_unique(
                 members_by_peer=members_by_peer,
                 username_to_peer=username_to_peer,
                 peer_id=peer_id,
                 username=quick_username,
+                historical_username_to_peer=historical_username_to_peer,
+                historical_peer_to_username=historical_peer_to_username,
             )
-            if not assigned and existing_peer and existing_peer != peer_id:
-                print(f"WARN: skip duplicate username {quick_username} for peer {peer_id} (already {existing_peer})")
+            if not assigned:
+                _log_username_assignment_conflict(quick_username, peer_id, existing_peer, conflict_reason)
             elif assigned:
                 updated += 1
                 print(f"INFO: chat url {peer_id} -> {quick_username}")
@@ -1708,14 +1779,16 @@ def _enrich_usernames_deep_chat(
         )
 
         if username != "—":
-            assigned, existing_peer = _assign_username_if_unique(
+            assigned, existing_peer, conflict_reason = _assign_username_if_unique(
                 members_by_peer=members_by_peer,
                 username_to_peer=username_to_peer,
                 peer_id=peer_id,
                 username=username,
+                historical_username_to_peer=historical_username_to_peer,
+                historical_peer_to_username=historical_peer_to_username,
             )
-            if not assigned and existing_peer and existing_peer != peer_id:
-                print(f"WARN: skip duplicate username {username} for peer {peer_id} (already {existing_peer})")
+            if not assigned:
+                _log_username_assignment_conflict(username, peer_id, existing_peer, conflict_reason)
             elif assigned:
                 updated += 1
                 print(f"INFO: chat deep {peer_id} -> {username}")
@@ -2232,6 +2305,8 @@ def _enrich_usernames_deep(
     timeout_sec: int,
     members: list[dict[str, str]],
     all_members: list[dict[str, str]] | None = None,
+    historical_username_to_peer: dict[str, str] | None = None,
+    historical_peer_to_username: dict[str, str] | None = None,
 ) -> tuple[int, int, list[str]]:
     members_by_peer = {item["peer_id"]: item for item in members}
     pending_peer_ids = [item["peer_id"] for item in members if item.get("username") == "—"]
@@ -2297,16 +2372,18 @@ def _enrich_usernames_deep(
             )
             username = _extract_username_from_profile_html(profile_html)
             if username != "—":
-                assigned, existing_peer = _assign_username_if_unique(
+                assigned, existing_peer, conflict_reason = _assign_username_if_unique(
                     members_by_peer=members_by_peer,
                     username_to_peer=username_to_peer,
                     peer_id=peer_id,
                     username=username,
+                    historical_username_to_peer=historical_username_to_peer,
+                    historical_peer_to_username=historical_peer_to_username,
                 )
                 if assigned:
                     updated += 1
-                elif existing_peer and existing_peer != peer_id:
-                    print(f"WARN: skip duplicate username {username} for peer {peer_id} (already {existing_peer})")
+                else:
+                    _log_username_assignment_conflict(username, peer_id, existing_peer, conflict_reason)
         finally:
             _close_profile_card(server, token, client_id, tab_id)
             time.sleep(0.15)
@@ -2499,6 +2576,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Принудительно навигировать вкладку Telegram на --group-url перед сбором.",
     )
+    parser.add_argument(
+        "--identity-history",
+        default="",
+        help="JSON-файл с историей peer_id <-> username для защиты от ложных переназначений.",
+    )
     return parser
 
 
@@ -2511,6 +2593,13 @@ def main() -> int:
     group_url = args.group_url
     out_path = Path(args.output).expanduser()
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    identity_history_path = Path(args.identity_history).expanduser() if args.identity_history else None
+    historical_username_to_peer, historical_peer_to_username = _load_identity_history(identity_history_path)
+    if historical_username_to_peer or historical_peer_to_username:
+        print(
+            f"INFO: loaded identity history: usernames={len(historical_username_to_peer)}, "
+            f"peers={len(historical_peer_to_username)}"
+        )
 
     def _write_progress_snapshot(current_members: list[dict[str, str]], mode_label: str, stage: str) -> None:
         snapshot = _dedupe_members(current_members)
@@ -2624,6 +2713,8 @@ def main() -> int:
                 scroll_steps=max(args.info_scroll_steps, 0),
                 deep_usernames=bool(args.deep_usernames),
                 max_members=max(args.max_members, 0),
+                historical_username_to_peer=historical_username_to_peer,
+                historical_peer_to_username=historical_peer_to_username,
                 on_progress=_on_info_progress,
             )
             if not info_members:
@@ -2673,6 +2764,8 @@ def main() -> int:
                 chat_target_name=str(args.chat_target_name or "").strip(),
                 min_members_target=max(args.chat_min_members, 0),
                 max_members=max(args.max_members, 0),
+                historical_username_to_peer=historical_username_to_peer,
+                historical_peer_to_username=historical_peer_to_username,
                 on_progress=_on_chat_progress,
             )
             if not chat_members:
@@ -2725,6 +2818,8 @@ def main() -> int:
                         group_url=group_url,
                         members=members,
                         deep_limit=max(args.chat_deep_limit, 0),
+                        historical_username_to_peer=historical_username_to_peer,
+                        historical_peer_to_username=historical_peer_to_username,
                     )
                     if mention_attempted:
                         print(
