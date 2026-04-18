@@ -63,6 +63,15 @@ cd /home/max/site-control-kit
 - пишет только новые контакты в `1.txt`, `2.txt`, `3.txt` и так далее;
 - если `@username` внезапно сменил владельца (`peer_id`) между запусками, не пишет его в numbered batch, а кладёт случай в `review.txt` и `conflicts.json`.
 
+Параметры можно менять через env, например:
+
+```bash
+CHAT_MIN_MEMBERS=10 CHAT_MAX_MEMBERS=10 CHAT_SCROLL_STEPS=40 CHAT_DEEP_LIMIT=20 \
+  ./scripts/collect_new_telegram_contacts.sh "https://web.telegram.org/k/#-2465948544"
+```
+
+Если Telegram Web перестал реально прокручиваться, chat-экспорт теперь завершится предупреждением `chat scroll stuck after 3 attempts`, вместо длинного пустого прогона.
+
 ## Архитектура
 
 ```text

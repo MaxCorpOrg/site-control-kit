@@ -15,6 +15,7 @@ CHAT_TIMEOUT_SEC="${CHAT_TIMEOUT_SEC:-12}"
 CHAT_MAX_RUNTIME="${CHAT_MAX_RUNTIME:-900}"
 CHAT_DEEP_MODE="${CHAT_DEEP_MODE:-full}"
 CHAT_MIN_MEMBERS="${CHAT_MIN_MEMBERS:-0}"
+CHAT_MAX_MEMBERS="${CHAT_MAX_MEMBERS:-0}"
 WAIT_CLIENT_SEC="${WAIT_CLIENT_SEC:-120}"
 CHAT_CLIENT_ID="${CHAT_CLIENT_ID:-}"
 CHAT_TAB_ID="${CHAT_TAB_ID:-}"
@@ -263,6 +264,7 @@ python3 -u "${EXPORT_SCRIPT}" \
   --chat-max-runtime "${CHAT_MAX_RUNTIME}" \
   --chat-deep-mode "${CHAT_DEEP_MODE}" \
   --chat-min-members "${CHAT_MIN_MEMBERS}" \
+  --max-members "${CHAT_MAX_MEMBERS}" \
   --chat-scroll-steps "${CHAT_STEPS}" \
   --deep-usernames \
   --chat-deep-limit "${CHAT_DEEP_LIMIT}" \

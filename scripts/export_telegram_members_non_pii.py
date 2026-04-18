@@ -1008,9 +1008,35 @@ def _scroll_chat_up(server: str, token: str, client_id: str, tab_id: int, timeou
                 },
                 raise_on_fail=False,
             )
-            if fallback.get("ok"):
-                return True
-        return True
+            if not fallback.get("ok"):
+                continue
+
+            probe = _send_command_result(
+                server=server,
+                token=token,
+                client_id=client_id,
+                tab_id=tab_id,
+                timeout_sec=timeout_sec,
+                command={
+                    "type": "scroll_by",
+                    "selector": selector,
+                    "delta_y": 0,
+                    "delta_x": 0,
+                },
+                raise_on_fail=False,
+            )
+            if not probe.get("ok"):
+                continue
+            probe_data = probe.get("data") or {}
+            probe_top = probe_data.get("beforeTop")
+            if isinstance(before_top, (int, float)) and isinstance(probe_top, (int, float)):
+                if abs(float(probe_top) - float(before_top)) >= 1:
+                    print(
+                        "INFO: chat scroll fallback moved container "
+                        f"(anchor={anchor_selector}, top={before_top}->{probe_top})"
+                    )
+                    return True
+        return False
 
     return False
 
