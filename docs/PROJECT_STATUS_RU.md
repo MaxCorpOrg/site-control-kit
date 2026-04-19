@@ -45,8 +45,13 @@
 ### Очистка raw output
 - Перед записью markdown экспортер очищает конфликтные duplicate `@username` и может восстановить исторический username для конкретного `peer_id` в итоговом output.
 
+### Усиление mention/deep-path
+- Для `mention`-режима добавлен более агрессивный запуск при stall discovery: deep теперь может запускаться раньше, даже если чат крутится по уже известной сигнатуре вида.
+- Чтение `@username` из composer больше не опирается только на `innerText`: теперь есть fallback по HTML-разметке (`href`, `data-plain-text`, `mention` markup).
+- Клик по пункту `Mention` стал шире по покрытию: после старых root-селекторов используются и общие `body/.btn-menu` fallback-пути возле последней точки context-click.
+
 ## Проверено
-- Полный unit-набор проходил зелёным: `67/67`.
+- Полный unit-набор проходил зелёным: `71/71`.
 - Shell syntax и `py_compile` для последних изменений проходили зелёными.
 - Живой smoke chain-runner подтверждён на временном каталоге:
   - `target_unique_members_reached`
@@ -65,6 +70,18 @@
   - `/home/max/telegram_contact_batches/chat_-2465948544/runs/20260419T172709Z/run.json`
   - `latest_full_best_source = .../runs/20260419T090950Z/snapshot.md`
   - `latest_safe_best_source = .../runs/20260419T094747Z/snapshot_safe.md`
+- Короткий live smoke на реальном чате после усиления mention/deep подтвердил:
+  - deep catch-up теперь реально запускается на коротком chat-run, а не только откладывается до бесконечности;
+  - артефакты:
+    - `/tmp/tg_mention_smoke.md`
+    - `/tmp/tg_mention_smoke_stats.json`
+  - факты:
+    - `members_total = 9`
+    - `members_with_username = 8`
+    - `deep_attempted_total = 3`
+    - `deep_updated_total = 0`
+    - `history_backfilled_total = 6`
+  - это значит, что scheduling mention/deep стал лучше, но live-результат по новым `@username` в этом конкретном smoke ещё не вырос.
 
 ## Текущие Проблемы
 
@@ -73,16 +90,20 @@
 - `mention context ... opened`
 - `WARN: mention item not clicked`
 
-То есть deep-path ещё не production-grade.
+То есть deep-path стал сильнее по scheduling и чтению composer, но ещё не production-grade именно на живом Telegram DOM.
 
-### 2. Exporter тратит слишком много runtime на discovery до deep
+### 2. Прямое live-подтверждение context-menu fallback ещё неполное
+Короткий smoke подтвердил запуск catch-up mention, но не дал новых `@username`.
+Отдельный target-run для точечного peer в живой среде подвис и был остановлен вручную, так что этот участок ещё требует дополнительной проверки на реальном DOM.
+
+### 3. Exporter тратит слишком много runtime на discovery до deep
 На некоторых прогонах deep успевает обработать 1 профиль, а остальное время уходит на scroll/discovery.
 
-### 3. Best-known latest может быть исторически сильным, но не самым свежим по времени
+### 4. Best-known latest может быть исторически сильным, но не самым свежим по времени
 Сейчас это осознанное поведение: `latest_*` в chat-dir означает лучший известный snapshot, а не обязательно самый свежий run.
 Если пользователю нужен именно последний run как основной артефакт, это потребуется оформить отдельно.
 
-### 4. Экспортёр остаётся монолитным
+### 5. Экспортёр остаётся монолитным
 `export_telegram_members_non_pii.py` всё ещё перегружен ответственностями и требует модульного разделения.
 
 ## Последний Подтверждённый Полезный Результат
@@ -95,9 +116,10 @@
   - `/home/max/telegram_contact_batches/chat_-2465948544/11.txt`
 
 ## Следующий Приоритет
-1. Повысить реальную результативность `mention`/deep-path, чтобы сильнее росли `members_with_username`, а не только backfill/history слой.
-2. Отделить понятие `best-known latest` от `most-recent run` в UI и документации, если пользователю важно видеть именно последний прогон как основной артефакт.
-3. Декомпозировать `export_telegram_members_non_pii.py` на модули.
+1. Добить live-подтверждение нового context-menu fallback на реальном Telegram DOM и снять конкретный успешный прогон по новому peer без history backfill.
+2. Повысить реальную результативность `mention`/deep-path, чтобы сильнее росли `members_with_username`, а не только backfill/history слой.
+3. Отделить понятие `best-known latest` от `most-recent run` в UI и документации, если пользователю важно видеть именно последний прогон как основной артефакт.
+4. Декомпозировать `export_telegram_members_non_pii.py` на модули.
 
 ## Как Продолжать Следующему Агенту
 1. Прочитать `AGENTS.md`.

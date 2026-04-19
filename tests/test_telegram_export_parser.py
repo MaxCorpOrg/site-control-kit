@@ -336,7 +336,54 @@ class TelegramExportParserTests(unittest.TestCase):
 
         self.assertTrue(opened)
         self.assertEqual(route, "peer")
-        self.assertEqual(calls[0], '.bubbles .bubbles-group-avatar.user-avatar[data-peer-id="456"] .avatar-photo')
+        self.assertEqual(calls[0], '.bubbles .bubble[data-peer-id="456"] .bubble-content-wrapper')
+
+    def test_normalize_username_from_mention_markup_reads_hash_link(self) -> None:
+        username = self.mod._normalize_username_from_mention_markup(
+            '<a class="mention" href="https://web.telegram.org/k/#@Alice_111">@Alice_111</a>'
+        )
+
+        self.assertEqual(username, "@Alice_111")
+
+    def test_read_username_from_composer_falls_back_to_html_markup(self) -> None:
+        responses = iter(
+            [
+                {"ok": True, "data": {"text": ""}},
+                {"ok": True, "data": {"html": '<a data-plain-text="@Alice_111">@Alice</a>'}},
+            ]
+        )
+
+        with mock.patch.object(self.mod, "_send_command_result", side_effect=lambda **kwargs: next(responses)):
+            username = self.mod._read_username_from_composer("server", "token", "client", 7)
+
+        self.assertEqual(username, "@Alice_111")
+
+    def test_try_username_via_mention_action_uses_body_fallback_click(self) -> None:
+        click_roots: list[str] = []
+
+        def _fake_send_command_result(**kwargs):
+            command = kwargs.get("command") or {}
+            command_type = command.get("type")
+            if command_type == "wait_selector":
+                return {"ok": True}
+            if command_type == "click_text":
+                click_roots.append(str(command.get("root_selector") or ""))
+                if str(command.get("root_selector") or "") == "body":
+                    return {"ok": True}
+                return {"ok": False}
+            return {"ok": True}
+
+        with mock.patch.object(self.mod, "_clear_composer_text") as clear_mock:
+            with mock.patch.object(self.mod, "_open_chat_peer_context_menu", return_value=(True, "peer")):
+                with mock.patch.object(self.mod, "_read_username_from_composer", return_value="@Alice_111"):
+                    with mock.patch.object(self.mod, "_send_command_result", side_effect=_fake_send_command_result):
+                        username = self.mod._try_username_via_mention_action(
+                            "server", "token", "client", 7, "111"
+                        )
+
+        self.assertEqual(username, "@Alice_111")
+        self.assertIn("body", click_roots)
+        self.assertGreaterEqual(clear_mock.call_count, 2)
 
     def test_should_run_chat_deep_step_runs_immediately_without_discovery_target(self) -> None:
         should_run = self.mod._should_run_chat_deep_step(
@@ -409,6 +456,20 @@ class TelegramExportParserTests(unittest.TestCase):
         )
 
         self.assertFalse(should_run)
+
+    def test_should_run_chat_deep_step_runs_mention_when_discovery_stalled(self) -> None:
+        should_run = self.mod._should_run_chat_deep_step(
+            step=1,
+            members_count=12,
+            min_members_target=50,
+            mode="mention",
+            chat_target_peer_id="",
+            chat_target_name="",
+            known_view_signature=True,
+            discovery_stall_steps=int(self.mod.CHAT_DISCOVERY_MENTION_STALL_TRIGGER),
+        )
+
+        self.assertTrue(should_run)
 
     def test_extract_chat_view_signature_uses_top_mid_peer_and_timestamp(self) -> None:
         html = (

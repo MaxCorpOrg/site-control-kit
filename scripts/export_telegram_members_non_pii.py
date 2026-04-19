@@ -65,6 +65,7 @@ CHAT_SCROLL_SETTLE_SEC = 0.35
 CHAT_SCROLL_DISTANCE_PX = 900
 CHAT_UNCHANGED_STEPS_LIMIT = 6
 CHAT_DISCOVERY_MENTION_DEEP_INTERVAL = max(int(os.environ.get("TELEGRAM_CHAT_DISCOVERY_MENTION_INTERVAL", "5") or "5"), 1)
+CHAT_DISCOVERY_MENTION_STALL_TRIGGER = max(int(os.environ.get("TELEGRAM_CHAT_DISCOVERY_MENTION_STALL_TRIGGER", "2") or "2"), 1)
 CHAT_DISCOVERY_SCROLL_BURST = max(int(os.environ.get("TELEGRAM_CHAT_DISCOVERY_SCROLL_BURST", "2") or "2"), 1)
 CHAT_DISCOVERY_BURST_SETTLE_SEC = max(float(os.environ.get("TELEGRAM_CHAT_DISCOVERY_BURST_SETTLE_SEC", "0.12") or "0.12"), 0.02)
 CHAT_JUMP_SCROLL_ENABLED = os.environ.get("TELEGRAM_CHAT_JUMP_SCROLL", "1").strip().lower() not in {"0", "false", "no"}
@@ -498,6 +499,28 @@ def _normalize_username_from_mention_input(value: str) -> str:
     return "—"
 
 
+def _normalize_username_from_mention_markup(value: str) -> str:
+    text = str(value or "")
+    if not text.strip():
+        return "—"
+
+    for pattern in (
+        r'href="[^"]*#@([A-Za-z0-9_]{5,32})"',
+        r'href="[^"]*[?&]domain=([A-Za-z0-9_]{5,32})"',
+        r'href="[^"]*t\.me/([A-Za-z0-9_]{5,32})"',
+        r'data-plain-text="@([A-Za-z0-9_]{5,32})"',
+        r'data-entity-type="mention"[^>]*>@([A-Za-z0-9_]{5,32})<',
+        r'@([A-Za-z0-9_]{5,32})',
+    ):
+        match = re.search(pattern, text, flags=re.I)
+        if not match:
+            continue
+        candidate = match.group(1)
+        if USERNAME_VALUE_RE.fullmatch(candidate):
+            return f"@{candidate}"
+    return "—"
+
+
 def _username_from_tg_url(url: str) -> str:
     text = (url or "").strip()
     if not text:
@@ -588,6 +611,20 @@ def _read_username_from_composer(
         username = _normalize_username_from_mention_input(text)
         if username != "—":
             return username
+        html_result = _send_command_result(
+            server=server,
+            token=token,
+            client_id=client_id,
+            tab_id=tab_id,
+            timeout_sec=2,
+            command={"type": "get_html", "selector": selector, "timeout_ms": 600},
+            raise_on_fail=False,
+        )
+        html_data = html_result.get("data") or {}
+        html_payload = str(html_data.get("html") or "") if isinstance(html_data, dict) else ""
+        username = _normalize_username_from_mention_markup(html_payload)
+        if username != "—":
+            return username
     return "—"
 
 
@@ -648,6 +685,9 @@ def _get_chat_anchor_peer_id(
 
 def _chat_peer_context_selectors(peer_id: str) -> tuple[str, ...]:
     return (
+        f'.bubbles .bubble[data-peer-id="{peer_id}"] .bubble-content-wrapper',
+        f'.bubbles .bubble[data-peer-id="{peer_id}"] .bubble-content',
+        f'.bubbles .bubble[data-peer-id="{peer_id}"]',
         f'.bubbles .bubbles-group-avatar.user-avatar[data-peer-id="{peer_id}"] .avatar-photo',
         f'.bubbles .bubbles-group-avatar.user-avatar[data-peer-id="{peer_id}"]',
         f'.peer-title.bubble-name-first[data-peer-id="{peer_id}"]',
@@ -719,7 +759,10 @@ def _try_username_via_mention_action(
         timeout_sec=2,
         command={
             "type": "wait_selector",
-            "selector": "#bubble-contextmenu.active, .btn-menu.contextmenu.active, #bubble-contextmenu, .btn-menu.contextmenu",
+            "selector": (
+                "#bubble-contextmenu.active, .btn-menu.contextmenu.active, #bubble-contextmenu, "
+                ".btn-menu.contextmenu, .btn-menu, .btn-menu-item, [role='menuitem']"
+            ),
             "timeout_ms": 1200,
             "visible_only": False,
         },
@@ -737,25 +780,30 @@ def _try_username_via_mention_action(
         "mencao",
     ]
     if not mention_click_ok:
-        for _ in range(3):
+        for _ in range(4):
             for root_selector in (
                 "#bubble-contextmenu.active",
                 "#bubble-contextmenu",
                 ".btn-menu.contextmenu.active",
                 ".btn-menu.contextmenu",
+                ".btn-menu",
+                "body",
+                "",
             ):
+                command = {
+                    "type": "click_text",
+                    "terms": mention_terms,
+                    "near_last_context": True,
+                }
+                if root_selector:
+                    command["root_selector"] = root_selector
                 mention_click = _send_command_result(
                     server=server,
                     token=token,
                     client_id=client_id,
                     tab_id=tab_id,
                     timeout_sec=2,
-                    command={
-                        "type": "click_text",
-                        "root_selector": root_selector,
-                        "terms": mention_terms,
-                        "near_last_context": True,
-                    },
+                    command=command,
                     raise_on_fail=False,
                 )
                 if mention_click.get("ok"):
@@ -1133,6 +1181,7 @@ def _should_run_chat_deep_step(
     chat_target_peer_id: str,
     chat_target_name: str,
     known_view_signature: bool = False,
+    discovery_stall_steps: int = 0,
 ) -> bool:
     if chat_target_peer_id or chat_target_name:
         return True
@@ -1140,10 +1189,12 @@ def _should_run_chat_deep_step(
     target = max(int(min_members_target), 0)
     if target <= 0 or members_count >= target:
         return True
-    if known_view_signature:
-        return False
 
     normalized_mode = str(mode or "").strip().lower()
+    if normalized_mode == "mention" and int(discovery_stall_steps) >= CHAT_DISCOVERY_MENTION_STALL_TRIGGER:
+        return True
+    if known_view_signature:
+        return False
     if normalized_mode in ("url", "full"):
         return False
 
@@ -2360,6 +2411,7 @@ def _collect_members_from_chat(
                         chat_target_peer_id=chat_target_peer_id,
                         chat_target_name=chat_target_name,
                         known_view_signature=known_view_signature,
+                        discovery_stall_steps=discovery_stall_steps,
                     ):
                         deep_deferred_steps += 1
                         deep_deferred_this_step = True
