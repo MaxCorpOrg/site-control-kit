@@ -84,7 +84,19 @@ CHAT_MIN_MEMBERS=10 CHAT_MAX_MEMBERS=10 CHAT_SCROLL_STEPS=40 CHAT_DEEP_LIMIT=20 
   ./scripts/collect_new_telegram_contacts.sh "https://web.telegram.org/k/#-2465948544"
 ```
 
+Для серии коротких прогонов с тем же `discovery_state.json` есть chain-runner:
+
+```bash
+cd /home/max/site-control-kit
+./scripts/collect_new_telegram_contacts_chain.sh "https://web.telegram.org/k/#-2465948544" \
+  "/home/max/telegram_contact_batches" \
+  --runs 5 \
+  --interval-sec 20 \
+  --stop-after-idle 2
+```
+
 Если Telegram Web перестал реально прокручиваться, chat-экспорт теперь завершится предупреждением `chat scroll stuck after 3 attempts`, вместо длинного пустого прогона.
+Если burst всё ещё упирается в тот же DOM-слой, экспортёр включает более агрессивный `jump-scroll` и пытается перепрыгнуть дальше по истории.
 
 После обновления файлов в `extension/` Chrome обычно требует `Reload` для unpacked extension на странице `chrome://extensions`, иначе новая логика content-script не подхватится в уже установленном расширении.
 

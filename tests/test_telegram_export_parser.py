@@ -465,6 +465,75 @@ class TelegramExportParserTests(unittest.TestCase):
 
         self.assertTrue(moved)
 
+    def test_scroll_chat_up_jump_accepts_direct_position_change(self) -> None:
+        responses = iter(
+            [
+                {
+                    "ok": True,
+                    "data": {
+                        "beforeTop": 0,
+                        "scrollHeight": 3479,
+                    },
+                },
+                {
+                    "ok": True,
+                    "data": {
+                        "beforeTop": 0,
+                        "afterTop": 800,
+                        "moved": True,
+                    },
+                },
+            ]
+        )
+
+        with mock.patch.object(self.mod, "_send_command_result", side_effect=lambda **kwargs: next(responses)):
+            with mock.patch.object(self.mod.time, "sleep", return_value=None):
+                moved = self.mod._scroll_chat_up_jump("server", "token", "client", 1, 5)
+
+        self.assertTrue(moved)
+
+    def test_scroll_chat_up_jump_accepts_probe_height_change(self) -> None:
+        responses = iter(
+            [
+                {
+                    "ok": True,
+                    "data": {
+                        "beforeTop": 0,
+                        "scrollHeight": 3479,
+                    },
+                },
+                {
+                    "ok": True,
+                    "data": {
+                        "beforeTop": 0,
+                        "afterTop": 0,
+                        "moved": False,
+                    },
+                },
+                {
+                    "ok": True,
+                    "data": {
+                        "beforeTop": 0,
+                        "afterTop": 0,
+                        "moved": False,
+                    },
+                },
+                {
+                    "ok": True,
+                    "data": {
+                        "beforeTop": 0,
+                        "scrollHeight": 4200,
+                    },
+                },
+            ]
+        )
+
+        with mock.patch.object(self.mod, "_send_command_result", side_effect=lambda **kwargs: next(responses)):
+            with mock.patch.object(self.mod.time, "sleep", return_value=None):
+                moved = self.mod._scroll_chat_up_jump("server", "token", "client", 1, 5)
+
+        self.assertTrue(moved)
+
 
 if __name__ == "__main__":
     unittest.main()

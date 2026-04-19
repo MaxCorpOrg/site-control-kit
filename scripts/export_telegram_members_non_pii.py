@@ -67,6 +67,10 @@ CHAT_UNCHANGED_STEPS_LIMIT = 6
 CHAT_DISCOVERY_MENTION_DEEP_INTERVAL = max(int(os.environ.get("TELEGRAM_CHAT_DISCOVERY_MENTION_INTERVAL", "5") or "5"), 1)
 CHAT_DISCOVERY_SCROLL_BURST = max(int(os.environ.get("TELEGRAM_CHAT_DISCOVERY_SCROLL_BURST", "2") or "2"), 1)
 CHAT_DISCOVERY_BURST_SETTLE_SEC = max(float(os.environ.get("TELEGRAM_CHAT_DISCOVERY_BURST_SETTLE_SEC", "0.12") or "0.12"), 0.02)
+CHAT_JUMP_SCROLL_ENABLED = os.environ.get("TELEGRAM_CHAT_JUMP_SCROLL", "1").strip().lower() not in {"0", "false", "no"}
+CHAT_JUMP_SCROLL_DISTANCE = max(int(os.environ.get("TELEGRAM_CHAT_JUMP_SCROLL_DISTANCE", "3200") or "3200"), CHAT_SCROLL_DISTANCE_PX + 400)
+CHAT_JUMP_SCROLL_REPEAT = max(int(os.environ.get("TELEGRAM_CHAT_JUMP_SCROLL_REPEAT", "2") or "2"), 1)
+CHAT_JUMP_SCROLL_TRIGGER_STALL = max(int(os.environ.get("TELEGRAM_CHAT_JUMP_SCROLL_TRIGGER_STALL", "3") or "3"), 1)
 DISCOVERY_STATE_MAX_SIGNATURES = max(int(os.environ.get("TELEGRAM_DISCOVERY_STATE_MAX_SIGNATURES", "400") or "400"), 50)
 DISCOVERY_STATE_MAX_PEERS = max(int(os.environ.get("TELEGRAM_DISCOVERY_STATE_MAX_PEERS", "5000") or "5000"), 100)
 INFO_SCROLL_SETTLE_SEC = 0.8
@@ -1460,6 +1464,131 @@ def _scroll_chat_up(server: str, token: str, client_id: str, tab_id: int, timeou
     return False
 
 
+def _scroll_chat_up_jump(server: str, token: str, client_id: str, tab_id: int, timeout_sec: int) -> bool:
+    if not CHAT_JUMP_SCROLL_ENABLED:
+        return False
+
+    for selector in (
+        ".bubbles .scrollable.scrollable-y",
+        ".chat.tabs-tab.active .bubbles .scrollable-y",
+        "#column-center .bubbles .scrollable-y",
+        "#column-center .scrollable-y",
+    ):
+        baseline = _send_command_result(
+            server=server,
+            token=token,
+            client_id=client_id,
+            tab_id=tab_id,
+            timeout_sec=timeout_sec,
+            command={
+                "type": "scroll_by",
+                "selector": selector,
+                "delta_y": 0,
+                "delta_x": 0,
+            },
+            raise_on_fail=False,
+        )
+        baseline_data = baseline.get("data") or {}
+        baseline_top = baseline_data.get("beforeTop")
+        baseline_height = baseline_data.get("scrollHeight")
+
+        for attempt in range(CHAT_JUMP_SCROLL_REPEAT):
+            distance = -int(CHAT_JUMP_SCROLL_DISTANCE * max(attempt + 1, 1))
+            result = _send_command_result(
+                server=server,
+                token=token,
+                client_id=client_id,
+                tab_id=tab_id,
+                timeout_sec=timeout_sec,
+                command={
+                    "type": "scroll_by",
+                    "selector": selector,
+                    "delta_y": distance,
+                    "delta_x": 0,
+                },
+                raise_on_fail=False,
+            )
+            if result.get("ok"):
+                data = result.get("data") or {}
+                before_top = data.get("beforeTop")
+                after_top = data.get("afterTop")
+                moved = data.get("moved")
+                if isinstance(moved, bool) and moved:
+                    print(
+                        f"INFO: jump scroll moved container "
+                        f"(selector={selector}, distance={distance}, attempt={attempt + 1})"
+                    )
+                    return True
+                if isinstance(before_top, (int, float)) and isinstance(after_top, (int, float)):
+                    if abs(float(after_top) - float(before_top)) >= 1:
+                        print(
+                            f"INFO: jump scroll changed container position "
+                            f"(selector={selector}, top={before_top}->{after_top}, attempt={attempt + 1})"
+                        )
+                        return True
+
+            wheel_result = _send_command_result(
+                server=server,
+                token=token,
+                client_id=client_id,
+                tab_id=tab_id,
+                timeout_sec=timeout_sec,
+                command={
+                    "type": "wheel",
+                    "selector": selector,
+                    "delta_y": distance,
+                    "delta_x": 0,
+                },
+                raise_on_fail=False,
+            )
+            if wheel_result.get("ok"):
+                wheel_data = wheel_result.get("data") or {}
+                wheel_moved = wheel_data.get("moved")
+                if isinstance(wheel_moved, bool) and wheel_moved:
+                    print(
+                        f"INFO: jump wheel moved container "
+                        f"(selector={selector}, distance={distance}, attempt={attempt + 1})"
+                    )
+                    return True
+
+            time.sleep(CHAT_DISCOVERY_BURST_SETTLE_SEC)
+            probe = _send_command_result(
+                server=server,
+                token=token,
+                client_id=client_id,
+                tab_id=tab_id,
+                timeout_sec=timeout_sec,
+                command={
+                    "type": "scroll_by",
+                    "selector": selector,
+                    "delta_y": 0,
+                    "delta_x": 0,
+                },
+                raise_on_fail=False,
+            )
+            if not probe.get("ok"):
+                continue
+            probe_data = probe.get("data") or {}
+            probe_top = probe_data.get("beforeTop")
+            probe_height = probe_data.get("scrollHeight")
+            if isinstance(baseline_top, (int, float)) and isinstance(probe_top, (int, float)):
+                if abs(float(probe_top) - float(baseline_top)) >= 1:
+                    print(
+                        f"INFO: jump scroll changed probed position "
+                        f"(selector={selector}, top={baseline_top}->{probe_top}, attempt={attempt + 1})"
+                    )
+                    return True
+            if isinstance(baseline_height, (int, float)) and isinstance(probe_height, (int, float)):
+                if abs(float(probe_height) - float(baseline_height)) >= 1:
+                    print(
+                        f"INFO: jump scroll changed probed height "
+                        f"(selector={selector}, height={baseline_height}->{probe_height}, attempt={attempt + 1})"
+                    )
+                    return True
+
+    return False
+
+
 def _scroll_info_members_down(server: str, token: str, client_id: str, tab_id: int, timeout_sec: int) -> bool:
     # Scroll the members list by moving to the last currently visible member row.
     for selector in (
@@ -1922,6 +2051,7 @@ def _collect_members_from_chat(
     no_scroll_steps = 0
     scroll_steps_done = 0
     burst_scrolls_done = 0
+    jump_scrolls_done = 0
     discovery_stall_steps = 0
     revisited_view_steps = 0
     deep_seen_peer_ids: set[str] = set()
@@ -2144,7 +2274,23 @@ def _collect_members_from_chat(
         if empty_steps >= 2 and not members:
             print("WARN: чат не читается (пустой DOM/не открыт диалог), останавливаюсь")
             break
-        if not _scroll_chat_up(server, token, client_id, tab_id, timeout_sec=min(timeout_sec, 10)):
+        scrolled = _scroll_chat_up(server, token, client_id, tab_id, timeout_sec=min(timeout_sec, 10))
+        if (
+            not scrolled
+            and CHAT_JUMP_SCROLL_ENABLED
+            and min_members_target > 0
+            and len(members) < min_members_target
+            and discovery_stall_steps >= CHAT_JUMP_SCROLL_TRIGGER_STALL
+        ):
+            if _scroll_chat_up_jump(server, token, client_id, tab_id, timeout_sec=min(timeout_sec, 10)):
+                jump_scrolls_done += 1
+                scroll_steps_done += 1
+                scrolled = True
+                print(
+                    f"INFO: rescue jump scroll applied at step {step} "
+                    f"(stall={discovery_stall_steps}, revisits={revisited_view_steps})"
+                )
+        if not scrolled:
             no_scroll_steps += 1
             if no_scroll_steps >= 3:
                 print("WARN: chat scroll stuck after 3 attempts, stopping")
@@ -2173,12 +2319,26 @@ def _collect_members_from_chat(
                     f"INFO: discovery burst scroll {burst_index + 1}/{extra_bursts} "
                     f"at step {step} (stall={discovery_stall_steps})"
                 )
+        if (
+            CHAT_JUMP_SCROLL_ENABLED
+            and min_members_target > 0
+            and len(members) < min_members_target
+            and discovery_stall_steps >= CHAT_JUMP_SCROLL_TRIGGER_STALL
+        ):
+            if _scroll_chat_up_jump(server, token, client_id, tab_id, timeout_sec=min(timeout_sec, 10)):
+                jump_scrolls_done += 1
+                scroll_steps_done += 1
+                print(
+                    f"INFO: jump scroll applied at step {step} "
+                    f"(stall={discovery_stall_steps}, revisits={revisited_view_steps})"
+                )
         time.sleep(CHAT_SCROLL_SETTLE_SEC)
 
     stats = {
         "unique_members": len(members),
         "scroll_steps_done": scroll_steps_done,
         "burst_scrolls_done": burst_scrolls_done,
+        "jump_scrolls_done": jump_scrolls_done,
         "revisited_view_steps": revisited_view_steps,
         "deep_attempted": deep_attempted_total,
         "deep_updated": deep_updated_total,
