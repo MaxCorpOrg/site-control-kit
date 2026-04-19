@@ -44,6 +44,16 @@ class TelegramContactChainTests(unittest.TestCase):
         self.assertTrue(self.mod.should_stop_after_idle(2, 2))
         self.assertFalse(self.mod.should_stop_after_idle(5, 0))
 
+    def test_should_stop_after_no_growth_uses_threshold(self) -> None:
+        self.assertFalse(self.mod.should_stop_after_no_growth(1, 2))
+        self.assertTrue(self.mod.should_stop_after_no_growth(2, 2))
+        self.assertFalse(self.mod.should_stop_after_no_growth(5, 0))
+
+    def test_reached_chain_target_requires_positive_threshold(self) -> None:
+        self.assertTrue(self.mod.reached_chain_target(22, 20))
+        self.assertFalse(self.mod.reached_chain_target(19, 20))
+        self.assertFalse(self.mod.reached_chain_target(50, 0))
+
 
 if __name__ == "__main__":
     unittest.main()

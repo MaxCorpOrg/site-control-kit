@@ -31,6 +31,7 @@ chat_slug="$(printf '%s' "${chat_fragment}" | tr -c 'A-Za-z0-9._-' '_')"
 chat_dir="${OUTPUT_ROOT}/chat_${chat_slug}"
 run_id="$(date -u +%Y%m%dT%H%M%SZ)"
 run_dir="${chat_dir}/runs/${run_id}"
+export_stats_path="${run_dir}/export_stats.json"
 
 mkdir -p "${chat_dir}"
 mkdir -p "${run_dir}"
@@ -53,6 +54,7 @@ export CHAT_MIN_MEMBERS="${CHAT_MIN_MEMBERS:-0}"
 export CHAT_MAX_MEMBERS="${CHAT_MAX_MEMBERS:-0}"
 export CHAT_IDENTITY_HISTORY="${chat_dir}/identity_history.json"
 export CHAT_DISCOVERY_STATE="${chat_dir}/discovery_state.json"
+export CHAT_STATS_OUTPUT="${export_stats_path}"
 
 cleanup() {
   rm -f "${temp_md}" "${temp_txt}"
@@ -140,7 +142,22 @@ write_run_json() {
   local interrupted_value="${11}"
   python3 - "${run_dir}/run.json" <<PY
 import json
+import os
 import sys
+
+stats_path = ${export_stats_path@Q}
+export_stats = {}
+if stats_path and os.path.exists(stats_path):
+    try:
+        with open(stats_path, "r", encoding="utf-8") as fh:
+            loaded = json.load(fh)
+        if isinstance(loaded, dict):
+            export_stats = loaded
+    except (OSError, json.JSONDecodeError):
+        export_stats = {}
+
+chat_stats = export_stats.get("chat_stats") if isinstance(export_stats.get("chat_stats"), dict) else {}
+info_stats = export_stats.get("info_stats") if isinstance(export_stats.get("info_stats"), dict) else {}
 
 payload = {
     "status": ${status@Q},
@@ -174,6 +191,27 @@ payload = {
     "snapshot_md": ${run_dir@Q} + "/snapshot.md",
     "snapshot_txt": ${run_dir@Q} + "/snapshot.txt",
     "export_log": ${run_dir@Q} + "/export.log",
+    "export_stats_path": stats_path if export_stats else "",
+    "export_stats_status": str(export_stats.get("status") or ""),
+    "unique_members": int(export_stats.get("members_total", 0) or 0),
+    "members_with_username": int(export_stats.get("members_with_username", 0) or 0),
+    "members_without_username": int(export_stats.get("members_without_username", 0) or 0),
+    "deep_attempted_total": int(export_stats.get("deep_attempted_total", 0) or 0),
+    "deep_updated_total": int(export_stats.get("deep_updated_total", 0) or 0),
+    "chat_scroll_steps_done": int(chat_stats.get("scroll_steps_done", 0) or 0),
+    "chat_burst_scrolls_done": int(chat_stats.get("burst_scrolls_done", 0) or 0),
+    "chat_jump_scrolls_done": int(chat_stats.get("jump_scrolls_done", 0) or 0),
+    "chat_revisited_view_steps": int(chat_stats.get("revisited_view_steps", 0) or 0),
+    "chat_deep_attempted": int(chat_stats.get("deep_attempted", 0) or 0),
+    "chat_deep_updated": int(chat_stats.get("deep_updated", 0) or 0),
+    "chat_deep_deferred_steps": int(chat_stats.get("deep_deferred_steps", 0) or 0),
+    "chat_runtime_limited": int(chat_stats.get("runtime_limited", 0) or 0),
+    "info_scroll_steps_done": int(info_stats.get("scroll_steps_done", 0) or 0),
+    "info_total_hint": int(info_stats.get("total_hint", 0) or 0),
+    "info_deep_attempted": int(info_stats.get("deep_attempted", 0) or 0),
+    "info_deep_updated": int(info_stats.get("deep_updated", 0) or 0),
+    "chat_stats": chat_stats,
+    "info_stats": info_stats,
 }
 with open(sys.argv[1], "w", encoding="utf-8") as fh:
     json.dump(payload, fh, ensure_ascii=False, indent=2)

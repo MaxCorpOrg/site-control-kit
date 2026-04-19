@@ -21,6 +21,7 @@ CHAT_CLIENT_ID="${CHAT_CLIENT_ID:-}"
 CHAT_TAB_ID="${CHAT_TAB_ID:-}"
 CHAT_IDENTITY_HISTORY="${CHAT_IDENTITY_HISTORY:-}"
 CHAT_DISCOVERY_STATE="${CHAT_DISCOVERY_STATE:-}"
+CHAT_STATS_OUTPUT="${CHAT_STATS_OUTPUT:-}"
 
 if [[ ! -f "${EXPORT_SCRIPT}" ]]; then
   echo "ERROR: export script not found: ${EXPORT_SCRIPT}" >&2
@@ -250,6 +251,7 @@ echo "INFO: collecting usernames from ${GROUP_URL}"
 extra_args=()
 identity_args=()
 discovery_args=()
+stats_args=()
 if [[ -n "${resolved_client_id}" ]]; then
   extra_args+=(--client-id "${resolved_client_id}")
 fi
@@ -261,6 +263,9 @@ if [[ -n "${CHAT_IDENTITY_HISTORY}" ]]; then
 fi
 if [[ -n "${CHAT_DISCOVERY_STATE}" ]]; then
   discovery_args+=(--discovery-state "${CHAT_DISCOVERY_STATE}")
+fi
+if [[ -n "${CHAT_STATS_OUTPUT}" ]]; then
+  stats_args+=(--stats-output "${CHAT_STATS_OUTPUT}")
 fi
 if [[ -n "${resolved_client_id}" || -n "${resolved_tab_id}" ]]; then
   echo "INFO: using Telegram target client=${resolved_client_id:-auto} tab=${resolved_tab_id:-auto}"
@@ -281,6 +286,7 @@ python3 -u "${EXPORT_SCRIPT}" \
   --chat-deep-limit "${CHAT_DEEP_LIMIT}" \
   "${identity_args[@]}" \
   "${discovery_args[@]}" \
+  "${stats_args[@]}" \
   "${extra_args[@]}" \
   --output "${OUT_MD}"
 

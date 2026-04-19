@@ -49,6 +49,14 @@ def should_stop_after_idle(idle_runs: int, stop_after_idle: int) -> bool:
     return stop_after_idle > 0 and idle_runs >= stop_after_idle
 
 
+def should_stop_after_no_growth(no_growth_runs: int, stop_after_no_growth: int) -> bool:
+    return stop_after_no_growth > 0 and no_growth_runs >= stop_after_no_growth
+
+
+def reached_chain_target(current_value: int, target_value: int) -> bool:
+    return target_value > 0 and current_value >= target_value
+
+
 def write_chain_summary(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -77,6 +85,24 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Continue the chain even if one run exits non-zero.",
     )
+    parser.add_argument(
+        "--target-unique-members",
+        type=int,
+        default=max(int(os.environ.get("TELEGRAM_CHAIN_TARGET_UNIQUE_MEMBERS", "0") or "0"), 0),
+        help="Stop once run.json reaches at least this many unique members (0 = disabled).",
+    )
+    parser.add_argument(
+        "--target-safe-count",
+        type=int,
+        default=max(int(os.environ.get("TELEGRAM_CHAIN_TARGET_SAFE_COUNT", "0") or "0"), 0),
+        help="Stop once run.json reaches at least this many safe usernames (0 = disabled).",
+    )
+    parser.add_argument(
+        "--stop-after-no-growth",
+        type=int,
+        default=max(int(os.environ.get("TELEGRAM_CHAIN_STOP_AFTER_NO_GROWTH", "0") or "0"), 0),
+        help="Stop after N completed runs without improving unique_members or safe_count (0 = disabled).",
+    )
     return parser
 
 
@@ -93,6 +119,9 @@ def main() -> int:
 
     attempts: list[dict[str, Any]] = []
     idle_runs = 0
+    no_growth_runs = 0
+    best_unique_members = 0
+    best_safe_count = 0
     chain_status = "completed"
 
     with chain_log_path.open("w", encoding="utf-8") as log_fh:
@@ -111,12 +140,29 @@ def main() -> int:
             run_json_path = latest_run_json(chat_dir)
             run_payload = load_run_payload(run_json_path)
             new_usernames = int(run_payload.get("new_usernames", 0) or 0)
+            unique_members = int(run_payload.get("unique_members", 0) or 0)
+            safe_count = int(run_payload.get("safe_count", 0) or 0)
+            members_with_username = int(run_payload.get("members_with_username", 0) or 0)
             run_status = str(run_payload.get("status") or ("completed" if completed.returncode == 0 else "failed"))
+            unique_progress = False
+            safe_progress = False
 
             if run_status == "completed" and new_usernames <= 0:
                 idle_runs += 1
             elif run_status == "completed":
                 idle_runs = 0
+
+            if run_status == "completed":
+                unique_progress = unique_members > best_unique_members
+                safe_progress = safe_count > best_safe_count
+                if unique_progress:
+                    best_unique_members = unique_members
+                if safe_progress:
+                    best_safe_count = safe_count
+                if unique_progress or safe_progress:
+                    no_growth_runs = 0
+                else:
+                    no_growth_runs += 1
 
             attempts.append(
                 {
@@ -126,21 +172,39 @@ def main() -> int:
                     "run_json": str(run_json_path) if run_json_path else "",
                     "run_status": run_status,
                     "new_usernames": new_usernames,
+                    "unique_members": unique_members,
+                    "safe_count": safe_count,
+                    "members_with_username": members_with_username,
+                    "unique_progress": unique_progress,
+                    "safe_progress": safe_progress,
                     "batch_path": str(run_payload.get("batch_path") or ""),
                     "idle_runs": idle_runs,
+                    "no_growth_runs": no_growth_runs,
+                    "best_unique_members": best_unique_members,
+                    "best_safe_count": best_safe_count,
                 }
             )
             log_fh.write(
                 f"[{datetime.now(timezone.utc).replace(microsecond=0).isoformat()}] "
-                f"run {attempt_index} exit={completed.returncode} status={run_status} new={new_usernames} idle={idle_runs}\n"
+                f"run {attempt_index} exit={completed.returncode} status={run_status} new={new_usernames} "
+                f"unique={unique_members} safe={safe_count} idle={idle_runs} no_growth={no_growth_runs}\n"
             )
             log_fh.flush()
 
             if completed.returncode != 0 and not args.continue_on_nonzero:
                 chain_status = "stopped_on_error"
                 break
+            if reached_chain_target(unique_members, int(args.target_unique_members)):
+                chain_status = "target_unique_members_reached"
+                break
+            if reached_chain_target(safe_count, int(args.target_safe_count)):
+                chain_status = "target_safe_count_reached"
+                break
             if should_stop_after_idle(idle_runs, int(args.stop_after_idle)):
                 chain_status = "stopped_on_idle"
+                break
+            if should_stop_after_no_growth(no_growth_runs, int(args.stop_after_no_growth)):
+                chain_status = "stopped_on_no_growth"
                 break
             if attempt_index >= int(args.runs):
                 break
@@ -158,11 +222,16 @@ def main() -> int:
         "runs_requested": int(args.runs),
         "interval_sec": float(args.interval_sec),
         "stop_after_idle": int(args.stop_after_idle),
+        "stop_after_no_growth": int(args.stop_after_no_growth),
+        "target_unique_members": int(args.target_unique_members),
+        "target_safe_count": int(args.target_safe_count),
+        "best_unique_members": best_unique_members,
+        "best_safe_count": best_safe_count,
         "attempts": attempts,
     }
     write_chain_summary(chain_summary_path, summary)
     print(f"INFO: chain summary saved to {chain_summary_path}", flush=True)
-    return 0 if chain_status in {"completed", "stopped_on_idle"} else 1
+    return 0 if chain_status in {"completed", "stopped_on_idle", "stopped_on_no_growth", "target_unique_members_reached", "target_safe_count_reached"} else 1
 
 
 if __name__ == "__main__":

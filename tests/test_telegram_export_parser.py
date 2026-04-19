@@ -376,6 +376,34 @@ class TelegramExportParserTests(unittest.TestCase):
         self.assertEqual(payload["seen_view_signatures"], ["mid=1|peer=2|ts=3"])
         self.assertEqual(payload["seen_peer_ids"], ["111", "222"])
 
+    def test_build_export_stats_payload_counts_usernames_and_keeps_chat_stats(self) -> None:
+        payload = self.mod._build_export_stats_payload(
+            status="completed",
+            group_url="https://web.telegram.org/k/#-2465948544",
+            source="chat",
+            source_label="chat",
+            out_path=Path("/tmp/out.md"),
+            members=[
+                {"peer_id": "1", "name": "Alice", "username": "@alice_1", "status": "—", "role": "—"},
+                {"peer_id": "2", "name": "Bob", "username": "—", "status": "—", "role": "—"},
+            ],
+            chat_stats={"unique_members": 2, "scroll_steps_done": 7, "jump_scrolls_done": 1},
+            info_stats={"unique_members": 0},
+            deep_usernames=True,
+            max_members=50,
+            deep_attempted_total=3,
+            deep_updated_total=1,
+        )
+
+        self.assertEqual(payload["status"], "completed")
+        self.assertEqual(payload["members_total"], 2)
+        self.assertEqual(payload["members_with_username"], 1)
+        self.assertEqual(payload["members_without_username"], 1)
+        self.assertEqual(payload["deep_attempted_total"], 3)
+        self.assertEqual(payload["deep_updated_total"], 1)
+        self.assertEqual(payload["chat_stats"]["scroll_steps_done"], 7)
+        self.assertEqual(payload["chat_stats"]["jump_scrolls_done"], 1)
+
     def test_load_discovery_state_returns_empty_payload_for_missing_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             payload = self.mod._load_discovery_state(Path(tmpdir) / "missing.json")

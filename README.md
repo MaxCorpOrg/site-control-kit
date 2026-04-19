@@ -66,7 +66,7 @@ cd /home/max/site-control-kit
 - парсит не только явные sender-label блоки, но и avatar-only группы сообщений, поэтому видимых участников из текущего DOM собирается больше;
 - сохраняет полный последний снимок в `latest_full.md` и `latest_full.txt`;
 - сохраняет безопасный снимок после identity-фильтрации в `latest_safe.md` и `latest_safe.txt`;
-- сохраняет отдельный лог запуска в `runs/<timestamp>/` с `run.json`, `export.log`, `snapshot.md`, `snapshot.txt`;
+- сохраняет отдельный лог запуска в `runs/<timestamp>/` с `run.json`, `export.log`, `export_stats.json`, `snapshot.md`, `snapshot.txt`;
 - если запуск прерван `Ctrl+C`/`TERM`, пишет структурный `run.json` со статусом `partial` и сохраняет partial-снапшоты в `runs/<timestamp>/`;
 - пишет только новые контакты в `1.txt`, `2.txt`, `3.txt` и так далее;
 - если `@username` внезапно сменил владельца (`peer_id`) между запусками, не пишет его в numbered batch, а кладёт случай в `review.txt` и `conflicts.json`.
@@ -92,8 +92,12 @@ cd /home/max/site-control-kit
   "/home/max/telegram_contact_batches" \
   --runs 5 \
   --interval-sec 20 \
-  --stop-after-idle 2
+  --stop-after-idle 2 \
+  --stop-after-no-growth 2 \
+  --target-unique-members 30
 ```
+
+`run.json` теперь дублирует ключевую телеметрию экспортёра: `unique_members`, `members_with_username`, `chat_scroll_steps_done`, `chat_jump_scrolls_done`, `deep_updated_total`, а полный сырой payload лежит в `export_stats.json`.
 
 Если Telegram Web перестал реально прокручиваться, chat-экспорт теперь завершится предупреждением `chat scroll stuck after 3 attempts`, вместо длинного пустого прогона.
 Если burst всё ещё упирается в тот же DOM-слой, экспортёр включает более агрессивный `jump-scroll` и пытается перепрыгнуть дальше по истории.

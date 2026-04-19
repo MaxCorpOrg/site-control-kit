@@ -1795,6 +1795,70 @@ def _load_discovery_state(discovery_state_path: Path | None) -> dict[str, Any]:
     }
 
 
+def _write_stats_output(stats_output_path: Path | None, payload: dict[str, Any]) -> None:
+    if stats_output_path is None:
+        return
+    try:
+        stats_output_path.parent.mkdir(parents=True, exist_ok=True)
+        stats_output_path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        print(f"WARN: cannot write stats output: {exc}", file=sys.stderr)
+
+
+def _count_members_with_username(members: list[dict[str, str]]) -> int:
+    return sum(
+        1
+        for item in members
+        if _normalize_username(str(item.get("username") or "").strip()) != "—"
+    )
+
+
+def _build_export_stats_payload(
+    *,
+    status: str,
+    group_url: str,
+    source: str,
+    source_label: str,
+    out_path: Path,
+    members: list[dict[str, str]] | None = None,
+    info_stats: dict[str, Any] | None = None,
+    chat_stats: dict[str, Any] | None = None,
+    deep_usernames: bool = False,
+    max_members: int = 0,
+    deep_attempted_total: int = 0,
+    deep_updated_total: int = 0,
+    error: str = "",
+) -> dict[str, Any]:
+    members = list(members or [])
+    info_stats = dict(info_stats or {})
+    chat_stats = dict(chat_stats or {})
+    members_total = len(members)
+    members_with_username = _count_members_with_username(members)
+    payload: dict[str, Any] = {
+        "status": status,
+        "timestamp_utc": dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat(),
+        "group_url": group_url,
+        "source": source,
+        "source_label": source_label,
+        "output": str(out_path),
+        "deep_usernames": bool(deep_usernames),
+        "max_members": int(max_members),
+        "members_total": members_total,
+        "members_with_username": members_with_username,
+        "members_without_username": max(members_total - members_with_username, 0),
+        "deep_attempted_total": int(deep_attempted_total),
+        "deep_updated_total": int(deep_updated_total),
+        "info_stats": info_stats,
+        "chat_stats": chat_stats,
+    }
+    if error:
+        payload["error"] = error
+    return payload
+
+
 def _save_discovery_state(discovery_state_path: Path | None, discovery_state: dict[str, Any] | None) -> None:
     if discovery_state_path is None or discovery_state is None:
         return
@@ -3387,6 +3451,11 @@ def build_parser() -> argparse.ArgumentParser:
         default="",
         help="JSON-файл с историей discovery-проходов чата (виденные view signatures и peer_id).",
     )
+    parser.add_argument(
+        "--stats-output",
+        default="",
+        help="JSON-файл для сохранения телеметрии экспорта (опционально).",
+    )
     return parser
 
 
@@ -3401,8 +3470,15 @@ def main() -> int:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     identity_history_path = Path(args.identity_history).expanduser() if args.identity_history else None
     discovery_state_path = Path(args.discovery_state).expanduser() if args.discovery_state else None
+    stats_output_path = Path(args.stats_output).expanduser() if args.stats_output else None
     historical_username_to_peer, historical_peer_to_username = _load_identity_history(identity_history_path)
     discovery_state = _load_discovery_state(discovery_state_path)
+    source_label = args.source
+    chat_stats: dict[str, int] = {}
+    info_stats: dict[str, int] = {}
+    members: list[dict[str, str]] = []
+    attempted = 0
+    updated = 0
     if historical_username_to_peer or historical_peer_to_username:
         print(
             f"INFO: loaded identity history: usernames={len(historical_username_to_peer)}, "
@@ -3493,9 +3569,6 @@ def main() -> int:
                 timeout_sec=max(args.timeout, 5),
             )
 
-        source_label = args.source
-        chat_stats: dict[str, int] = {}
-        info_stats: dict[str, int] = {}
         info_members: list[dict[str, str]] = []
         chat_members: list[dict[str, str]] = []
 
@@ -3612,9 +3685,6 @@ def main() -> int:
             members = members[: args.max_members]
 
         if args.deep_usernames:
-            attempted = 0
-            updated = 0
-
             if args.source in ("chat", "both"):
                 chat_attempted = int(chat_stats.get("deep_attempted", 0))
                 chat_updated = int(chat_stats.get("deep_updated", 0))
@@ -3677,10 +3747,45 @@ def main() -> int:
 
         _write_markdown(out_path, members, group_url, source_label)
         _save_discovery_state(discovery_state_path, discovery_state)
+        _write_stats_output(
+            stats_output_path,
+            _build_export_stats_payload(
+                status="completed",
+                group_url=group_url,
+                source=args.source,
+                source_label=source_label,
+                out_path=out_path,
+                members=members,
+                info_stats=info_stats,
+                chat_stats=chat_stats,
+                deep_usernames=bool(args.deep_usernames),
+                max_members=max(args.max_members, 0),
+                deep_attempted_total=attempted,
+                deep_updated_total=updated,
+            ),
+        )
 
         print(f"OK: saved {len(members)} members to {out_path}")
         return 0
     except Exception as exc:  # noqa: BLE001
+        _write_stats_output(
+            stats_output_path,
+            _build_export_stats_payload(
+                status="failed",
+                group_url=group_url,
+                source=args.source,
+                source_label=source_label,
+                out_path=out_path,
+                members=members,
+                info_stats=info_stats,
+                chat_stats=chat_stats,
+                deep_usernames=bool(args.deep_usernames),
+                max_members=max(args.max_members, 0),
+                deep_attempted_total=attempted,
+                deep_updated_total=updated,
+                error=str(exc),
+            ),
+        )
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 
