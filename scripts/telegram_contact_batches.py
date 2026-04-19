@@ -12,12 +12,23 @@ USERNAME_RE = re.compile(r"@[A-Za-z0-9_]{5,32}")
 HISTORY_FILE = "identity_history.json"
 REVIEW_FILE = "review.txt"
 CONFLICTS_FILE = "conflicts.json"
+SAFE_MD_FILE = "latest_safe.md"
+SAFE_TXT_FILE = "latest_safe.txt"
 
 
 class MemberRecord(NamedTuple):
     peer_id: str
     name: str
     username: str
+
+
+class MarkdownMemberRow(NamedTuple):
+    index: str
+    name: str
+    username: str
+    status: str
+    role: str
+    peer_id: str
 
 
 def normalize_username(value: str) -> str:
@@ -89,6 +100,14 @@ def review_path(directory: Path) -> Path:
 
 def conflicts_path(directory: Path) -> Path:
     return directory / CONFLICTS_FILE
+
+
+def safe_md_path(directory: Path) -> Path:
+    return directory / SAFE_MD_FILE
+
+
+def safe_txt_path(directory: Path) -> Path:
+    return directory / SAFE_TXT_FILE
 
 
 def utc_now_iso() -> str:
@@ -164,8 +183,13 @@ def _split_markdown_cells(line: str) -> list[str]:
 
 
 def load_member_records_from_markdown(path: Path) -> list[MemberRecord]:
+    rows = load_markdown_member_rows(path)
+    return [MemberRecord(peer_id=row.peer_id, name=row.name, username=row.username) for row in rows]
+
+
+def load_markdown_member_rows(path: Path) -> list[MarkdownMemberRow]:
     text = path.read_text(encoding="utf-8", errors="ignore")
-    rows: list[MemberRecord] = []
+    rows: list[MarkdownMemberRow] = []
     for line in text.splitlines():
         if not line.startswith("|"):
             continue
@@ -179,10 +203,13 @@ def load_member_records_from_markdown(path: Path) -> list[MemberRecord]:
         if not username or not peer_id or peer_id == "—":
             continue
         rows.append(
-            MemberRecord(
-                peer_id=peer_id,
+            MarkdownMemberRow(
+                index=str(cells[0] or "").strip(),
                 name=str(cells[1] or "").strip(),
                 username=username,
+                status=str(cells[3] or "").strip(),
+                role=str(cells[4] or "").strip(),
+                peer_id=peer_id,
             )
         )
     return rows
@@ -320,25 +347,68 @@ def write_review_files(directory: Path, conflicts: list[dict[str, str]]) -> tupl
     return review_txt, conflicts_json
 
 
+def write_safe_outputs(
+    directory: Path,
+    rows: list[MarkdownMemberRow],
+    safe_usernames: list[str],
+) -> tuple[Path, Path, int]:
+    allowed = {normalize_username(item) for item in safe_usernames if normalize_username(item)}
+    safe_rows: list[MarkdownMemberRow] = []
+    seen: set[str] = set()
+    for row in rows:
+        username = normalize_username(row.username)
+        if not username or username not in allowed or username in seen:
+            continue
+        seen.add(username)
+        safe_rows.append(row)
+
+    safe_txt = safe_txt_path(directory)
+    safe_md = safe_md_path(directory)
+    txt_body = "\n".join(row.username for row in safe_rows)
+    safe_txt.write_text((txt_body + "\n") if txt_body else "", encoding="utf-8")
+
+    lines = [
+        "# Safe Telegram Usernames",
+        "",
+        f"Updated at: {utc_now_iso()}",
+        f"Count: {len(safe_rows)}",
+        "",
+        "| # | Имя | Username | Статус | Роль | Peer ID |",
+        "|---|---|---|---|---|---|",
+    ]
+    for index, row in enumerate(safe_rows, start=1):
+        lines.append(
+            f"| {index} | {row.name or '—'} | {row.username} | {row.status or '—'} | {row.role or '—'} | {row.peer_id or '—'} |"
+        )
+    lines.append("")
+    safe_md.write_text("\n".join(lines), encoding="utf-8")
+    return safe_md, safe_txt, len(safe_rows)
+
+
 def save_new_batch(
     source: Path,
     directory: Path,
     full_md: Path | None = None,
-) -> tuple[int, Path | None, int, Path | None]:
+) -> tuple[int, Path | None, int, Path | None, Path | None, Path | None, int]:
     directory.mkdir(parents=True, exist_ok=True)
     usernames = load_usernames(source)
     review_file: Path | None = None
     review_count = 0
+    latest_safe_md: Path | None = None
+    latest_safe_txt: Path | None = None
+    latest_safe_count = 0
 
     if full_md is not None and full_md.exists():
         history = load_history(directory)
-        records = load_member_records_from_markdown(full_md)
+        rows = load_markdown_member_rows(full_md)
+        records = [MemberRecord(peer_id=row.peer_id, name=row.name, username=row.username) for row in rows]
         safe_usernames, conflicts, next_history = evaluate_identity_records(records, history)
         if safe_usernames:
             allowed = set(safe_usernames)
             usernames = [item for item in usernames if item in allowed]
         else:
             usernames = []
+        latest_safe_md, latest_safe_txt, latest_safe_count = write_safe_outputs(directory, rows, safe_usernames)
         review_count = len(conflicts)
         review_txt, _ = write_review_files(directory, conflicts)
         review_file = review_txt
@@ -346,11 +416,11 @@ def save_new_batch(
 
     new_rows = filter_new_usernames(usernames, known_usernames(directory))
     if not new_rows:
-        return 0, None, review_count, review_file
+        return 0, None, review_count, review_file, latest_safe_md, latest_safe_txt, latest_safe_count
 
     batch_path = directory / f"{next_batch_number(directory)}.txt"
     batch_path.write_text("\n".join(new_rows) + "\n", encoding="utf-8")
-    return len(new_rows), batch_path, review_count, review_file
+    return len(new_rows), batch_path, review_count, review_file, latest_safe_md, latest_safe_txt, latest_safe_count
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -365,7 +435,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = build_parser().parse_args()
-    count, batch_path, review_count, review_file = save_new_batch(
+    count, batch_path, review_count, review_file, safe_md, safe_txt, safe_count = save_new_batch(
         Path(args.source).expanduser(),
         Path(args.directory).expanduser(),
         Path(args.full_md).expanduser() if args.full_md else None,
@@ -375,6 +445,9 @@ def main() -> int:
     print(f"path={batch_path if batch_path else ''}")
     print(f"review_count={review_count}")
     print(f"review_path={review_file if review_file else ''}")
+    print(f"safe_count={safe_count}")
+    print(f"safe_md={safe_md if safe_md else ''}")
+    print(f"safe_txt={safe_txt if safe_txt else ''}")
     return 0
 
 

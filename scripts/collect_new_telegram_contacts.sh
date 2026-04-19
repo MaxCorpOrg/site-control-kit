@@ -58,6 +58,9 @@ write_run_json() {
   local batch_path_value="$4"
   local review_count_value="$5"
   local review_path_value="$6"
+  local safe_count_value="$7"
+  local safe_md_value="$8"
+  local safe_txt_value="$9"
   python3 - "${run_dir}/run.json" <<PY
 import json
 import sys
@@ -81,6 +84,9 @@ payload = {
     "batch_path": ${batch_path_value@Q},
     "review_count": int(${review_count_value@Q}),
     "review_path": ${review_path_value@Q},
+    "safe_count": int(${safe_count_value@Q}),
+    "latest_safe_md": ${safe_md_value@Q},
+    "latest_safe_txt": ${safe_txt_value@Q},
     "latest_full_md": ${chat_dir@Q} + "/latest_full.md",
     "latest_full_txt": ${chat_dir@Q} + "/latest_full.txt",
     "snapshot_md": ${run_dir@Q} + "/snapshot.md",
@@ -94,7 +100,7 @@ PY
 }
 
 if ! bash "${AUTO_SCRIPT}" "${GROUP_URL}" "${temp_md}" 2>&1 | tee "${run_dir}/export.log"; then
-  write_run_json "failed" "0" "0" "" "0" ""
+  write_run_json "failed" "0" "0" "" "0" "" "0" "" ""
   echo "ERROR: export failed, see ${run_dir}/export.log" >&2
   exit 1
 fi
@@ -111,6 +117,9 @@ count="$(printf '%s\n' "${helper_output}" | sed -n 's/^count=//p')"
 path="$(printf '%s\n' "${helper_output}" | sed -n 's/^path=//p')"
 review_count="$(printf '%s\n' "${helper_output}" | sed -n 's/^review_count=//p')"
 review_path="$(printf '%s\n' "${helper_output}" | sed -n 's/^review_path=//p')"
+safe_count="$(printf '%s\n' "${helper_output}" | sed -n 's/^safe_count=//p')"
+safe_md="$(printf '%s\n' "${helper_output}" | sed -n 's/^safe_md=//p')"
+safe_txt="$(printf '%s\n' "${helper_output}" | sed -n 's/^safe_txt=//p')"
 
 if [[ "${created}" == "1" && -n "${path}" ]]; then
   echo "DONE: saved ${count} new usernames"
@@ -126,6 +135,9 @@ fi
 if [[ -n "${review_count}" && "${review_count}" != "0" && -n "${review_path}" ]]; then
   echo "  Review:   ${review_path} (${review_count} conflict(s))"
 fi
+if [[ -n "${safe_txt}" ]]; then
+  echo "  Safe:     ${safe_txt} (${safe_count:-0} username(s))"
+fi
 
 echo "  Run dir:  ${run_dir}"
-write_run_json "completed" "${created:-0}" "${count:-0}" "${path:-}" "${review_count:-0}" "${review_path:-}"
+write_run_json "completed" "${created:-0}" "${count:-0}" "${path:-}" "${review_count:-0}" "${review_path:-}" "${safe_count:-0}" "${safe_md:-}" "${safe_txt:-}"

@@ -61,6 +61,7 @@ cd /home/max/site-control-kit
 - передаёт в экспортёр `identity_history.json`, чтобы deep-сбор не переназначал `@username` между разными `peer_id`, если история уже знает стабильную связку;
 - парсит не только явные sender-label блоки, но и avatar-only группы сообщений, поэтому видимых участников из текущего DOM собирается больше;
 - сохраняет полный последний снимок в `latest_full.md` и `latest_full.txt`;
+- сохраняет безопасный снимок после identity-фильтрации в `latest_safe.md` и `latest_safe.txt`;
 - сохраняет отдельный лог запуска в `runs/<timestamp>/` с `run.json`, `export.log`, `snapshot.md`, `snapshot.txt`;
 - пишет только новые контакты в `1.txt`, `2.txt`, `3.txt` и так далее;
 - если `@username` внезапно сменил владельца (`peer_id`) между запусками, не пишет его в numbered batch, а кладёт случай в `review.txt` и `conflicts.json`.

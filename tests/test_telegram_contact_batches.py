@@ -56,12 +56,15 @@ class TelegramContactBatchesTests(unittest.TestCase):
         source = self.root / "source.txt"
         source.write_text("@known_111\n@new_222\n@new_333\n", encoding="utf-8")
 
-        count, path, review_count, review_path = self.mod.save_new_batch(source, batch_dir)
+        count, path, review_count, review_path, safe_md, safe_txt, safe_count = self.mod.save_new_batch(source, batch_dir)
 
         self.assertEqual(count, 2)
         self.assertEqual(path, batch_dir / "2.txt")
         self.assertEqual(review_count, 0)
         self.assertIsNone(review_path)
+        self.assertIsNone(safe_md)
+        self.assertIsNone(safe_txt)
+        self.assertEqual(safe_count, 0)
         self.assertEqual(path.read_text(encoding="utf-8"), "@new_222\n@new_333\n")
 
     def test_save_new_batch_skips_empty_delta(self) -> None:
@@ -72,12 +75,15 @@ class TelegramContactBatchesTests(unittest.TestCase):
         source = self.root / "source.txt"
         source.write_text("@known_111\n", encoding="utf-8")
 
-        count, path, review_count, review_path = self.mod.save_new_batch(source, batch_dir)
+        count, path, review_count, review_path, safe_md, safe_txt, safe_count = self.mod.save_new_batch(source, batch_dir)
 
         self.assertEqual(count, 0)
         self.assertIsNone(path)
         self.assertEqual(review_count, 0)
         self.assertIsNone(review_path)
+        self.assertIsNone(safe_md)
+        self.assertIsNone(safe_txt)
+        self.assertEqual(safe_count, 0)
         self.assertEqual([p.name for p in self.mod.numbered_batch_files(batch_dir)], ["1.txt"])
 
     def test_load_member_records_from_markdown_reads_username_and_peer(self) -> None:
@@ -98,6 +104,22 @@ class TelegramContactBatchesTests(unittest.TestCase):
         self.assertEqual(rows[0].name, "Alice")
         self.assertEqual(rows[0].username, "@alice_111")
 
+    def test_load_markdown_member_rows_keeps_status_and_role(self) -> None:
+        report = self.root / "latest_full.md"
+        report.write_text(
+            "# Report\n\n"
+            "| # | Имя | Username | Статус | Роль | Peer ID |\n"
+            "|---|---|---|---|---|---|\n"
+            "| 1 | Alice | @Alice_111 | online | admin | 111 |\n",
+            encoding="utf-8",
+        )
+
+        rows = self.mod.load_markdown_member_rows(report)
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].status, "online")
+        self.assertEqual(rows[0].role, "admin")
+
     def test_save_new_batch_quarantines_conflicting_identity(self) -> None:
         batch_dir = self.root / "chat"
         batch_dir.mkdir()
@@ -113,11 +135,15 @@ class TelegramContactBatchesTests(unittest.TestCase):
             encoding="utf-8",
         )
 
-        count, path, review_count, review_path = self.mod.save_new_batch(first_source, batch_dir, first_md)
+        count, path, review_count, review_path, safe_md, safe_txt, safe_count = self.mod.save_new_batch(first_source, batch_dir, first_md)
         self.assertEqual(count, 1)
         self.assertEqual(path, batch_dir / "1.txt")
         self.assertEqual(review_count, 0)
         self.assertIsNone(review_path)
+        self.assertEqual(safe_count, 1)
+        self.assertEqual(safe_md, batch_dir / "latest_safe.md")
+        self.assertEqual(safe_txt, batch_dir / "latest_safe.txt")
+        self.assertEqual(safe_txt.read_text(encoding="utf-8"), "@alice_111\n")
 
         second_source = self.root / "second_source.txt"
         second_source.write_text("@alice_111\n@bob_222\n", encoding="utf-8")
@@ -131,13 +157,19 @@ class TelegramContactBatchesTests(unittest.TestCase):
             encoding="utf-8",
         )
 
-        count, path, review_count, review_path = self.mod.save_new_batch(second_source, batch_dir, second_md)
+        count, path, review_count, review_path, safe_md, safe_txt, safe_count = self.mod.save_new_batch(second_source, batch_dir, second_md)
 
         self.assertEqual(count, 1)
         self.assertEqual(path, batch_dir / "2.txt")
         self.assertEqual(path.read_text(encoding="utf-8"), "@bob_222\n")
         self.assertEqual(review_count, 1)
         self.assertEqual(review_path, batch_dir / "review.txt")
+        self.assertEqual(safe_count, 1)
+        self.assertEqual(safe_md, batch_dir / "latest_safe.md")
+        self.assertEqual(safe_txt, batch_dir / "latest_safe.txt")
+        self.assertEqual(safe_txt.read_text(encoding="utf-8"), "@bob_222\n")
+        self.assertIn("@bob_222", safe_md.read_text(encoding="utf-8"))
+        self.assertNotIn("@alice_111", safe_md.read_text(encoding="utf-8"))
         self.assertIn("username_changed_owner", review_path.read_text(encoding="utf-8"))
 
         conflicts_json = batch_dir / "conflicts.json"
