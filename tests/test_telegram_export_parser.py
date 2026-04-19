@@ -272,6 +272,65 @@ class TelegramExportParserTests(unittest.TestCase):
         self.assertEqual(route, "peer")
         self.assertEqual(calls[0], '.bubbles .bubbles-group-avatar.user-avatar[data-peer-id="456"] .avatar-photo')
 
+    def test_should_run_chat_deep_step_runs_immediately_without_discovery_target(self) -> None:
+        should_run = self.mod._should_run_chat_deep_step(
+            step=2,
+            members_count=8,
+            min_members_target=0,
+            mode="mention",
+            chat_target_peer_id="",
+            chat_target_name="",
+        )
+
+        self.assertTrue(should_run)
+
+    def test_should_run_chat_deep_step_defers_url_mode_during_discovery(self) -> None:
+        should_run = self.mod._should_run_chat_deep_step(
+            step=3,
+            members_count=12,
+            min_members_target=50,
+            mode="url",
+            chat_target_peer_id="",
+            chat_target_name="",
+        )
+
+        self.assertFalse(should_run)
+
+    def test_should_run_chat_deep_step_allows_periodic_mention_during_discovery(self) -> None:
+        interval = int(self.mod.CHAT_DISCOVERY_MENTION_DEEP_INTERVAL)
+
+        should_skip = self.mod._should_run_chat_deep_step(
+            step=1,
+            members_count=12,
+            min_members_target=50,
+            mode="mention",
+            chat_target_peer_id="",
+            chat_target_name="",
+        )
+        should_run = self.mod._should_run_chat_deep_step(
+            step=interval,
+            members_count=12,
+            min_members_target=50,
+            mode="mention",
+            chat_target_peer_id="",
+            chat_target_name="",
+        )
+
+        self.assertFalse(should_skip)
+        self.assertTrue(should_run)
+
+    def test_should_run_chat_deep_step_does_not_defer_targeted_probe(self) -> None:
+        should_run = self.mod._should_run_chat_deep_step(
+            step=4,
+            members_count=12,
+            min_members_target=50,
+            mode="mention",
+            chat_target_peer_id="123",
+            chat_target_name="",
+        )
+
+        self.assertTrue(should_run)
+
     def test_scroll_chat_up_requires_actual_wheel_movement(self) -> None:
         responses = iter(
             [

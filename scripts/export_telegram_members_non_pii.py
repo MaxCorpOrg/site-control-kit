@@ -64,6 +64,7 @@ CHAT_ANCHOR_CONTEXT_SELECTORS = (
 CHAT_SCROLL_SETTLE_SEC = 0.35
 CHAT_SCROLL_DISTANCE_PX = 900
 CHAT_UNCHANGED_STEPS_LIMIT = 6
+CHAT_DISCOVERY_MENTION_DEEP_INTERVAL = max(int(os.environ.get("TELEGRAM_CHAT_DISCOVERY_MENTION_INTERVAL", "5") or "5"), 1)
 INFO_SCROLL_SETTLE_SEC = 0.8
 CHAT_DEEP_DEFAULT_LIMIT = 3
 X11_WHEEL_FALLBACK_ENABLED = os.environ.get("TELEGRAM_X11_WHEEL_FALLBACK", "1").strip().lower() not in {"0", "false", "no"}
@@ -1115,6 +1116,29 @@ def _extract_total_members_hint(html_payload: str) -> int | None:
     return None
 
 
+def _should_run_chat_deep_step(
+    *,
+    step: int,
+    members_count: int,
+    min_members_target: int,
+    mode: str,
+    chat_target_peer_id: str,
+    chat_target_name: str,
+) -> bool:
+    if chat_target_peer_id or chat_target_name:
+        return True
+
+    target = max(int(min_members_target), 0)
+    if target <= 0 or members_count >= target:
+        return True
+
+    normalized_mode = str(mode or "").strip().lower()
+    if normalized_mode in ("url", "full"):
+        return False
+
+    return step == 0 or step % CHAT_DISCOVERY_MENTION_DEEP_INTERVAL == 0
+
+
 def _dedupe_members(members: list[dict[str, str]]) -> list[dict[str, str]]:
     merged: dict[str, dict[str, str]] = {}
     order: list[str] = []
@@ -1822,6 +1846,7 @@ def _collect_members_from_chat(
     deep_seen_peer_ids: set[str] = set()
     deep_attempted_total = 0
     deep_updated_total = 0
+    deep_deferred_steps = 0
     runtime_limited = False
 
     for step in range(max(0, scroll_steps) + 1):
@@ -1912,31 +1937,45 @@ def _collect_members_from_chat(
                 if deep_targets:
                     deep_targets = deep_targets[:1]
                 if deep_targets:
-                    elapsed = time.time() - started_at
-                    remaining_runtime = max(2.0, float(max_runtime_sec) - elapsed - 2.0)
-                    deep_runtime_budget = remaining_runtime
-                    attempted, updated, opened, opened_peer_ids = _enrich_usernames_deep_chat(
-                        server=server,
-                        token=token,
-                        client_id=client_id,
-                        tab_id=tab_id,
-                        timeout_sec=max(timeout_sec, 5),
-                        members=deep_targets,
-                        all_members=members,
-                        group_url=group_url,
-                        max_runtime_sec=deep_runtime_budget,
+                    if not _should_run_chat_deep_step(
+                        step=step,
+                        members_count=len(members),
+                        min_members_target=min_members_target,
                         mode=chat_deep_mode,
-                        historical_username_to_peer=historical_username_to_peer,
-                        historical_peer_to_username=historical_peer_to_username,
-                    )
-                    deep_attempted_total += attempted
-                    deep_updated_total += updated
-                    for peer_id in opened_peer_ids:
-                        deep_seen_peer_ids.add(peer_id)
-                    print(
-                        f"INFO: chat deep step {step}: processed {attempted}, "
-                        f"opened {opened}, filled {updated}, total_filled {deep_updated_total}"
-                    )
+                        chat_target_peer_id=chat_target_peer_id,
+                        chat_target_name=chat_target_name,
+                    ):
+                        deep_deferred_steps += 1
+                        print(
+                            f"INFO: defer chat deep at step {step} "
+                            f"(members {len(members)}/{max(int(min_members_target), 0)}, mode={chat_deep_mode})"
+                        )
+                    else:
+                        elapsed = time.time() - started_at
+                        remaining_runtime = max(2.0, float(max_runtime_sec) - elapsed - 2.0)
+                        deep_runtime_budget = remaining_runtime
+                        attempted, updated, opened, opened_peer_ids = _enrich_usernames_deep_chat(
+                            server=server,
+                            token=token,
+                            client_id=client_id,
+                            tab_id=tab_id,
+                            timeout_sec=max(timeout_sec, 5),
+                            members=deep_targets,
+                            all_members=members,
+                            group_url=group_url,
+                            max_runtime_sec=deep_runtime_budget,
+                            mode=chat_deep_mode,
+                            historical_username_to_peer=historical_username_to_peer,
+                            historical_peer_to_username=historical_peer_to_username,
+                        )
+                        deep_attempted_total += attempted
+                        deep_updated_total += updated
+                        for peer_id in opened_peer_ids:
+                            deep_seen_peer_ids.add(peer_id)
+                        print(
+                            f"INFO: chat deep step {step}: processed {attempted}, "
+                            f"opened {opened}, filled {updated}, total_filled {deep_updated_total}"
+                        )
 
         if max_members_effective and len(members) > max_members_effective:
             members = members[:max_members_effective]
@@ -1980,6 +2019,7 @@ def _collect_members_from_chat(
         "scroll_steps_done": scroll_steps_done,
         "deep_attempted": deep_attempted_total,
         "deep_updated": deep_updated_total,
+        "deep_deferred_steps": deep_deferred_steps,
         "runtime_limited": int(runtime_limited),
     }
     return members, stats
@@ -3239,6 +3279,7 @@ def main() -> int:
             if args.source in ("chat", "both"):
                 chat_attempted = int(chat_stats.get("deep_attempted", 0))
                 chat_updated = int(chat_stats.get("deep_updated", 0))
+                deep_deferred_steps = int(chat_stats.get("deep_deferred_steps", 0))
                 runtime_limited = bool(int(chat_stats.get("runtime_limited", 0)))
                 mention_attempted = 0
                 mention_updated = 0
@@ -3264,7 +3305,26 @@ def main() -> int:
                 elif runtime_limited:
                     print("INFO: skip mention deep because chat runtime limit was reached")
                 elif unresolved > 0 and args.chat_deep_mode == "mention":
-                    print("INFO: skip extra mention-deep pass in mention mode")
+                    if deep_deferred_steps > 0:
+                        mention_attempted, mention_updated = _enrich_chat_usernames_via_mentions(
+                            server=server,
+                            token=token,
+                            client_id=client_id,
+                            tab_id=tab_id,
+                            timeout_sec=max(args.timeout, 5),
+                            group_url=group_url,
+                            members=members,
+                            deep_limit=max(args.chat_deep_limit, 0),
+                            historical_username_to_peer=historical_username_to_peer,
+                            historical_peer_to_username=historical_peer_to_username,
+                        )
+                        if mention_attempted:
+                            print(
+                                f"INFO: chat mention catch-up done: processed {mention_attempted}, "
+                                f"filled {mention_updated}"
+                            )
+                    else:
+                        print("INFO: skip extra mention-deep pass in mention mode")
 
                 attempted += chat_attempted + mention_attempted
                 updated += chat_updated + mention_updated
