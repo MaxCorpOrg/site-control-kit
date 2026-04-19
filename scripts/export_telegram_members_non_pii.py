@@ -67,6 +67,8 @@ CHAT_UNCHANGED_STEPS_LIMIT = 6
 CHAT_DISCOVERY_MENTION_DEEP_INTERVAL = max(int(os.environ.get("TELEGRAM_CHAT_DISCOVERY_MENTION_INTERVAL", "5") or "5"), 1)
 CHAT_DISCOVERY_SCROLL_BURST = max(int(os.environ.get("TELEGRAM_CHAT_DISCOVERY_SCROLL_BURST", "2") or "2"), 1)
 CHAT_DISCOVERY_BURST_SETTLE_SEC = max(float(os.environ.get("TELEGRAM_CHAT_DISCOVERY_BURST_SETTLE_SEC", "0.12") or "0.12"), 0.02)
+DISCOVERY_STATE_MAX_SIGNATURES = max(int(os.environ.get("TELEGRAM_DISCOVERY_STATE_MAX_SIGNATURES", "400") or "400"), 50)
+DISCOVERY_STATE_MAX_PEERS = max(int(os.environ.get("TELEGRAM_DISCOVERY_STATE_MAX_PEERS", "5000") or "5000"), 100)
 INFO_SCROLL_SETTLE_SEC = 0.8
 CHAT_DEEP_DEFAULT_LIMIT = 3
 X11_WHEEL_FALLBACK_ENABLED = os.environ.get("TELEGRAM_X11_WHEEL_FALLBACK", "1").strip().lower() not in {"0", "false", "no"}
@@ -1126,6 +1128,7 @@ def _should_run_chat_deep_step(
     mode: str,
     chat_target_peer_id: str,
     chat_target_name: str,
+    known_view_signature: bool = False,
 ) -> bool:
     if chat_target_peer_id or chat_target_name:
         return True
@@ -1133,6 +1136,8 @@ def _should_run_chat_deep_step(
     target = max(int(min_members_target), 0)
     if target <= 0 or members_count >= target:
         return True
+    if known_view_signature:
+        return False
 
     normalized_mode = str(mode or "").strip().lower()
     if normalized_mode in ("url", "full"):
@@ -1626,6 +1631,54 @@ def _load_identity_history(history_path: Path | None) -> tuple[dict[str, str], d
     return username_to_peer, peer_to_username
 
 
+def _load_discovery_state(discovery_state_path: Path | None) -> dict[str, Any]:
+    if discovery_state_path is None or not discovery_state_path.exists():
+        return {
+            "version": 1,
+            "updated_at": "",
+            "seen_view_signatures": [],
+            "seen_peer_ids": [],
+        }
+    try:
+        payload = json.loads(discovery_state_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {
+            "version": 1,
+            "updated_at": "",
+            "seen_view_signatures": [],
+            "seen_peer_ids": [],
+        }
+    if not isinstance(payload, dict):
+        payload = {}
+    seen_view_signatures_raw = payload.get("seen_view_signatures")
+    seen_peer_ids_raw = payload.get("seen_peer_ids")
+    seen_view_signatures = []
+    if isinstance(seen_view_signatures_raw, list):
+        seen_view_signatures = [str(value).strip() for value in seen_view_signatures_raw if str(value).strip()]
+    seen_peer_ids = []
+    if isinstance(seen_peer_ids_raw, list):
+        seen_peer_ids = [str(value).strip() for value in seen_peer_ids_raw if str(value).strip()]
+    return {
+        "version": 1,
+        "updated_at": str(payload.get("updated_at") or ""),
+        "seen_view_signatures": seen_view_signatures[-DISCOVERY_STATE_MAX_SIGNATURES:],
+        "seen_peer_ids": seen_peer_ids[-DISCOVERY_STATE_MAX_PEERS:],
+    }
+
+
+def _save_discovery_state(discovery_state_path: Path | None, discovery_state: dict[str, Any] | None) -> None:
+    if discovery_state_path is None or discovery_state is None:
+        return
+    discovery_state_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "version": 1,
+        "updated_at": dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat(),
+        "seen_view_signatures": list((discovery_state.get("seen_view_signatures") or []))[-DISCOVERY_STATE_MAX_SIGNATURES:],
+        "seen_peer_ids": list((discovery_state.get("seen_peer_ids") or []))[-DISCOVERY_STATE_MAX_PEERS:],
+    }
+    discovery_state_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
 def _log_username_assignment_conflict(username: str, peer_id: str, conflict_value: str | None, reason: str | None) -> None:
     if reason == "historical_username_owner":
         print(
@@ -1854,6 +1907,7 @@ def _collect_members_from_chat(
     max_members: int = 0,
     historical_username_to_peer: dict[str, str] | None = None,
     historical_peer_to_username: dict[str, str] | None = None,
+    discovery_state: dict[str, Any] | None = None,
     on_progress: Callable[[list[dict[str, str]], str], None] | None = None,
 ) -> tuple[list[dict[str, str]], dict[str, int]]:
     members: list[dict[str, str]] = []
@@ -1869,11 +1923,34 @@ def _collect_members_from_chat(
     scroll_steps_done = 0
     burst_scrolls_done = 0
     discovery_stall_steps = 0
+    revisited_view_steps = 0
     deep_seen_peer_ids: set[str] = set()
     deep_attempted_total = 0
     deep_updated_total = 0
     deep_deferred_steps = 0
     runtime_limited = False
+    seen_view_signatures: list[str] = []
+    seen_view_signature_set: set[str] = set()
+    seen_peer_ids: list[str] = []
+    seen_peer_id_set: set[str] = set()
+
+    if isinstance(discovery_state, dict):
+        raw_view_signatures = discovery_state.get("seen_view_signatures") or []
+        raw_peer_ids = discovery_state.get("seen_peer_ids") or []
+        if isinstance(raw_view_signatures, list):
+            for value in raw_view_signatures:
+                signature = str(value or "").strip()
+                if not signature or signature in seen_view_signature_set:
+                    continue
+                seen_view_signatures.append(signature)
+                seen_view_signature_set.add(signature)
+        if isinstance(raw_peer_ids, list):
+            for value in raw_peer_ids:
+                peer_id = str(value or "").strip()
+                if not peer_id or peer_id in seen_peer_id_set:
+                    continue
+                seen_peer_ids.append(peer_id)
+                seen_peer_id_set.add(peer_id)
 
     for step in range(max(0, scroll_steps) + 1):
         if time.time() - started_at > max(max_runtime_sec, 5):
@@ -1903,11 +1980,18 @@ def _collect_members_from_chat(
 
         chat_members = _parse_chat_members(html_payload)
         current_view_signature = _extract_chat_view_signature(html_payload)
+        known_view_signature = bool(current_view_signature and current_view_signature in seen_view_signature_set)
 
         if chat_members:
             members.extend(chat_members)
             members = _dedupe_members(members)
             empty_steps = 0
+            for item in chat_members:
+                peer_id = str(item.get("peer_id") or "").strip()
+                if not peer_id or peer_id in seen_peer_id_set:
+                    continue
+                seen_peer_ids.append(peer_id)
+                seen_peer_id_set.add(peer_id)
         else:
             empty_steps += 1
 
@@ -1972,6 +2056,7 @@ def _collect_members_from_chat(
                         mode=chat_deep_mode,
                         chat_target_peer_id=chat_target_peer_id,
                         chat_target_name=chat_target_name,
+                        known_view_signature=known_view_signature,
                     ):
                         deep_deferred_steps += 1
                         deep_deferred_this_step = True
@@ -2032,9 +2117,27 @@ def _collect_members_from_chat(
         else:
             unchanged_steps = 0
             discovery_stall_steps = 0
+        if known_view_signature and min_members_target > 0 and current_member_count < min_members_target:
+            revisited_view_steps += 1
+            discovery_stall_steps += 1
+            print(
+                f"INFO: revisit known chat view at step {step} "
+                f"(members {current_member_count}/{min_members_target})"
+            )
         previous_min_ts = min_ts
         previous_member_count = current_member_count
         previous_view_signature = current_view_signature
+        if current_view_signature and current_view_signature not in seen_view_signature_set:
+            seen_view_signatures.append(current_view_signature)
+            seen_view_signature_set.add(current_view_signature)
+            if len(seen_view_signatures) > DISCOVERY_STATE_MAX_SIGNATURES:
+                drop = seen_view_signatures.pop(0)
+                seen_view_signature_set.discard(drop)
+        if len(seen_peer_ids) > DISCOVERY_STATE_MAX_PEERS:
+            overflow = len(seen_peer_ids) - DISCOVERY_STATE_MAX_PEERS
+            for _ in range(overflow):
+                drop = seen_peer_ids.pop(0)
+                seen_peer_id_set.discard(drop)
 
         if step >= scroll_steps:
             break
@@ -2076,11 +2179,15 @@ def _collect_members_from_chat(
         "unique_members": len(members),
         "scroll_steps_done": scroll_steps_done,
         "burst_scrolls_done": burst_scrolls_done,
+        "revisited_view_steps": revisited_view_steps,
         "deep_attempted": deep_attempted_total,
         "deep_updated": deep_updated_total,
         "deep_deferred_steps": deep_deferred_steps,
         "runtime_limited": int(runtime_limited),
     }
+    if isinstance(discovery_state, dict):
+        discovery_state["seen_view_signatures"] = seen_view_signatures[-DISCOVERY_STATE_MAX_SIGNATURES:]
+        discovery_state["seen_peer_ids"] = seen_peer_ids[-DISCOVERY_STATE_MAX_PEERS:]
     return members, stats
 
 
@@ -3115,6 +3222,11 @@ def build_parser() -> argparse.ArgumentParser:
         default="",
         help="JSON-файл с историей peer_id <-> username для защиты от ложных переназначений.",
     )
+    parser.add_argument(
+        "--discovery-state",
+        default="",
+        help="JSON-файл с историей discovery-проходов чата (виденные view signatures и peer_id).",
+    )
     return parser
 
 
@@ -3128,11 +3240,18 @@ def main() -> int:
     out_path = Path(args.output).expanduser()
     out_path.parent.mkdir(parents=True, exist_ok=True)
     identity_history_path = Path(args.identity_history).expanduser() if args.identity_history else None
+    discovery_state_path = Path(args.discovery_state).expanduser() if args.discovery_state else None
     historical_username_to_peer, historical_peer_to_username = _load_identity_history(identity_history_path)
+    discovery_state = _load_discovery_state(discovery_state_path)
     if historical_username_to_peer or historical_peer_to_username:
         print(
             f"INFO: loaded identity history: usernames={len(historical_username_to_peer)}, "
             f"peers={len(historical_peer_to_username)}"
+        )
+    if discovery_state.get("seen_view_signatures") or discovery_state.get("seen_peer_ids"):
+        print(
+            f"INFO: loaded discovery state: signatures={len(discovery_state.get('seen_view_signatures') or [])}, "
+            f"peers={len(discovery_state.get('seen_peer_ids') or [])}"
         )
 
     def _write_progress_snapshot(current_members: list[dict[str, str]], mode_label: str, stage: str) -> None:
@@ -3300,6 +3419,7 @@ def main() -> int:
                 max_members=max(args.max_members, 0),
                 historical_username_to_peer=historical_username_to_peer,
                 historical_peer_to_username=historical_peer_to_username,
+                discovery_state=discovery_state,
                 on_progress=_on_chat_progress,
             )
             if not chat_members:
@@ -3396,6 +3516,7 @@ def main() -> int:
             print(f"INFO: deep mode processed {attempted} profiles, filled {updated} usernames")
 
         _write_markdown(out_path, members, group_url, source_label)
+        _save_discovery_state(discovery_state_path, discovery_state)
 
         print(f"OK: saved {len(members)} members to {out_path}")
         return 0

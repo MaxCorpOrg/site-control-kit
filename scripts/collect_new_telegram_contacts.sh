@@ -52,6 +52,7 @@ export CHAT_DEEP_MODE="${CHAT_DEEP_MODE:-full}"
 export CHAT_MIN_MEMBERS="${CHAT_MIN_MEMBERS:-0}"
 export CHAT_MAX_MEMBERS="${CHAT_MAX_MEMBERS:-0}"
 export CHAT_IDENTITY_HISTORY="${chat_dir}/identity_history.json"
+export CHAT_DISCOVERY_STATE="${chat_dir}/discovery_state.json"
 
 cleanup() {
   rm -f "${temp_md}" "${temp_txt}"
@@ -155,6 +156,7 @@ payload = {
     "min_members": int(${CHAT_MIN_MEMBERS@Q}),
     "max_members": int(${CHAT_MAX_MEMBERS@Q}),
     "identity_history_path": ${CHAT_IDENTITY_HISTORY@Q},
+    "discovery_state_path": ${CHAT_DISCOVERY_STATE@Q},
     "created": int(${created_value@Q}),
     "new_usernames": int(${count_value@Q}),
     "batch_path": ${batch_path_value@Q},

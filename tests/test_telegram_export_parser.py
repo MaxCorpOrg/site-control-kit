@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import tempfile
 import unittest
 from http.client import RemoteDisconnected
 from pathlib import Path
@@ -331,6 +332,19 @@ class TelegramExportParserTests(unittest.TestCase):
 
         self.assertTrue(should_run)
 
+    def test_should_run_chat_deep_step_defers_known_view_during_discovery(self) -> None:
+        should_run = self.mod._should_run_chat_deep_step(
+            step=0,
+            members_count=12,
+            min_members_target=50,
+            mode="mention",
+            chat_target_peer_id="",
+            chat_target_name="",
+            known_view_signature=True,
+        )
+
+        self.assertFalse(should_run)
+
     def test_extract_chat_view_signature_uses_top_mid_peer_and_timestamp(self) -> None:
         html = (
             '<div class="avatar avatar-like bubbles-group-avatar user-avatar" data-peer-id="789">AB</div>'
@@ -345,6 +359,29 @@ class TelegramExportParserTests(unittest.TestCase):
 
     def test_extract_chat_view_signature_returns_empty_for_empty_html(self) -> None:
         self.assertEqual(self.mod._extract_chat_view_signature(""), "")
+
+    def test_discovery_state_roundtrip_preserves_signatures_and_peers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "discovery_state.json"
+            self.mod._save_discovery_state(
+                path,
+                {
+                    "seen_view_signatures": ["mid=1|peer=2|ts=3"],
+                    "seen_peer_ids": ["111", "222"],
+                },
+            )
+
+            payload = self.mod._load_discovery_state(path)
+
+        self.assertEqual(payload["seen_view_signatures"], ["mid=1|peer=2|ts=3"])
+        self.assertEqual(payload["seen_peer_ids"], ["111", "222"])
+
+    def test_load_discovery_state_returns_empty_payload_for_missing_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            payload = self.mod._load_discovery_state(Path(tmpdir) / "missing.json")
+
+        self.assertEqual(payload["seen_view_signatures"], [])
+        self.assertEqual(payload["seen_peer_ids"], [])
 
     def test_scroll_chat_up_requires_actual_wheel_movement(self) -> None:
         responses = iter(
