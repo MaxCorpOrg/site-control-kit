@@ -48,6 +48,19 @@ CHAT_SCROLL_SELECTORS = (
     "#column-center .bubbles [data-mid]",
     ".chat.tabs-tab.active .bubbles",
 )
+CHAT_ANCHOR_AVATAR_SELECTORS = (
+    ".chat.tabs-tab.active .bubbles .bubbles-group-avatar.user-avatar",
+    "#column-center .bubbles .bubbles-group-avatar.user-avatar",
+    ".bubbles .bubbles-group-avatar.user-avatar",
+)
+CHAT_ANCHOR_CONTEXT_SELECTORS = (
+    ".chat.tabs-tab.active .bubbles .bubbles-group-avatar.user-avatar .avatar-photo",
+    ".chat.tabs-tab.active .bubbles .bubbles-group-avatar.user-avatar",
+    "#column-center .bubbles .bubbles-group-avatar.user-avatar .avatar-photo",
+    "#column-center .bubbles .bubbles-group-avatar.user-avatar",
+    ".bubbles .bubbles-group-avatar.user-avatar .avatar-photo",
+    ".bubbles .bubbles-group-avatar.user-avatar",
+)
 CHAT_SCROLL_SETTLE_SEC = 0.35
 CHAT_SCROLL_DISTANCE_PX = 900
 CHAT_UNCHANGED_STEPS_LIMIT = 6
@@ -598,6 +611,74 @@ def _clear_composer_text(
     )
 
 
+def _get_chat_anchor_peer_id(
+    server: str,
+    token: str,
+    client_id: str,
+    tab_id: int,
+) -> str:
+    # Telegram frequently exposes the currently anchored sender avatar as the
+    # first visible group avatar while scrolling. Use that stable element when
+    # message-local selectors are flaky.
+    for selector in CHAT_ANCHOR_AVATAR_SELECTORS:
+        result = _send_command_result(
+            server=server,
+            token=token,
+            client_id=client_id,
+            tab_id=tab_id,
+            timeout_sec=2,
+            command={"type": "get_attribute", "selector": selector, "attribute": "data-peer-id"},
+            raise_on_fail=False,
+        )
+        data = result.get("data") or {}
+        peer_id = str(data.get("value") or "").strip() if isinstance(data, dict) else ""
+        if peer_id.isdigit():
+            return peer_id
+    return ""
+
+
+def _chat_peer_context_selectors(peer_id: str) -> tuple[str, ...]:
+    return (
+        f'.bubbles .bubbles-group-avatar.user-avatar[data-peer-id="{peer_id}"] .avatar-photo',
+        f'.bubbles .bubbles-group-avatar.user-avatar[data-peer-id="{peer_id}"]',
+        f'.peer-title.bubble-name-first[data-peer-id="{peer_id}"]',
+        f'.bubbles .peer-title[data-peer-id="{peer_id}"]',
+    )
+
+
+def _open_chat_peer_context_menu(
+    server: str,
+    token: str,
+    client_id: str,
+    tab_id: int,
+    peer_id: str,
+) -> tuple[bool, str]:
+    tried_selectors: set[str] = set()
+    anchor_peer_id = _get_chat_anchor_peer_id(server, token, client_id, tab_id)
+    selector_groups: list[tuple[str, tuple[str, ...]]] = []
+    if anchor_peer_id and anchor_peer_id == peer_id:
+        selector_groups.append(("anchor", CHAT_ANCHOR_CONTEXT_SELECTORS))
+    selector_groups.append(("peer", _chat_peer_context_selectors(peer_id)))
+
+    for route, selectors in selector_groups:
+        for selector in selectors:
+            if selector in tried_selectors:
+                continue
+            tried_selectors.add(selector)
+            opened = _send_command_result(
+                server=server,
+                token=token,
+                client_id=client_id,
+                tab_id=tab_id,
+                timeout_sec=2,
+                command={"type": "context_click", "selector": selector, "timeout_ms": 900},
+                raise_on_fail=False,
+            )
+            if opened.get("ok"):
+                return True, route
+    return False, ""
+
+
 def _try_username_via_mention_action(
     server: str,
     token: str,
@@ -608,28 +689,33 @@ def _try_username_via_mention_action(
     # Prevent stale @username from previous attempts.
     _clear_composer_text(server, token, client_id, tab_id)
 
-    clicked_context = False
-    for selector in (
-        f'.bubbles .bubbles-group-avatar.user-avatar[data-peer-id="{peer_id}"] .avatar-photo',
-        f'.bubbles .bubbles-group-avatar.user-avatar[data-peer-id="{peer_id}"]',
-        f'.peer-title.bubble-name-first[data-peer-id="{peer_id}"]',
-        f'.bubbles .peer-title[data-peer-id="{peer_id}"]',
-    ):
-        opened = _send_command_result(
-            server=server,
-            token=token,
-            client_id=client_id,
-            tab_id=tab_id,
-            timeout_sec=2,
-            command={"type": "context_click", "selector": selector, "timeout_ms": 900},
-            raise_on_fail=False,
-        )
-        if opened.get("ok"):
-            clicked_context = True
-            break
+    clicked_context, context_route = _open_chat_peer_context_menu(
+        server=server,
+        token=token,
+        client_id=client_id,
+        tab_id=tab_id,
+        peer_id=peer_id,
+    )
     if not clicked_context:
         print(f"WARN: mention context menu not opened for peer {peer_id}")
         return "—"
+    if context_route == "anchor":
+        print(f"INFO: mention context for peer {peer_id} opened via anchor avatar")
+
+    _send_command_result(
+        server=server,
+        token=token,
+        client_id=client_id,
+        tab_id=tab_id,
+        timeout_sec=2,
+        command={
+            "type": "wait_selector",
+            "selector": "#bubble-contextmenu.active, .btn-menu.contextmenu.active, #bubble-contextmenu, .btn-menu.contextmenu",
+            "timeout_ms": 1200,
+            "visible_only": False,
+        },
+        raise_on_fail=False,
+    )
 
     mention_click_ok = False
     mention_terms = [
@@ -642,9 +728,7 @@ def _try_username_via_mention_action(
         "mencao",
     ]
     if not mention_click_ok:
-        # Single pass is enough here: repeating menu search tends to stall progress
-        # when UI is unstable during continuous chat scrolling.
-        for _ in range(1):
+        for _ in range(3):
             for root_selector in (
                 "#bubble-contextmenu.active",
                 "#bubble-contextmenu",
@@ -656,7 +740,7 @@ def _try_username_via_mention_action(
                     token=token,
                     client_id=client_id,
                     tab_id=tab_id,
-                    timeout_sec=1,
+                    timeout_sec=2,
                     command={
                         "type": "click_text",
                         "root_selector": root_selector,
@@ -670,7 +754,7 @@ def _try_username_via_mention_action(
                     break
             if mention_click_ok:
                 break
-            time.sleep(0.14)
+            time.sleep(0.12)
     if not mention_click_ok:
         print(f"WARN: mention item not clicked for peer {peer_id}")
         return "—"
@@ -1812,6 +1896,14 @@ def _collect_members_from_chat(
                     target_key = _name_key(chat_target_name)
                     if target_key:
                         deep_targets = [item for item in deep_targets if target_key in _name_key(str(item.get("name") or ""))]
+                chat_anchor_peer_id = ""
+                if deep_targets:
+                    chat_anchor_peer_id = _get_chat_anchor_peer_id(server, token, client_id, tab_id)
+                if chat_anchor_peer_id:
+                    deep_targets = sorted(
+                        deep_targets,
+                        key=lambda item: 0 if str(item.get("peer_id") or "").strip() == chat_anchor_peer_id else 1,
+                    )
                 limit = max(int(chat_deep_limit), 0)
                 if limit <= 0:
                     deep_targets = []

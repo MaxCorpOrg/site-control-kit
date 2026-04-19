@@ -228,6 +228,50 @@ class TelegramExportParserTests(unittest.TestCase):
         self.assertEqual(client_id, "client-1")
         self.assertEqual(tab_id, 202)
 
+    def test_get_chat_anchor_peer_id_reads_visible_avatar_attribute(self) -> None:
+        with mock.patch.object(
+            self.mod,
+            "_send_command_result",
+            return_value={"ok": True, "data": {"value": "1621138520"}},
+        ):
+            peer_id = self.mod._get_chat_anchor_peer_id("server", "token", "client", 7)
+
+        self.assertEqual(peer_id, "1621138520")
+
+    def test_open_chat_peer_context_menu_prefers_anchor_route_when_peer_matches(self) -> None:
+        calls: list[str] = []
+
+        def _fake_send_command_result(**kwargs):
+            selector = str(kwargs.get("command", {}).get("selector") or "")
+            calls.append(selector)
+            return {"ok": True}
+
+        with mock.patch.object(self.mod, "_get_chat_anchor_peer_id", return_value="123"):
+            with mock.patch.object(self.mod, "_send_command_result", side_effect=_fake_send_command_result):
+                opened, route = self.mod._open_chat_peer_context_menu("server", "token", "client", 7, "123")
+
+        self.assertTrue(opened)
+        self.assertEqual(route, "anchor")
+        self.assertEqual(calls[0], self.mod.CHAT_ANCHOR_CONTEXT_SELECTORS[0])
+
+    def test_open_chat_peer_context_menu_falls_back_to_peer_route_when_anchor_differs(self) -> None:
+        calls: list[str] = []
+
+        def _fake_send_command_result(**kwargs):
+            selector = str(kwargs.get("command", {}).get("selector") or "")
+            calls.append(selector)
+            if selector == '.bubbles .bubbles-group-avatar.user-avatar[data-peer-id="456"] .avatar-photo':
+                return {"ok": True}
+            return {"ok": False}
+
+        with mock.patch.object(self.mod, "_get_chat_anchor_peer_id", return_value="123"):
+            with mock.patch.object(self.mod, "_send_command_result", side_effect=_fake_send_command_result):
+                opened, route = self.mod._open_chat_peer_context_menu("server", "token", "client", 7, "456")
+
+        self.assertTrue(opened)
+        self.assertEqual(route, "peer")
+        self.assertEqual(calls[0], '.bubbles .bubbles-group-avatar.user-avatar[data-peer-id="456"] .avatar-photo')
+
     def test_scroll_chat_up_requires_actual_wheel_movement(self) -> None:
         responses = iter(
             [

@@ -4,6 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AUTO_SCRIPT="${SCRIPT_DIR}/auto_collect_usernames.sh"
 BATCH_HELPER="${SCRIPT_DIR}/telegram_contact_batches.py"
+SAFE_HELPER="${SCRIPT_DIR}/write_telegram_safe_snapshot.py"
 
 GROUP_URL="${1:-}"
 OUTPUT_ROOT="${2:-${HOME}/telegram_contact_batches}"
@@ -36,6 +37,12 @@ mkdir -p "${run_dir}"
 
 temp_md="$(mktemp /tmp/telegram_contact_batch.XXXXXX.md)"
 temp_txt="${temp_md%.md}_usernames.txt"
+interrupted="0"
+partial_review_count="0"
+partial_review_path=""
+partial_safe_count="0"
+partial_safe_md=""
+partial_safe_txt=""
 
 export CHAT_SCROLL_STEPS="${CHAT_SCROLL_STEPS:-12}"
 export CHAT_DEEP_LIMIT="${CHAT_DEEP_LIMIT:-40}"
@@ -49,7 +56,74 @@ export CHAT_IDENTITY_HISTORY="${chat_dir}/identity_history.json"
 cleanup() {
   rm -f "${temp_md}" "${temp_txt}"
 }
+mark_interrupted() {
+  interrupted="1"
+}
+trap mark_interrupted INT TERM
 trap cleanup EXIT
+
+extract_usernames_txt() {
+  local md_file="$1"
+  local txt_file="$2"
+  python3 - "$md_file" "$txt_file" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+md = Path(sys.argv[1])
+out = Path(sys.argv[2])
+text = md.read_text(encoding="utf-8", errors="ignore")
+seen = set()
+rows = []
+for line in text.splitlines():
+    m = re.search(r"\|\s*\d+\s*\|.*\|\s*(@[A-Za-z0-9_]{5,32})\s*\|", line)
+    if not m:
+        continue
+    username = m.group(1)
+    key = username.lower()
+    if key in seen:
+        continue
+    seen.add(key)
+    rows.append(username)
+out.write_text("\n".join(rows) + ("\n" if rows else ""), encoding="utf-8")
+PY
+}
+
+prepare_partial_artifacts() {
+  partial_review_count="0"
+  partial_review_path=""
+  partial_safe_count="0"
+  partial_safe_md=""
+  partial_safe_txt=""
+
+  if [[ ! -s "${temp_md}" ]]; then
+    return 1
+  fi
+
+  extract_usernames_txt "${temp_md}" "${temp_txt}"
+  cp "${temp_md}" "${run_dir}/snapshot.md"
+  cp "${temp_txt}" "${run_dir}/snapshot.txt"
+
+  if [[ -f "${SAFE_HELPER}" ]]; then
+    local safe_output
+    safe_output="$(python3 "${SAFE_HELPER}" --source-md "${temp_md}" --directory "${run_dir}" 2>/dev/null || true)"
+    partial_review_count="$(printf '%s\n' "${safe_output}" | sed -n 's/^review_count=//p')"
+    partial_review_path="$(printf '%s\n' "${safe_output}" | sed -n 's/^review_path=//p')"
+    partial_safe_count="$(printf '%s\n' "${safe_output}" | sed -n 's/^safe_count=//p')"
+    partial_safe_md="$(printf '%s\n' "${safe_output}" | sed -n 's/^safe_md=//p')"
+    partial_safe_txt="$(printf '%s\n' "${safe_output}" | sed -n 's/^safe_txt=//p')"
+
+    if [[ -n "${partial_safe_md}" && -f "${partial_safe_md}" ]]; then
+      cp "${partial_safe_md}" "${run_dir}/snapshot_safe.md"
+      partial_safe_md="${run_dir}/snapshot_safe.md"
+    fi
+    if [[ -n "${partial_safe_txt}" && -f "${partial_safe_txt}" ]]; then
+      cp "${partial_safe_txt}" "${run_dir}/snapshot_safe.txt"
+      partial_safe_txt="${run_dir}/snapshot_safe.txt"
+    fi
+  fi
+  return 0
+}
 
 write_run_json() {
   local status="$1"
@@ -61,6 +135,8 @@ write_run_json() {
   local safe_count_value="$7"
   local safe_md_value="$8"
   local safe_txt_value="$9"
+  local exit_code_value="${10}"
+  local interrupted_value="${11}"
   python3 - "${run_dir}/run.json" <<PY
 import json
 import sys
@@ -87,6 +163,8 @@ payload = {
     "safe_count": int(${safe_count_value@Q}),
     "latest_safe_md": ${safe_md_value@Q},
     "latest_safe_txt": ${safe_txt_value@Q},
+    "exit_code": int(${exit_code_value@Q}),
+    "interrupted": bool(int(${interrupted_value@Q})),
     "latest_full_md": ${chat_dir@Q} + "/latest_full.md",
     "latest_full_txt": ${chat_dir@Q} + "/latest_full.txt",
     "snapshot_safe_md": ${run_dir@Q} + "/snapshot_safe.md",
@@ -101,8 +179,26 @@ with open(sys.argv[1], "w", encoding="utf-8") as fh:
 PY
 }
 
-if ! bash "${AUTO_SCRIPT}" "${GROUP_URL}" "${temp_md}" 2>&1 | tee "${run_dir}/export.log"; then
-  write_run_json "failed" "0" "0" "" "0" "" "0" "" ""
+set +e
+bash "${AUTO_SCRIPT}" "${GROUP_URL}" "${temp_md}" 2>&1 | tee "${run_dir}/export.log"
+pipe_status=("${PIPESTATUS[@]}")
+set -e
+export_status="${pipe_status[0]:-1}"
+tee_status="${pipe_status[1]:-1}"
+
+if [[ "${interrupted}" == "1" || "${export_status}" == "130" || "${export_status}" == "143" ]]; then
+  if prepare_partial_artifacts; then
+    write_run_json "partial" "0" "0" "" "${partial_review_count:-0}" "${partial_review_path:-}" "${partial_safe_count:-0}" "${partial_safe_md:-}" "${partial_safe_txt:-}" "${export_status:-130}" "1"
+    echo "WARN: export interrupted, partial snapshot saved to ${run_dir}" >&2
+  else
+    write_run_json "partial" "0" "0" "" "0" "" "0" "" "" "${export_status:-130}" "1"
+    echo "WARN: export interrupted before snapshot was written" >&2
+  fi
+  exit 130
+fi
+
+if [[ "${export_status}" != "0" || "${tee_status}" != "0" ]]; then
+  write_run_json "failed" "0" "0" "" "0" "" "0" "" "" "${export_status:-1}" "0"
   echo "ERROR: export failed, see ${run_dir}/export.log" >&2
   exit 1
 fi
@@ -148,4 +244,4 @@ if [[ -n "${safe_txt}" ]]; then
 fi
 
 echo "  Run dir:  ${run_dir}"
-write_run_json "completed" "${created:-0}" "${count:-0}" "${path:-}" "${review_count:-0}" "${review_path:-}" "${safe_count:-0}" "${safe_md:-}" "${safe_txt:-}"
+write_run_json "completed" "${created:-0}" "${count:-0}" "${path:-}" "${review_count:-0}" "${review_path:-}" "${safe_count:-0}" "${safe_md:-}" "${safe_txt:-}" "0" "0"
