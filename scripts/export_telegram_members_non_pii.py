@@ -12,6 +12,7 @@ import subprocess
 import sys
 import time
 import webbrowser
+from http.client import HTTPException
 from pathlib import Path
 from typing import Any, Callable
 from urllib.error import HTTPError, URLError
@@ -95,7 +96,7 @@ def _http_json(
     except HTTPError as exc:
         raw = exc.read().decode("utf-8", errors="replace") if hasattr(exc, "read") else ""
         raise RuntimeError(f"HTTP {exc.code}: {raw or exc.reason}") from exc
-    except (URLError, TimeoutError, socket.timeout) as exc:
+    except (URLError, TimeoutError, socket.timeout, HTTPException, ConnectionError, OSError) as exc:
         reason = getattr(exc, "reason", None) or str(exc) or exc.__class__.__name__
         raise RuntimeError(f"Network error: {reason}") from exc
 

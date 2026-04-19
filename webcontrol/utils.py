@@ -21,7 +21,10 @@ def load_json(path: Path, default: Any) -> Any:
 
 def dump_json(path: Path, payload: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    body = json.dumps(payload, ensure_ascii=True, indent=2)
+    temp_path = path.with_suffix(f"{path.suffix}.tmp")
+    temp_path.write_text(body, encoding="utf-8")
+    temp_path.replace(path)
 
 
 def compact(obj: dict[str, Any]) -> dict[str, Any]:

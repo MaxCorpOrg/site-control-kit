@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import unittest
+from http.client import RemoteDisconnected
 from pathlib import Path
 
 
@@ -183,6 +184,21 @@ class TelegramExportParserTests(unittest.TestCase):
         )
         self.assertIsNotNone(picked)
         self.assertEqual(picked["window_id"], "0x2")
+
+    def test_http_json_wraps_remote_disconnect_as_runtime_error(self) -> None:
+        original_urlopen = self.mod.urlopen
+
+        def _boom(*args, **kwargs):
+            raise RemoteDisconnected("Remote end closed connection without response")
+
+        self.mod.urlopen = _boom
+        try:
+            with self.assertRaises(RuntimeError) as ctx:
+                self.mod._http_json("http://127.0.0.1:8765", "token", "GET", "/api/clients")
+        finally:
+            self.mod.urlopen = original_urlopen
+
+        self.assertIn("Network error: Remote end closed connection without response", str(ctx.exception))
 
 
 if __name__ == "__main__":
