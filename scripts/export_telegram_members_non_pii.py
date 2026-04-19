@@ -65,6 +65,8 @@ CHAT_SCROLL_SETTLE_SEC = 0.35
 CHAT_SCROLL_DISTANCE_PX = 900
 CHAT_UNCHANGED_STEPS_LIMIT = 6
 CHAT_DISCOVERY_MENTION_DEEP_INTERVAL = max(int(os.environ.get("TELEGRAM_CHAT_DISCOVERY_MENTION_INTERVAL", "5") or "5"), 1)
+CHAT_DISCOVERY_SCROLL_BURST = max(int(os.environ.get("TELEGRAM_CHAT_DISCOVERY_SCROLL_BURST", "2") or "2"), 1)
+CHAT_DISCOVERY_BURST_SETTLE_SEC = max(float(os.environ.get("TELEGRAM_CHAT_DISCOVERY_BURST_SETTLE_SEC", "0.12") or "0.12"), 0.02)
 INFO_SCROLL_SETTLE_SEC = 0.8
 CHAT_DEEP_DEFAULT_LIMIT = 3
 X11_WHEEL_FALLBACK_ENABLED = os.environ.get("TELEGRAM_X11_WHEEL_FALLBACK", "1").strip().lower() not in {"0", "false", "no"}
@@ -1139,6 +1141,27 @@ def _should_run_chat_deep_step(
     return step == 0 or step % CHAT_DISCOVERY_MENTION_DEEP_INTERVAL == 0
 
 
+def _extract_chat_view_signature(html_payload: str) -> str:
+    if not html_payload:
+        return ""
+
+    top_mids = re.findall(r'data-mid="([^"]+)"', html_payload, flags=re.I)[:3]
+    top_timestamps = re.findall(r'data-timestamp="([^"]+)"', html_payload, flags=re.I)[:3]
+    top_peers = re.findall(
+        r'class="(?=[^"]*bubbles-group-avatar)(?=[^"]*user-avatar)[^"]*"[^>]*data-peer-id="([^"]+)"',
+        html_payload,
+        flags=re.I,
+    )[:3]
+    parts = []
+    if top_mids:
+        parts.append("mid=" + ",".join(top_mids))
+    if top_peers:
+        parts.append("peer=" + ",".join(top_peers))
+    if top_timestamps:
+        parts.append("ts=" + ",".join(top_timestamps))
+    return "|".join(parts)
+
+
 def _dedupe_members(members: list[dict[str, str]]) -> list[dict[str, str]]:
     merged: dict[str, dict[str, str]] = {}
     order: list[str] = []
@@ -1839,10 +1862,13 @@ def _collect_members_from_chat(
     started_at = time.time()
     previous_min_ts: int | None = None
     previous_member_count: int | None = None
+    previous_view_signature = ""
     unchanged_steps = 0
     empty_steps = 0
     no_scroll_steps = 0
     scroll_steps_done = 0
+    burst_scrolls_done = 0
+    discovery_stall_steps = 0
     deep_seen_peer_ids: set[str] = set()
     deep_attempted_total = 0
     deep_updated_total = 0
@@ -1876,6 +1902,7 @@ def _collect_members_from_chat(
         )
 
         chat_members = _parse_chat_members(html_payload)
+        current_view_signature = _extract_chat_view_signature(html_payload)
 
         if chat_members:
             members.extend(chat_members)
@@ -1889,6 +1916,7 @@ def _collect_members_from_chat(
         if on_progress is not None:
             on_progress(members, f"chat step {step} collecting")
 
+        deep_deferred_this_step = False
         if deep_usernames and members and chat_members:
             if time.time() - started_at > max(max_runtime_sec, 5):
                 print(f"WARN: skip deep (runtime limit {max_runtime_sec}s reached)")
@@ -1946,6 +1974,7 @@ def _collect_members_from_chat(
                         chat_target_name=chat_target_name,
                     ):
                         deep_deferred_steps += 1
+                        deep_deferred_this_step = True
                         print(
                             f"INFO: defer chat deep at step {step} "
                             f"(members {len(members)}/{max(int(min_members_target), 0)}, mode={chat_deep_mode})"
@@ -1991,12 +2020,21 @@ def _collect_members_from_chat(
         timestamps = [int(value) for value in re.findall(r'data-timestamp="(\d+)"', html_payload)]
         min_ts = min(timestamps) if timestamps else None
         current_member_count = len(members)
-        if min_ts is not None and min_ts == previous_min_ts and current_member_count == previous_member_count:
+        view_changed = bool(current_view_signature and current_view_signature != previous_view_signature)
+        if (
+            min_ts is not None
+            and min_ts == previous_min_ts
+            and current_member_count == previous_member_count
+            and not view_changed
+        ):
             unchanged_steps += 1
+            discovery_stall_steps += 1
         else:
             unchanged_steps = 0
+            discovery_stall_steps = 0
         previous_min_ts = min_ts
         previous_member_count = current_member_count
+        previous_view_signature = current_view_signature
 
         if step >= scroll_steps:
             break
@@ -2012,11 +2050,32 @@ def _collect_members_from_chat(
             continue
         no_scroll_steps = 0
         scroll_steps_done += 1
+        extra_bursts = 0
+        if (
+            CHAT_DISCOVERY_SCROLL_BURST > 1
+            and min_members_target > 0
+            and len(members) < min_members_target
+            and deep_deferred_this_step
+            and discovery_stall_steps >= 1
+        ):
+            extra_bursts = CHAT_DISCOVERY_SCROLL_BURST - 1
+        if extra_bursts > 0:
+            for burst_index in range(extra_bursts):
+                time.sleep(CHAT_DISCOVERY_BURST_SETTLE_SEC)
+                if not _scroll_chat_up(server, token, client_id, tab_id, timeout_sec=min(timeout_sec, 10)):
+                    break
+                burst_scrolls_done += 1
+                scroll_steps_done += 1
+                print(
+                    f"INFO: discovery burst scroll {burst_index + 1}/{extra_bursts} "
+                    f"at step {step} (stall={discovery_stall_steps})"
+                )
         time.sleep(CHAT_SCROLL_SETTLE_SEC)
 
     stats = {
         "unique_members": len(members),
         "scroll_steps_done": scroll_steps_done,
+        "burst_scrolls_done": burst_scrolls_done,
         "deep_attempted": deep_attempted_total,
         "deep_updated": deep_updated_total,
         "deep_deferred_steps": deep_deferred_steps,

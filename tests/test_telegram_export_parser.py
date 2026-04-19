@@ -331,6 +331,21 @@ class TelegramExportParserTests(unittest.TestCase):
 
         self.assertTrue(should_run)
 
+    def test_extract_chat_view_signature_uses_top_mid_peer_and_timestamp(self) -> None:
+        html = (
+            '<div class="avatar avatar-like bubbles-group-avatar user-avatar" data-peer-id="789">AB</div>'
+            '<div data-mid="101" data-timestamp="1776505277" class="bubble hide-name is-in"></div>'
+            '<div class="avatar avatar-like bubbles-group-avatar user-avatar" data-peer-id="456">CD</div>'
+            '<div data-mid="102" data-timestamp="1776505278" class="bubble hide-name is-in"></div>'
+        )
+
+        signature = self.mod._extract_chat_view_signature(html)
+
+        self.assertEqual(signature, "mid=101,102|peer=789,456|ts=1776505277,1776505278")
+
+    def test_extract_chat_view_signature_returns_empty_for_empty_html(self) -> None:
+        self.assertEqual(self.mod._extract_chat_view_signature(""), "")
+
     def test_scroll_chat_up_requires_actual_wheel_movement(self) -> None:
         responses = iter(
             [
