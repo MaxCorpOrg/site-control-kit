@@ -1200,9 +1200,47 @@ def _scroll_chat_up(server: str, token: str, client_id: str, tab_id: int, timeou
             raise_on_fail=False,
         )
         if wheel_result.get("ok"):
+            wheel_data = wheel_result.get("data") or {}
+            wheel_moved = wheel_data.get("moved")
+            if isinstance(wheel_moved, bool) and wheel_moved:
+                print(f"INFO: chat wheel moved container for selector={selector}")
+                return True
+
             print(f"INFO: chat wheel dispatched for selector={selector}")
             time.sleep(0.22)
-            return True
+
+            probe = _send_command_result(
+                server=server,
+                token=token,
+                client_id=client_id,
+                tab_id=tab_id,
+                timeout_sec=timeout_sec,
+                command={
+                    "type": "scroll_by",
+                    "selector": selector,
+                    "delta_y": 0,
+                    "delta_x": 0,
+                },
+                raise_on_fail=False,
+            )
+            if probe.get("ok"):
+                probe_data = probe.get("data") or {}
+                probe_top = probe_data.get("beforeTop")
+                probe_height = probe_data.get("scrollHeight")
+                if isinstance(before_top, (int, float)) and isinstance(probe_top, (int, float)):
+                    if abs(float(probe_top) - float(before_top)) >= 1:
+                        print(
+                            "INFO: chat wheel changed container position "
+                            f"(selector={selector}, top={before_top}->{probe_top})"
+                        )
+                        return True
+                if isinstance(data.get("scrollHeight"), (int, float)) and isinstance(probe_height, (int, float)):
+                    if abs(float(probe_height) - float(data.get("scrollHeight"))) >= 1:
+                        print(
+                            "INFO: chat wheel changed scroll height "
+                            f"(selector={selector}, height={data.get('scrollHeight')}->{probe_height})"
+                        )
+                        return True
 
         x11_before_height = data.get("scrollHeight")
         if _x11_wheel_scroll_telegram():
@@ -2126,13 +2164,18 @@ def _find_tab(clients: list[dict[str, Any]], client_id: str | None, tab_id: int 
                 return cid, int(tab_id)
         raise RuntimeError(f"tab_id not found in client {cid}: {tab_id}")
 
-    # 1) Exact/pattern match requested by user.
+    # 1) Exact/pattern match requested by user; prefer active tab if duplicates exist.
+    pattern_matches: list[tuple[int, int]] = []
     for tab in tabs:
         url = str(tab.get("url") or "")
         if url_pattern and url_pattern in url:
             tid = tab.get("id")
             if isinstance(tid, int):
-                return cid, tid
+                priority = 0 if bool(tab.get("active")) else 1
+                pattern_matches.append((priority, tid))
+    if pattern_matches:
+        pattern_matches.sort()
+        return cid, pattern_matches[0][1]
 
     # 2) Prefer explicit dialog URLs with hash fragment, avoid bare /k/ root.
     for tab in tabs:

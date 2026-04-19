@@ -89,6 +89,8 @@ payload = {
     "latest_safe_txt": ${safe_txt_value@Q},
     "latest_full_md": ${chat_dir@Q} + "/latest_full.md",
     "latest_full_txt": ${chat_dir@Q} + "/latest_full.txt",
+    "snapshot_safe_md": ${run_dir@Q} + "/snapshot_safe.md",
+    "snapshot_safe_txt": ${run_dir@Q} + "/snapshot_safe.txt",
     "snapshot_md": ${run_dir@Q} + "/snapshot.md",
     "snapshot_txt": ${run_dir@Q} + "/snapshot.txt",
     "export_log": ${run_dir@Q} + "/export.log",
@@ -136,6 +138,12 @@ if [[ -n "${review_count}" && "${review_count}" != "0" && -n "${review_path}" ]]
   echo "  Review:   ${review_path} (${review_count} conflict(s))"
 fi
 if [[ -n "${safe_txt}" ]]; then
+  if [[ -n "${safe_md}" && -f "${safe_md}" ]]; then
+    cp "${safe_md}" "${run_dir}/snapshot_safe.md"
+  fi
+  if [[ -f "${safe_txt}" ]]; then
+    cp "${safe_txt}" "${run_dir}/snapshot_safe.txt"
+  fi
   echo "  Safe:     ${safe_txt} (${safe_count:-0} username(s))"
 fi
 

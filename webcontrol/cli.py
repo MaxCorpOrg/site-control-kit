@@ -4,6 +4,7 @@ import argparse
 import base64
 import json
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -133,6 +134,516 @@ def _write_data_url_to_file(data_url: str, output_path: str) -> str:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(raw)
     return str(path)
+
+
+def _tabs_for_window(client: dict[str, Any], window_id: int) -> list[dict[str, Any]]:
+    tabs = client.get("tabs")
+    if not isinstance(tabs, list):
+        return []
+    return [tab for tab in tabs if int(tab.get("windowId", -1)) == int(window_id)]
+
+
+def _find_browser_tab(client: dict[str, Any], target: dict[str, Any]) -> dict[str, Any] | None:
+    tabs = client.get("tabs")
+    if not isinstance(tabs, list) or not tabs:
+        return None
+
+    tab_id = target.get("tab_id")
+    if isinstance(tab_id, int):
+        for tab in tabs:
+            if int(tab.get("id", -1)) == tab_id:
+                return tab
+
+    url_pattern = str(target.get("url_pattern") or "").strip()
+    if url_pattern:
+        for tab in tabs:
+            if url_pattern in str(tab.get("url") or ""):
+                return tab
+
+    if target.get("active", True):
+        for tab in tabs:
+            if bool(tab.get("active")):
+                return tab
+
+    return tabs[0]
+
+
+def _tab_cycle_plan(window_tabs: list[dict[str, Any]], target_tab_id: int) -> tuple[int, bool] | None:
+    if not window_tabs:
+        return None
+    active_index = None
+    target_index = None
+    for index, tab in enumerate(window_tabs):
+        if bool(tab.get("active")):
+            active_index = index
+        if int(tab.get("id", -1)) == int(target_tab_id):
+            target_index = index
+    if active_index is None or target_index is None:
+        return None
+    if active_index == target_index:
+        return (0, False)
+    total = len(window_tabs)
+    forward = (target_index - active_index) % total
+    backward = (active_index - target_index) % total
+    return (forward, False) if forward <= backward else (backward, True)
+
+
+def _absolute_tab_hotkey(window_tabs: list[dict[str, Any]], target_tab_id: int) -> str | None:
+    for index, tab in enumerate(window_tabs):
+        if int(tab.get("id", -1)) != int(target_tab_id):
+            continue
+        if index <= 7:
+            return str(index + 1)
+        if index == len(window_tabs) - 1:
+            return "9"
+        return None
+    return None
+
+
+def _parse_wmctrl_windows(output: str) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    for raw_line in str(output or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        parts = line.split(None, 4)
+        if len(parts) < 5:
+            continue
+        window_id, desktop, wm_class, host, title = parts
+        rows.append(
+            {
+                "window_id": window_id,
+                "desktop": desktop,
+                "wm_class": wm_class,
+                "host": host,
+                "title": title,
+            }
+        )
+    return rows
+
+
+def _find_x11_browser_window(window_tabs: list[dict[str, Any]]) -> str:
+    if sys.platform != "linux" or not os.environ.get("DISPLAY"):
+        return ""
+    try:
+        proc = subprocess.run(["wmctrl", "-lx"], check=False, capture_output=True, text=True)
+    except OSError:
+        return ""
+    windows = _parse_wmctrl_windows(proc.stdout)
+    preferred_titles: list[str] = []
+    for tab in window_tabs:
+        title = str(tab.get("title") or "").strip()
+        if title:
+            preferred_titles.append(title)
+    active_titles = [str(tab.get("title") or "").strip() for tab in window_tabs if bool(tab.get("active"))]
+    title_candidates = active_titles + [title for title in preferred_titles if title not in active_titles]
+
+    for title in title_candidates:
+        for window in windows:
+            wm_class = str(window.get("wm_class") or "").lower()
+            full_title = str(window.get("title") or "")
+            if "chrome" not in wm_class:
+                continue
+            if title and title in full_title:
+                return str(window.get("window_id") or "")
+    return ""
+
+
+def _x11_send_keys(window_id: str, sequences: list[list[str]]) -> bool:
+    if not window_id or sys.platform != "linux" or not os.environ.get("DISPLAY"):
+        return False
+    try:
+        from Xlib import X, XK, display  # type: ignore
+        from Xlib.ext import xtest  # type: ignore
+    except Exception:
+        return False
+
+    try:
+        subprocess.run(["wmctrl", "-ia", window_id], check=False)
+        time.sleep(0.18)
+        d = display.Display()
+
+        def _press(name: str, pressed: bool) -> None:
+            keysym = XK.string_to_keysym(name)
+            if keysym == 0:
+                raise RuntimeError(f"Unknown X11 key: {name}")
+            keycode = d.keysym_to_keycode(keysym)
+            xtest.fake_input(d, X.KeyPress if pressed else X.KeyRelease, keycode)
+
+        for sequence in sequences:
+            if not sequence:
+                continue
+            modifiers = sequence[:-1]
+            main_key = sequence[-1]
+            for name in modifiers:
+                _press(name, True)
+            _press(main_key, True)
+            _press(main_key, False)
+            for name in reversed(modifiers):
+                _press(name, False)
+            d.sync()
+            time.sleep(0.08)
+        return True
+    except Exception:
+        return False
+
+
+def _find_client_by_id(clients: list[dict[str, Any]], client_id: str) -> dict[str, Any] | None:
+    for client in clients:
+        if str(client.get("client_id") or "").strip() == client_id:
+            return client
+    return None
+
+
+def _find_created_tab(
+    client: dict[str, Any],
+    *,
+    window_id: int,
+    previous_tab_ids: set[int],
+    preferred_url: str = "",
+    require_active: bool = False,
+) -> dict[str, Any] | None:
+    candidates = [
+        tab
+        for tab in _tabs_for_window(client, window_id)
+        if int(tab.get("id", -1)) not in previous_tab_ids
+    ]
+    if require_active:
+        candidates = [tab for tab in candidates if bool(tab.get("active"))]
+    if not candidates:
+        return None
+
+    preferred_url = preferred_url.strip()
+    if preferred_url:
+        for tab in candidates:
+            if preferred_url in str(tab.get("url") or ""):
+                return tab
+    for tab in candidates:
+        if bool(tab.get("active")):
+            return tab
+    return candidates[0]
+
+
+def _wait_for_tab_state(
+    *,
+    server: str,
+    token: str,
+    client_id: str,
+    predicate,
+    timeout_sec: float,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    deadline = time.time() + max(timeout_sec, 0.5)
+    while time.time() < deadline:
+        clients = _get_clients(server, token)
+        client = _find_client_by_id(clients, client_id)
+        if client:
+            matched = predicate(client)
+            if matched is not None:
+                return client, matched
+        time.sleep(0.2)
+    return None, None
+
+
+def _synthetic_command_record(client_id: str, *, data: dict[str, Any] | None = None, error: dict[str, Any] | None = None) -> dict[str, Any]:
+    ok = error is None
+    return {
+        "status": "completed" if ok else "failed",
+        "deliveries": {
+            client_id: {
+                "result": {
+                    "ok": ok,
+                    "status": "completed" if ok else "failed",
+                    "data": data,
+                    "error": error,
+                }
+            }
+        },
+    }
+
+
+def _browser_result_error_message(command: dict[str, Any], client_id: str) -> str:
+    result = _extract_command_result(command, client_id)
+    error = result.get("error") if isinstance(result, dict) else None
+    if isinstance(error, dict):
+        return str(error.get("message") or error.get("error") or "").strip()
+    return str(error or "").strip()
+
+
+def _x11_activate_tab_fallback(
+    *,
+    server: str,
+    token: str,
+    client: dict[str, Any],
+    target: dict[str, Any],
+    wait_sec: int,
+) -> dict[str, Any] | None:
+    target_tab = _find_browser_tab(client, target)
+    if not target_tab:
+        return None
+    window_id = int(target_tab.get("windowId", -1))
+    window_tabs = _tabs_for_window(client, window_id)
+    if not window_tabs:
+        return None
+    x11_window_id = _find_x11_browser_window(window_tabs)
+    if not x11_window_id:
+        return None
+
+    plan = _tab_cycle_plan(window_tabs, int(target_tab.get("id", -1)))
+    if plan is None:
+        return None
+    steps, reverse = plan
+    if steps == 0:
+        return _synthetic_command_record(
+            str(client.get("client_id") or "").strip(),
+            data={"tabId": target_tab.get("id"), "active": True, "via": "x11_fallback"},
+        )
+    key_sequence = ["Control_L", "Prior"] if reverse else ["Control_L", "Next"]
+    sequences = [key_sequence] * steps
+
+    if not _x11_send_keys(x11_window_id, sequences):
+        return None
+
+    client_id = str(client.get("client_id") or "").strip()
+    _, activated_tab = _wait_for_tab_state(
+        server=server,
+        token=token,
+        client_id=client_id,
+        timeout_sec=max(wait_sec, 3),
+        predicate=lambda current_client: next(
+            (
+                tab
+                for tab in _tabs_for_window(current_client, window_id)
+                if int(tab.get("id", -1)) == int(target_tab.get("id", -1)) and bool(tab.get("active"))
+            ),
+            None,
+        ),
+    )
+    if not activated_tab:
+        return None
+    return _synthetic_command_record(
+        client_id,
+        data={"tabId": activated_tab.get("id"), "active": True, "via": "x11_fallback"},
+    )
+
+
+def _x11_new_tab_fallback(
+    *,
+    server: str,
+    token: str,
+    client: dict[str, Any],
+    target: dict[str, Any],
+    url: str,
+    background: bool,
+    timeout_ms: int,
+    wait_sec: int,
+    poll_interval: float,
+) -> dict[str, Any] | None:
+    anchor_tab = _find_browser_tab(client, target)
+    if not anchor_tab:
+        return None
+    window_id = int(anchor_tab.get("windowId", -1))
+    window_tabs = _tabs_for_window(client, window_id)
+    if not window_tabs:
+        return None
+    x11_window_id = _find_x11_browser_window(window_tabs)
+    if not x11_window_id:
+        return None
+    previous_tab_ids = {int(tab.get("id", -1)) for tab in window_tabs}
+    previous_active_tab_id = next((int(tab.get("id", -1)) for tab in window_tabs if bool(tab.get("active"))), -1)
+    client_id = str(client.get("client_id") or "").strip()
+
+    refreshed_client, new_tab = _wait_for_tab_state(
+        server=server,
+        token=token,
+        client_id=client_id,
+        timeout_sec=1.2,
+        predicate=lambda current_client: _find_created_tab(
+            current_client,
+            window_id=window_id,
+            previous_tab_ids=previous_tab_ids,
+            preferred_url=url,
+        ),
+    )
+    if not refreshed_client or not new_tab:
+        if not _x11_send_keys(x11_window_id, [["Control_L", "t"]]):
+            return None
+
+        refreshed_client, new_tab = _wait_for_tab_state(
+            server=server,
+            token=token,
+            client_id=client_id,
+            timeout_sec=max(wait_sec, 3),
+            predicate=lambda current_client: _find_created_tab(
+                current_client,
+                window_id=window_id,
+                previous_tab_ids=previous_tab_ids,
+                preferred_url=url,
+                require_active=True,
+            ),
+        )
+    if not refreshed_client or not new_tab:
+        return None
+
+    navigate_record = _browser_send_command(
+        server=server,
+        token=token,
+        client_id=client_id,
+        target={"client_id": client_id, "tab_id": int(new_tab.get("id", -1)), "active": True},
+        command={"type": "navigate", "url": url},
+        timeout_ms=timeout_ms,
+        wait_sec=wait_sec,
+        poll_interval=poll_interval,
+    )
+    if navigate_record.get("status") != "completed":
+        return navigate_record
+
+    if background and previous_active_tab_id > 0:
+        updated_client = refreshed_client
+        updated_tabs = _tabs_for_window(updated_client, window_id)
+        previous_target = next((tab for tab in updated_tabs if int(tab.get("id", -1)) == previous_active_tab_id), None)
+        if previous_target:
+            _x11_activate_tab_fallback(
+                server=server,
+                token=token,
+                client=updated_client,
+                target={"client_id": client_id, "tab_id": previous_active_tab_id, "active": True},
+                wait_sec=max(3, wait_sec // 2),
+            )
+
+    return _synthetic_command_record(
+        client_id,
+        data={
+            "tabId": new_tab.get("id"),
+            "windowId": new_tab.get("windowId"),
+            "url": url,
+            "active": not background,
+            "via": "x11_fallback",
+        },
+    )
+
+
+def _x11_close_tab_fallback(
+    *,
+    server: str,
+    token: str,
+    client: dict[str, Any],
+    target: dict[str, Any],
+    wait_sec: int,
+) -> dict[str, Any] | None:
+    target_tab = _find_browser_tab(client, target)
+    if not target_tab:
+        return None
+    client_id = str(client.get("client_id") or "").strip()
+    tab_id = int(target_tab.get("id", -1))
+    window_id = int(target_tab.get("windowId", -1))
+    window_tabs = _tabs_for_window(client, window_id)
+    x11_window_id = _find_x11_browser_window(window_tabs)
+    if not x11_window_id:
+        return None
+
+    active_client = client
+    active_target = target_tab
+    if not bool(target_tab.get("active")):
+        activated = _x11_activate_tab_fallback(
+            server=server,
+            token=token,
+            client=client,
+            target={"client_id": client_id, "tab_id": tab_id, "active": True},
+            wait_sec=wait_sec,
+        )
+        if not activated:
+            return None
+        refreshed_client, refreshed_tab = _wait_for_tab_state(
+            server=server,
+            token=token,
+            client_id=client_id,
+            timeout_sec=max(wait_sec, 3),
+            predicate=lambda current_client: _find_browser_tab(
+                current_client, {"client_id": client_id, "tab_id": tab_id, "active": True}
+            ),
+        )
+        if not refreshed_client or not refreshed_tab:
+            return None
+        active_client = refreshed_client
+        active_target = refreshed_tab
+
+    if not _x11_send_keys(x11_window_id, [["Control_L", "w"]]):
+        return None
+
+    _, missing_tab = _wait_for_tab_state(
+        server=server,
+        token=token,
+        client_id=client_id,
+        timeout_sec=max(wait_sec, 3),
+        predicate=lambda current_client: None
+        if _find_browser_tab(current_client, {"client_id": client_id, "tab_id": tab_id, "active": False})
+        else {"closed": True},
+    )
+    if not missing_tab:
+        return None
+
+    return _synthetic_command_record(
+        client_id,
+        data={
+            "tabId": active_target.get("id"),
+            "windowId": active_target.get("windowId"),
+            "closed": True,
+            "via": "x11_fallback",
+        },
+    )
+
+
+def _maybe_apply_browser_tab_fallback(
+    *,
+    action: str,
+    server: str,
+    token: str,
+    client: dict[str, Any],
+    target: dict[str, Any],
+    command: dict[str, Any],
+    timeout_ms: int,
+    wait_sec: int,
+    poll_interval: float,
+    command_record: dict[str, Any],
+) -> dict[str, Any]:
+    if command_record.get("status") == "completed":
+        return command_record
+
+    if action == "activate":
+        fallback = _x11_activate_tab_fallback(
+            server=server,
+            token=token,
+            client=client,
+            target=target,
+            wait_sec=wait_sec,
+        )
+        return fallback or command_record
+
+    if action == "new-tab":
+        fallback = _x11_new_tab_fallback(
+            server=server,
+            token=token,
+            client=client,
+            target=target,
+            url=str(command.get("url") or ""),
+            background=command.get("active") is False,
+            timeout_ms=timeout_ms,
+            wait_sec=wait_sec,
+            poll_interval=poll_interval,
+        )
+        return fallback or command_record
+
+    if action == "close-tab":
+        fallback = _x11_close_tab_fallback(
+            server=server,
+            token=token,
+            client=client,
+            target=target,
+            wait_sec=wait_sec,
+        )
+        return fallback or command_record
+
+    return command_record
 
 
 def _browser_target(args: argparse.Namespace, client_id: str) -> dict[str, Any]:
@@ -326,6 +837,18 @@ def cmd_browser(args: argparse.Namespace) -> int:
             timeout_ms=args.timeout_ms,
             wait_sec=args.wait,
             poll_interval=args.poll_interval,
+        )
+        command_record = _maybe_apply_browser_tab_fallback(
+            action=action,
+            server=server,
+            token=token,
+            client=client,
+            target=target,
+            command=compact(command),
+            timeout_ms=args.timeout_ms,
+            wait_sec=args.wait,
+            poll_interval=args.poll_interval,
+            command_record=command_record,
         )
 
         if action == "screenshot" and args.output:

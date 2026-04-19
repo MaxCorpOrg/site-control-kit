@@ -4,6 +4,7 @@ import importlib.util
 import unittest
 from http.client import RemoteDisconnected
 from pathlib import Path
+from unittest import mock
 
 
 def _load_export_module():
@@ -199,6 +200,115 @@ class TelegramExportParserTests(unittest.TestCase):
             self.mod.urlopen = original_urlopen
 
         self.assertIn("Network error: Remote end closed connection without response", str(ctx.exception))
+
+    def test_find_tab_prefers_active_exact_dialog_match(self) -> None:
+        client_id, tab_id = self.mod._find_tab(
+            clients=[
+                {
+                    "client_id": "client-1",
+                    "tabs": [
+                        {
+                            "id": 101,
+                            "active": False,
+                            "url": "https://web.telegram.org/k/#-2465948544",
+                        },
+                        {
+                            "id": 202,
+                            "active": True,
+                            "url": "https://web.telegram.org/k/#-2465948544",
+                        },
+                    ],
+                }
+            ],
+            client_id=None,
+            tab_id=None,
+            url_pattern="https://web.telegram.org/k/#-2465948544",
+        )
+
+        self.assertEqual(client_id, "client-1")
+        self.assertEqual(tab_id, 202)
+
+    def test_scroll_chat_up_requires_actual_wheel_movement(self) -> None:
+        responses = iter(
+            [
+                {
+                    "ok": True,
+                    "data": {
+                        "beforeTop": 0,
+                        "afterTop": 0,
+                        "scrollHeight": 3479,
+                        "clientHeight": 513,
+                        "moved": False,
+                    },
+                },
+                {
+                    "ok": True,
+                    "data": {
+                        "beforeTop": 0,
+                        "afterTop": 0,
+                        "moved": False,
+                    },
+                },
+                {
+                    "ok": True,
+                    "data": {
+                        "beforeTop": 0,
+                        "afterTop": 0,
+                        "scrollHeight": 3479,
+                    },
+                },
+                {"ok": False},
+                {"ok": False},
+                {"ok": False},
+                {"ok": False},
+            ]
+        )
+
+        with mock.patch.object(self.mod, "_send_command_result", side_effect=lambda **kwargs: next(responses)):
+            with mock.patch.object(self.mod, "_x11_wheel_scroll_telegram", return_value=False):
+                with mock.patch.object(self.mod.time, "sleep", return_value=None):
+                    moved = self.mod._scroll_chat_up("server", "token", "client", 1, 5)
+
+        self.assertFalse(moved)
+
+    def test_scroll_chat_up_accepts_wheel_height_growth(self) -> None:
+        responses = iter(
+            [
+                {
+                    "ok": True,
+                    "data": {
+                        "beforeTop": 0,
+                        "afterTop": 0,
+                        "scrollHeight": 3479,
+                        "clientHeight": 513,
+                        "moved": False,
+                    },
+                },
+                {
+                    "ok": True,
+                    "data": {
+                        "beforeTop": 0,
+                        "afterTop": 0,
+                        "moved": False,
+                    },
+                },
+                {
+                    "ok": True,
+                    "data": {
+                        "beforeTop": 0,
+                        "afterTop": 0,
+                        "scrollHeight": 4200,
+                    },
+                },
+            ]
+        )
+
+        with mock.patch.object(self.mod, "_send_command_result", side_effect=lambda **kwargs: next(responses)):
+            with mock.patch.object(self.mod, "_x11_wheel_scroll_telegram", return_value=False):
+                with mock.patch.object(self.mod.time, "sleep", return_value=None):
+                    moved = self.mod._scroll_chat_up("server", "token", "client", 1, 5)
+
+        self.assertTrue(moved)
 
 
 if __name__ == "__main__":

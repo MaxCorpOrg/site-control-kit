@@ -171,6 +171,7 @@ except Exception:
     raise SystemExit(0)
 
 clients = payload.get("clients") or []
+exact_matches = []
 for client in clients:
     client_id = str(client.get("client_id") or "").strip()
     if forced_client_id and client_id != forced_client_id.strip():
@@ -180,8 +181,13 @@ for client in clients:
         url = str(tab.get("url") or "")
         fragment = url.split("#", 1)[1] if "#" in url else ""
         if target_fragment and fragment == target_fragment and isinstance(tab_id, int):
-            print(f"{client_id}\t{tab_id}")
-            raise SystemExit(0)
+            exact_matches.append((bool(tab.get("active")), client_id, tab_id))
+
+if exact_matches:
+    exact_matches.sort(key=lambda item: (not item[0], item[1], item[2]))
+    _, client_id, tab_id = exact_matches[0]
+    print(f"{client_id}\t{tab_id}")
+    raise SystemExit(0)
 
 for client in clients:
     client_id = str(client.get("client_id") or "").strip()
