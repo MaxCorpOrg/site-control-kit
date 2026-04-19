@@ -198,6 +198,7 @@ payload = {
     "members_without_username": int(export_stats.get("members_without_username", 0) or 0),
     "deep_attempted_total": int(export_stats.get("deep_attempted_total", 0) or 0),
     "deep_updated_total": int(export_stats.get("deep_updated_total", 0) or 0),
+    "history_backfilled_total": int(export_stats.get("history_backfilled_total", 0) or 0),
     "chat_scroll_steps_done": int(chat_stats.get("scroll_steps_done", 0) or 0),
     "chat_burst_scrolls_done": int(chat_stats.get("burst_scrolls_done", 0) or 0),
     "chat_jump_scrolls_done": int(chat_stats.get("jump_scrolls_done", 0) or 0),

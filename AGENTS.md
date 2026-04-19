@@ -14,11 +14,17 @@
 
 ## С Чего Начинать Агенту
 Перед любой работой прочитать в таком порядке:
-1. `BROWSER_QUICKSTART.md` — короткий путь запуска и базовые команды.
-2. `docs/AI_MAINTAINER_GUIDE.md` — как агенту использовать и развивать инструмент.
-3. `docs/API.md` — протокол, типы команд, контракт результата.
-4. `docs/ARCHITECTURE.md` — поток команд, роли компонентов, маршрутизация.
-5. `docs/EXTENSION.md` — где реализованы background- и DOM-команды.
+1. `AGENTS.md` — этот файл, без пропусков.
+2. `docs/PROJECT_WORKFLOW_RU.md` — обязательный порядок работы, проверки и handoff.
+3. `docs/PROJECT_STATUS_RU.md` — что уже сделано, что проверено, что сломано, что делать дальше.
+4. `BROWSER_QUICKSTART.md` — короткий путь запуска и базовые команды.
+5. `docs/AI_MAINTAINER_GUIDE.md` — как агенту использовать и развивать инструмент.
+6. `docs/API.md` — протокол, типы команд, контракт результата.
+7. `docs/ARCHITECTURE.md` — поток команд, роли компонентов, маршрутизация.
+8. `docs/EXTENSION.md` — где реализованы background- и DOM-команды.
+9. Для Telegram-задач дополнительно: `docs/TELEGRAM_CLIENT_ROADMAP_RU.md`.
+
+Запрещено начинать изменения в коде, не просмотрев `docs/PROJECT_STATUS_RU.md`. Этот файл нужен, чтобы новый чат или новый агент не дублировал уже закрытые задачи и видел текущие дыры.
 
 ## Миссия
 Поддерживать и улучшать `Site Control Kit` как локальную платформу управления сайтами:
@@ -59,15 +65,75 @@
 Если расширение было перезагружено или обновлено, сначала снова проверить `browser status`.
 
 ## Минимальные Проверки
-- Обязательно запускать: `python -m unittest discover -s tests -p 'test_*.py'`
+- Обязательно запускать: `PYTHONPATH="$PWD" python3 -m unittest discover -s tests -p 'test_*.py'`
 - При изменении CLI полезно проверить:
-  - `python -m webcontrol --help`
-  - `python -m webcontrol browser --help`
+  - `PYTHONPATH="$PWD" python3 -m webcontrol --help`
+  - `PYTHONPATH="$PWD" python3 -m webcontrol browser --help`
 - При изменении браузерного контура полезно делать smoke-проверку:
   - `browser.cmd status`
   - `browser.cmd tabs`
   - `browser.cmd open https://example.com`
   - `browser.cmd text h1`
+
+## Обязательный Цикл Работы
+Каждая завершённая задача должна проходить через один и тот же цикл:
+1. Проверить текущее состояние дерева:
+   - `git status --short --branch`
+2. Просмотреть уже завершённые задачи и последнее состояние проекта:
+   - `docs/PROJECT_STATUS_RU.md`
+   - `git log --oneline -n 15`
+3. Для Telegram-задач до правок просмотреть последние артефакты:
+   - `chat_<id>/latest_full.md`
+   - `chat_<id>/latest_safe.md`
+   - последний `runs/<timestamp>/run.json`
+   - последний `runs/<timestamp>/export.log`
+   - если есть, `runs/<timestamp>/export_stats.json`
+   - `identity_history.json`
+   - `discovery_state.json`
+4. После каждой законченной правки обязательно прогнать проверки.
+5. После проверок обновить `docs/PROJECT_STATUS_RU.md`:
+   - что сделано;
+   - что проверено;
+   - что осталось;
+   - какой следующий логичный шаг.
+6. Только потом считать задачу завершённой.
+
+## Правило Проверок Для Этого Проекта
+Это правило обязательное для любого агента и любого чата:
+- После каждой завершённой задачи запускать полный unit-набор:
+  - `PYTHONPATH="$PWD" python3 -m unittest discover -s tests -p 'test_*.py'`
+- Если менялись Python entrypoints или большие Python-модули:
+  - `python3 -m py_compile <изменённые python-файлы>`
+- Если менялись shell-скрипты:
+  - `bash -n <изменённые shell-файлы>`
+- Если меняется живой browser/Telegram контур:
+  - делать хотя бы один живой smoke и сохранять путь к `run.json`/`export.log` в `docs/PROJECT_STATUS_RU.md`
+
+Нельзя завершать задачу сообщением "готово", если проверки не были запущены или явно не описано, почему их нельзя было выполнить.
+
+## Telegram-Специфичный Диагностический Порядок
+Если задача связана с тем, что Telegram "не собрал username", "застрял", "ничего не сохранил" или "сохранил не того":
+1. Сначала определить, на каком слое сбой:
+   - discovery/scroll;
+   - mention-deep/url-deep;
+   - backfill из `identity_history.json`;
+   - safe/quarantine слой;
+   - batch layer.
+2. Не делать вывод по одному `latest_full.txt`; всегда смотреть ещё:
+   - `latest_full.md`
+   - `latest_safe.md`
+   - последний `run.json`
+   - последний `export.log`
+3. Если новый прогон дал результат хуже исторического, отдельно проверить, не затёр ли он полезные safe/raw-артефакты.
+4. Перед следующей правкой явно зафиксировать в `docs/PROJECT_STATUS_RU.md`, что именно сейчас является узким местом.
+
+## Правило Коммитов И Handoff
+- Коммиты для проектной работы писать осмысленно и по-русски.
+- После серии изменений агент обязан оставить в `docs/PROJECT_STATUS_RU.md` короткий handoff:
+  - последний завершённый блок;
+  - доказательства проверки;
+  - текущий риск;
+  - следующий приоритет.
 
 ## Куда Вносить Изменения
 - `webcontrol/cli.py` — CLI, `sitectl browser`, удобные команды и разбор аргументов.

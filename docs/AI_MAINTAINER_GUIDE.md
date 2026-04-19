@@ -71,6 +71,8 @@
 - удобство для пользователя и агента в реальной Windows-среде.
 
 ## Источники Правды
+- `docs/PROJECT_WORKFLOW_RU.md` — обязательный порядок работы, проверок и handoff.
+- `docs/PROJECT_STATUS_RU.md` — текущее состояние проекта, завершённые задачи, открытые проблемы и следующий приоритет.
 - `docs/API.md` — типы команд, поля payload, контракт результата.
 - `docs/ARCHITECTURE.md` — поток команд и распределение ролей.
 - `docs/EXTENSION.md` — где реализованы browser-level и DOM-level действия.
@@ -78,13 +80,16 @@
 - `BROWSER_QUICKSTART.md` — кратчайший практический маршрут.
 
 ## Рекомендуемый Порядок Работы Агента
-1. Прочитать `BROWSER_QUICKSTART.md`.
-2. Прочитать `docs/API.md`.
-3. Проверить живой контур:
+1. Прочитать `AGENTS.md`.
+2. Прочитать `docs/PROJECT_WORKFLOW_RU.md`.
+3. Прочитать `docs/PROJECT_STATUS_RU.md`.
+4. Прочитать `BROWSER_QUICKSTART.md`.
+5. Прочитать `docs/API.md`.
+6. Проверить живой контур:
    - `browser.cmd status`
    - `browser.cmd tabs`
-4. Выполнить нужные действия через `browser.cmd` или `sitectl browser`.
-5. Если возможностей не хватает, расширить инструмент, а не плодить временные костыли.
+7. Выполнить нужные действия через `browser.cmd` или `sitectl browser`.
+8. Если возможностей не хватает, расширить инструмент, а не плодить временные костыли.
 
 ## Базовый Smoke-Тест
 Минимальный живой сценарий:
@@ -184,12 +189,17 @@ browser.cmd text h1
 
 ## Что Делать Перед Коммитом
 1. Запустить:
-   - `python -m unittest discover -s tests -p 'test_*.py'`
+   - `PYTHONPATH="$PWD" python3 -m unittest discover -s tests -p 'test_*.py'`
 2. Если менялся CLI:
-   - `python -m webcontrol --help`
-   - `python -m webcontrol browser --help`
+   - `PYTHONPATH="$PWD" python3 -m webcontrol --help`
+   - `PYTHONPATH="$PWD" python3 -m webcontrol browser --help`
 3. Если менялся браузерный контур:
    - `browser.cmd status`
    - `browser.cmd tabs`
    - минимум один живой сценарий в браузере
-4. Обновить документацию так, чтобы новый агент мог начать работу без устных пояснений.
+4. Обновить `docs/PROJECT_STATUS_RU.md`, чтобы новый агент видел:
+   - что завершено;
+   - что проверено;
+   - что остаётся проблемой;
+   - какой следующий приоритет.
+5. Обновить документацию так, чтобы новый агент мог начать работу без устных пояснений.

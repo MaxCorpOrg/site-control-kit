@@ -1830,6 +1830,7 @@ def _build_export_stats_payload(
     max_members: int = 0,
     deep_attempted_total: int = 0,
     deep_updated_total: int = 0,
+    history_backfilled_total: int = 0,
     error: str = "",
 ) -> dict[str, Any]:
     members = list(members or [])
@@ -1851,6 +1852,7 @@ def _build_export_stats_payload(
         "members_without_username": max(members_total - members_with_username, 0),
         "deep_attempted_total": int(deep_attempted_total),
         "deep_updated_total": int(deep_updated_total),
+        "history_backfilled_total": int(history_backfilled_total),
         "info_stats": info_stats,
         "chat_stats": chat_stats,
     }
@@ -1924,6 +1926,53 @@ def _assign_username_if_unique(
     member["username"] = normalized
     username_to_peer[key] = peer_id
     return True, existing_peer, None
+
+
+def _backfill_usernames_from_history(
+    *,
+    members: list[dict[str, str]],
+    historical_username_to_peer: dict[str, str] | None = None,
+    historical_peer_to_username: dict[str, str] | None = None,
+) -> tuple[int, int]:
+    if not members or not historical_peer_to_username:
+        return 0, 0
+
+    members_by_peer = {
+        str(item.get("peer_id") or "").strip(): item
+        for item in members
+        if str(item.get("peer_id") or "").strip()
+    }
+    username_to_peer = _seed_username_to_peer(members)
+    updated = 0
+    conflicts = 0
+
+    for peer_id, historical_username in historical_peer_to_username.items():
+        member = members_by_peer.get(str(peer_id).strip())
+        if member is None:
+            continue
+        if _normalize_username(str(member.get("username") or "").strip()) != "—":
+            continue
+        assigned, conflict_value, reason = _assign_username_if_unique(
+            members_by_peer=members_by_peer,
+            username_to_peer=username_to_peer,
+            peer_id=str(peer_id).strip(),
+            username=str(historical_username or "").strip(),
+            historical_username_to_peer=historical_username_to_peer,
+            historical_peer_to_username=historical_peer_to_username,
+        )
+        if assigned:
+            updated += 1
+            continue
+        if reason not in {"empty", "missing_member"}:
+            conflicts += 1
+            _log_username_assignment_conflict(
+                str(historical_username or "").strip(),
+                str(peer_id).strip(),
+                conflict_value,
+                reason,
+            )
+
+    return updated, conflicts
 
 
 def _enrich_chat_usernames_via_info(
@@ -3479,6 +3528,7 @@ def main() -> int:
     members: list[dict[str, str]] = []
     attempted = 0
     updated = 0
+    history_backfilled = 0
     if historical_username_to_peer or historical_peer_to_username:
         print(
             f"INFO: loaded identity history: usernames={len(historical_username_to_peer)}, "
@@ -3684,6 +3734,20 @@ def main() -> int:
         if args.max_members > 0 and len(members) > args.max_members:
             members = members[: args.max_members]
 
+        history_backfilled, history_conflicts = _backfill_usernames_from_history(
+            members=members,
+            historical_username_to_peer=historical_username_to_peer,
+            historical_peer_to_username=historical_peer_to_username,
+        )
+        if history_backfilled > 0:
+            print(
+                f"INFO: identity history backfill restored {history_backfilled} username(s)"
+            )
+        if history_conflicts > 0:
+            print(
+                f"WARN: identity history backfill skipped {history_conflicts} conflicting assignment(s)"
+            )
+
         if args.deep_usernames:
             if args.source in ("chat", "both"):
                 chat_attempted = int(chat_stats.get("deep_attempted", 0))
@@ -3762,6 +3826,7 @@ def main() -> int:
                 max_members=max(args.max_members, 0),
                 deep_attempted_total=attempted,
                 deep_updated_total=updated,
+                history_backfilled_total=history_backfilled,
             ),
         )
 
@@ -3783,6 +3848,7 @@ def main() -> int:
                 max_members=max(args.max_members, 0),
                 deep_attempted_total=attempted,
                 deep_updated_total=updated,
+                history_backfilled_total=history_backfilled,
                 error=str(exc),
             ),
         )

@@ -59,6 +59,7 @@ cd /home/max/site-control-kit
 - старается переиспользовать точную Telegram-вкладку по URL-фрагменту и передаёт её `tab_id` в экспортёр;
 - если нужная Telegram-вкладка уже открыта на этом же `#chat`, больше не перезагружает её через `navigate`, чтобы не терять текущую позицию в истории сообщений;
 - передаёт в экспортёр `identity_history.json`, чтобы deep-сбор не переназначал `@username` между разными `peer_id`, если история уже знает стабильную связку;
+- если новый run видит уже известный `peer_id` без `@username`, восстанавливает его из `identity_history.json` ещё до extra-deep, чтобы повторный прогон не начинал заново с пустого raw-слоя;
 - ведёт `discovery_state.json`, чтобы следующий запуск знал уже просмотренные слои чата (`data-mid/data-peer-id`) и не тратил первые шаги на тот же самый DOM-срез;
 - если запуск стартует на уже известном слое из `discovery_state.json`, deep сразу откладывается и runtime уходит в прокрутку, а не в повторный mention по тем же людям;
 - в `mention`-deep сначала пытается использовать текущий anchor/sticky avatar в чате как стабильную точку для открытия контекстного меню, и только потом откатывается к message-local селекторам;
@@ -97,7 +98,7 @@ cd /home/max/site-control-kit
   --target-unique-members 30
 ```
 
-`run.json` теперь дублирует ключевую телеметрию экспортёра: `unique_members`, `members_with_username`, `chat_scroll_steps_done`, `chat_jump_scrolls_done`, `deep_updated_total`, а полный сырой payload лежит в `export_stats.json`.
+`run.json` теперь дублирует ключевую телеметрию экспортёра: `unique_members`, `members_with_username`, `chat_scroll_steps_done`, `chat_jump_scrolls_done`, `deep_updated_total`, `history_backfilled_total`, а полный сырой payload лежит в `export_stats.json`.
 
 Если Telegram Web перестал реально прокручиваться, chat-экспорт теперь завершится предупреждением `chat scroll stuck after 3 attempts`, вместо длинного пустого прогона.
 Если burst всё ещё упирается в тот же DOM-слой, экспортёр включает более агрессивный `jump-scroll` и пытается перепрыгнуть дальше по истории.
