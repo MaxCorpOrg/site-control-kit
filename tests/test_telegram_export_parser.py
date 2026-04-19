@@ -164,6 +164,26 @@ class TelegramExportParserTests(unittest.TestCase):
         )
         self.assertFalse(matched)
 
+    def test_parse_wmctrl_windows_reads_geometry_and_title(self) -> None:
+        windows = self.mod._parse_wmctrl_windows(
+            "0x02800264  2 328  128  2396 1536 GIGA Telegram Web - Google Chrome\n"
+        )
+        self.assertEqual(len(windows), 1)
+        self.assertEqual(windows[0]["window_id"], "0x02800264")
+        self.assertEqual(windows[0]["x"], 328)
+        self.assertEqual(windows[0]["width"], 2396)
+        self.assertEqual(windows[0]["title"], "Telegram Web - Google Chrome")
+
+    def test_pick_telegram_x11_window_prefers_chrome_title(self) -> None:
+        picked = self.mod._pick_telegram_x11_window(
+            [
+                {"window_id": "0x1", "title": "Telegram Web - Chromium"},
+                {"window_id": "0x2", "title": "Telegram Web - Google Chrome"},
+            ]
+        )
+        self.assertIsNotNone(picked)
+        self.assertEqual(picked["window_id"], "0x2")
+
 
 if __name__ == "__main__":
     unittest.main()

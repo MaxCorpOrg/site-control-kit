@@ -7,6 +7,8 @@ import html as html_lib
 import json
 import os
 import re
+import socket
+import subprocess
 import sys
 import time
 import webbrowser
@@ -50,10 +52,16 @@ CHAT_SCROLL_DISTANCE_PX = 900
 CHAT_UNCHANGED_STEPS_LIMIT = 6
 INFO_SCROLL_SETTLE_SEC = 0.8
 CHAT_DEEP_DEFAULT_LIMIT = 3
+X11_WHEEL_FALLBACK_ENABLED = os.environ.get("TELEGRAM_X11_WHEEL_FALLBACK", "1").strip().lower() not in {"0", "false", "no"}
+X11_WHEEL_BUTTON = int(os.environ.get("TELEGRAM_X11_WHEEL_BUTTON", "5") or "5")
+X11_WHEEL_CLICKS = max(int(os.environ.get("TELEGRAM_X11_WHEEL_CLICKS", "8") or "8"), 1)
+X11_WHEEL_SETTLE_SEC = max(float(os.environ.get("TELEGRAM_X11_WHEEL_SETTLE_SEC", "0.8") or "0.8"), 0.1)
+X11_WHEEL_X_RATIO = min(max(float(os.environ.get("TELEGRAM_X11_WHEEL_X_RATIO", "0.58") or "0.58"), 0.05), 0.95)
+X11_WHEEL_Y_RATIO = min(max(float(os.environ.get("TELEGRAM_X11_WHEEL_Y_RATIO", "0.42") or "0.42"), 0.05), 0.95)
 SPECIFIC_TG_DIALOG_URL_RE = re.compile(r"^https?://web\.telegram\.org/(k|a)/#[^#\s]+$", flags=re.I)
 ACTIVE_CLIENT_MAX_AGE_SEC = 90
 ACTIVE_CLIENT_WAIT_SEC = 25
-HTTP_REQUEST_TIMEOUT_SEC = 8
+HTTP_REQUEST_TIMEOUT_SEC = max(int(os.environ.get("TELEGRAM_HTTP_TIMEOUT_SEC", "20") or "20"), 5)
 
 
 def _norm_server(url: str) -> str:
@@ -87,8 +95,9 @@ def _http_json(
     except HTTPError as exc:
         raw = exc.read().decode("utf-8", errors="replace") if hasattr(exc, "read") else ""
         raise RuntimeError(f"HTTP {exc.code}: {raw or exc.reason}") from exc
-    except URLError as exc:
-        raise RuntimeError(f"Network error: {exc.reason}") from exc
+    except (URLError, TimeoutError, socket.timeout) as exc:
+        reason = getattr(exc, "reason", None) or str(exc) or exc.__class__.__name__
+        raise RuntimeError(f"Network error: {reason}") from exc
 
 
 def _http_json_retry(
@@ -329,6 +338,122 @@ def _normalize_username(value: str) -> str:
             if USERNAME_VALUE_RE.fullmatch(username):
                 return f"@{username}"
     return "—"
+
+
+def _parse_wmctrl_windows(output: str) -> list[dict[str, Any]]:
+    windows: list[dict[str, Any]] = []
+    for raw_line in str(output or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        parts = line.split(None, 7)
+        if len(parts) < 8:
+            continue
+        window_id, desktop, x, y, width, height, host, title = parts
+        try:
+            windows.append(
+                {
+                    "window_id": window_id,
+                    "desktop": int(desktop),
+                    "x": int(x),
+                    "y": int(y),
+                    "width": int(width),
+                    "height": int(height),
+                    "host": host,
+                    "title": title,
+                }
+            )
+        except ValueError:
+            continue
+    return windows
+
+
+def _pick_telegram_x11_window(windows: list[dict[str, Any]]) -> dict[str, Any] | None:
+    preferred: dict[str, Any] | None = None
+    fallback: dict[str, Any] | None = None
+    for item in windows:
+        title = str(item.get("title") or "").strip()
+        if not title or "telegram web" not in title.lower():
+            continue
+        if "chrome" in title.lower():
+            preferred = item
+            break
+        fallback = fallback or item
+    return preferred or fallback
+
+
+def _get_active_x11_window_id() -> str:
+    try:
+        proc = subprocess.run(
+            ["xprop", "-root", "_NET_ACTIVE_WINDOW"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError:
+        return ""
+    output = f"{proc.stdout}\n{proc.stderr}"
+    match = re.search(r"window id # (0x[0-9a-fA-F]+)", output)
+    return str(match.group(1) if match else "").strip()
+
+
+def _x11_wheel_scroll_telegram() -> bool:
+    if not X11_WHEEL_FALLBACK_ENABLED:
+        return False
+    if sys.platform != "linux" or not os.environ.get("DISPLAY"):
+        return False
+
+    try:
+        proc = subprocess.run(
+            ["wmctrl", "-lG"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError:
+        return False
+    windows = _parse_wmctrl_windows(proc.stdout)
+    window = _pick_telegram_x11_window(windows)
+    if window is None:
+        return False
+
+    try:
+        from Xlib import X, display  # type: ignore
+        from Xlib.ext import xtest  # type: ignore
+    except Exception:
+        return False
+
+    try:
+        current_active = _get_active_x11_window_id()
+        d = display.Display()
+        root = d.screen().root
+        pointer = root.query_pointer()
+        original_x = int(pointer.root_x)
+        original_y = int(pointer.root_y)
+
+        subprocess.run(["wmctrl", "-ia", str(window["window_id"])], check=False)
+        time.sleep(0.18)
+
+        target_x = int(window["x"]) + max(1, min(int(int(window["width"]) * X11_WHEEL_X_RATIO), int(window["width"]) - 2))
+        target_y = int(window["y"]) + max(1, min(int(int(window["height"]) * X11_WHEEL_Y_RATIO), int(window["height"]) - 2))
+
+        xtest.fake_input(d, X.MotionNotify, x=target_x, y=target_y)
+        d.sync()
+        time.sleep(0.08)
+
+        for _ in range(X11_WHEEL_CLICKS):
+            xtest.fake_input(d, X.ButtonPress, X11_WHEEL_BUTTON)
+            xtest.fake_input(d, X.ButtonRelease, X11_WHEEL_BUTTON)
+        d.sync()
+        time.sleep(X11_WHEEL_SETTLE_SEC)
+
+        xtest.fake_input(d, X.MotionNotify, x=original_x, y=original_y)
+        d.sync()
+        if current_active:
+            subprocess.run(["wmctrl", "-ia", current_active], check=False)
+        return True
+    except Exception:
+        return False
 
 
 def _normalize_username_from_mention_input(value: str) -> str:
@@ -1078,6 +1203,41 @@ def _scroll_chat_up(server: str, token: str, client_id: str, tab_id: int, timeou
             time.sleep(0.22)
             return True
 
+        x11_before_height = data.get("scrollHeight")
+        if _x11_wheel_scroll_telegram():
+            probe = _send_command_result(
+                server=server,
+                token=token,
+                client_id=client_id,
+                tab_id=tab_id,
+                timeout_sec=timeout_sec,
+                command={
+                    "type": "scroll_by",
+                    "selector": selector,
+                    "delta_y": 0,
+                    "delta_x": 0,
+                },
+                raise_on_fail=False,
+            )
+            if probe.get("ok"):
+                probe_data = probe.get("data") or {}
+                probe_top = probe_data.get("beforeTop")
+                probe_height = probe_data.get("scrollHeight")
+                if isinstance(before_top, (int, float)) and isinstance(probe_top, (int, float)):
+                    if abs(float(probe_top) - float(before_top)) >= 1:
+                        print(
+                            "INFO: chat X11 wheel moved container "
+                            f"(selector={selector}, top={before_top}->{probe_top})"
+                        )
+                        return True
+                if isinstance(x11_before_height, (int, float)) and isinstance(probe_height, (int, float)):
+                    if abs(float(probe_height) - float(x11_before_height)) >= 1:
+                        print(
+                            "INFO: chat X11 wheel changed scroll height "
+                            f"(selector={selector}, height={x11_before_height}->{probe_height})"
+                        )
+                        return True
+
         for anchor_selector in CHAT_SCROLL_SELECTORS:
             fallback = _send_command_result(
                 server=server,
@@ -1673,10 +1833,6 @@ def _collect_members_from_chat(
         if empty_steps >= 2 and not members:
             print("WARN: чат не читается (пустой DOM/не открыт диалог), останавливаюсь")
             break
-        if unchanged_steps >= CHAT_UNCHANGED_STEPS_LIMIT and len(members) >= max(0, int(min_members_target)):
-            print(f"INFO: chat content unchanged for {unchanged_steps} steps, stopping")
-            break
-
         if not _scroll_chat_up(server, token, client_id, tab_id, timeout_sec=min(timeout_sec, 10)):
             no_scroll_steps += 1
             if no_scroll_steps >= 3:
