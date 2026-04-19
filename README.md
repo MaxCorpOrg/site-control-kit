@@ -66,6 +66,12 @@ cd /home/max/site-control-kit
 - пишет только новые контакты в `1.txt`, `2.txt`, `3.txt` и так далее;
 - если `@username` внезапно сменил владельца (`peer_id`) между запусками, не пишет его в numbered batch, а кладёт случай в `review.txt` и `conflicts.json`.
 
+GUI-скрипты `scripts/telegram_members_export_app.sh` и `scripts/telegram_members_export_gui.sh` теперь тоже пишут safe-артефакты рядом с выбранным выходным файлом:
+- `telegram_export_<chat-id>/latest_safe.md`
+- `telegram_export_<chat-id>/latest_safe.txt`
+- `telegram_export_<chat-id>/review.txt`
+- `telegram_export_<chat-id>/conflicts.json`
+
 Параметры можно менять через env, например:
 
 ```bash
@@ -76,6 +82,29 @@ CHAT_MIN_MEMBERS=10 CHAT_MAX_MEMBERS=10 CHAT_SCROLL_STEPS=40 CHAT_DEEP_LIMIT=20 
 Если Telegram Web перестал реально прокручиваться, chat-экспорт теперь завершится предупреждением `chat scroll stuck after 3 attempts`, вместо длинного пустого прогона.
 
 После обновления файлов в `extension/` Chrome обычно требует `Reload` для unpacked extension на странице `chrome://extensions`, иначе новая логика content-script не подхватится в уже установленном расширении.
+
+## Browser Observability: noVNC
+
+Для визуального контроля браузера и ручного recovery можно поднять локальный noVNC-слой поверх X11:
+
+```bash
+cd /home/max/site-control-kit
+./scripts/start_browser_novnc.sh
+```
+
+Скрипт ожидает локально установленные пакеты:
+- `x11vnc`
+- `websockify`
+- `noVNC` web files, по умолчанию в `/usr/share/novnc`
+
+По умолчанию noVNC слушает только `127.0.0.1:6080`, а VNC-порт проброшен только на localhost. Это не заменяет текущий browser bridge; это вспомогательный режим для наблюдения за живым браузером, ручной прокрутки и отладки нестабильных DOM-сценариев.
+
+Остановить можно так:
+
+```bash
+cd /home/max/site-control-kit
+./scripts/stop_browser_novnc.sh
+```
 
 ## Архитектура
 

@@ -8,6 +8,7 @@ from webcontrol.cli import (
     _find_created_tab,
     _find_browser_tab,
     _pick_client,
+    _tab_present,
     _tab_cycle_plan,
 )
 
@@ -110,6 +111,14 @@ class BrowserCliHelperTests(unittest.TestCase):
         )
         self.assertIsNotNone(tab)
         self.assertEqual(tab["id"], 11)
+
+    def test_tab_present_detects_known_tab(self) -> None:
+        client = {"tabs": [{"id": 10}, {"id": 11}]}
+        self.assertTrue(_tab_present(client, 11))
+
+    def test_tab_present_returns_false_for_missing_tab(self) -> None:
+        client = {"tabs": [{"id": 10}, {"id": 11}]}
+        self.assertFalse(_tab_present(client, 12))
 
 
 if __name__ == "__main__":

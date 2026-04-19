@@ -3,6 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUN_ONCE_SCRIPT="${SCRIPT_DIR}/run_chat_export_once.sh"
+SAFE_SNAPSHOT_SCRIPT="${SCRIPT_DIR}/write_telegram_safe_snapshot.py"
 
 if ! command -v zenity >/dev/null 2>&1; then
   echo "ERROR: zenity is not installed. Install package 'zenity' and rerun." >&2
@@ -13,6 +14,13 @@ if [[ ! -x "${RUN_ONCE_SCRIPT}" ]]; then
   zenity --error \
     --title="Telegram Members Export" \
     --text="Скрипт не найден или не исполняемый:\n${RUN_ONCE_SCRIPT}"
+  exit 1
+fi
+
+if [[ ! -f "${SAFE_SNAPSHOT_SCRIPT}" ]]; then
+  zenity --error \
+    --title="Telegram Members Export" \
+    --text="Скрипт safe-снимка не найден:\n${SAFE_SNAPSHOT_SCRIPT}"
   exit 1
 fi
 
@@ -36,6 +44,24 @@ detect_token() {
 
 is_uint() {
   [[ "${1:-}" =~ ^[0-9]+$ ]]
+}
+
+chat_slug_from_url() {
+  local group_url="$1"
+  python3 - "$group_url" <<'PY'
+import re
+import sys
+
+fragment = str(sys.argv[1] or "").split("#", 1)[1] if "#" in str(sys.argv[1] or "") else "chat"
+slug = re.sub(r"[^A-Za-z0-9._-]+", "_", fragment).strip("_") or "chat"
+print(slug)
+PY
+}
+
+build_safe_snapshot() {
+  local source_md="$1"
+  local output_dir="$2"
+  python3 "${SAFE_SNAPSHOT_SCRIPT}" --source-md "${source_md}" --directory "${output_dir}"
 }
 
 terminate_export() {
@@ -113,9 +139,39 @@ run_with_progress() {
   set -e
 
   if [[ "${rc}" -eq 0 ]]; then
+    local chat_slug
+    local safe_output_dir
+    local safe_output
+    local safe_count
+    local safe_md
+    local safe_txt
+    local review_count
+    local review_path
+    local conflicts_path
+    chat_slug="$(chat_slug_from_url "${group_url}")"
+    safe_output_dir="$(dirname "${output_path}")/telegram_export_${chat_slug}"
+    safe_output="$(build_safe_snapshot "${output_path}" "${safe_output_dir}" 2>>"${log_file}" || true)"
+    safe_count="$(printf '%s\n' "${safe_output}" | sed -n 's/^safe_count=//p')"
+    safe_md="$(printf '%s\n' "${safe_output}" | sed -n 's/^safe_md=//p')"
+    safe_txt="$(printf '%s\n' "${safe_output}" | sed -n 's/^safe_txt=//p')"
+    review_count="$(printf '%s\n' "${safe_output}" | sed -n 's/^review_count=//p')"
+    review_path="$(printf '%s\n' "${safe_output}" | sed -n 's/^review_path=//p')"
+    conflicts_path="$(printf '%s\n' "${safe_output}" | sed -n 's/^conflicts_path=//p')"
+
+    local info_text
+    info_text="Готово.\n\nФайл сохранен в:\n${output_path}"
+    if [[ -n "${safe_txt}" ]]; then
+      info_text="${info_text}\n\nSafe @username: ${safe_count:-0}\nSafe TXT:\n${safe_txt}\nSafe MD:\n${safe_md}"
+    fi
+    if [[ -n "${review_count}" && "${review_count}" != "0" && -n "${review_path}" ]]; then
+      info_text="${info_text}\n\nКонфликты: ${review_count}\nReview:\n${review_path}"
+      if [[ -n "${conflicts_path}" ]]; then
+        info_text="${info_text}\nConflicts JSON:\n${conflicts_path}"
+      fi
+    fi
     zenity --info \
       --title="Telegram Members Export" \
-      --text="Готово.\n\nФайл сохранен в:\n${output_path}"
+      --text="${info_text}"
   else
     local err_text
     err_text="$(tail -n 25 "${log_file}")"

@@ -168,6 +168,16 @@ def _find_browser_tab(client: dict[str, Any], target: dict[str, Any]) -> dict[st
     return tabs[0]
 
 
+def _tab_present(client: dict[str, Any], tab_id: int) -> bool:
+    tabs = client.get("tabs")
+    if not isinstance(tabs, list):
+        return False
+    for tab in tabs:
+        if int(tab.get("id", -1)) == int(tab_id):
+            return True
+    return False
+
+
 def _tab_cycle_plan(window_tabs: list[dict[str, Any]], target_tab_id: int) -> tuple[int, bool] | None:
     if not window_tabs:
         return None
@@ -344,6 +354,24 @@ def _wait_for_tab_state(
     return None, None
 
 
+def _wait_for_tab_absent(
+    *,
+    server: str,
+    token: str,
+    client_id: str,
+    tab_id: int,
+    timeout_sec: float,
+) -> bool:
+    _, payload = _wait_for_tab_state(
+        server=server,
+        token=token,
+        client_id=client_id,
+        timeout_sec=timeout_sec,
+        predicate=lambda current_client: {"closed": True} if not _tab_present(current_client, tab_id) else None,
+    )
+    return bool(payload)
+
+
 def _synthetic_command_record(client_id: str, *, data: dict[str, Any] | None = None, error: dict[str, Any] | None = None) -> dict[str, Any]:
     ok = error is None
     return {
@@ -478,7 +506,7 @@ def _x11_new_tab_fallback(
                 window_id=window_id,
                 previous_tab_ids=previous_tab_ids,
                 preferred_url=url,
-                require_active=True,
+                require_active=False,
             ),
         )
     if not refreshed_client or not new_tab:
@@ -497,18 +525,53 @@ def _x11_new_tab_fallback(
     if navigate_record.get("status") != "completed":
         return navigate_record
 
-    if background and previous_active_tab_id > 0:
-        updated_client = refreshed_client
-        updated_tabs = _tabs_for_window(updated_client, window_id)
-        previous_target = next((tab for tab in updated_tabs if int(tab.get("id", -1)) == previous_active_tab_id), None)
-        if previous_target:
-            _x11_activate_tab_fallback(
+    updated_client, updated_new_tab = _wait_for_tab_state(
+        server=server,
+        token=token,
+        client_id=client_id,
+        timeout_sec=max(wait_sec, 3),
+        predicate=lambda current_client: _find_browser_tab(
+            current_client,
+            {"client_id": client_id, "tab_id": int(new_tab.get("id", -1)), "active": False},
+        ),
+    )
+    if updated_client and updated_new_tab:
+        new_tab = updated_new_tab
+        refreshed_client = updated_client
+
+    if background:
+        if previous_active_tab_id > 0:
+            updated_tabs = _tabs_for_window(refreshed_client, window_id)
+            previous_target = next((tab for tab in updated_tabs if int(tab.get("id", -1)) == previous_active_tab_id), None)
+            if previous_target:
+                _x11_activate_tab_fallback(
+                    server=server,
+                    token=token,
+                    client=refreshed_client,
+                    target={"client_id": client_id, "tab_id": previous_active_tab_id, "active": True},
+                    wait_sec=max(3, wait_sec // 2),
+                )
+    elif not bool(new_tab.get("active")):
+        activated = _x11_activate_tab_fallback(
+            server=server,
+            token=token,
+            client=refreshed_client,
+            target={"client_id": client_id, "tab_id": int(new_tab.get("id", -1)), "active": True},
+            wait_sec=max(3, wait_sec // 2),
+        )
+        if activated:
+            refreshed_client, activated_tab = _wait_for_tab_state(
                 server=server,
                 token=token,
-                client=updated_client,
-                target={"client_id": client_id, "tab_id": previous_active_tab_id, "active": True},
-                wait_sec=max(3, wait_sec // 2),
+                client_id=client_id,
+                timeout_sec=max(wait_sec, 3),
+                predicate=lambda current_client: _find_browser_tab(
+                    current_client,
+                    {"client_id": client_id, "tab_id": int(new_tab.get("id", -1)), "active": True},
+                ),
             )
+            if refreshed_client and activated_tab:
+                new_tab = activated_tab
 
     return _synthetic_command_record(
         client_id,
@@ -516,7 +579,7 @@ def _x11_new_tab_fallback(
             "tabId": new_tab.get("id"),
             "windowId": new_tab.get("windowId"),
             "url": url,
-            "active": not background,
+            "active": bool(new_tab.get("active")) if not background else False,
             "via": "x11_fallback",
         },
     )
@@ -531,9 +594,23 @@ def _x11_close_tab_fallback(
     wait_sec: int,
 ) -> dict[str, Any] | None:
     target_tab = _find_browser_tab(client, target)
-    if not target_tab:
-        return None
     client_id = str(client.get("client_id") or "").strip()
+    requested_tab_id = target.get("tab_id")
+    if not target_tab:
+        if isinstance(requested_tab_id, int):
+            if _wait_for_tab_absent(
+                server=server,
+                token=token,
+                client_id=client_id,
+                tab_id=requested_tab_id,
+                timeout_sec=1.0,
+            ):
+                return _synthetic_command_record(
+                    client_id,
+                    data={"tabId": requested_tab_id, "closed": True, "via": "postcheck"},
+                )
+        return None
+
     tab_id = int(target_tab.get("id", -1))
     window_id = int(target_tab.get("windowId", -1))
     window_tabs = _tabs_for_window(client, window_id)
@@ -541,7 +618,6 @@ def _x11_close_tab_fallback(
     if not x11_window_id:
         return None
 
-    active_client = client
     active_target = target_tab
     if not bool(target_tab.get("active")):
         activated = _x11_activate_tab_fallback(
@@ -564,22 +640,22 @@ def _x11_close_tab_fallback(
         )
         if not refreshed_client or not refreshed_tab:
             return None
-        active_client = refreshed_client
         active_target = refreshed_tab
+        refreshed_window_tabs = _tabs_for_window(refreshed_client, window_id)
+        refreshed_window_id = _find_x11_browser_window(refreshed_window_tabs)
+        if refreshed_window_id:
+            x11_window_id = refreshed_window_id
 
     if not _x11_send_keys(x11_window_id, [["Control_L", "w"]]):
         return None
 
-    _, missing_tab = _wait_for_tab_state(
+    if not _wait_for_tab_absent(
         server=server,
         token=token,
         client_id=client_id,
+        tab_id=tab_id,
         timeout_sec=max(wait_sec, 3),
-        predicate=lambda current_client: None
-        if _find_browser_tab(current_client, {"client_id": client_id, "tab_id": tab_id, "active": False})
-        else {"closed": True},
-    )
-    if not missing_tab:
+    ):
         return None
 
     return _synthetic_command_record(

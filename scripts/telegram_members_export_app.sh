@@ -4,6 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 EXPORT_SCRIPT="${SCRIPT_DIR}/export_telegram_members_non_pii.py"
 START_HUB_SCRIPT="${SCRIPT_DIR}/start_hub.sh"
+SAFE_SNAPSHOT_SCRIPT="${SCRIPT_DIR}/write_telegram_safe_snapshot.py"
 
 if ! command -v zenity >/dev/null 2>&1; then
   echo "ERROR: zenity is not installed. Install package 'zenity' and rerun." >&2
@@ -22,6 +23,11 @@ fi
 
 if [[ ! -f "${EXPORT_SCRIPT}" ]]; then
   zenity --error --title="Telegram Members Export" --text="Скрипт экспорта не найден:\n${EXPORT_SCRIPT}"
+  exit 1
+fi
+
+if [[ ! -f "${SAFE_SNAPSHOT_SCRIPT}" ]]; then
+  zenity --error --title="Telegram Members Export" --text="Скрипт safe-снимка не найден:\n${SAFE_SNAPSHOT_SCRIPT}"
   exit 1
 fi
 
@@ -138,6 +144,24 @@ for client in data.get("clients") or []:
 PY
 }
 
+chat_slug_from_url() {
+  local group_url="$1"
+  python3 - "$group_url" <<'PY'
+import re
+import sys
+
+fragment = str(sys.argv[1] or "").split("#", 1)[1] if "#" in str(sys.argv[1] or "") else "chat"
+slug = re.sub(r"[^A-Za-z0-9._-]+", "_", fragment).strip("_") or "chat"
+print(slug)
+PY
+}
+
+build_safe_snapshot() {
+  local source_md="$1"
+  local output_dir="$2"
+  python3 "${SAFE_SNAPSHOT_SCRIPT}" --source-md "${source_md}" --directory "${output_dir}"
+}
+
 server="${default_server}"
 token="$(detect_token)"
 
@@ -224,6 +248,9 @@ if [[ "${group_url}" != *"/#"* ]]; then
   zenity --error --title="Telegram Members Export" --text="Некорректный URL группы:\n${group_url}\n\nНужен адрес с # и ID/username диалога."
   exit 1
 fi
+
+chat_slug="$(chat_slug_from_url "${group_url}")"
+safe_output_dir="$(dirname "${output_path}")/telegram_export_${chat_slug}"
 
 timeout_value="${default_timeout}"
 chat_scroll_steps="${default_chat_scroll_steps}"
@@ -324,6 +351,26 @@ exit_code=$?
 set -e
 
 if [[ ${exit_code} -eq 0 ]]; then
+  safe_snapshot_output=""
+  safe_count="0"
+  safe_md=""
+  safe_txt=""
+  review_count="0"
+  review_path=""
+  conflicts_path=""
+  set +e
+  safe_snapshot_output="$(build_safe_snapshot "${export_output_path}" "${safe_output_dir}" 2>>"${log_file}")"
+  safe_exit_code=$?
+  set -e
+  if [[ ${safe_exit_code} -eq 0 ]]; then
+    safe_count="$(printf '%s\n' "${safe_snapshot_output}" | sed -n 's/^safe_count=//p')"
+    safe_md="$(printf '%s\n' "${safe_snapshot_output}" | sed -n 's/^safe_md=//p')"
+    safe_txt="$(printf '%s\n' "${safe_snapshot_output}" | sed -n 's/^safe_txt=//p')"
+    review_count="$(printf '%s\n' "${safe_snapshot_output}" | sed -n 's/^review_count=//p')"
+    review_path="$(printf '%s\n' "${safe_snapshot_output}" | sed -n 's/^review_path=//p')"
+    conflicts_path="$(printf '%s\n' "${safe_snapshot_output}" | sed -n 's/^conflicts_path=//p')"
+  fi
+
   if [[ "${output_mode}" == "txt" ]]; then
     set +e
     usernames_count="$(extract_usernames_from_markdown "${export_output_path}" "${output_path}")"
@@ -333,10 +380,23 @@ if [[ ${exit_code} -eq 0 ]]; then
       zenity --error --title="Telegram Members Export" --text="Экспорт прошел, но не удалось собрать .txt с @username.\nПроверьте лог:\n${log_file}"
       exit 1
     fi
-    zenity --info --title="Telegram Members Export" --text="Готово.\n\nСобрано @username: ${usernames_count}\nФайл сохранен в:\n${output_path}"
+    info_text="Готово.\n\nСобрано @username: ${usernames_count}\nФайл сохранен в:\n${output_path}"
   else
-    zenity --info --title="Telegram Members Export" --text="Готово.\n\nФайл сохранен в:\n${output_path}"
+    info_text="Готово.\n\nФайл сохранен в:\n${output_path}"
   fi
+
+  if [[ ${safe_exit_code} -eq 0 ]]; then
+    info_text="${info_text}\n\nSafe @username: ${safe_count:-0}\nSafe TXT:\n${safe_txt}\nSafe MD:\n${safe_md}"
+    if [[ -n "${review_count}" && "${review_count}" != "0" && -n "${review_path}" ]]; then
+      info_text="${info_text}\n\nКонфликты: ${review_count}\nReview:\n${review_path}"
+      if [[ -n "${conflicts_path}" ]]; then
+        info_text="${info_text}\nConflicts JSON:\n${conflicts_path}"
+      fi
+    fi
+  else
+    info_text="${info_text}\n\nSafe-снимок не собран. Проверьте лог:\n${log_file}"
+  fi
+  zenity --info --title="Telegram Members Export" --text="${info_text}"
 else
   error_text="$(tail -n 25 "${log_file}")"
   zenity --error --title="Telegram Members Export" --text="Ошибка выгрузки.\n\n${error_text}"
