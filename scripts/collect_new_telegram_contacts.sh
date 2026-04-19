@@ -38,12 +38,24 @@ mkdir -p "${run_dir}"
 
 temp_md="$(mktemp /tmp/telegram_contact_batch.XXXXXX.md)"
 temp_txt="${temp_md%.md}_usernames.txt"
+backup_latest_full_md=""
+backup_latest_full_txt=""
+backup_latest_safe_md=""
+backup_latest_safe_txt=""
 interrupted="0"
 partial_review_count="0"
 partial_review_path=""
 partial_safe_count="0"
 partial_safe_md=""
 partial_safe_txt=""
+latest_full_promoted="1"
+latest_full_decision_candidate=""
+latest_full_decision_baseline=""
+latest_full_best_source=""
+latest_safe_promoted="1"
+latest_safe_decision_candidate=""
+latest_safe_decision_baseline=""
+latest_safe_best_source=""
 
 export CHAT_SCROLL_STEPS="${CHAT_SCROLL_STEPS:-12}"
 export CHAT_DEEP_LIMIT="${CHAT_DEEP_LIMIT:-40}"
@@ -57,7 +69,7 @@ export CHAT_DISCOVERY_STATE="${chat_dir}/discovery_state.json"
 export CHAT_STATS_OUTPUT="${export_stats_path}"
 
 cleanup() {
-  rm -f "${temp_md}" "${temp_txt}"
+  rm -f "${temp_md}" "${temp_txt}" "${backup_latest_full_md}" "${backup_latest_full_txt}" "${backup_latest_safe_md}" "${backup_latest_safe_txt}"
 }
 mark_interrupted() {
   interrupted="1"
@@ -89,6 +101,80 @@ for line in text.splitlines():
     seen.add(key)
     rows.append(username)
 out.write_text("\n".join(rows) + ("\n" if rows else ""), encoding="utf-8")
+PY
+}
+
+backup_if_exists() {
+  local source_path="$1"
+  if [[ ! -f "${source_path}" ]]; then
+    return 0
+  fi
+  local suffix
+  suffix=".bak"
+  if [[ "${source_path}" == *.md ]]; then
+    suffix=".md"
+  elif [[ "${source_path}" == *.txt ]]; then
+    suffix=".txt"
+  fi
+  local backup_path
+  backup_path="$(mktemp "/tmp/telegram_snapshot_backup.XXXXXX${suffix}")"
+  cp "${source_path}" "${backup_path}"
+  printf '%s\n' "${backup_path}"
+}
+
+snapshot_decision() {
+  local candidate_md="$1"
+  local baseline_md="$2"
+  python3 - "$BATCH_HELPER" "$candidate_md" "$baseline_md" <<'PY'
+import importlib.util
+import json
+import sys
+from pathlib import Path
+
+module_path = Path(sys.argv[1]).expanduser()
+candidate_path = Path(sys.argv[2]).expanduser()
+baseline_path = Path(sys.argv[3]).expanduser()
+spec = importlib.util.spec_from_file_location("telegram_contact_batches", module_path)
+if spec is None or spec.loader is None:
+    raise RuntimeError(f"Unable to load helper module from {module_path}")
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+
+candidate = module.summarize_markdown_snapshot(candidate_path)
+baseline = module.summarize_markdown_snapshot(baseline_path if baseline_path.exists() else None)
+promote = 1 if (not baseline_path.exists() or module.should_promote_snapshot(candidate, baseline)) else 0
+print(f"promote={promote}")
+print("candidate=" + json.dumps(candidate, ensure_ascii=False, sort_keys=True))
+print("baseline=" + json.dumps(baseline, ensure_ascii=False, sort_keys=True))
+PY
+}
+
+best_snapshot_source() {
+  local latest_md="$1"
+  local snapshot_name="$2"
+  python3 - "$BATCH_HELPER" "$chat_dir" "$latest_md" "$snapshot_name" <<'PY'
+import importlib.util
+import json
+import sys
+from pathlib import Path
+
+module_path = Path(sys.argv[1]).expanduser()
+chat_dir = Path(sys.argv[2]).expanduser()
+latest_md = Path(sys.argv[3]).expanduser()
+snapshot_name = sys.argv[4]
+spec = importlib.util.spec_from_file_location("telegram_contact_batches", module_path)
+if spec is None or spec.loader is None:
+    raise RuntimeError(f"Unable to load helper module from {module_path}")
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+
+paths = []
+if latest_md.exists():
+    paths.append(latest_md)
+paths.extend(sorted((chat_dir / "runs").glob(f"*/{snapshot_name}")))
+best_path, best_summary = module.select_best_snapshot(paths)
+print(f"path={best_path if best_path else ''}")
+print("summary=" + json.dumps(best_summary, ensure_ascii=False, sort_keys=True))
 PY
 }
 
@@ -184,6 +270,14 @@ payload = {
     "latest_safe_txt": ${safe_txt_value@Q},
     "exit_code": int(${exit_code_value@Q}),
     "interrupted": bool(int(${interrupted_value@Q})),
+    "latest_full_promoted": bool(int(${latest_full_promoted@Q})),
+    "latest_full_decision_candidate": ${latest_full_decision_candidate@Q},
+    "latest_full_decision_baseline": ${latest_full_decision_baseline@Q},
+    "latest_full_best_source": ${latest_full_best_source@Q},
+    "latest_safe_promoted": bool(int(${latest_safe_promoted@Q})),
+    "latest_safe_decision_candidate": ${latest_safe_decision_candidate@Q},
+    "latest_safe_decision_baseline": ${latest_safe_decision_baseline@Q},
+    "latest_safe_best_source": ${latest_safe_best_source@Q},
     "latest_full_md": ${chat_dir@Q} + "/latest_full.md",
     "latest_full_txt": ${chat_dir@Q} + "/latest_full.txt",
     "snapshot_safe_md": ${run_dir@Q} + "/snapshot_safe.md",
@@ -199,6 +293,8 @@ payload = {
     "deep_attempted_total": int(export_stats.get("deep_attempted_total", 0) or 0),
     "deep_updated_total": int(export_stats.get("deep_updated_total", 0) or 0),
     "history_backfilled_total": int(export_stats.get("history_backfilled_total", 0) or 0),
+    "output_usernames_restored_total": int(export_stats.get("output_usernames_restored_total", 0) or 0),
+    "output_usernames_cleared_total": int(export_stats.get("output_usernames_cleared_total", 0) or 0),
     "chat_scroll_steps_done": int(chat_stats.get("scroll_steps_done", 0) or 0),
     "chat_burst_scrolls_done": int(chat_stats.get("burst_scrolls_done", 0) or 0),
     "chat_jump_scrolls_done": int(chat_stats.get("jump_scrolls_done", 0) or 0),
@@ -244,11 +340,25 @@ if [[ "${export_status}" != "0" || "${tee_status}" != "0" ]]; then
   exit 1
 fi
 
-cp "${temp_md}" "${chat_dir}/latest_full.md"
-cp "${temp_txt}" "${chat_dir}/latest_full.txt"
+backup_latest_full_md="$(backup_if_exists "${chat_dir}/latest_full.md" || true)"
+backup_latest_full_txt="$(backup_if_exists "${chat_dir}/latest_full.txt" || true)"
 cp "${temp_md}" "${run_dir}/snapshot.md"
 cp "${temp_txt}" "${run_dir}/snapshot.txt"
 
+full_decision="$(snapshot_decision "${temp_md}" "${backup_latest_full_md:-/nonexistent}" )"
+latest_full_promoted="$(printf '%s\n' "${full_decision}" | sed -n 's/^promote=//p')"
+latest_full_decision_candidate="$(printf '%s\n' "${full_decision}" | sed -n 's/^candidate=//p')"
+latest_full_decision_baseline="$(printf '%s\n' "${full_decision}" | sed -n 's/^baseline=//p')"
+
+if [[ "${latest_full_promoted}" == "1" ]]; then
+  cp "${temp_md}" "${chat_dir}/latest_full.md"
+  cp "${temp_txt}" "${chat_dir}/latest_full.txt"
+else
+  echo "INFO: kept existing latest_full snapshot because current run is weaker"
+fi
+
+backup_latest_safe_md="$(backup_if_exists "${chat_dir}/latest_safe.md" || true)"
+backup_latest_safe_txt="$(backup_if_exists "${chat_dir}/latest_safe.txt" || true)"
 helper_output="$(python3 "${BATCH_HELPER}" --source "${temp_txt}" --directory "${chat_dir}" --full-md "${temp_md}")"
 
 created="$(printf '%s\n' "${helper_output}" | sed -n 's/^created=//p')"
@@ -281,7 +391,57 @@ if [[ -n "${safe_txt}" ]]; then
   if [[ -f "${safe_txt}" ]]; then
     cp "${safe_txt}" "${run_dir}/snapshot_safe.txt"
   fi
+
+  safe_decision="$(snapshot_decision "${safe_md}" "${backup_latest_safe_md:-/nonexistent}" )"
+  latest_safe_promoted="$(printf '%s\n' "${safe_decision}" | sed -n 's/^promote=//p')"
+  latest_safe_decision_candidate="$(printf '%s\n' "${safe_decision}" | sed -n 's/^candidate=//p')"
+  latest_safe_decision_baseline="$(printf '%s\n' "${safe_decision}" | sed -n 's/^baseline=//p')"
+  if [[ "${latest_safe_promoted}" != "1" ]]; then
+    if [[ -n "${backup_latest_safe_md}" && -f "${backup_latest_safe_md}" ]]; then
+      cp "${backup_latest_safe_md}" "${chat_dir}/latest_safe.md"
+    else
+      rm -f "${chat_dir}/latest_safe.md"
+    fi
+    if [[ -n "${backup_latest_safe_txt}" && -f "${backup_latest_safe_txt}" ]]; then
+      cp "${backup_latest_safe_txt}" "${chat_dir}/latest_safe.txt"
+    else
+      rm -f "${chat_dir}/latest_safe.txt"
+    fi
+    echo "INFO: kept existing latest_safe snapshot because current run is weaker"
+  fi
   echo "  Safe:     ${safe_txt} (${safe_count:-0} username(s))"
+fi
+
+latest_full_best_source="${chat_dir}/latest_full.md"
+full_best="$(best_snapshot_source "${chat_dir}/latest_full.md" "snapshot.md")"
+full_best_path="$(printf '%s\n' "${full_best}" | sed -n 's/^path=//p')"
+if [[ -n "${full_best_path}" ]]; then
+  latest_full_best_source="${full_best_path}"
+  if [[ "${full_best_path}" != "${chat_dir}/latest_full.md" ]]; then
+    cp "${full_best_path}" "${chat_dir}/latest_full.md"
+    full_best_txt="${full_best_path%/snapshot.md}/snapshot.txt"
+    if [[ -f "${full_best_txt}" ]]; then
+      cp "${full_best_txt}" "${chat_dir}/latest_full.txt"
+    else
+      extract_usernames_txt "${full_best_path}" "${chat_dir}/latest_full.txt"
+    fi
+    echo "INFO: refreshed latest_full snapshot from best run artifact ${full_best_path}"
+  fi
+fi
+
+latest_safe_best_source="${chat_dir}/latest_safe.md"
+safe_best="$(best_snapshot_source "${chat_dir}/latest_safe.md" "snapshot_safe.md")"
+safe_best_path="$(printf '%s\n' "${safe_best}" | sed -n 's/^path=//p')"
+if [[ -n "${safe_best_path}" ]]; then
+  latest_safe_best_source="${safe_best_path}"
+  if [[ "${safe_best_path}" != "${chat_dir}/latest_safe.md" ]]; then
+    cp "${safe_best_path}" "${chat_dir}/latest_safe.md"
+    safe_best_txt="${safe_best_path%/snapshot_safe.md}/snapshot_safe.txt"
+    if [[ -f "${safe_best_txt}" ]]; then
+      cp "${safe_best_txt}" "${chat_dir}/latest_safe.txt"
+    fi
+    echo "INFO: refreshed latest_safe snapshot from best run artifact ${safe_best_path}"
+  fi
 fi
 
 echo "  Run dir:  ${run_dir}"

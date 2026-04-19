@@ -1831,6 +1831,8 @@ def _build_export_stats_payload(
     deep_attempted_total: int = 0,
     deep_updated_total: int = 0,
     history_backfilled_total: int = 0,
+    output_usernames_restored_total: int = 0,
+    output_usernames_cleared_total: int = 0,
     error: str = "",
 ) -> dict[str, Any]:
     members = list(members or [])
@@ -1853,6 +1855,8 @@ def _build_export_stats_payload(
         "deep_attempted_total": int(deep_attempted_total),
         "deep_updated_total": int(deep_updated_total),
         "history_backfilled_total": int(history_backfilled_total),
+        "output_usernames_restored_total": int(output_usernames_restored_total),
+        "output_usernames_cleared_total": int(output_usernames_cleared_total),
         "info_stats": info_stats,
         "chat_stats": chat_stats,
     }
@@ -1973,6 +1977,62 @@ def _backfill_usernames_from_history(
             )
 
     return updated, conflicts
+
+
+def _sanitize_member_usernames_for_output(
+    *,
+    members: list[dict[str, str]],
+    historical_username_to_peer: dict[str, str] | None = None,
+    historical_peer_to_username: dict[str, str] | None = None,
+) -> tuple[int, int]:
+    if not members:
+        return 0, 0
+
+    normalized_peer_history = {
+        str(peer_id).strip(): _normalize_username(str(username))
+        for peer_id, username in (historical_peer_to_username or {}).items()
+        if str(peer_id).strip() and _normalize_username(str(username)) != "—"
+    }
+    username_to_peer: dict[str, str] = {}
+    restored = 0
+    cleared = 0
+
+    for item in members:
+        peer_id = str(item.get("peer_id") or "").strip()
+        if not peer_id:
+            continue
+        current_username = _normalize_username(str(item.get("username") or "").strip())
+        historical_username = normalized_peer_history.get(peer_id, "—")
+        if historical_username != "—" and current_username != "—" and historical_username.lower() != current_username.lower():
+            item["username"] = historical_username
+            current_username = historical_username
+            restored += 1
+        elif current_username != "—":
+            item["username"] = current_username
+
+    for item in members:
+        peer_id = str(item.get("peer_id") or "").strip()
+        if not peer_id:
+            continue
+        username = _normalize_username(str(item.get("username") or "").strip())
+        if username == "—":
+            item["username"] = "—"
+            continue
+        key = username.lower()
+        historical_owner = str((historical_username_to_peer or {}).get(key) or "").strip()
+        if historical_owner and historical_owner != peer_id:
+            item["username"] = "—"
+            cleared += 1
+            continue
+        existing_peer = username_to_peer.get(key)
+        if existing_peer and existing_peer != peer_id:
+            item["username"] = "—"
+            cleared += 1
+            continue
+        username_to_peer[key] = peer_id
+        item["username"] = username
+
+    return restored, cleared
 
 
 def _enrich_chat_usernames_via_info(
@@ -3529,6 +3589,8 @@ def main() -> int:
     attempted = 0
     updated = 0
     history_backfilled = 0
+    output_usernames_restored = 0
+    output_usernames_cleared = 0
     if historical_username_to_peer or historical_peer_to_username:
         print(
             f"INFO: loaded identity history: usernames={len(historical_username_to_peer)}, "
@@ -3809,6 +3871,20 @@ def main() -> int:
 
             print(f"INFO: deep mode processed {attempted} profiles, filled {updated} usernames")
 
+        output_usernames_restored, output_usernames_cleared = _sanitize_member_usernames_for_output(
+            members=members,
+            historical_username_to_peer=historical_username_to_peer,
+            historical_peer_to_username=historical_peer_to_username,
+        )
+        if output_usernames_restored > 0:
+            print(
+                f"INFO: output sanitize restored {output_usernames_restored} historical username(s)"
+            )
+        if output_usernames_cleared > 0:
+            print(
+                f"WARN: output sanitize cleared {output_usernames_cleared} conflicting username(s)"
+            )
+
         _write_markdown(out_path, members, group_url, source_label)
         _save_discovery_state(discovery_state_path, discovery_state)
         _write_stats_output(
@@ -3827,6 +3903,8 @@ def main() -> int:
                 deep_attempted_total=attempted,
                 deep_updated_total=updated,
                 history_backfilled_total=history_backfilled,
+                output_usernames_restored_total=output_usernames_restored,
+                output_usernames_cleared_total=output_usernames_cleared,
             ),
         )
 
@@ -3849,6 +3927,8 @@ def main() -> int:
                 deep_attempted_total=attempted,
                 deep_updated_total=updated,
                 history_backfilled_total=history_backfilled,
+                output_usernames_restored_total=output_usernames_restored,
+                output_usernames_cleared_total=output_usernames_cleared,
                 error=str(exc),
             ),
         )

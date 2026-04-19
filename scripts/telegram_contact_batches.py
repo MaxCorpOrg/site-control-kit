@@ -182,12 +182,7 @@ def _split_markdown_cells(line: str) -> list[str]:
     return cells
 
 
-def load_member_records_from_markdown(path: Path) -> list[MemberRecord]:
-    rows = load_markdown_member_rows(path)
-    return [MemberRecord(peer_id=row.peer_id, name=row.name, username=row.username) for row in rows]
-
-
-def load_markdown_member_rows(path: Path) -> list[MarkdownMemberRow]:
+def load_markdown_table_rows(path: Path) -> list[MarkdownMemberRow]:
     text = path.read_text(encoding="utf-8", errors="ignore")
     rows: list[MarkdownMemberRow] = []
     for line in text.splitlines():
@@ -198,21 +193,74 @@ def load_markdown_member_rows(path: Path) -> list[MarkdownMemberRow]:
             continue
         if cells[0] in {"#", "---"}:
             continue
-        username = normalize_username(cells[2])
         peer_id = str(cells[5] or "").strip()
-        if not username or not peer_id or peer_id == "—":
+        if not peer_id or peer_id == "—":
             continue
         rows.append(
             MarkdownMemberRow(
                 index=str(cells[0] or "").strip(),
                 name=str(cells[1] or "").strip(),
-                username=username,
+                username=normalize_username(cells[2]) or "—",
                 status=str(cells[3] or "").strip(),
                 role=str(cells[4] or "").strip(),
                 peer_id=peer_id,
             )
         )
     return rows
+
+
+def load_member_records_from_markdown(path: Path) -> list[MemberRecord]:
+    rows = load_markdown_member_rows(path)
+    return [MemberRecord(peer_id=row.peer_id, name=row.name, username=row.username) for row in rows]
+
+
+def load_markdown_member_rows(path: Path) -> list[MarkdownMemberRow]:
+    return [row for row in load_markdown_table_rows(path) if normalize_username(row.username)]
+
+
+def summarize_markdown_snapshot(path: Path | None) -> dict[str, int]:
+    if path is None or not path.exists():
+        return {
+            "total_rows": 0,
+            "rows_with_username": 0,
+            "unique_usernames": 0,
+            "duplicate_username_rows": 0,
+        }
+
+    rows = load_markdown_table_rows(path)
+    usernames = [normalize_username(row.username) for row in rows if normalize_username(row.username)]
+    return {
+        "total_rows": len(rows),
+        "rows_with_username": len(usernames),
+        "unique_usernames": len(set(usernames)),
+        "duplicate_username_rows": max(len(usernames) - len(set(usernames)), 0),
+    }
+
+
+def snapshot_rank(summary: dict[str, int]) -> tuple[int, int, int, int]:
+    return (
+        int(summary.get("unique_usernames", 0) or 0),
+        -int(summary.get("duplicate_username_rows", 0) or 0),
+        int(summary.get("total_rows", 0) or 0),
+        int(summary.get("rows_with_username", 0) or 0),
+    )
+
+
+def should_promote_snapshot(candidate: dict[str, int], current: dict[str, int]) -> bool:
+    return snapshot_rank(candidate) >= snapshot_rank(current)
+
+
+def select_best_snapshot(paths: list[Path]) -> tuple[Path | None, dict[str, int]]:
+    best_path: Path | None = None
+    best_summary = summarize_markdown_snapshot(None)
+    for path in paths:
+        if path is None or not path.exists():
+            continue
+        summary = summarize_markdown_snapshot(path)
+        if best_path is None or should_promote_snapshot(summary, best_summary):
+            best_path = path
+            best_summary = summary
+    return best_path, best_summary
 
 
 def evaluate_identity_records(

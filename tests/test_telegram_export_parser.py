@@ -186,6 +186,38 @@ class TelegramExportParserTests(unittest.TestCase):
         self.assertEqual(conflicts, 1)
         self.assertEqual(members[1]["username"], "—")
 
+    def test_sanitize_member_usernames_for_output_clears_duplicate_username(self) -> None:
+        members = [
+            {"peer_id": "111", "name": "Alice", "username": "@alice_old", "status": "—", "role": "—"},
+            {"peer_id": "222", "name": "Bob", "username": "@alice_old", "status": "—", "role": "—"},
+        ]
+
+        restored, cleared = self.mod._sanitize_member_usernames_for_output(
+            members=members,
+            historical_username_to_peer={"@alice_old": "111"},
+            historical_peer_to_username={"111": "@alice_old"},
+        )
+
+        self.assertEqual(restored, 0)
+        self.assertEqual(cleared, 1)
+        self.assertEqual(members[0]["username"], "@alice_old")
+        self.assertEqual(members[1]["username"], "—")
+
+    def test_sanitize_member_usernames_for_output_restores_historical_peer_username(self) -> None:
+        members = [
+            {"peer_id": "111", "name": "Alice", "username": "@wrong_name", "status": "—", "role": "—"},
+        ]
+
+        restored, cleared = self.mod._sanitize_member_usernames_for_output(
+            members=members,
+            historical_username_to_peer={"@alice_old": "111"},
+            historical_peer_to_username={"111": "@alice_old"},
+        )
+
+        self.assertEqual(restored, 1)
+        self.assertEqual(cleared, 0)
+        self.assertEqual(members[0]["username"], "@alice_old")
+
     def test_url_matches_expected_dialog_by_exact_fragment(self) -> None:
         matched = self.mod._url_matches_expected_dialog(
             "https://web.telegram.org/k/#-2465948544",
@@ -427,6 +459,8 @@ class TelegramExportParserTests(unittest.TestCase):
             deep_attempted_total=3,
             deep_updated_total=1,
             history_backfilled_total=2,
+            output_usernames_restored_total=1,
+            output_usernames_cleared_total=2,
         )
 
         self.assertEqual(payload["status"], "completed")
@@ -436,6 +470,8 @@ class TelegramExportParserTests(unittest.TestCase):
         self.assertEqual(payload["deep_attempted_total"], 3)
         self.assertEqual(payload["deep_updated_total"], 1)
         self.assertEqual(payload["history_backfilled_total"], 2)
+        self.assertEqual(payload["output_usernames_restored_total"], 1)
+        self.assertEqual(payload["output_usernames_cleared_total"], 2)
         self.assertEqual(payload["chat_stats"]["scroll_steps_done"], 7)
         self.assertEqual(payload["chat_stats"]["jump_scrolls_done"], 1)
 

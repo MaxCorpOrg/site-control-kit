@@ -120,6 +120,64 @@ class TelegramContactBatchesTests(unittest.TestCase):
         self.assertEqual(rows[0].status, "online")
         self.assertEqual(rows[0].role, "admin")
 
+    def test_summarize_markdown_snapshot_counts_rows_and_unique_usernames(self) -> None:
+        report = self.root / "latest_full.md"
+        report.write_text(
+            "# Report\n\n"
+            "| # | Имя | Username | Статус | Роль | Peer ID |\n"
+            "|---|---|---|---|---|---|\n"
+            "| 1 | Alice | @Alice_111 | online | admin | 111 |\n"
+            "| 2 | Bob | @Alice_111 | — | — | 222 |\n"
+            "| 3 | Carol | — | — | — | 333 |\n",
+            encoding="utf-8",
+        )
+
+        summary = self.mod.summarize_markdown_snapshot(report)
+
+        self.assertEqual(summary["total_rows"], 3)
+        self.assertEqual(summary["rows_with_username"], 2)
+        self.assertEqual(summary["unique_usernames"], 1)
+        self.assertEqual(summary["duplicate_username_rows"], 1)
+
+    def test_should_promote_snapshot_rejects_degradation(self) -> None:
+        current = {"total_rows": 12, "rows_with_username": 7, "unique_usernames": 7, "duplicate_username_rows": 0}
+        candidate = {"total_rows": 9, "rows_with_username": 2, "unique_usernames": 2, "duplicate_username_rows": 0}
+
+        self.assertFalse(self.mod.should_promote_snapshot(candidate, current))
+        self.assertTrue(self.mod.should_promote_snapshot(current, candidate))
+
+    def test_should_promote_snapshot_prefers_fewer_duplicates_for_same_unique_count(self) -> None:
+        candidate = {"total_rows": 13, "rows_with_username": 7, "unique_usernames": 7, "duplicate_username_rows": 0}
+        current = {"total_rows": 12, "rows_with_username": 9, "unique_usernames": 7, "duplicate_username_rows": 2}
+
+        self.assertTrue(self.mod.should_promote_snapshot(candidate, current))
+
+    def test_select_best_snapshot_prefers_cleaner_candidate(self) -> None:
+        first = self.root / "first.md"
+        first.write_text(
+            "# Report\n\n"
+            "| # | Имя | Username | Статус | Роль | Peer ID |\n"
+            "|---|---|---|---|---|---|\n"
+            "| 1 | Alice | @alice_111 | — | — | 111 |\n"
+            "| 2 | Bob | @alice_111 | — | — | 222 |\n",
+            encoding="utf-8",
+        )
+        second = self.root / "second.md"
+        second.write_text(
+            "# Report\n\n"
+            "| # | Имя | Username | Статус | Роль | Peer ID |\n"
+            "|---|---|---|---|---|---|\n"
+            "| 1 | Alice | @alice_111 | — | — | 111 |\n"
+            "| 2 | Bob | @bob_222 | — | — | 222 |\n",
+            encoding="utf-8",
+        )
+
+        best_path, best_summary = self.mod.select_best_snapshot([first, second])
+
+        self.assertEqual(best_path, second)
+        self.assertEqual(best_summary["unique_usernames"], 2)
+        self.assertEqual(best_summary["duplicate_username_rows"], 0)
+
     def test_save_new_batch_quarantines_conflicting_identity(self) -> None:
         batch_dir = self.root / "chat"
         batch_dir.mkdir()

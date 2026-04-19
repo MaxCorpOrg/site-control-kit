@@ -60,6 +60,7 @@ cd /home/max/site-control-kit
 - если нужная Telegram-вкладка уже открыта на этом же `#chat`, больше не перезагружает её через `navigate`, чтобы не терять текущую позицию в истории сообщений;
 - передаёт в экспортёр `identity_history.json`, чтобы deep-сбор не переназначал `@username` между разными `peer_id`, если история уже знает стабильную связку;
 - если новый run видит уже известный `peer_id` без `@username`, восстанавливает его из `identity_history.json` ещё до extra-deep, чтобы повторный прогон не начинал заново с пустого raw-слоя;
+- перед записью raw-снимка очищает конфликтные duplicate `@username`, чтобы `latest_full.md` был ближе к truth set, а не только safe-слой;
 - ведёт `discovery_state.json`, чтобы следующий запуск знал уже просмотренные слои чата (`data-mid/data-peer-id`) и не тратил первые шаги на тот же самый DOM-срез;
 - если запуск стартует на уже известном слое из `discovery_state.json`, deep сразу откладывается и runtime уходит в прокрутку, а не в повторный mention по тем же людям;
 - в `mention`-deep сначала пытается использовать текущий anchor/sticky avatar в чате как стабильную точку для открытия контекстного меню, и только потом откатывается к message-local селекторам;
@@ -67,6 +68,8 @@ cd /home/max/site-control-kit
 - парсит не только явные sender-label блоки, но и avatar-only группы сообщений, поэтому видимых участников из текущего DOM собирается больше;
 - сохраняет полный последний снимок в `latest_full.md` и `latest_full.txt`;
 - сохраняет безопасный снимок после identity-фильтрации в `latest_safe.md` и `latest_safe.txt`;
+- если текущий прогон получился слабее уже существующего snapshot, не затирает `latest_full.*` и `latest_safe.*`, а оставляет лучший known state в chat-dir;
+- после прогона умеет поднять лучший raw/safe snapshot из `runs/*/snapshot*.md`, если именно там лежит более качественный результат;
 - сохраняет отдельный лог запуска в `runs/<timestamp>/` с `run.json`, `export.log`, `export_stats.json`, `snapshot.md`, `snapshot.txt`;
 - если запуск прерван `Ctrl+C`/`TERM`, пишет структурный `run.json` со статусом `partial` и сохраняет partial-снапшоты в `runs/<timestamp>/`;
 - пишет только новые контакты в `1.txt`, `2.txt`, `3.txt` и так далее;
@@ -98,7 +101,8 @@ cd /home/max/site-control-kit
   --target-unique-members 30
 ```
 
-`run.json` теперь дублирует ключевую телеметрию экспортёра: `unique_members`, `members_with_username`, `chat_scroll_steps_done`, `chat_jump_scrolls_done`, `deep_updated_total`, `history_backfilled_total`, а полный сырой payload лежит в `export_stats.json`.
+`run.json` теперь дублирует ключевую телеметрию экспортёра: `unique_members`, `members_with_username`, `chat_scroll_steps_done`, `chat_jump_scrolls_done`, `deep_updated_total`, `history_backfilled_total`, `output_usernames_cleared_total`, а полный сырой payload лежит в `export_stats.json`.
+Также в `run.json` есть признаки продвижения/сохранения latest-снимков: `latest_full_promoted`, `latest_safe_promoted`, `latest_full_best_source`, `latest_safe_best_source`.
 
 Если Telegram Web перестал реально прокручиваться, chat-экспорт теперь завершится предупреждением `chat scroll stuck after 3 attempts`, вместо длинного пустого прогона.
 Если burst всё ещё упирается в тот же DOM-слой, экспортёр включает более агрессивный `jump-scroll` и пытается перепрыгнуть дальше по истории.
