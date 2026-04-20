@@ -397,6 +397,37 @@ def _browser_result_error_message(command: dict[str, Any], client_id: str) -> st
     return str(error or "").strip()
 
 
+def _annotate_stale_extension_hint(action: str, client_id: str, command_record: dict[str, Any]) -> dict[str, Any]:
+    if action not in {"open", "new-tab", "reload", "activate", "close-tab"}:
+        return command_record
+    if command_record.get("status") == "completed":
+        return command_record
+
+    result = _extract_command_result(command_record, client_id)
+    error = result.get("error")
+    message = _browser_result_error_message(command_record, client_id)
+    if "Unsupported command type in content script" not in message:
+        return command_record
+    if not isinstance(error, dict):
+        return command_record
+
+    error = dict(error)
+    error.setdefault(
+        "hint",
+        "Похоже, браузер работает на устаревшем runtime расширения. Перезагрузите unpacked extension в chrome://extensions.",
+    )
+    result["error"] = error
+
+    deliveries = command_record.get("deliveries")
+    if isinstance(deliveries, dict):
+        delivery = deliveries.get(client_id)
+        if isinstance(delivery, dict):
+            current = delivery.get("result")
+            if isinstance(current, dict):
+                current["error"] = error
+    return command_record
+
+
 def _x11_activate_tab_fallback(
     *,
     server: str,
@@ -719,7 +750,7 @@ def _maybe_apply_browser_tab_fallback(
         )
         return fallback or command_record
 
-    return command_record
+    return _annotate_stale_extension_hint(action, str(client.get("client_id") or "").strip(), command_record)
 
 
 def _browser_target(args: argparse.Namespace, client_id: str) -> dict[str, Any]:

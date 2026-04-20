@@ -4,6 +4,7 @@ import unittest
 
 from webcontrol.cli import (
     _absolute_tab_hotkey,
+    _annotate_stale_extension_hint,
     _extract_command_result,
     _find_created_tab,
     _find_browser_tab,
@@ -119,6 +120,43 @@ class BrowserCliHelperTests(unittest.TestCase):
     def test_tab_present_returns_false_for_missing_tab(self) -> None:
         client = {"tabs": [{"id": 10}, {"id": 11}]}
         self.assertFalse(_tab_present(client, 12))
+
+    def test_annotate_stale_extension_hint_marks_tab_level_content_script_misroute(self) -> None:
+        command_record = {
+            "status": "failed",
+            "deliveries": {
+                "client-a": {
+                    "result": {
+                        "ok": False,
+                        "error": {"message": "Unsupported command type in content script: new_tab"},
+                    }
+                }
+            },
+        }
+
+        updated = _annotate_stale_extension_hint("new-tab", "client-a", command_record)
+        error = updated["deliveries"]["client-a"]["result"]["error"]
+
+        self.assertIn("hint", error)
+        self.assertIn("chrome://extensions", error["hint"])
+
+    def test_annotate_stale_extension_hint_ignores_non_tab_actions(self) -> None:
+        command_record = {
+            "status": "failed",
+            "deliveries": {
+                "client-a": {
+                    "result": {
+                        "ok": False,
+                        "error": {"message": "Unsupported command type in content script: click"},
+                    }
+                }
+            },
+        }
+
+        updated = _annotate_stale_extension_hint("click", "client-a", command_record)
+        error = updated["deliveries"]["client-a"]["result"]["error"]
+
+        self.assertNotIn("hint", error)
 
 
 if __name__ == "__main__":

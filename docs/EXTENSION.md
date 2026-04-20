@@ -56,10 +56,21 @@
 - `heartbeatIntervalMs`
 - служебные поля диагностики (`lastPollAt`, `lastHeartbeatAt`, `lastCommand...`)
 
+## Heartbeat meta
+В heartbeat расширение отправляет не только `extension_version`, но и `meta.capabilities`:
+- `background_commands` — что умеет service worker без content script;
+- `content_commands` — что умеет DOM-слой.
+
+Это нужно для диагностики stale runtime: когда браузер работает на старой загруженной версии расширения, а код в репозитории уже ушёл вперёд.
+
 ## Ограничения MV3
 - Service worker непостоянный.
 - На страницах `chrome://*` и ряде служебных URL content script не работает.
 - Некоторые сайты блокируют `run_script` через CSP (`unsafe-eval` запрещён).
+
+## Замечание по `click_text`
+`click_text` ищет текст не только на parent menu-item, но и на вложенных text-span узлах, а затем поднимается к ближайшему кликабельному предку.
+Это важно для Telegram Web и похожих UI, где видимый текст лежит в `.btn-menu-item-text`, а кликабельный контейнер — выше по DOM.
 
 ## Как добавить новую команду
 1. Обновить схему/описание в `docs/API.md`.

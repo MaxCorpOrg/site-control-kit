@@ -118,6 +118,16 @@ function normalizedText(value) {
 
 let lastContextPoint = null;
 
+function closestClickable(node) {
+  if (!node || typeof node.closest !== "function") {
+    return node || null;
+  }
+  return (
+    node.closest("button, a, [role='menuitem'], [role='button'], .btn-menu-item, .MenuItem, .menu-item, [class*='menu-item'], .row") ||
+    node
+  );
+}
+
 function findByText(terms, rootSelector, nearLastContext = false) {
   const root = rootSelector ? document.querySelector(rootSelector) : document;
   if (!root) {
@@ -129,7 +139,7 @@ function findByText(terms, rootSelector, nearLastContext = false) {
   }
   const nodes = Array.from(
     root.querySelectorAll(
-      "button, a, [role='menuitem'], [role='button'], .btn-menu-item, .MenuItem, .menu-item, [class*='menu-item'], .row"
+      "button, a, [role='menuitem'], [role='button'], .btn-menu-item, .MenuItem, .menu-item, [class*='menu-item'], [class*='menu-item-text'], .btn-menu-item-text, .row, span.i18n"
     )
   );
   const cx =
@@ -137,19 +147,25 @@ function findByText(terms, rootSelector, nearLastContext = false) {
   const cy =
     nearLastContext && lastContextPoint ? Number(lastContextPoint.y || window.innerHeight / 2) : window.innerHeight / 2;
   const candidates = [];
+  const seen = new Set();
   for (const node of nodes) {
-    const txt = normalizedText(node.textContent);
+    const target = closestClickable(node);
+    if (!target || seen.has(target)) {
+      continue;
+    }
+    seen.add(target);
+    const txt = normalizedText(target.textContent || node.textContent);
     if (!txt) {
       continue;
     }
     if (!needles.some((needle) => txt.includes(needle))) {
       continue;
     }
-    const rect = node.getBoundingClientRect();
+    const rect = target.getBoundingClientRect();
     if (rect.width < 2 || rect.height < 2 || rect.bottom <= 0 || rect.right <= 0 || rect.top >= window.innerHeight || rect.left >= window.innerWidth) {
       continue;
     }
-    const style = window.getComputedStyle(node);
+    const style = window.getComputedStyle(target);
     if (!style || style.display === "none" || style.visibility === "hidden" || style.pointerEvents === "none" || Number(style.opacity || "1") === 0) {
       continue;
     }
@@ -157,7 +173,7 @@ function findByText(terms, rootSelector, nearLastContext = false) {
     const dx = rect.left + rect.width / 2 - cx;
     const dy = rect.top + rect.height / 2 - cy;
     const dist = Math.abs(dx) + Math.abs(dy);
-    candidates.push({ node, z, dist });
+    candidates.push({ node: target, z, dist });
   }
   if (!candidates.length) {
     return null;

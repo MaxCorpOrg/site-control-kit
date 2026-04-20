@@ -35,7 +35,14 @@
   "tabs": [
     { "id": 12, "windowId": 1, "active": true, "title": "...", "url": "https://..." }
   ],
-  "meta": { "extension": "site-control-bridge", "platform": "Linux" }
+  "meta": {
+    "extension": "site-control-bridge",
+    "platform": "Linux",
+    "capabilities": {
+      "background_commands": ["navigate", "new_tab", "reload", "activate_tab", "close_tab", "screenshot"],
+      "content_commands": ["click", "click_text", "extract_text", "get_html", "..."]
+    }
+  }
 }
 ```
 

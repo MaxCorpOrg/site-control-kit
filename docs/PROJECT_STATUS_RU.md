@@ -49,9 +49,14 @@
 - Для `mention`-режима добавлен более агрессивный запуск при stall discovery: deep теперь может запускаться раньше, даже если чат крутится по уже известной сигнатуре вида.
 - Чтение `@username` из composer больше не опирается только на `innerText`: теперь есть fallback по HTML-разметке (`href`, `data-plain-text`, `mention` markup).
 - Клик по пункту `Mention` стал шире по покрытию: после старых root-селекторов используются и общие `body/.btn-menu` fallback-пути возле последней точки context-click.
+- В `content.js` усилен `click_text`: теперь он умеет находить текст на вложенных menu-item text span узлах и кликать ближайший кликабельный предок.
+
+### Диагностика stale extension runtime
+- В heartbeat `meta` добавлены `capabilities` по background/content-командам.
+- CLI теперь умеет помечать browser tab-level ошибки вида `Unsupported command type in content script ...` как вероятный stale runtime и подсказывает reload в `chrome://extensions`.
 
 ## Проверено
-- Полный unit-набор проходил зелёным: `71/71`.
+- Полный unit-набор проходил зелёным: `73/73`.
 - Shell syntax и `py_compile` для последних изменений проходили зелёными.
 - Живой smoke chain-runner подтверждён на временном каталоге:
   - `target_unique_members_reached`
@@ -80,8 +85,18 @@
     - `members_with_username = 8`
     - `deep_attempted_total = 3`
     - `deep_updated_total = 0`
-    - `history_backfilled_total = 6`
+  - `history_backfilled_total = 6`
   - это значит, что scheduling mention/deep стал лучше, но live-результат по новым `@username` в этом конкретном smoke ещё не вырос.
+- Новый live probe на свежем Telegram tab без history backfill подтвердил:
+  - после `context_click` в `body` действительно присутствует пункт `Mention`;
+  - значит, bottleneck сместился не в открытие меню, а в DOM-поиск/клик по menu item;
+  - чистый snapshot:
+    - `/tmp/tg_now_nohistory.md`
+    - `/tmp/tg_now_nohistory.log`
+  - точечный probe:
+    - peer `530627292`
+    - после context-click в DOM найден текст `Mention`
+  - это самый сильный live-факт по текущей deep-проблеме на сегодня.
 
 ## Текущие Проблемы
 
@@ -90,20 +105,30 @@
 - `mention context ... opened`
 - `WARN: mention item not clicked`
 
-То есть deep-path стал сильнее по scheduling и чтению composer, но ещё не production-grade именно на живом Telegram DOM.
+То есть deep-path стал сильнее по scheduling и чтению composer, а live probe подтвердил наличие `Mention` в DOM, но именно текущий загруженный runtime расширения ещё не даёт завершить путь до успешного клика/вставки.
 
 ### 2. Прямое live-подтверждение context-menu fallback ещё неполное
 Короткий smoke подтвердил запуск catch-up mention, но не дал новых `@username`.
-Отдельный target-run для точечного peer в живой среде подвис и был остановлен вручную, так что этот участок ещё требует дополнительной проверки на реальном DOM.
+Отдельный target-run для точечного peer снова подвис и был остановлен вручную, но state/log probe уже локализовал проблему точнее: `context_click` проходит, `Mention` есть в DOM, а ломается именно `click_text` path текущего runtime.
 
-### 3. Exporter тратит слишком много runtime на discovery до deep
+### 3. Живой браузерный runtime не синхронизирован с кодом репозитория
+На машине обнаружен stale runtime расширения:
+- `browser new-tab` в живом окружении упал как `Unsupported command type in content script: new_tab`;
+- это означает, что загруженная версия background/content runtime в Chrome отстаёт от кода в репозитории.
+Без reload unpacked extension часть новых правок нельзя подтвердить end-to-end.
+
+### 4. Exporter тратит слишком много runtime на discovery до deep
 На некоторых прогонах deep успевает обработать 1 профиль, а остальное время уходит на scroll/discovery.
 
-### 4. Best-known latest может быть исторически сильным, но не самым свежим по времени
+### 5. X11 fallback для browser tab actions в этой среде ненадёжен
+Проверка `_x11_send_keys` на реальном Chrome window вернула `True`, но фактический `Ctrl+T` не создал новую вкладку.
+Это отдельный инфраструктурный долг browser CLI.
+
+### 6. Best-known latest может быть исторически сильным, но не самым свежим по времени
 Сейчас это осознанное поведение: `latest_*` в chat-dir означает лучший известный snapshot, а не обязательно самый свежий run.
 Если пользователю нужен именно последний run как основной артефакт, это потребуется оформить отдельно.
 
-### 5. Экспортёр остаётся монолитным
+### 7. Экспортёр остаётся монолитным
 `export_telegram_members_non_pii.py` всё ещё перегружен ответственностями и требует модульного разделения.
 
 ## Последний Подтверждённый Полезный Результат
@@ -116,10 +141,11 @@
   - `/home/max/telegram_contact_batches/chat_-2465948544/11.txt`
 
 ## Следующий Приоритет
-1. Добить live-подтверждение нового context-menu fallback на реальном Telegram DOM и снять конкретный успешный прогон по новому peer без history backfill.
-2. Повысить реальную результативность `mention`/deep-path, чтобы сильнее росли `members_with_username`, а не только backfill/history слой.
-3. Отделить понятие `best-known latest` от `most-recent run` в UI и документации, если пользователю важно видеть именно последний прогон как основной артефакт.
-4. Декомпозировать `export_telegram_members_non_pii.py` на модули.
+1. Перезагрузить unpacked extension и повторить точечный peer-run на чистом Telegram tab без history backfill.
+2. После reload снять конкретный успешный `mention`-deep прогон по новому peer.
+3. Починить или переосмыслить X11 fallback для `browser new-tab`.
+4. Отделить понятие `best-known latest` от `most-recent run` в UI и документации, если пользователю важно видеть именно последний прогон как основной артефакт.
+5. Декомпозировать `export_telegram_members_non_pii.py` на модули.
 
 ## Как Продолжать Следующему Агенту
 1. Прочитать `AGENTS.md`.

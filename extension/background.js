@@ -6,6 +6,30 @@ const DEFAULT_CONFIG = {
   heartbeatIntervalMs: 8000
 };
 
+const BRIDGE_CAPABILITIES = {
+  background_commands: ["navigate", "new_tab", "reload", "activate_tab", "close_tab", "screenshot"],
+  content_commands: [
+    "back",
+    "forward",
+    "get_page_url",
+    "context_click",
+    "click_text",
+    "clear_editable",
+    "click",
+    "fill",
+    "focus",
+    "extract_text",
+    "get_html",
+    "get_attribute",
+    "wait_selector",
+    "scroll",
+    "scroll_by",
+    "wheel",
+    "run_script",
+    "press_key"
+  ]
+};
+
 let pollTimer = null;
 let heartbeatTimer = null;
 
@@ -263,7 +287,8 @@ async function sendHeartbeat(config) {
     tabs,
     meta: {
       extension: "site-control-bridge",
-      platform: navigator.platform
+      platform: navigator.platform,
+      capabilities: BRIDGE_CAPABILITIES
     }
   };
 
