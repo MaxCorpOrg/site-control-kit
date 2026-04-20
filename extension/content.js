@@ -128,6 +128,21 @@ function closestClickable(node) {
   );
 }
 
+function interactableRect(node) {
+  if (!node) {
+    return null;
+  }
+  const rect = node.getBoundingClientRect();
+  if (rect.width < 2 || rect.height < 2 || rect.bottom <= 0 || rect.right <= 0 || rect.top >= window.innerHeight || rect.left >= window.innerWidth) {
+    return null;
+  }
+  const style = window.getComputedStyle(node);
+  if (!style || style.display === "none" || style.visibility === "hidden" || style.pointerEvents === "none" || Number(style.opacity || "1") === 0) {
+    return null;
+  }
+  return { rect, style };
+}
+
 function findByText(terms, rootSelector, nearLastContext = false) {
   const root = rootSelector ? document.querySelector(rootSelector) : document;
   if (!root) {
@@ -161,14 +176,11 @@ function findByText(terms, rootSelector, nearLastContext = false) {
     if (!needles.some((needle) => txt.includes(needle))) {
       continue;
     }
-    const rect = target.getBoundingClientRect();
-    if (rect.width < 2 || rect.height < 2 || rect.bottom <= 0 || rect.right <= 0 || rect.top >= window.innerHeight || rect.left >= window.innerWidth) {
+    const visible = interactableRect(target);
+    if (!visible) {
       continue;
     }
-    const style = window.getComputedStyle(target);
-    if (!style || style.display === "none" || style.visibility === "hidden" || style.pointerEvents === "none" || Number(style.opacity || "1") === 0) {
-      continue;
-    }
+    const { rect, style } = visible;
     const z = Number(style.zIndex) || 0;
     const dx = rect.left + rect.width / 2 - cx;
     const dy = rect.top + rect.height / 2 - cy;
@@ -179,6 +191,72 @@ function findByText(terms, rootSelector, nearLastContext = false) {
     return null;
   }
   candidates.sort((a, b) => (b.z - a.z) || (a.dist - b.dist));
+  return candidates[0].node;
+}
+
+function findMenuItemByText(terms, nearLastContext = false) {
+  const needles = (Array.isArray(terms) ? terms : [terms]).map(normalizedText).filter(Boolean);
+  if (!needles.length) {
+    return null;
+  }
+  const cx =
+    nearLastContext && lastContextPoint ? Number(lastContextPoint.x || window.innerWidth / 2) : window.innerWidth / 2;
+  const cy =
+    nearLastContext && lastContextPoint ? Number(lastContextPoint.y || window.innerHeight / 2) : window.innerHeight / 2;
+
+  const menuRoots = Array.from(document.querySelectorAll(".btn-menu, [role='menu'], [class*='contextmenu'], [class*='popup'], [class*='dropdown']"));
+  const visibleRoots = [];
+  for (const root of menuRoots) {
+    const visible = interactableRect(root);
+    if (!visible) {
+      continue;
+    }
+    const { rect, style } = visible;
+    const z = Number(style.zIndex) || 0;
+    const dx = rect.left + rect.width / 2 - cx;
+    const dy = rect.top + rect.height / 2 - cy;
+    const dist = Math.abs(dx) + Math.abs(dy);
+    visibleRoots.push({ root, z, dist });
+  }
+  if (!visibleRoots.length) {
+    return null;
+  }
+  visibleRoots.sort((a, b) => (b.z - a.z) || (a.dist - b.dist));
+
+  const seen = new Set();
+  const candidates = [];
+  for (const { root, z: rootZ, dist: rootDist } of visibleRoots) {
+    const nodes = Array.from(
+      root.querySelectorAll(
+        ".btn-menu-item, [role='menuitem'], button, a, .menu-item, [class*='menu-item'], .row, .btn-menu-item-text, [class*='menu-item-text'], .i18n, span"
+      )
+    );
+    for (const node of nodes) {
+      const target = closestClickable(node);
+      if (!target || seen.has(target)) {
+        continue;
+      }
+      seen.add(target);
+      const txt = normalizedText(target.textContent || node.textContent);
+      if (!txt || !needles.some((needle) => txt.includes(needle))) {
+        continue;
+      }
+      const visible = interactableRect(target);
+      if (!visible) {
+        continue;
+      }
+      const { rect, style } = visible;
+      const z = Math.max(rootZ, Number(style.zIndex) || 0);
+      const dx = rect.left + rect.width / 2 - cx;
+      const dy = rect.top + rect.height / 2 - cy;
+      const dist = Math.abs(dx) + Math.abs(dy);
+      candidates.push({ node: target, z, dist, rootDist });
+    }
+  }
+  if (!candidates.length) {
+    return null;
+  }
+  candidates.sort((a, b) => (b.z - a.z) || (a.rootDist - b.rootDist) || (a.dist - b.dist));
   return candidates[0].node;
 }
 
@@ -253,6 +331,18 @@ async function runCommand(command) {
       node.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window }));
       node.click();
       return { clicked: true, text: String(node.textContent || "").trim() };
+    }
+
+    case "click_menu_text": {
+      const node = findMenuItemByText(command.terms || command.text || [], Boolean(command.near_last_context));
+      if (!node) {
+        throw new Error("No visible menu item found by text");
+      }
+      node.scrollIntoView({ block: "center", inline: "nearest", behavior: "auto" });
+      node.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));
+      node.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window }));
+      node.click();
+      return { clicked: true, text: String(node.textContent || "").trim(), menu: true };
     }
 
     case "clear_editable": {

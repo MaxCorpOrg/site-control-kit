@@ -46,6 +46,13 @@
 }
 ```
 
+Для DOM-команд поддерживаются в том числе:
+- `click_text`
+- `click_menu_text`
+- `extract_text`
+- `get_html`
+- `wait_selector`
+
 Ответ:
 ```json
 { "ok": true, "client": { "client_id": "client-123", "last_seen": "..." } }

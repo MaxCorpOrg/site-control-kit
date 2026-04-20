@@ -360,12 +360,16 @@ class TelegramExportParserTests(unittest.TestCase):
 
     def test_try_username_via_mention_action_uses_body_fallback_click(self) -> None:
         click_roots: list[str] = []
+        command_types: list[str] = []
 
         def _fake_send_command_result(**kwargs):
             command = kwargs.get("command") or {}
             command_type = command.get("type")
+            command_types.append(str(command_type))
             if command_type == "wait_selector":
                 return {"ok": True}
+            if command_type == "click_menu_text":
+                return {"ok": False}
             if command_type == "click_text":
                 click_roots.append(str(command.get("root_selector") or ""))
                 if str(command.get("root_selector") or "") == "body":
@@ -382,8 +386,36 @@ class TelegramExportParserTests(unittest.TestCase):
                         )
 
         self.assertEqual(username, "@Alice_111")
+        self.assertIn("click_menu_text", command_types)
         self.assertIn("body", click_roots)
         self.assertGreaterEqual(clear_mock.call_count, 2)
+
+    def test_try_username_via_mention_action_prefers_click_menu_text(self) -> None:
+        command_types: list[str] = []
+
+        def _fake_send_command_result(**kwargs):
+            command = kwargs.get("command") or {}
+            command_type = str(command.get("type") or "")
+            command_types.append(command_type)
+            if command_type == "wait_selector":
+                return {"ok": True}
+            if command_type == "click_menu_text":
+                return {"ok": True}
+            if command_type == "click_text":
+                return {"ok": False}
+            return {"ok": True}
+
+        with mock.patch.object(self.mod, "_clear_composer_text"):
+            with mock.patch.object(self.mod, "_open_chat_peer_context_menu", return_value=(True, "peer")):
+                with mock.patch.object(self.mod, "_read_username_from_composer", return_value="@Alice_111"):
+                    with mock.patch.object(self.mod, "_send_command_result", side_effect=_fake_send_command_result):
+                        username = self.mod._try_username_via_mention_action(
+                            "server", "token", "client", 7, "111"
+                        )
+
+        self.assertEqual(username, "@Alice_111")
+        self.assertIn("click_menu_text", command_types)
+        self.assertNotIn("click_text", command_types)
 
     def test_should_run_chat_deep_step_runs_immediately_without_discovery_target(self) -> None:
         should_run = self.mod._should_run_chat_deep_step(

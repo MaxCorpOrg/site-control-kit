@@ -144,6 +144,7 @@ tab-level API   content.js -> DOM страницы
 Выполняются внутри страницы через `content.js`:
 - `click`
 - `click_text`
+- `click_menu_text`
 - `fill`
 - `focus`
 - `extract_text`

@@ -13,6 +13,7 @@ const BRIDGE_CAPABILITIES = {
     "forward",
     "get_page_url",
     "context_click",
+    "click_menu_text",
     "click_text",
     "clear_editable",
     "click",

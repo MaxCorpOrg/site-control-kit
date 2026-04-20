@@ -781,6 +781,22 @@ def _try_username_via_mention_action(
     ]
     if not mention_click_ok:
         for _ in range(4):
+            mention_click = _send_command_result(
+                server=server,
+                token=token,
+                client_id=client_id,
+                tab_id=tab_id,
+                timeout_sec=2,
+                command={
+                    "type": "click_menu_text",
+                    "terms": mention_terms,
+                    "near_last_context": True,
+                },
+                raise_on_fail=False,
+            )
+            if mention_click.get("ok"):
+                mention_click_ok = True
+                break
             for root_selector in (
                 "#bubble-contextmenu.active",
                 "#bubble-contextmenu",

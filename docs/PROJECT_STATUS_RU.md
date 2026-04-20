@@ -50,13 +50,14 @@
 - Чтение `@username` из composer больше не опирается только на `innerText`: теперь есть fallback по HTML-разметке (`href`, `data-plain-text`, `mention` markup).
 - Клик по пункту `Mention` стал шире по покрытию: после старых root-селекторов используются и общие `body/.btn-menu` fallback-пути возле последней точки context-click.
 - В `content.js` усилен `click_text`: теперь он умеет находить текст на вложенных menu-item text span узлах и кликать ближайший кликабельный предок.
+- Добавлена отдельная DOM-команда `click_menu_text` для видимых popup/context menu; Telegram mention-path теперь пробует её раньше общего `click_text`.
 
 ### Диагностика stale extension runtime
 - В heartbeat `meta` добавлены `capabilities` по background/content-командам.
 - CLI теперь умеет помечать browser tab-level ошибки вида `Unsupported command type in content script ...` как вероятный stale runtime и подсказывает reload в `chrome://extensions`.
 
 ## Проверено
-- Полный unit-набор проходил зелёным: `73/73`.
+- Полный unit-набор проходил зелёным: `75/75`.
 - Shell syntax и `py_compile` для последних изменений проходили зелёными.
 - Живой smoke chain-runner подтверждён на временном каталоге:
   - `target_unique_members_reached`
@@ -97,6 +98,9 @@
     - peer `530627292`
     - после context-click в DOM найден текст `Mention`
   - это самый сильный live-факт по текущей deep-проблеме на сегодня.
+- Живой smoke по browser bridge подтвердил новую stale-runtime диагностику:
+  - `browser new-tab` сейчас падает в живой среде как `Unsupported command type in content script: new_tab`;
+  - CLI теперь добавляет явный `hint` про reload unpacked extension в `chrome://extensions`.
 
 ## Текущие Проблемы
 
@@ -105,7 +109,7 @@
 - `mention context ... opened`
 - `WARN: mention item not clicked`
 
-То есть deep-path стал сильнее по scheduling и чтению composer, а live probe подтвердил наличие `Mention` в DOM, но именно текущий загруженный runtime расширения ещё не даёт завершить путь до успешного клика/вставки.
+То есть deep-path стал сильнее по scheduling и чтению composer, а live probe подтвердил наличие `Mention` в DOM. Код уже переведён на отдельный `click_menu_text`, но live-подтверждение этого нового пути всё ещё упирается в stale runtime расширения до его reload.
 
 ### 2. Прямое live-подтверждение context-menu fallback ещё неполное
 Короткий smoke подтвердил запуск catch-up mention, но не дал новых `@username`.
@@ -144,8 +148,9 @@
 1. Перезагрузить unpacked extension и повторить точечный peer-run на чистом Telegram tab без history backfill.
 2. После reload снять конкретный успешный `mention`-deep прогон по новому peer.
 3. Починить или переосмыслить X11 fallback для `browser new-tab`.
-4. Отделить понятие `best-known latest` от `most-recent run` в UI и документации, если пользователю важно видеть именно последний прогон как основной артефакт.
-5. Декомпозировать `export_telegram_members_non_pii.py` на модули.
+4. Разделить browser capability/runtime compatibility и Telegram export concerns в отдельные модули/слои.
+5. Отделить понятие `best-known latest` от `most-recent run` в UI и документации, если пользователю важно видеть именно последний прогон как основной артефакт.
+6. Декомпозировать `export_telegram_members_non_pii.py` на модули.
 
 ## Как Продолжать Следующему Агенту
 1. Прочитать `AGENTS.md`.

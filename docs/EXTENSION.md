@@ -34,6 +34,7 @@
 
 Ключевые DOM-команды:
 - `click`, `click_text`, `fill`, `focus`
+- `click_menu_text` — клик по видимому пункту меню по тексту
 - `extract_text`, `get_html`, `get_attribute`, `get_page_url`
 - `wait_selector`, `scroll`, `scroll_by`
 - `back`, `forward`, `press_key`, `run_script`
@@ -71,6 +72,10 @@
 ## Замечание по `click_text`
 `click_text` ищет текст не только на parent menu-item, но и на вложенных text-span узлах, а затем поднимается к ближайшему кликабельному предку.
 Это важно для Telegram Web и похожих UI, где видимый текст лежит в `.btn-menu-item-text`, а кликабельный контейнер — выше по DOM.
+
+## Когда использовать `click_menu_text`
+Для всплывающих меню и контекстных меню лучше использовать `click_menu_text`, а не общий `click_text`.
+Он ищет только по видимым menu-root контейнерам и лучше подходит для Telegram menu items после `context_click`.
 
 ## Как добавить новую команду
 1. Обновить схему/описание в `docs/API.md`.

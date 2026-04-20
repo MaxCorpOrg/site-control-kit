@@ -8,6 +8,7 @@ from webcontrol.cli import (
     _extract_command_result,
     _find_created_tab,
     _find_browser_tab,
+    _maybe_apply_browser_tab_fallback,
     _pick_client,
     _tab_present,
     _tab_cycle_plan,
@@ -157,6 +158,36 @@ class BrowserCliHelperTests(unittest.TestCase):
         error = updated["deliveries"]["client-a"]["result"]["error"]
 
         self.assertNotIn("hint", error)
+
+    def test_maybe_apply_browser_tab_fallback_keeps_stale_hint_for_new_tab_without_fallback(self) -> None:
+        client = {"client_id": "client-a"}
+        command_record = {
+            "status": "failed",
+            "deliveries": {
+                "client-a": {
+                    "result": {
+                        "ok": False,
+                        "error": {"message": "Unsupported command type in content script: new_tab"},
+                    }
+                }
+            },
+        }
+
+        updated = _maybe_apply_browser_tab_fallback(
+            action="new-tab",
+            server="http://127.0.0.1:8765",
+            token="token",
+            client=client,
+            target={},
+            command={"type": "new_tab", "url": "https://example.com", "active": True},
+            timeout_ms=1000,
+            wait_sec=1,
+            poll_interval=0.1,
+            command_record=command_record,
+        )
+
+        error = updated["deliveries"]["client-a"]["result"]["error"]
+        self.assertIn("hint", error)
 
 
 if __name__ == "__main__":

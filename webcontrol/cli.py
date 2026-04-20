@@ -724,7 +724,11 @@ def _maybe_apply_browser_tab_fallback(
             target=target,
             wait_sec=wait_sec,
         )
-        return fallback or command_record
+        return _annotate_stale_extension_hint(
+            action,
+            str(client.get("client_id") or "").strip(),
+            fallback or command_record,
+        )
 
     if action == "new-tab":
         fallback = _x11_new_tab_fallback(
@@ -738,7 +742,11 @@ def _maybe_apply_browser_tab_fallback(
             wait_sec=wait_sec,
             poll_interval=poll_interval,
         )
-        return fallback or command_record
+        return _annotate_stale_extension_hint(
+            action,
+            str(client.get("client_id") or "").strip(),
+            fallback or command_record,
+        )
 
     if action == "close-tab":
         fallback = _x11_close_tab_fallback(
@@ -748,7 +756,11 @@ def _maybe_apply_browser_tab_fallback(
             target=target,
             wait_sec=wait_sec,
         )
-        return fallback or command_record
+        return _annotate_stale_extension_hint(
+            action,
+            str(client.get("client_id") or "").strip(),
+            fallback or command_record,
+        )
 
     return _annotate_stale_extension_hint(action, str(client.get("client_id") or "").strip(), command_record)
 
