@@ -74,6 +74,7 @@ CHAT_JUMP_SCROLL_REPEAT = max(int(os.environ.get("TELEGRAM_CHAT_JUMP_SCROLL_REPE
 CHAT_JUMP_SCROLL_TRIGGER_STALL = max(int(os.environ.get("TELEGRAM_CHAT_JUMP_SCROLL_TRIGGER_STALL", "3") or "3"), 1)
 DISCOVERY_STATE_MAX_SIGNATURES = max(int(os.environ.get("TELEGRAM_DISCOVERY_STATE_MAX_SIGNATURES", "400") or "400"), 50)
 DISCOVERY_STATE_MAX_PEERS = max(int(os.environ.get("TELEGRAM_DISCOVERY_STATE_MAX_PEERS", "5000") or "5000"), 100)
+DISCOVERY_STATE_MAX_DEEP_PEERS = max(int(os.environ.get("TELEGRAM_DISCOVERY_STATE_MAX_DEEP_PEERS", "1500") or "1500"), 100)
 INFO_SCROLL_SETTLE_SEC = 0.8
 CHAT_DEEP_DEFAULT_LIMIT = 3
 CHAT_MENTION_DEEP_MAX_PER_STEP = max(int(os.environ.get("TELEGRAM_CHAT_MENTION_DEEP_MAX_PER_STEP", "3") or "3"), 1)
@@ -1352,6 +1353,137 @@ def _compute_chat_deep_batch_size(
     return max(1, min(limit, batch_size))
 
 
+def _normalize_deep_peer_history(payload: Any) -> dict[str, dict[str, int | str]]:
+    if not isinstance(payload, dict):
+        return {}
+    normalized: dict[str, dict[str, int | str]] = {}
+    for raw_peer_id, raw_stats in payload.items():
+        peer_id = str(raw_peer_id or "").strip()
+        if not peer_id or not isinstance(raw_stats, dict):
+            continue
+        normalized[peer_id] = {
+            "attempts": max(int(raw_stats.get("attempts", 0) or 0), 0),
+            "failures": max(int(raw_stats.get("failures", 0) or 0), 0),
+            "mention_success": max(int(raw_stats.get("mention_success", 0) or 0), 0),
+            "url_success": max(int(raw_stats.get("url_success", 0) or 0), 0),
+            "last_outcome": str(raw_stats.get("last_outcome") or "").strip(),
+        }
+    return normalized
+
+
+def _record_deep_peer_outcome(
+    deep_peer_history: dict[str, dict[str, int | str]] | None,
+    peer_id: str,
+    outcome: str,
+) -> None:
+    if not isinstance(deep_peer_history, dict):
+        return
+    normalized_peer_id = str(peer_id or "").strip()
+    if not normalized_peer_id:
+        return
+    stats = deep_peer_history.setdefault(
+        normalized_peer_id,
+        {
+            "attempts": 0,
+            "failures": 0,
+            "mention_success": 0,
+            "url_success": 0,
+            "last_outcome": "",
+        },
+    )
+    stats["attempts"] = max(int(stats.get("attempts", 0) or 0), 0) + 1
+    if outcome == "mention_success":
+        stats["mention_success"] = max(int(stats.get("mention_success", 0) or 0), 0) + 1
+    elif outcome == "url_success":
+        stats["url_success"] = max(int(stats.get("url_success", 0) or 0), 0) + 1
+    elif outcome == "failure":
+        stats["failures"] = max(int(stats.get("failures", 0) or 0), 0) + 1
+    stats["last_outcome"] = str(outcome or "").strip()
+
+
+def _deep_target_sort_key(
+    member: dict[str, str],
+    *,
+    visible_order: int,
+    chat_anchor_peer_id: str,
+    deep_peer_history: dict[str, dict[str, int | str]] | None = None,
+) -> tuple[int, int, int, int, int]:
+    peer_id = str(member.get("peer_id") or "").strip()
+    history = (deep_peer_history or {}).get(peer_id) or {}
+    attempts = max(int(history.get("attempts", 0) or 0), 0)
+    failures = max(int(history.get("failures", 0) or 0), 0)
+    last_outcome = str(history.get("last_outcome") or "").strip().lower()
+    success_count = max(int(history.get("mention_success", 0) or 0), 0) + max(int(history.get("url_success", 0) or 0), 0)
+    anchor_rank = 0 if chat_anchor_peer_id and peer_id == chat_anchor_peer_id else 1
+    freshness_rank = 0 if attempts == 0 else 1
+    outcome_rank = 2
+    if success_count > 0:
+        outcome_rank = 0
+    elif failures == 0 and last_outcome != "failure":
+        outcome_rank = 1
+    return (
+        anchor_rank,
+        freshness_rank,
+        outcome_rank,
+        failures,
+        visible_order,
+    )
+
+
+def _select_chat_deep_targets(
+    *,
+    members: list[dict[str, str]],
+    chat_members: list[dict[str, str]],
+    deep_seen_peer_ids: set[str],
+    chat_target_peer_id: str,
+    chat_target_name: str,
+    chat_anchor_peer_id: str,
+    limit: int,
+    deep_peer_history: dict[str, dict[str, int | str]] | None = None,
+) -> list[dict[str, str]]:
+    if limit <= 0 or not members or not chat_members:
+        return []
+
+    members_by_peer = {str(item.get("peer_id") or ""): item for item in members if item.get("peer_id")}
+    ordered_visible_peer_ids: list[str] = []
+    seen_visible_peer_ids: set[str] = set()
+    for item in reversed(chat_members):
+        peer_id = str(item.get("peer_id") or "").strip()
+        if not peer_id or peer_id in seen_visible_peer_ids:
+            continue
+        seen_visible_peer_ids.add(peer_id)
+        ordered_visible_peer_ids.append(peer_id)
+
+    deep_targets: list[dict[str, str]] = []
+    for peer_id in ordered_visible_peer_ids:
+        member = members_by_peer.get(peer_id)
+        if member is None:
+            continue
+        if member.get("username") != "—":
+            continue
+        if peer_id in deep_seen_peer_ids:
+            continue
+        deep_targets.append(member)
+
+    if chat_target_peer_id:
+        deep_targets = [item for item in deep_targets if str(item.get("peer_id") or "").strip() == chat_target_peer_id]
+    if chat_target_name:
+        target_key = _name_key(chat_target_name)
+        if target_key:
+            deep_targets = [item for item in deep_targets if target_key in _name_key(str(item.get("name") or ""))]
+
+    visible_order_map = {peer_id: index for index, peer_id in enumerate(ordered_visible_peer_ids)}
+    deep_targets.sort(
+        key=lambda item: _deep_target_sort_key(
+            item,
+            visible_order=visible_order_map.get(str(item.get("peer_id") or "").strip(), len(visible_order_map)),
+            chat_anchor_peer_id=chat_anchor_peer_id,
+            deep_peer_history=deep_peer_history,
+        )
+    )
+    return deep_targets[:limit]
+
+
 def _extract_chat_view_signature(html_payload: str) -> str:
     if not html_payload:
         return ""
@@ -2439,10 +2571,12 @@ def _collect_members_from_chat(
     seen_view_signature_set: set[str] = set()
     seen_peer_ids: list[str] = []
     seen_peer_id_set: set[str] = set()
+    deep_peer_history: dict[str, dict[str, int | str]] = {}
 
     if isinstance(discovery_state, dict):
         raw_view_signatures = discovery_state.get("seen_view_signatures") or []
         raw_peer_ids = discovery_state.get("seen_peer_ids") or []
+        deep_peer_history = _normalize_deep_peer_history(discovery_state.get("deep_peer_history") or {})
         if isinstance(raw_view_signatures, list):
             for value in raw_view_signatures:
                 signature = str(value or "").strip()
@@ -2511,42 +2645,13 @@ def _collect_members_from_chat(
             if time.time() - started_at > max(max_runtime_sec, 5):
                 print(f"WARN: skip deep (runtime limit {max_runtime_sec}s reached)")
             else:
-                # Process visible users bottom->top and only one deep target per scroll step.
-                # This avoids repeatedly hitting a "sticky" avatar while chat is being scrolled.
-                members_by_peer = {str(item.get("peer_id") or ""): item for item in members if item.get("peer_id")}
-                ordered_visible_peer_ids: list[str] = []
-                seen_visible_peer_ids: set[str] = set()
-                for item in reversed(chat_members):
-                    peer_id = str(item.get("peer_id") or "").strip()
-                    if not peer_id or peer_id in seen_visible_peer_ids:
-                        continue
-                    seen_visible_peer_ids.add(peer_id)
-                    ordered_visible_peer_ids.append(peer_id)
-
-                deep_targets = []
-                for peer_id in ordered_visible_peer_ids:
-                    member = members_by_peer.get(peer_id)
-                    if member is None:
-                        continue
-                    if member.get("username") != "—":
-                        continue
-                    if peer_id in deep_seen_peer_ids:
-                        continue
-                    deep_targets.append(member)
-                if chat_target_peer_id:
-                    deep_targets = [item for item in deep_targets if str(item.get("peer_id") or "").strip() == chat_target_peer_id]
-                if chat_target_name:
-                    target_key = _name_key(chat_target_name)
-                    if target_key:
-                        deep_targets = [item for item in deep_targets if target_key in _name_key(str(item.get("name") or ""))]
                 chat_anchor_peer_id = ""
-                if deep_targets:
+                unresolved_visible = [
+                    item for item in chat_members
+                    if str(item.get("peer_id") or "").strip() and str(item.get("username") or "—").strip() == "—"
+                ]
+                if unresolved_visible:
                     chat_anchor_peer_id = _get_chat_anchor_peer_id(server, token, client_id, tab_id)
-                if chat_anchor_peer_id:
-                    deep_targets = sorted(
-                        deep_targets,
-                        key=lambda item: 0 if str(item.get("peer_id") or "").strip() == chat_anchor_peer_id else 1,
-                    )
                 elapsed = time.time() - started_at
                 remaining_runtime = max(2.0, float(max_runtime_sec) - elapsed - 2.0)
                 limit = _compute_chat_deep_batch_size(
@@ -2558,7 +2663,16 @@ def _collect_members_from_chat(
                 if limit <= 0:
                     deep_targets = []
                 else:
-                    deep_targets = deep_targets[:limit]
+                    deep_targets = _select_chat_deep_targets(
+                        members=members,
+                        chat_members=chat_members,
+                        deep_seen_peer_ids=deep_seen_peer_ids,
+                        chat_target_peer_id=chat_target_peer_id,
+                        chat_target_name=chat_target_name,
+                        chat_anchor_peer_id=chat_anchor_peer_id,
+                        limit=limit,
+                        deep_peer_history=deep_peer_history,
+                    )
                 if deep_targets:
                     if not _should_run_chat_deep_step(
                         step=step,
@@ -2592,6 +2706,7 @@ def _collect_members_from_chat(
                             historical_username_to_peer=historical_username_to_peer,
                             historical_peer_to_username=historical_peer_to_username,
                             supports_click_menu_text=supports_click_menu_text,
+                            deep_peer_history=deep_peer_history,
                         )
                         deep_attempted_total += attempted
                         deep_updated_total += updated
@@ -2649,6 +2764,10 @@ def _collect_members_from_chat(
             for _ in range(overflow):
                 drop = seen_peer_ids.pop(0)
                 seen_peer_id_set.discard(drop)
+        if len(deep_peer_history) > DISCOVERY_STATE_MAX_DEEP_PEERS:
+            overflow = len(deep_peer_history) - DISCOVERY_STATE_MAX_DEEP_PEERS
+            for peer_id in list(deep_peer_history.keys())[:overflow]:
+                deep_peer_history.pop(peer_id, None)
 
         if step >= scroll_steps:
             break
@@ -2729,6 +2848,7 @@ def _collect_members_from_chat(
     if isinstance(discovery_state, dict):
         discovery_state["seen_view_signatures"] = seen_view_signatures[-DISCOVERY_STATE_MAX_SIGNATURES:]
         discovery_state["seen_peer_ids"] = seen_peer_ids[-DISCOVERY_STATE_MAX_PEERS:]
+        discovery_state["deep_peer_history"] = deep_peer_history
     return members, stats
 
 
@@ -2746,6 +2866,7 @@ def _enrich_usernames_deep_chat(
     historical_username_to_peer: dict[str, str] | None = None,
     historical_peer_to_username: dict[str, str] | None = None,
     supports_click_menu_text: bool = True,
+    deep_peer_history: dict[str, dict[str, int | str]] | None = None,
 ) -> tuple[int, int, int, list[str]]:
     members_by_peer = {item["peer_id"]: item for item in members}
     pending_peer_ids = [item["peer_id"] for item in members if item.get("username") == "—"]
@@ -2811,6 +2932,7 @@ def _enrich_usernames_deep_chat(
                     continue
                 if assigned:
                     updated += 1
+                    _record_deep_peer_outcome(deep_peer_history, peer_id, "mention_success")
                     print(f"INFO: chat mention {peer_id} -> {mention_username}")
                 _restore_group_dialog_after_deep_probe(
                     server=server,
@@ -2891,6 +3013,7 @@ def _enrich_usernames_deep_chat(
                 _log_username_assignment_conflict(quick_username, peer_id, existing_peer, conflict_reason)
             elif assigned:
                 updated += 1
+                _record_deep_peer_outcome(deep_peer_history, peer_id, "url_success")
                 print(f"INFO: chat url {peer_id} -> {quick_username}")
             _restore_group_dialog_after_deep_probe(
                 server=server,
@@ -2906,6 +3029,7 @@ def _enrich_usernames_deep_chat(
             continue
 
         if effective_mode == "url":
+            _record_deep_peer_outcome(deep_peer_history, peer_id, "failure")
             _restore_group_dialog_after_deep_probe(
                 server=server,
                 token=token,
@@ -2955,7 +3079,10 @@ def _enrich_usernames_deep_chat(
                 _log_username_assignment_conflict(username, peer_id, existing_peer, conflict_reason)
             elif assigned:
                 updated += 1
+                _record_deep_peer_outcome(deep_peer_history, peer_id, "url_success")
                 print(f"INFO: chat deep {peer_id} -> {username}")
+        else:
+            _record_deep_peer_outcome(deep_peer_history, peer_id, "failure")
 
         if not _return_to_group_dialog_reliable(
             server=server,

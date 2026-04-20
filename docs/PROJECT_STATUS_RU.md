@@ -55,6 +55,7 @@
 - `mention`-deep теперь может брать несколько peer за один scroll-step, если оставшегося runtime достаточно.
 - Если Telegram два раза подряд отвечает `No visible menu item found by text`, deep раньше прекращает бесполезные повторные попытки и быстрее уходит в fallback.
 - Возврат в group dialog после URL/mention fallback теперь проверяется явно: один сложный peer больше не должен ломать весь остаток deep-шага.
+- `discovery_state.json` теперь хранит `deep_peer_history`: repeated failure peer автоматически опускаются ниже в порядке deep-target selection, а свежие кандидаты идут раньше.
 
 ### Диагностика stale extension runtime
 - В heartbeat `meta` добавлены `capabilities` по background/content-командам.
@@ -197,6 +198,12 @@
       - `@oleg_klsnkv`
       - `@xpenguinfromhell`
       - `@olegoleg48`
+- Новый seeded-history smoke подтвердил, что deep ranking реально учитывает прошлые неудачи:
+  - артефакт:
+    - `/tmp/tg_ranked_history_smoke.a5rnGA/export.log`
+  - факт:
+    - peer `530627292` был заранее помечен как repeated failure в `discovery_state.json`
+    - deep первым взял других visible peer (`547163094`, затем `858739581`), а не проблемный peer из seeded history
 
 ## Текущие Проблемы
 

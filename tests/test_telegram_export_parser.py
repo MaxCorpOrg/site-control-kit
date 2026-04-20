@@ -671,6 +671,47 @@ class TelegramExportParserTests(unittest.TestCase):
         self.assertFalse(restored)
         self.assertEqual(calls, [False])
 
+    def test_select_chat_deep_targets_deprioritizes_repeat_failures(self) -> None:
+        members = [
+            {"peer_id": "100", "name": "Fresh", "username": "—", "status": "—", "role": "—"},
+            {"peer_id": "200", "name": "RetryFail", "username": "—", "status": "—", "role": "—"},
+            {"peer_id": "300", "name": "Anchor", "username": "—", "status": "—", "role": "—"},
+        ]
+        chat_members = [dict(item) for item in members]
+        deep_peer_history = {
+            "200": {
+                "attempts": 4,
+                "failures": 4,
+                "mention_success": 0,
+                "url_success": 0,
+                "last_outcome": "failure",
+            }
+        }
+
+        selected = self.mod._select_chat_deep_targets(
+            members=members,
+            chat_members=chat_members,
+            deep_seen_peer_ids=set(),
+            chat_target_peer_id="",
+            chat_target_name="",
+            chat_anchor_peer_id="300",
+            limit=3,
+            deep_peer_history=deep_peer_history,
+        )
+
+        self.assertEqual([item["peer_id"] for item in selected], ["300", "100", "200"])
+
+    def test_record_deep_peer_outcome_updates_attempts_and_failures(self) -> None:
+        history: dict[str, dict[str, int | str]] = {}
+
+        self.mod._record_deep_peer_outcome(history, "111", "failure")
+        self.mod._record_deep_peer_outcome(history, "111", "url_success")
+
+        self.assertEqual(history["111"]["attempts"], 2)
+        self.assertEqual(history["111"]["failures"], 1)
+        self.assertEqual(history["111"]["url_success"], 1)
+        self.assertEqual(history["111"]["last_outcome"], "url_success")
+
     def test_extract_chat_view_signature_uses_top_mid_peer_and_timestamp(self) -> None:
         html = (
             '<div class="avatar avatar-like bubbles-group-avatar user-avatar" data-peer-id="789">AB</div>'
