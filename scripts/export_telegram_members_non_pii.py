@@ -76,6 +76,9 @@ DISCOVERY_STATE_MAX_SIGNATURES = max(int(os.environ.get("TELEGRAM_DISCOVERY_STAT
 DISCOVERY_STATE_MAX_PEERS = max(int(os.environ.get("TELEGRAM_DISCOVERY_STATE_MAX_PEERS", "5000") or "5000"), 100)
 INFO_SCROLL_SETTLE_SEC = 0.8
 CHAT_DEEP_DEFAULT_LIMIT = 3
+CHAT_MENTION_DEEP_MAX_PER_STEP = max(int(os.environ.get("TELEGRAM_CHAT_MENTION_DEEP_MAX_PER_STEP", "3") or "3"), 1)
+CHAT_MENTION_DEEP_BATCH_RUNTIME_2 = max(float(os.environ.get("TELEGRAM_CHAT_MENTION_DEEP_BATCH_RUNTIME_2", "36") or "36"), 5.0)
+CHAT_MENTION_DEEP_BATCH_RUNTIME_3 = max(float(os.environ.get("TELEGRAM_CHAT_MENTION_DEEP_BATCH_RUNTIME_3", "75") or "75"), CHAT_MENTION_DEEP_BATCH_RUNTIME_2)
 X11_WHEEL_FALLBACK_ENABLED = os.environ.get("TELEGRAM_X11_WHEEL_FALLBACK", "1").strip().lower() not in {"0", "false", "no"}
 X11_WHEEL_BUTTON = int(os.environ.get("TELEGRAM_X11_WHEEL_BUTTON", "5") or "5")
 X11_WHEEL_CLICKS = max(int(os.environ.get("TELEGRAM_X11_WHEEL_CLICKS", "8") or "8"), 1)
@@ -176,6 +179,13 @@ def _format_command_error(error: Any) -> str:
     if error is None:
         return ""
     return str(error).strip()
+
+
+def _is_no_visible_menu_item_error(error_text: str) -> bool:
+    normalized = str(error_text or "").strip().lower()
+    if not normalized:
+        return False
+    return "no visible menu item found by text" in normalized
 
 
 def _fresh_clients(clients: list[dict[str, Any]], max_age_sec: int) -> tuple[list[dict[str, Any]], str]:
@@ -815,8 +825,10 @@ def _try_username_via_mention_action(
         "menção",
         "mencao",
     ]
+    no_visible_menu_item_misses = 0
     if not mention_click_ok:
         for attempt_index in range(4):
+            click_menu_error_text = ""
             if supports_click_menu_text:
                 print(f"INFO: mention click_menu_text attempt {attempt_index + 1} for peer {peer_id}")
                 mention_click = _send_command_result(
@@ -836,11 +848,11 @@ def _try_username_via_mention_action(
                     print(f"INFO: mention click_menu_text success on attempt {attempt_index + 1} for peer {peer_id}")
                     mention_click_ok = True
                     break
-                error_text = _format_command_error(mention_click.get("error"))
-                if error_text:
+                click_menu_error_text = _format_command_error(mention_click.get("error"))
+                if click_menu_error_text:
                     print(
                         f"INFO: mention click_menu_text miss on attempt {attempt_index + 1} "
-                        f"for peer {peer_id}: {error_text}"
+                        f"for peer {peer_id}: {click_menu_error_text}"
                     )
             for root_selector in (
                 "#bubble-contextmenu.active",
@@ -877,6 +889,16 @@ def _try_username_via_mention_action(
                     break
             if mention_click_ok:
                 break
+            if _is_no_visible_menu_item_error(click_menu_error_text):
+                no_visible_menu_item_misses += 1
+                if no_visible_menu_item_misses >= 2:
+                    print(
+                        f"INFO: mention menu item still invisible after {no_visible_menu_item_misses} "
+                        f"attempts for peer {peer_id}, switch to fallback"
+                    )
+                    break
+            else:
+                no_visible_menu_item_misses = 0
             time.sleep(0.12)
     if not mention_click_ok:
         print(f"WARN: mention item not clicked for peer {peer_id}")
@@ -1034,6 +1056,42 @@ def _return_to_group_dialog_reliable(
         group_url=group_url,
         timeout_sec=min(max(timeout_sec, 2), 8),
     )
+
+
+def _restore_group_dialog_after_deep_probe(
+    *,
+    server: str,
+    token: str,
+    client_id: str,
+    tab_id: int,
+    group_url: str,
+    timeout_sec: int,
+    reason: str,
+    allow_navigate_retry: bool,
+) -> bool:
+    if _return_to_group_dialog_reliable(
+        server=server,
+        token=token,
+        client_id=client_id,
+        tab_id=tab_id,
+        group_url=group_url,
+        timeout_sec=timeout_sec,
+        allow_navigate_fallback=False,
+    ):
+        return True
+    if allow_navigate_retry and _return_to_group_dialog_reliable(
+        server=server,
+        token=token,
+        client_id=client_id,
+        tab_id=tab_id,
+        group_url=group_url,
+        timeout_sec=timeout_sec,
+        allow_navigate_fallback=True,
+    ):
+        print(f"INFO: restored group dialog via navigate fallback after {reason}")
+        return True
+    print(f"WARN: could not restore group dialog after {reason}")
+    return False
 
 
 def _url_matches_expected_dialog(expected_url: str, current_url: str) -> bool:
@@ -1266,6 +1324,32 @@ def _should_run_chat_deep_step(
         return False
 
     return step == 0 or step % CHAT_DISCOVERY_MENTION_DEEP_INTERVAL == 0
+
+
+def _compute_chat_deep_batch_size(
+    *,
+    mode: str,
+    chat_deep_limit: int,
+    remaining_runtime_sec: float,
+    targeted_probe: bool = False,
+) -> int:
+    limit = max(int(chat_deep_limit), 0)
+    if limit <= 0:
+        return 0
+    if targeted_probe:
+        return 1
+
+    normalized_mode = str(mode or "").strip().lower()
+    if normalized_mode != "mention":
+        return 1 if limit > 0 else 0
+
+    batch_size = 1
+    if remaining_runtime_sec >= CHAT_MENTION_DEEP_BATCH_RUNTIME_3:
+        batch_size = 3
+    elif remaining_runtime_sec >= CHAT_MENTION_DEEP_BATCH_RUNTIME_2:
+        batch_size = 2
+    batch_size = min(batch_size, CHAT_MENTION_DEEP_MAX_PER_STEP)
+    return max(1, min(limit, batch_size))
 
 
 def _extract_chat_view_signature(html_payload: str) -> str:
@@ -2463,13 +2547,18 @@ def _collect_members_from_chat(
                         deep_targets,
                         key=lambda item: 0 if str(item.get("peer_id") or "").strip() == chat_anchor_peer_id else 1,
                     )
-                limit = max(int(chat_deep_limit), 0)
+                elapsed = time.time() - started_at
+                remaining_runtime = max(2.0, float(max_runtime_sec) - elapsed - 2.0)
+                limit = _compute_chat_deep_batch_size(
+                    mode=chat_deep_mode,
+                    chat_deep_limit=chat_deep_limit,
+                    remaining_runtime_sec=remaining_runtime,
+                    targeted_probe=bool(chat_target_peer_id or chat_target_name),
+                )
                 if limit <= 0:
                     deep_targets = []
                 else:
                     deep_targets = deep_targets[:limit]
-                if deep_targets:
-                    deep_targets = deep_targets[:1]
                 if deep_targets:
                     if not _should_run_chat_deep_step(
                         step=step,
@@ -2488,8 +2577,6 @@ def _collect_members_from_chat(
                             f"(members {len(members)}/{max(int(min_members_target), 0)}, mode={chat_deep_mode})"
                         )
                     else:
-                        elapsed = time.time() - started_at
-                        remaining_runtime = max(2.0, float(max_runtime_sec) - elapsed - 2.0)
                         deep_runtime_budget = remaining_runtime
                         attempted, updated, opened, opened_peer_ids = _enrich_usernames_deep_chat(
                             server=server,
@@ -2725,14 +2812,15 @@ def _enrich_usernames_deep_chat(
                 if assigned:
                     updated += 1
                     print(f"INFO: chat mention {peer_id} -> {mention_username}")
-                _return_to_group_dialog_reliable(
+                _restore_group_dialog_after_deep_probe(
                     server=server,
                     token=token,
                     client_id=client_id,
                     tab_id=tab_id,
                     group_url=group_url,
                     timeout_sec=min(timeout_sec, 2),
-                    allow_navigate_fallback=False,
+                    reason=f"mention success for peer {peer_id}",
+                    allow_navigate_retry=False,
                 )
                 time.sleep(0.03)
                 continue
@@ -2767,14 +2855,15 @@ def _enrich_usernames_deep_chat(
                 clicked = True
 
         if not clicked:
-            _return_to_group_dialog_reliable(
+            _restore_group_dialog_after_deep_probe(
                 server=server,
                 token=token,
                 client_id=client_id,
                 tab_id=tab_id,
                 group_url=group_url,
                 timeout_sec=min(timeout_sec, 3),
-                allow_navigate_fallback=False,
+                reason=f"deep open miss for peer {peer_id}",
+                allow_navigate_retry=False,
             )
             time.sleep(0.05)
             continue
@@ -2803,27 +2892,29 @@ def _enrich_usernames_deep_chat(
             elif assigned:
                 updated += 1
                 print(f"INFO: chat url {peer_id} -> {quick_username}")
-            _return_to_group_dialog_reliable(
+            _restore_group_dialog_after_deep_probe(
                 server=server,
                 token=token,
                 client_id=client_id,
                 tab_id=tab_id,
                 group_url=group_url,
                 timeout_sec=min(timeout_sec, 3),
-                allow_navigate_fallback=False,
+                reason=f"url username probe for peer {peer_id}",
+                allow_navigate_retry=True,
             )
             time.sleep(0.05)
             continue
 
         if effective_mode == "url":
-            _return_to_group_dialog_reliable(
+            _restore_group_dialog_after_deep_probe(
                 server=server,
                 token=token,
                 client_id=client_id,
                 tab_id=tab_id,
                 group_url=group_url,
                 timeout_sec=min(timeout_sec, 3),
-                allow_navigate_fallback=False,
+                reason=f"url fallback for peer {peer_id}",
+                allow_navigate_retry=True,
             )
             time.sleep(0.05)
             continue

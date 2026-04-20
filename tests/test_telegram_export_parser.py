@@ -447,6 +447,33 @@ class TelegramExportParserTests(unittest.TestCase):
         self.assertNotIn("click_menu_text", command_types)
         self.assertIn("click_text", command_types)
 
+    def test_try_username_via_mention_action_stops_early_after_repeated_invisible_menu_item(self) -> None:
+        click_menu_attempts = 0
+
+        def _fake_send_command_result(**kwargs):
+            nonlocal click_menu_attempts
+            command = kwargs.get("command") or {}
+            command_type = str(command.get("type") or "")
+            if command_type == "wait_selector":
+                return {"ok": True}
+            if command_type == "click_menu_text":
+                click_menu_attempts += 1
+                return {"ok": False, "error": {"message": "No visible menu item found by text"}}
+            if command_type == "click_text":
+                return {"ok": False}
+            return {"ok": True}
+
+        with mock.patch.object(self.mod.time, "sleep", return_value=None):
+            with mock.patch.object(self.mod, "_clear_composer_text"):
+                with mock.patch.object(self.mod, "_open_chat_peer_context_menu", return_value=(True, "peer")):
+                    with mock.patch.object(self.mod, "_send_command_result", side_effect=_fake_send_command_result):
+                        username = self.mod._try_username_via_mention_action(
+                            "server", "token", "client", 7, "111"
+                        )
+
+        self.assertEqual(username, "—")
+        self.assertEqual(click_menu_attempts, 2)
+
     def test_extract_bridge_capabilities_reads_background_and_content_lists(self) -> None:
         background, content = self.mod._extract_bridge_capabilities(
             {
@@ -553,6 +580,96 @@ class TelegramExportParserTests(unittest.TestCase):
         )
 
         self.assertTrue(should_run)
+
+    def test_compute_chat_deep_batch_size_returns_three_for_fast_mention_runtime(self) -> None:
+        batch_size = self.mod._compute_chat_deep_batch_size(
+            mode="mention",
+            chat_deep_limit=5,
+            remaining_runtime_sec=120.0,
+        )
+
+        self.assertEqual(batch_size, 3)
+
+    def test_compute_chat_deep_batch_size_returns_two_for_medium_mention_runtime(self) -> None:
+        batch_size = self.mod._compute_chat_deep_batch_size(
+            mode="mention",
+            chat_deep_limit=5,
+            remaining_runtime_sec=50.0,
+        )
+
+        self.assertEqual(batch_size, 2)
+
+    def test_compute_chat_deep_batch_size_returns_one_for_short_mention_runtime(self) -> None:
+        batch_size = self.mod._compute_chat_deep_batch_size(
+            mode="mention",
+            chat_deep_limit=5,
+            remaining_runtime_sec=20.0,
+        )
+
+        self.assertEqual(batch_size, 1)
+
+    def test_compute_chat_deep_batch_size_keeps_targeted_probe_single(self) -> None:
+        batch_size = self.mod._compute_chat_deep_batch_size(
+            mode="mention",
+            chat_deep_limit=5,
+            remaining_runtime_sec=120.0,
+            targeted_probe=True,
+        )
+
+        self.assertEqual(batch_size, 1)
+
+    def test_compute_chat_deep_batch_size_keeps_url_mode_single(self) -> None:
+        batch_size = self.mod._compute_chat_deep_batch_size(
+            mode="url",
+            chat_deep_limit=5,
+            remaining_runtime_sec=120.0,
+        )
+
+        self.assertEqual(batch_size, 1)
+
+    def test_restore_group_dialog_after_deep_probe_uses_navigate_retry_when_enabled(self) -> None:
+        calls: list[bool] = []
+
+        def _fake_return_to_group_dialog_reliable(**kwargs):
+            calls.append(bool(kwargs.get("allow_navigate_fallback")))
+            return bool(kwargs.get("allow_navigate_fallback"))
+
+        with mock.patch.object(self.mod, "_return_to_group_dialog_reliable", side_effect=_fake_return_to_group_dialog_reliable):
+            restored = self.mod._restore_group_dialog_after_deep_probe(
+                server="server",
+                token="token",
+                client_id="client",
+                tab_id=7,
+                group_url="https://web.telegram.org/k/#-2465948544",
+                timeout_sec=5,
+                reason="url fallback for peer 111",
+                allow_navigate_retry=True,
+            )
+
+        self.assertTrue(restored)
+        self.assertEqual(calls, [False, True])
+
+    def test_restore_group_dialog_after_deep_probe_stops_without_navigate_retry(self) -> None:
+        calls: list[bool] = []
+
+        def _fake_return_to_group_dialog_reliable(**kwargs):
+            calls.append(bool(kwargs.get("allow_navigate_fallback")))
+            return False
+
+        with mock.patch.object(self.mod, "_return_to_group_dialog_reliable", side_effect=_fake_return_to_group_dialog_reliable):
+            restored = self.mod._restore_group_dialog_after_deep_probe(
+                server="server",
+                token="token",
+                client_id="client",
+                tab_id=7,
+                group_url="https://web.telegram.org/k/#-2465948544",
+                timeout_sec=5,
+                reason="mention success for peer 111",
+                allow_navigate_retry=False,
+            )
+
+        self.assertFalse(restored)
+        self.assertEqual(calls, [False])
 
     def test_extract_chat_view_signature_uses_top_mid_peer_and_timestamp(self) -> None:
         html = (

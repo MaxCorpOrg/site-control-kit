@@ -52,6 +52,9 @@
 - В `content.js` усилен `click_text`: теперь он умеет находить текст на вложенных menu-item text span узлах и кликать ближайший кликабельный предок.
 - Добавлена отдельная DOM-команда `click_menu_text` для видимых popup/context menu; Telegram mention-path теперь пробует её раньше общего `click_text`.
 - `mention`-режим больше не тупиковый: если `Mention` у конкретного peer не дал `@username`, deep-chat делает лёгкий URL fallback для этого же peer и не сжигает шаг целиком впустую.
+- `mention`-deep теперь может брать несколько peer за один scroll-step, если оставшегося runtime достаточно.
+- Если Telegram два раза подряд отвечает `No visible menu item found by text`, deep раньше прекращает бесполезные повторные попытки и быстрее уходит в fallback.
+- Возврат в group dialog после URL/mention fallback теперь проверяется явно: один сложный peer больше не должен ломать весь остаток deep-шага.
 
 ### Диагностика stale extension runtime
 - В heartbeat `meta` добавлены `capabilities` по background/content-командам.
@@ -174,6 +177,26 @@
     - `@oleg_klsnkv`
     - `@Heavy_seas`
     - `@olegoleg48`
+- Новый live run после увеличения deep-batch подтвердил, что один шаг теперь реально обрабатывает несколько peer подряд:
+  - артефакты:
+    - `/tmp/tg_live_batch_boost.h1cwzl/snapshot.md`
+    - `/tmp/tg_live_batch_boost.h1cwzl/export_stats.json`
+  - факты:
+    - `chat deep step 0: processed 3`
+    - `deep_attempted_total = 3`
+    - `deep_updated_total = 3`
+    - там же подтвердился URL fallback для `@xpenguinfromhell`
+- Новый live run после фикса возврата в group dialog подтвердил, что multi-peer deep больше не сыпется после тяжёлого URL/mention случая:
+  - артефакты:
+    - `/tmp/tg_live_batch_boost3.7ErTfD/snapshot.md`
+    - `/tmp/tg_live_batch_boost3.7ErTfD/export_stats.json`
+  - факты:
+    - `chat deep step 0: processed 3, filled 3`
+    - `history_backfilled_total = 0`
+    - подтверждённые username:
+      - `@oleg_klsnkv`
+      - `@xpenguinfromhell`
+      - `@olegoleg48`
 
 ## Текущие Проблемы
 
@@ -183,12 +206,12 @@
 
 То есть deep-path больше не сломан инфраструктурно: stale runtime снят, `click_menu_text` живой, composer-read рабочий. Текущий узкий момент уже прикладной: неодинаковая доступность `Mention` и разный throughput по разным peer/слоям чата.
 
-### 2. Throughput deep-path пока ниже желаемого
-Сейчас основной рост по новым `@username` уже пошёл, но скорость пока неровная:
-- на коротких run удаётся собрать новые username без history;
-- на части peer шаг уходит в miss по `Mention` и только затем в fallback.
+### 2. Throughput deep-path уже вырос, но всё ещё ниже желаемого на длинных run
+Сейчас основной рост по новым `@username` уже пошёл:
+- на коротких run deep умеет делать `processed 3 / filled 3` прямо в одном scroll-step;
+- один неудачный peer больше не ломает весь batch-step.
 
-Следующий смысловой резерв уже не в починке runtime, а в подборе deep-target'ов и в повышении доли peer, для которых шаг завершается реальным `@username`.
+Следующий резерв уже не в починке path, а в общем балансе runtime между discovery и deep на длинных прогонах.
 
 ### 3. Reload helper стал рабочим, но fallback-кнопка ещё зависит от геометрии
 Основной stale-runtime блок снят через self-reload страницы расширения.
@@ -202,8 +225,8 @@
 - его точные координаты всё ещё зависят от сборки Chrome/масштаба окна.
 
 ### 4. Exporter всё ещё тратит слишком много runtime на discovery до deep
-После последних фиксов короткий no-history run уже даёт `3/3` успешных deep-update на видимом слое.
-Но на длинных прогонах discovery всё ещё легко съедает существенную часть бюджета раньше, чем deep успевает пройти достаточно peer.
+После последних фиксов короткие no-history run уже дают `3/3` успешных deep-update на видимом слое.
+Но на длинных прогонах runtime всё ещё может упираться в общий бюджет раньше, чем deep пройдёт следующий слой visible peer.
 
 ### 5. X11 fallback для browser tab actions в этой среде ненадёжен
 Проверка `_x11_send_keys` на реальном Chrome window вернула `True`, но фактический `Ctrl+T` не создал новую вкладку.
@@ -217,19 +240,19 @@
 `export_telegram_members_non_pii.py` всё ещё перегружен ответственностями и требует модульного разделения.
 
 ## Последний Подтверждённый Полезный Результат
-- Живой no-history run на новом runtime подтвердил, что основной export path уже собирает новые `@username` без помощи `identity_history.json`.
+- Живой no-history run на новом runtime подтвердил, что основной export path уже собирает новые `@username` без помощи `identity_history.json` и обрабатывает несколько peer в одном deep-step.
 - Артефакты проверки:
-  - `/tmp/tg_live_nohistory_verify.ZW8Ucj/snapshot.md`
-  - `/tmp/tg_live_general_nohistory2.IYo4yH/snapshot.md`
-  - `/tmp/tg_live_general_nohistory2.IYo4yH/export_stats.json`
+  - `/tmp/tg_live_batch_boost3.7ErTfD/snapshot.md`
+  - `/tmp/tg_live_batch_boost3.7ErTfD/export_stats.json`
 - Ключевой факт:
   - `deep_updated_total = 3`
   - `history_backfilled_total = 0`
-  - это значит, что mention/deep снова приносит новые реальные username, а не только восстанавливает старые знания из истории.
+  - `chat deep step 0: processed 3, filled 3`
+  - это значит, что mention/deep снова приносит новые реальные username, а не только восстанавливает старые знания из истории, и делает это батчем, а не по одному peer.
 
 ## Следующий Приоритет
-1. Поднять throughput deep-path: за один короткий run обрабатывать больше unknown peer с приоритетом на тех, где `Mention` вероятнее всего доступен.
-2. Снизить runtime-затраты discovery относительно deep, чтобы новые `@username` росли не только на точечных visible-layer run.
+1. Снизить runtime-затраты discovery относительно deep, чтобы multi-peer deep чаще успевал проходить следующий слой visible peer.
+2. Поднять приоритеты deep-target'ов: раньше брать тех peer, у кого вероятность успешного `Mention` выше.
 3. Разделить browser capability/runtime compatibility и Telegram export concerns в отдельные модули/слои.
 4. Отделить понятие `best-known latest` от `most-recent run` в UI и документации, если пользователю важно видеть именно последний прогон как основной артефакт.
 5. Декомпозировать `export_telegram_members_non_pii.py` на модули.
