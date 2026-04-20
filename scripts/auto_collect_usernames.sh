@@ -3,11 +3,31 @@ set -euo pipefail
 
 ROOT_DIR="/home/max/site-control-kit"
 EXPORT_SCRIPT="${ROOT_DIR}/scripts/export_telegram_members_non_pii.py"
+PROFILE_HELPER="${ROOT_DIR}/scripts/telegram_profiles.py"
 HUB_URL="http://127.0.0.1:8765"
 TOKEN="${SITECTL_TOKEN:-local-bridge-quickstart-2026}"
 
 GROUP_URL="${1:-https://web.telegram.org/k/#-1288116010}"
 OUT_MD="${2:-${HOME}/Загрузки/Telegram Desktop/telegram_usernames_auto.md}"
+
+CHAT_PROFILE="${CHAT_PROFILE:-balanced}"
+
+if [[ ! -f "${PROFILE_HELPER}" ]]; then
+  echo "ERROR: profile helper not found: ${PROFILE_HELPER}" >&2
+  exit 1
+fi
+
+apply_profile_defaults() {
+  local profile_name="$1"
+  while IFS=$'\t' read -r name value; do
+    [[ -n "${name:-}" ]] || continue
+    if [[ -z "${!name:-}" ]]; then
+      export "${name}=${value}"
+    fi
+  done < <(python3 "${PROFILE_HELPER}" env "${profile_name}")
+}
+
+apply_profile_defaults "${CHAT_PROFILE}"
 
 CHAT_STEPS="${CHAT_SCROLL_STEPS:-120}"
 CHAT_DEEP_LIMIT="${CHAT_DEEP_LIMIT:-120}"
@@ -158,10 +178,6 @@ from urllib.request import Request, urlopen
 hub_url, token, group_url, forced_client_id, forced_tab_id = sys.argv[1:6]
 target_fragment = group_url.split("#", 1)[1] if "#" in group_url else ""
 
-if forced_tab_id.strip():
-    print(f"{forced_client_id.strip()}\t{forced_tab_id.strip()}")
-    raise SystemExit(0)
-
 req = Request(
     f"{hub_url}/api/clients",
     headers={"Accept": "application/json", "X-Access-Token": token},
@@ -173,10 +189,30 @@ except Exception:
     raise SystemExit(0)
 
 clients = payload.get("clients") or []
+
+forced_client_id = forced_client_id.strip()
+forced_tab_id = forced_tab_id.strip()
+
+if forced_tab_id:
+    for client in clients:
+        client_id = str(client.get("client_id") or "").strip()
+        if forced_client_id and client_id != forced_client_id:
+            continue
+        for tab in client.get("tabs") or []:
+            tab_id = tab.get("id")
+            if str(tab_id) == forced_tab_id:
+                print(f"{client_id}\t{forced_tab_id}")
+                raise SystemExit(0)
+    if forced_client_id:
+        print(f"{forced_client_id}\t{forced_tab_id}")
+        raise SystemExit(0)
+    print(f"\t{forced_tab_id}")
+    raise SystemExit(0)
+
 exact_matches = []
 for client in clients:
     client_id = str(client.get("client_id") or "").strip()
-    if forced_client_id and client_id != forced_client_id.strip():
+    if forced_client_id and client_id != forced_client_id:
         continue
     for tab in client.get("tabs") or []:
         tab_id = tab.get("id")
@@ -193,7 +229,7 @@ if exact_matches:
 
 for client in clients:
     client_id = str(client.get("client_id") or "").strip()
-    if forced_client_id and client_id != forced_client_id.strip():
+    if forced_client_id and client_id != forced_client_id:
         continue
     for tab in client.get("tabs") or []:
         tab_id = tab.get("id")

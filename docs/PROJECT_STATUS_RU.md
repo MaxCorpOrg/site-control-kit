@@ -28,6 +28,8 @@
 - Chain-runner уже умеет останавливаться по `target_unique_members`, `target_safe_count`, `stop-after-idle`, `stop-after-no-growth`.
 - Chain-runner теперь умеет не ждать обычный интервал после run, который завершился сильным `deep-yield`: если exporter сам остановился на продуктивном deep-шаге, следующая короткая попытка стартует сразу.
 - Chain-runner получил профили `fast`, `balanced`, `deep`: они задают дефолтный интервал и набор env-настроек для collect-script, при этом ручные env всё ещё имеют приоритет.
+- Профили вынесены в общий helper `scripts/telegram_profiles.py`, поэтому те же режимы теперь доступны и для shell/GUI-скриптов, а не только внутри chain-runner.
+- Исправлен forced-tab regression в `auto_collect_usernames.sh`: теперь `CHAT_TAB_ID` без явного `CHAT_CLIENT_ID` корректно резолвится обратно в пару `client_id/tab_id`, а не ломает таргетинг.
 
 ### Диагностика прогонов
 - Каждый run сохраняет `run.json`, `export.log`, `snapshot.md/txt`, `snapshot_safe.md/txt`.
@@ -80,7 +82,7 @@
   - при открытии такой страницы расширение вызывает `chrome.runtime.reload()` само.
 
 ## Проверено
-- Полный unit-набор сейчас зелёный: `107/107`.
+- Полный unit-набор сейчас зелёный: `110/110`.
 - Shell syntax и `py_compile` для последних изменений проходили зелёными.
 - Точечный прогон экспортёрных тестов после capability-preflight:
   - `tests.test_telegram_export_parser`
@@ -120,6 +122,23 @@
   - чистый snapshot:
     - `/tmp/tg_now_nohistory.md`
     - `/tmp/tg_now_nohistory.log`
+- Живое сравнение профилей на одной и той же базе (`identity_history.json + discovery_state.json`) показало:
+  - `fast`:
+    - `/tmp/tg_chain_profile_fast/chat_-2465948544/runs/20260420T114702Z/run.json`
+    - `unique_members = 11`
+    - `deep_updated_total = 1`
+    - `history_backfilled_total = 8`
+    - `chat_scroll_steps_done = 0`
+  - `deep`:
+    - `/tmp/tg_chain_profile_deep/chat_-2465948544/runs/20260420T115310Z/run.json`
+    - `unique_members = 13`
+    - `deep_updated_total = 3`
+    - `history_backfilled_total = 5`
+    - `chat_scroll_steps_done = 3`
+  - практический вывод:
+    - `deep` лучше добывает новые реальные `@username`;
+    - `fast` полезен как быстрый повторный проход по уже накопленной истории.
+- Тот же live smoke отдельно подтвердил, что `expired no delivery` внутри `click_menu_text` теперь повторяется как устойчивый pattern, а не единичный фейл: следующий оптимизационный шаг должен быть delivery-aware bailout и более ранний URL fallback.
   - точечный probe:
     - peer `530627292`
     - после context-click в DOM найден текст `Mention`

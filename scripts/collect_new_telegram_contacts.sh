@@ -5,6 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AUTO_SCRIPT="${SCRIPT_DIR}/auto_collect_usernames.sh"
 BATCH_HELPER="${SCRIPT_DIR}/telegram_contact_batches.py"
 SAFE_HELPER="${SCRIPT_DIR}/write_telegram_safe_snapshot.py"
+PROFILE_HELPER="${SCRIPT_DIR}/telegram_profiles.py"
 
 GROUP_URL="${1:-}"
 OUTPUT_ROOT="${2:-${HOME}/telegram_contact_batches}"
@@ -22,6 +23,11 @@ fi
 
 if [[ ! -f "${BATCH_HELPER}" ]]; then
   echo "ERROR: batch helper not found: ${BATCH_HELPER}" >&2
+  exit 1
+fi
+
+if [[ ! -f "${PROFILE_HELPER}" ]]; then
+  echo "ERROR: profile helper not found: ${PROFILE_HELPER}" >&2
   exit 1
 fi
 
@@ -56,6 +62,20 @@ latest_safe_promoted="1"
 latest_safe_decision_candidate=""
 latest_safe_decision_baseline=""
 latest_safe_best_source=""
+
+export CHAT_PROFILE="${CHAT_PROFILE:-balanced}"
+
+apply_profile_defaults() {
+  local profile_name="$1"
+  while IFS=$'\t' read -r name value; do
+    [[ -n "${name:-}" ]] || continue
+    if [[ -z "${!name:-}" ]]; then
+      export "${name}=${value}"
+    fi
+  done < <(python3 "${PROFILE_HELPER}" env "${profile_name}")
+}
+
+apply_profile_defaults "${CHAT_PROFILE}"
 
 export CHAT_SCROLL_STEPS="${CHAT_SCROLL_STEPS:-12}"
 export CHAT_DEEP_LIMIT="${CHAT_DEEP_LIMIT:-40}"
@@ -248,6 +268,7 @@ info_stats = export_stats.get("info_stats") if isinstance(export_stats.get("info
 payload = {
     "status": ${status@Q},
     "group_url": ${GROUP_URL@Q},
+    "profile": ${CHAT_PROFILE@Q},
     "chat_dir": ${chat_dir@Q},
     "run_dir": ${run_dir@Q},
     "run_id": ${run_id@Q},

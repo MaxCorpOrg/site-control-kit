@@ -4,6 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUN_ONCE_SCRIPT="${SCRIPT_DIR}/run_chat_export_once.sh"
 SAFE_SNAPSHOT_SCRIPT="${SCRIPT_DIR}/write_telegram_safe_snapshot.py"
+PROFILE_HELPER="${SCRIPT_DIR}/telegram_profiles.py"
 
 if ! command -v zenity >/dev/null 2>&1; then
   echo "ERROR: zenity is not installed. Install package 'zenity' and rerun." >&2
@@ -24,15 +25,46 @@ if [[ ! -f "${SAFE_SNAPSHOT_SCRIPT}" ]]; then
   exit 1
 fi
 
+if [[ ! -f "${PROFILE_HELPER}" ]]; then
+  zenity --error \
+    --title="Telegram Members Export" \
+    --text="Скрипт профилей не найден:\n${PROFILE_HELPER}"
+  exit 1
+fi
+
 default_group_url="https://web.telegram.org/k/#-"
 default_output="${HOME}/Загрузки/Telegram Desktop/MadCoreChat_members_non_pii.md"
 default_min_records="20"
 
+chat_profile="${CHAT_PROFILE:-balanced}"
 chat_steps="${CHAT_SCROLL_STEPS:-60}"
 chat_deep_limit="${CHAT_DEEP_LIMIT:-3}"
 timeout_sec="${CHAT_TIMEOUT_SEC:-12}"
 chat_max_runtime="${CHAT_MAX_RUNTIME:-420}"
 chat_deep_mode="${CHAT_DEEP_MODE:-mention}"
+
+apply_profile_defaults() {
+  local profile_name="$1"
+  while IFS=$'\t' read -r name value; do
+    [[ -n "${name:-}" ]] || continue
+    if [[ -z "${!name:-}" ]]; then
+      export "${name}=${value}"
+    fi
+  done < <(python3 "${PROFILE_HELPER}" env "${profile_name}")
+}
+
+refresh_profile_values() {
+  local profile_name="$1"
+  unset CHAT_SCROLL_STEPS CHAT_DEEP_LIMIT CHAT_MAX_RUNTIME
+  apply_profile_defaults "${profile_name}"
+  chat_steps="${CHAT_SCROLL_STEPS:-60}"
+  chat_deep_limit="${CHAT_DEEP_LIMIT:-3}"
+  timeout_sec="${CHAT_TIMEOUT_SEC:-12}"
+  chat_max_runtime="${CHAT_MAX_RUNTIME:-420}"
+  chat_deep_mode="${CHAT_DEEP_MODE:-mention}"
+}
+
+refresh_profile_values "${chat_profile}"
 
 detect_token() {
   if [[ -n "${SITECTL_TOKEN:-}" ]]; then
@@ -190,6 +222,25 @@ output_path="${default_output}"
 min_records="${default_min_records}"
 
 while true; do
+  profile_choice="$(
+    zenity \
+      --list \
+      --radiolist \
+      --title="Профиль Telegram экспорта" \
+      --text="Выберите режим запуска:" \
+      --column="" \
+      --column="Профиль" \
+      $([[ "${chat_profile}" == "fast" ]] && printf '%s ' TRUE || printf '%s ' FALSE) "fast" \
+      $([[ "${chat_profile}" == "balanced" ]] && printf '%s ' TRUE || printf '%s ' FALSE) "balanced" \
+      $([[ "${chat_profile}" == "deep" ]] && printf '%s ' TRUE || printf '%s ' FALSE) "deep" \
+      --height=260 \
+      --width=420
+  )" || exit 0
+
+  chat_profile="${profile_choice:-balanced}"
+  export CHAT_PROFILE="${chat_profile}"
+  refresh_profile_values "${chat_profile}"
+
   group_url="$(
     zenity \
       --entry \
@@ -238,9 +289,15 @@ while true; do
     --title="Telegram Members Export" \
     --ok-label="Start" \
     --cancel-label="Exit" \
-    --text="Запустить экспорт?\n\nURL: ${group_url}\nМин. записей: ${min_records}\nФайл: ${output_path}"; then
+    --text="Запустить экспорт?\n\nПрофиль: ${chat_profile}\nURL: ${group_url}\nМин. записей: ${min_records}\nФайл: ${output_path}"; then
     exit 0
   fi
+
+  export CHAT_SCROLL_STEPS="${chat_steps}"
+  export CHAT_DEEP_LIMIT="${chat_deep_limit}"
+  export CHAT_TIMEOUT_SEC="${timeout_sec}"
+  export CHAT_MAX_RUNTIME="${chat_max_runtime}"
+  export CHAT_DEEP_MODE="${chat_deep_mode}"
 
   run_with_progress "${token}" "${output_path}" "${group_url}" "${min_records}" || true
 

@@ -13,37 +13,22 @@ from pathlib import Path
 from typing import Any
 
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from telegram_profiles import (  # noqa: E402
+    DEFAULT_PROFILE,
+    available_profiles,
+    build_profile_env,
+    resolve_chain_interval,
+    resolve_profile,
+    resolve_profile_name,
+)
+
+
 ROOT_DIR = Path(__file__).resolve().parents[1]
 COLLECT_SCRIPT = ROOT_DIR / "scripts" / "collect_new_telegram_contacts.sh"
-CHAIN_PROFILES: dict[str, dict[str, Any]] = {
-    "fast": {
-        "interval_sec": 8.0,
-        "env": {
-            "CHAT_SCROLL_STEPS": "10",
-            "CHAT_DEEP_LIMIT": "24",
-            "CHAT_MAX_RUNTIME": "120",
-            "TELEGRAM_CHAT_MENTION_DEEP_MAX_PER_STEP": "4",
-            "TELEGRAM_CHAT_DEEP_PRIORITY_MIN_RUNTIME": "14",
-        },
-    },
-    "balanced": {
-        "interval_sec": 20.0,
-        "env": {},
-    },
-    "deep": {
-        "interval_sec": 30.0,
-        "env": {
-            "CHAT_SCROLL_STEPS": "18",
-            "CHAT_DEEP_LIMIT": "60",
-            "CHAT_MAX_RUNTIME": "360",
-            "TELEGRAM_CHAT_MENTION_DEEP_MAX_PER_STEP": "4",
-            "TELEGRAM_CHAT_DEEP_PRIORITY_EXTRA_ROUNDS": "2",
-            "TELEGRAM_CHAT_DEEP_PRIORITY_MIN_RUNTIME": "24",
-            "TELEGRAM_CHAT_DISCOVERY_SCROLL_BURST": "3",
-            "TELEGRAM_CHAT_JUMP_SCROLL_TRIGGER_STALL": "2",
-        },
-    },
-}
 
 
 def chat_slug_from_group_url(group_url: str) -> str:
@@ -98,10 +83,6 @@ def should_skip_interval_after_run(run_payload: dict[str, Any], skip_on_producti
     return is_productive_deep_yield(run_payload)
 
 
-def resolve_chain_profile(profile_name: str) -> dict[str, Any]:
-    return CHAIN_PROFILES.get(str(profile_name or "balanced").strip().lower(), CHAIN_PROFILES["balanced"])
-
-
 def resolve_interval_sec(explicit_value: float | None, profile_name: str) -> float:
     if explicit_value is not None:
         return max(float(explicit_value), 0.0)
@@ -111,16 +92,15 @@ def resolve_interval_sec(explicit_value: float | None, profile_name: str) -> flo
             return max(float(env_value), 0.0)
         except ValueError:
             pass
-    profile = resolve_chain_profile(profile_name)
-    return max(float(profile.get("interval_sec", 20.0) or 20.0), 0.0)
+    return resolve_chain_interval(profile_name)
 
 
 def build_collect_env(profile_name: str) -> dict[str, str]:
     env = os.environ.copy()
-    profile = resolve_chain_profile(profile_name)
-    for key, value in dict(profile.get("env") or {}).items():
+    for key, value in build_profile_env(profile_name).items():
         env.setdefault(str(key), str(value))
-    env["TELEGRAM_CHAIN_PROFILE"] = str(profile_name or "balanced").strip().lower()
+    env["TELEGRAM_CHAIN_PROFILE"] = resolve_profile_name(profile_name)
+    env.setdefault("CHAT_PROFILE", resolve_profile_name(profile_name))
     return env
 
 
@@ -137,8 +117,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("output_root", nargs="?", default=str(Path.home() / "telegram_contact_batches"))
     parser.add_argument(
         "--profile",
-        choices=sorted(CHAIN_PROFILES),
-        default=str(os.environ.get("TELEGRAM_CHAIN_PROFILE", "balanced") or "balanced").strip().lower(),
+        choices=available_profiles(),
+        default=str(os.environ.get("TELEGRAM_CHAIN_PROFILE", DEFAULT_PROFILE) or DEFAULT_PROFILE).strip().lower(),
         help="Preset chain profile for collect-script env and default interval.",
     )
     parser.add_argument("--runs", type=int, default=max(int(os.environ.get("TELEGRAM_CHAIN_RUNS", "5") or "5"), 1))
@@ -188,7 +168,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     args = build_parser().parse_args()
 
-    profile_name = str(args.profile or "balanced").strip().lower()
+    profile_name = resolve_profile_name(args.profile)
     interval_sec = resolve_interval_sec(args.interval_sec, profile_name)
     collect_env = build_collect_env(profile_name)
     output_root = Path(args.output_root).expanduser()
@@ -331,7 +311,7 @@ def main() -> int:
         "target_safe_count": int(args.target_safe_count),
         "skip_interval_on_productive_yield": bool(args.skip_interval_on_productive_yield),
         "productive_yield_runs": productive_yield_runs,
-        "collect_env_overrides": dict(resolve_chain_profile(profile_name).get("env") or {}),
+        "collect_env_overrides": dict(resolve_profile(profile_name).get("env") or {}),
         "best_unique_members": best_unique_members,
         "best_safe_count": best_safe_count,
         "attempts": attempts,

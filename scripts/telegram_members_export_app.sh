@@ -5,6 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 EXPORT_SCRIPT="${SCRIPT_DIR}/export_telegram_members_non_pii.py"
 START_HUB_SCRIPT="${SCRIPT_DIR}/start_hub.sh"
 SAFE_SNAPSHOT_SCRIPT="${SCRIPT_DIR}/write_telegram_safe_snapshot.py"
+PROFILE_HELPER="${SCRIPT_DIR}/telegram_profiles.py"
 
 if ! command -v zenity >/dev/null 2>&1; then
   echo "ERROR: zenity is not installed. Install package 'zenity' and rerun." >&2
@@ -31,6 +32,11 @@ if [[ ! -f "${SAFE_SNAPSHOT_SCRIPT}" ]]; then
   exit 1
 fi
 
+if [[ ! -f "${PROFILE_HELPER}" ]]; then
+  zenity --error --title="Telegram Members Export" --text="Скрипт профилей не найден:\n${PROFILE_HELPER}"
+  exit 1
+fi
+
 default_server="http://127.0.0.1:8765"
 default_group_url="https://web.telegram.org/k/#-"
 default_timeout="12"
@@ -41,6 +47,17 @@ default_chat_deep_mode="full"
 default_target_users="0"
 default_output="${HOME}/Загрузки/Telegram Desktop/telegram_usernames.txt"
 default_token="local-bridge-quickstart-2026"
+default_chat_profile="${CHAT_PROFILE:-balanced}"
+
+apply_profile_defaults() {
+  local profile_name="$1"
+  while IFS=$'\t' read -r name value; do
+    [[ -n "${name:-}" ]] || continue
+    if [[ -z "${!name:-}" ]]; then
+      export "${name}=${value}"
+    fi
+  done < <(python3 "${PROFILE_HELPER}" env "${profile_name}")
+}
 
 detect_token() {
   if [[ -n "${SITECTL_TOKEN:-}" ]]; then
@@ -252,17 +269,39 @@ fi
 chat_slug="$(chat_slug_from_url "${group_url}")"
 safe_output_dir="$(dirname "${output_path}")/telegram_export_${chat_slug}"
 
+chat_profile="$(
+  zenity \
+    --list \
+    --radiolist \
+    --title="Профиль Telegram экспорта" \
+    --text="Выберите режим запуска:" \
+    --column="" \
+    --column="Профиль" \
+    $([[ "${default_chat_profile}" == "fast" ]] && printf '%s ' TRUE || printf '%s ' FALSE) "fast" \
+    $([[ "${default_chat_profile}" == "balanced" ]] && printf '%s ' TRUE || printf '%s ' FALSE) "balanced" \
+    $([[ "${default_chat_profile}" == "deep" ]] && printf '%s ' TRUE || printf '%s ' FALSE) "deep" \
+    --height=260 \
+    --width=420
+)"
+if [[ -z "${chat_profile:-}" ]]; then
+  exit 0
+fi
+
+export CHAT_PROFILE="${chat_profile}"
+unset CHAT_SCROLL_STEPS CHAT_DEEP_LIMIT CHAT_MAX_RUNTIME
+apply_profile_defaults "${chat_profile}"
+
 timeout_value="${default_timeout}"
-chat_scroll_steps="${default_chat_scroll_steps}"
-chat_deep_limit="${default_chat_deep_limit}"
-chat_max_runtime="${default_chat_max_runtime}"
+chat_scroll_steps="${CHAT_SCROLL_STEPS:-${default_chat_scroll_steps}}"
+chat_deep_limit="${CHAT_DEEP_LIMIT:-${default_chat_deep_limit}}"
+chat_max_runtime="${CHAT_MAX_RUNTIME:-${default_chat_max_runtime}}"
 chat_deep_mode="${default_chat_deep_mode}"
 target_users="${default_target_users}"
 run_params="$(
   zenity \
     --entry \
     --title="Параметры сбора чата" \
-    --text="Введите: шаги_скролла|deep_лимит|таймаут_сек|макс_время_чата|лимит_пользователей\nПример: 120|60|12|900|0 (0 = без лимита)" \
+    --text="Профиль: ${chat_profile}\nВведите: шаги_скролла|deep_лимит|таймаут_сек|макс_время_чата|лимит_пользователей\nПример: 120|60|12|900|0 (0 = без лимита)" \
     --entry-text "${chat_scroll_steps}|${chat_deep_limit}|${timeout_value}|${chat_max_runtime}|${target_users}"
 )"
 if [[ -z "${run_params:-}" ]]; then
@@ -274,6 +313,11 @@ is_uint "${chat_deep_limit}" || chat_deep_limit="${default_chat_deep_limit}"
 is_uint "${timeout_value}" || timeout_value="${default_timeout}"
 is_uint "${chat_max_runtime}" || chat_max_runtime="${default_chat_max_runtime}"
 is_uint "${target_users}" || target_users="${default_target_users}"
+
+export CHAT_SCROLL_STEPS="${chat_scroll_steps}"
+export CHAT_DEEP_LIMIT="${chat_deep_limit}"
+export CHAT_TIMEOUT_SEC="${timeout_value}"
+export CHAT_MAX_RUNTIME="${chat_max_runtime}"
 
 deep_mode_choice="$(
   zenity \
@@ -299,6 +343,8 @@ elif [[ "${deep_mode_choice}" == "URL (через профиль URL)" ]]; then
 else
   chat_deep_mode="mention"
 fi
+
+export CHAT_DEEP_MODE="${chat_deep_mode}"
 
 chat_min_members="0"
 max_members="0"
