@@ -61,9 +61,16 @@
 - CLI получил отдельное действие `browser x11-click`:
   - можно кликать по системным страницам и окнам без content script через относительные координаты окна;
   - это стало базой для best-effort helper `scripts/reload_bridge_extension.sh`.
+- CLI получил и `browser x11-keys`:
+  - можно отправлять `Tab`, `Return`, модификаторы и другие X11 key sequences прямо в окно Chrome;
+  - helper теперь может работать не только мышью, но и клавиатурой на system-page уровне.
+- В `options.html` и `popup.html` добавлен self-reload trigger:
+  - `chrome-extension://<id>/options.html?action=reload-self`
+  - `chrome-extension://<id>/popup.html?action=reload-self`
+  - при открытии такой страницы расширение вызывает `chrome.runtime.reload()` само.
 
 ## Проверено
-- Полный unit-набор проходил зелёным: `81/81`.
+- Полный unit-набор проходил зелёным: `82/82`.
 - Shell syntax и `py_compile` для последних изменений проходили зелёными.
 - Точечный прогон экспортёрных тестов после capability-preflight:
   - `tests.test_telegram_export_parser`
@@ -126,6 +133,23 @@
     - `tabId = 614278005`
     - `windowId = 0x03400020`
     - `via = x11_click`
+- После фикса `_x11_send_keys` живой browser bridge реально вернулся к полной работе:
+  - `browser activate --tab-id 614278010` успешно сработал через `x11_fallback`;
+  - `browser x11-click` теперь умеет поднимать неактивную вкладку в многотабовом окне;
+  - `browser x11-keys` тоже проходит по той же цепочке.
+- Self-reload расширения подтверждён живьём:
+  - `./scripts/reload_bridge_extension.sh` на вкладке `614278010` успешно довёл runtime до нового состояния;
+  - после этого в heartbeat появились `meta.capabilities.background_commands` и `meta.capabilities.content_commands`;
+  - это сняло stale-runtime как инфраструктурный блокер.
+- Post-reload smoke подтверждён:
+  - `browser new-tab 'https://web.telegram.org/k/#-2465948544'` снова завершился `completed`, без старой content-script misroute ошибки;
+  - новый tab: `614278035`
+  - URL: `https://web.telegram.org/k/#-2465948544`
+- Новый live smoke на Telegram после reload подтвердил:
+  - stale-runtime блок больше не мешает mention-пути;
+  - в логе уже есть:
+    - `INFO: mention context for peer 530627292 opened via anchor avatar`
+  - это сужает текущий bottleneck уже до клика по menu item / чтения composer, а не до загрузки старого runtime.
 
 ## Текущие Проблемы
 
@@ -134,28 +158,22 @@
 - `mention context ... opened`
 - `WARN: mention item not clicked`
 
-То есть deep-path стал сильнее по scheduling и чтению composer, а live probe подтвердил наличие `Mention` в DOM. Код уже переведён на отдельный `click_menu_text`, а экспортёр теперь умеет сам распознавать отсутствие этой команды по bridge capabilities и переключаться на legacy fallback. Но live-подтверждение нового пути всё ещё упирается в stale runtime расширения до его reload.
+То есть deep-path стал сильнее по scheduling и чтению composer, а live probe подтвердил наличие `Mention` в DOM. Код уже переведён на отдельный `click_menu_text`, stale runtime снят через self-reload, и mention-путь доходит до открытия контекстного меню на новом runtime. Текущий узкий момент сместился ещё глубже: к точному клику по menu item и/или чтению composer после этого.
 
 ### 2. Прямое live-подтверждение context-menu fallback ещё неполное
 Короткий smoke подтвердил запуск catch-up mention, но не дал новых `@username`.
 Отдельный target-run для точечного peer снова подвис и был остановлен вручную, но state/log probe уже локализовал проблему точнее: `context_click` проходит, `Mention` есть в DOM, а ломается именно `click_text` path текущего runtime.
 
-### 3. Живой браузерный runtime не синхронизирован с кодом репозитория
-На машине обнаружен stale runtime расширения:
-- `browser new-tab` в живом окружении упал как `Unsupported command type in content script: new_tab`;
-- это означает, что загруженная версия background/content runtime в Chrome отстаёт от кода в репозитории.
-Без reload unpacked extension часть новых правок нельзя подтвердить end-to-end.
+### 3. Reload helper стал рабочим, но fallback-кнопка ещё зависит от геометрии
+Основной stale-runtime блок снят через self-reload страницы расширения.
+Что уже точно работает:
+- self-reload через `chrome-extension://.../options.html?action=reload-self`;
+- проверка появления `content_commands` после reload;
+- post-reload browser commands (`new-tab`, `activate`, `x11-click`, `x11-keys`).
 
-### 3a. Reload helper пока best-effort
-Есть новый `scripts/reload_bridge_extension.sh`, но координаты Reload в Chrome UI всё ещё зависят от сборки/масштаба окна.
-Инфраструктурная часть уже есть:
-- quiet-tab selection;
-- переход на `chrome://extensions/?id=...`;
-- X11 click fallback;
-- проверка появления `content_commands` после reload.
-
-Осталось добить стабильное live-подтверждение именно координаты/фокуса кнопки Reload.
-Ещё один нюанс live-среды: если выбранная quiet-tab неактивна внутри многотабового окна, `x11-click` сейчас корректно требует сначала сделать её видимой. Для отдельных однотабовых quiet-window helper уже рабочий.
+Что ещё остаётся best-effort:
+- fallback-клик по кнопке Reload на `chrome://extensions`;
+- его точные координаты всё ещё зависят от сборки Chrome/масштаба окна.
 
 ### 4. Exporter тратит слишком много runtime на discovery до deep
 На некоторых прогонах deep успевает обработать 1 профиль, а остальное время уходит на scroll/discovery.
@@ -181,9 +199,9 @@
   - `/home/max/telegram_contact_batches/chat_-2465948544/11.txt`
 
 ## Следующий Приоритет
-1. Дожать live-координаты/фокус для `scripts/reload_bridge_extension.sh` и подтвердить, что после него в heartbeat появляются `content_commands`.
-2. После reload снять конкретный успешный `mention`-deep прогон по новому peer и сравнить `click_menu_text` против legacy fallback.
-3. Починить или переосмыслить X11 fallback для `browser new-tab`.
+1. Снять конкретный успешный `mention`-deep прогон по новому peer на уже обновлённом runtime и сравнить `click_menu_text` против legacy fallback.
+2. Доточить диагностические логи и selector-path вокруг menu item / composer, потому что это теперь главный live bottleneck.
+3. При желании допилить fallback-координаты для `chrome://extensions`, но это уже не блокер номер один.
 4. Разделить browser capability/runtime compatibility и Telegram export concerns в отдельные модули/слои.
 5. Отделить понятие `best-known latest` от `most-recent run` в UI и документации, если пользователю важно видеть именно последний прогон как основной артефакт.
 6. Декомпозировать `export_telegram_members_non_pii.py` на модули.

@@ -10,6 +10,7 @@ from webcontrol.cli import (
     _find_browser_tab,
     _find_x11_browser_window_geometry,
     _maybe_apply_browser_tab_fallback,
+    _parse_x11_key_sequences,
     _parse_wmctrl_geometry_windows,
     _pick_client,
     _tab_present,
@@ -168,6 +169,13 @@ class BrowserCliHelperTests(unittest.TestCase):
             y_ratio=0.2,
         )
         self.assertEqual(point, (1000, 150))
+
+    def test_parse_x11_key_sequences_supports_modifiers(self) -> None:
+        sequences = _parse_x11_key_sequences(["Tab", "Control_L+Shift_L+Tab", " Return "])
+        self.assertEqual(
+            sequences,
+            [["Tab"], ["Control_L", "Shift_L", "Tab"], ["Return"]],
+        )
 
     def test_tab_present_detects_known_tab(self) -> None:
         client = {"tabs": [{"id": 10}, {"id": 11}]}

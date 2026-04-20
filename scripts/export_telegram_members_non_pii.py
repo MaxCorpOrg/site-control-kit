@@ -816,8 +816,9 @@ def _try_username_via_mention_action(
         "mencao",
     ]
     if not mention_click_ok:
-        for _ in range(4):
+        for attempt_index in range(4):
             if supports_click_menu_text:
+                print(f"INFO: mention click_menu_text attempt {attempt_index + 1} for peer {peer_id}")
                 mention_click = _send_command_result(
                     server=server,
                     token=token,
@@ -832,8 +833,15 @@ def _try_username_via_mention_action(
                     raise_on_fail=False,
                 )
                 if mention_click.get("ok"):
+                    print(f"INFO: mention click_menu_text success on attempt {attempt_index + 1} for peer {peer_id}")
                     mention_click_ok = True
                     break
+                error_text = _format_command_error(mention_click.get("error"))
+                if error_text:
+                    print(
+                        f"INFO: mention click_menu_text miss on attempt {attempt_index + 1} "
+                        f"for peer {peer_id}: {error_text}"
+                    )
             for root_selector in (
                 "#bubble-contextmenu.active",
                 "#bubble-contextmenu",
@@ -860,6 +868,11 @@ def _try_username_via_mention_action(
                     raise_on_fail=False,
                 )
                 if mention_click.get("ok"):
+                    route = root_selector or "<global>"
+                    print(
+                        f"INFO: mention click_text success via {route} "
+                        f"on attempt {attempt_index + 1} for peer {peer_id}"
+                    )
                     mention_click_ok = True
                     break
             if mention_click_ok:
@@ -878,6 +891,7 @@ def _try_username_via_mention_action(
             tab_id=tab_id,
         )
         if username != "—":
+            print(f"INFO: mention composer resolved {peer_id} -> {username}")
             _clear_composer_text(server, token, client_id, tab_id)
             return username
         time.sleep(0.15)

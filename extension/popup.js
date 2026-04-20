@@ -18,6 +18,19 @@ function $(id) {
   return document.getElementById(id);
 }
 
+function requestedAction() {
+  const search = new URLSearchParams(window.location.search || "");
+  if (search.get("action")) {
+    return String(search.get("action") || "").trim();
+  }
+  const hash = String(window.location.hash || "").replace(/^#/, "");
+  if (!hash) {
+    return "";
+  }
+  const hashParams = new URLSearchParams(hash);
+  return String(hashParams.get("action") || "").trim();
+}
+
 async function refresh() {
   const st = await storageGet(KEYS);
   $("clientLine").textContent = `Клиент: ${st.clientId || "-"} | Хаб: ${st.serverUrl || "-"}`;
@@ -39,6 +52,12 @@ async function runAction(type) {
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
+  if (requestedAction() === "reload-self") {
+    $("errorLine").textContent = "Перезагрузка расширения...";
+    setTimeout(() => chrome.runtime.reload(), 50);
+    return;
+  }
+
   await refresh();
 
   $("pollNowBtn").addEventListener("click", () => {

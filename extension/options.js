@@ -24,6 +24,19 @@ function setStatus(message, isError = false) {
   el.classList.toggle("error", isError);
 }
 
+function requestedAction() {
+  const search = new URLSearchParams(window.location.search || "");
+  if (search.get("action")) {
+    return String(search.get("action") || "").trim();
+  }
+  const hash = String(window.location.hash || "").replace(/^#/, "");
+  if (!hash) {
+    return "";
+  }
+  const hashParams = new URLSearchParams(hash);
+  return String(hashParams.get("action") || "").trim();
+}
+
 async function load() {
   const cfg = { ...DEFAULTS, ...(await storageGet(Object.keys(DEFAULTS))) };
   $("serverUrl").value = cfg.serverUrl;
@@ -55,6 +68,12 @@ async function reset() {
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
+  if (requestedAction() === "reload-self") {
+    setStatus("Перезагрузка расширения...");
+    setTimeout(() => chrome.runtime.reload(), 50);
+    return;
+  }
+
   await load();
 
   $("saveBtn").addEventListener("click", () => {

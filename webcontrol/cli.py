@@ -338,12 +338,53 @@ def _x11_window_click_point(window: dict[str, Any], *, x_ratio: float, y_ratio: 
     return target_x, target_y
 
 
+def _parse_x11_key_sequences(values: list[str]) -> list[list[str]]:
+    sequences: list[list[str]] = []
+    for raw in values:
+        text = str(raw or "").strip()
+        if not text:
+            continue
+        parts = [item.strip() for item in text.split("+") if item.strip()]
+        if parts:
+            sequences.append(parts)
+    return sequences
+
+
 def _x11_send_keys(window_id: str, sequences: list[list[str]]) -> bool:
     if not window_id or sys.platform != "linux" or not os.environ.get("DISPLAY"):
         return False
     try:
         from Xlib import X, XK, display  # type: ignore
         from Xlib.ext import xtest  # type: ignore
+    except Exception:
+        return False
+
+    try:
+        subprocess.run(["wmctrl", "-ia", window_id], check=False)
+        time.sleep(0.18)
+        d = display.Display()
+
+        def _press(name: str, pressed: bool) -> None:
+            keysym = XK.string_to_keysym(name)
+            if keysym == 0:
+                raise RuntimeError(f"Unknown X11 key: {name}")
+            keycode = d.keysym_to_keycode(keysym)
+            xtest.fake_input(d, X.KeyPress if pressed else X.KeyRelease, keycode)
+
+        for sequence in sequences:
+            if not sequence:
+                continue
+            modifiers = sequence[:-1]
+            main_key = sequence[-1]
+            for name in modifiers:
+                _press(name, True)
+            _press(main_key, True)
+            _press(main_key, False)
+            for name in reversed(modifiers):
+                _press(name, False)
+            d.sync()
+            time.sleep(0.08)
+        return True
     except Exception:
         return False
 
@@ -391,35 +432,6 @@ def _x11_click_window(window: dict[str, Any], *, x_ratio: float, y_ratio: float,
         }
     except Exception:
         return None
-
-    try:
-        subprocess.run(["wmctrl", "-ia", window_id], check=False)
-        time.sleep(0.18)
-        d = display.Display()
-
-        def _press(name: str, pressed: bool) -> None:
-            keysym = XK.string_to_keysym(name)
-            if keysym == 0:
-                raise RuntimeError(f"Unknown X11 key: {name}")
-            keycode = d.keysym_to_keycode(keysym)
-            xtest.fake_input(d, X.KeyPress if pressed else X.KeyRelease, keycode)
-
-        for sequence in sequences:
-            if not sequence:
-                continue
-            modifiers = sequence[:-1]
-            main_key = sequence[-1]
-            for name in modifiers:
-                _press(name, True)
-            _press(main_key, True)
-            _press(main_key, False)
-            for name in reversed(modifiers):
-                _press(name, False)
-            d.sync()
-            time.sleep(0.08)
-        return True
-    except Exception:
-        return False
 
 
 def _find_client_by_id(clients: list[dict[str, Any]], client_id: str) -> dict[str, Any] | None:
@@ -882,6 +894,67 @@ def _x11_click_fallback(
     return _synthetic_command_record(client_id, data=data)
 
 
+def _x11_keys_fallback(
+    *,
+    server: str,
+    token: str,
+    client: dict[str, Any],
+    target: dict[str, Any],
+    sequences: list[list[str]],
+    wait_sec: int,
+) -> dict[str, Any] | None:
+    if not sequences:
+        return None
+    target_tab = _find_browser_tab(client, target)
+    if not target_tab:
+        return None
+    client_id = str(client.get("client_id") or "").strip()
+    window_id = int(target_tab.get("windowId", -1))
+    window_tabs = _tabs_for_window(client, window_id)
+    active_target = target_tab
+    if not bool(target_tab.get("active")) and len(window_tabs) > 1:
+        activated = _x11_activate_tab_fallback(
+            server=server,
+            token=token,
+            client=client,
+            target={"client_id": client_id, "tab_id": int(target_tab.get("id", -1)), "active": True},
+            wait_sec=wait_sec,
+        )
+        if not activated:
+            return None
+        refreshed_client, refreshed_tab = _wait_for_tab_state(
+            server=server,
+            token=token,
+            client_id=client_id,
+            timeout_sec=max(wait_sec, 3),
+            predicate=lambda current_client: _find_browser_tab(
+                current_client,
+                {"client_id": client_id, "tab_id": int(target_tab.get("id", -1)), "active": True},
+            ),
+        )
+        if not refreshed_client or not refreshed_tab:
+            return None
+        client = refreshed_client
+        active_target = refreshed_tab
+        window_id = int(active_target.get("windowId", -1))
+        window_tabs = _tabs_for_window(client, window_id)
+    x11_window_id = _find_x11_browser_window(window_tabs)
+    if not x11_window_id:
+        return None
+    if not _x11_send_keys(x11_window_id, sequences):
+        return None
+    return _synthetic_command_record(
+        client_id,
+        data={
+            "tabId": int(active_target.get("id", -1)),
+            "windowBrowserId": window_id,
+            "windowId": x11_window_id,
+            "sequences": ["+".join(sequence) for sequence in sequences],
+            "via": "x11_keys",
+        },
+    )
+
+
 def _maybe_apply_browser_tab_fallback(
     *,
     action: str,
@@ -1077,6 +1150,25 @@ def cmd_browser(args: argparse.Namespace) -> int:
             )
             if not command_record:
                 raise RuntimeError("X11 click fallback is unavailable for the selected browser tab/window.")
+            _print_browser_summary(
+                action=action,
+                client=client,
+                command=command_record,
+                raw=args.raw,
+            )
+            return 0
+        if action == "x11-keys":
+            sequences = _parse_x11_key_sequences(args.sequence)
+            command_record = _x11_keys_fallback(
+                server=server,
+                token=token,
+                client=client,
+                target=target,
+                sequences=sequences,
+                wait_sec=args.wait,
+            )
+            if not command_record:
+                raise RuntimeError("X11 key fallback is unavailable for the selected browser tab/window.")
             _print_browser_summary(
                 action=action,
                 client=client,
@@ -1535,6 +1627,15 @@ def build_parser() -> argparse.ArgumentParser:
     browser_x11_click.add_argument("--y-ratio", type=float, required=True, help="Vertical position within window (0..1)")
     browser_x11_click.add_argument("--button", type=int, default=1, help="Mouse button number (default: 1)")
     browser_x11_click.set_defaults(func=cmd_browser)
+
+    browser_x11_keys = browser_sub.add_parser("x11-keys", help="Send key sequences to the browser window through X11")
+    browser_x11_keys.add_argument(
+        "--sequence",
+        action="append",
+        required=True,
+        help="Key sequence like 'Tab' or 'Control_L+Shift_L+Tab'; may be repeated",
+    )
+    browser_x11_keys.set_defaults(func=cmd_browser)
 
     browser_scroll = browser_sub.add_parser("scroll", help="Scroll to selector or coordinates")
     browser_scroll.add_argument("--selector")

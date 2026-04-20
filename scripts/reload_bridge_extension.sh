@@ -20,6 +20,7 @@ export PYTHONPATH
 export SERVER_URL ACCESS_TOKEN REQUESTED_CLIENT_ID REQUESTED_TAB_ID VERIFY_WAIT_SEC CLIENT_ID
 
 TARGET_URL="chrome://extensions/?id=${EXTENSION_ID}"
+SELF_RELOAD_URL="chrome-extension://${EXTENSION_ID}/options.html?action=reload-self"
 
 selection_json="$(
 python3 - <<'PY'
@@ -118,26 +119,13 @@ PY
 )"
 
 echo "INFO: reload helper client=${CLIENT_ID} tab=${TAB_ID} title=${ORIGINAL_TITLE:-unknown}"
-echo "INFO: open ${TARGET_URL}"
+echo "INFO: try self-reload via ${SELF_RELOAD_URL}"
 python3 -m webcontrol browser \
   --server "${SERVER_URL}" \
   --token "${ACCESS_TOKEN}" \
   --client-id "${CLIENT_ID}" \
   --tab-id "${TAB_ID}" \
-  open "${TARGET_URL}" >/dev/null
-
-sleep "${OPEN_WAIT_SEC}"
-
-echo "INFO: x11 click ratio=(${RELOAD_X_RATIO}, ${RELOAD_Y_RATIO}) button=${BUTTON_NUMBER}"
-python3 -m webcontrol browser \
-  --server "${SERVER_URL}" \
-  --token "${ACCESS_TOKEN}" \
-  --client-id "${CLIENT_ID}" \
-  --tab-id "${TAB_ID}" \
-  x11-click \
-  --x-ratio "${RELOAD_X_RATIO}" \
-  --y-ratio "${RELOAD_Y_RATIO}" \
-  --button "${BUTTON_NUMBER}"
+  open "${SELF_RELOAD_URL}" >/dev/null || true
 
 sleep "${POST_CLICK_WAIT_SEC}"
 
@@ -181,6 +169,71 @@ PY
 )"
 
 echo "INFO: verify ${verify_json}"
+
+if [[ "${verify_json}" == *'"ok": false'* ]]; then
+  echo "INFO: self-reload did not expose content_commands, falling back to chrome://extensions"
+  python3 -m webcontrol browser \
+    --server "${SERVER_URL}" \
+    --token "${ACCESS_TOKEN}" \
+    --client-id "${CLIENT_ID}" \
+    --tab-id "${TAB_ID}" \
+    open "${TARGET_URL}" >/dev/null
+
+  sleep "${OPEN_WAIT_SEC}"
+
+  echo "INFO: x11 click ratio=(${RELOAD_X_RATIO}, ${RELOAD_Y_RATIO}) button=${BUTTON_NUMBER}"
+  python3 -m webcontrol browser \
+    --server "${SERVER_URL}" \
+    --token "${ACCESS_TOKEN}" \
+    --client-id "${CLIENT_ID}" \
+    --tab-id "${TAB_ID}" \
+    x11-click \
+    --x-ratio "${RELOAD_X_RATIO}" \
+    --y-ratio "${RELOAD_Y_RATIO}" \
+    --button "${BUTTON_NUMBER}"
+
+  sleep "${POST_CLICK_WAIT_SEC}"
+
+  verify_json="$(
+  python3 - <<'PY'
+import json
+import os
+import time
+import urllib.request
+
+server = os.environ["SERVER_URL"]
+token = os.environ["ACCESS_TOKEN"]
+client_id = os.environ["CLIENT_ID"]
+deadline = time.time() + float(os.environ["VERIFY_WAIT_SEC"])
+last_seen = ""
+content_caps = None
+
+while time.time() < deadline:
+    req = urllib.request.Request(
+        server.rstrip("/") + "/api/clients",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    with urllib.request.urlopen(req, timeout=10) as response:
+        payload = json.load(response)
+    clients = payload.get("clients") or []
+    for client in clients:
+        if str(client.get("client_id") or "").strip() != client_id:
+            continue
+        last_seen = str(client.get("last_seen") or "")
+        meta = client.get("meta") or {}
+        capabilities = meta.get("capabilities") if isinstance(meta, dict) else None
+        if isinstance(capabilities, dict):
+            content_caps = capabilities.get("content_commands")
+        if isinstance(content_caps, list) and content_caps:
+            print(json.dumps({"ok": True, "last_seen": last_seen, "content_commands": content_caps}, ensure_ascii=False))
+            raise SystemExit(0)
+    time.sleep(0.8)
+
+print(json.dumps({"ok": False, "last_seen": last_seen, "content_commands": content_caps}, ensure_ascii=False))
+PY
+  )"
+  echo "INFO: verify after fallback ${verify_json}"
+fi
 
 if [[ "${RESTORE_ORIGINAL_URL}" == "1" ]] && [[ -n "${ORIGINAL_URL}" ]] && [[ "${ORIGINAL_URL}" != "${TARGET_URL}" ]]; then
   echo "INFO: restore ${ORIGINAL_URL}"
