@@ -51,6 +51,7 @@
 - Клик по пункту `Mention` стал шире по покрытию: после старых root-селекторов используются и общие `body/.btn-menu` fallback-пути возле последней точки context-click.
 - В `content.js` усилен `click_text`: теперь он умеет находить текст на вложенных menu-item text span узлах и кликать ближайший кликабельный предок.
 - Добавлена отдельная DOM-команда `click_menu_text` для видимых popup/context menu; Telegram mention-path теперь пробует её раньше общего `click_text`.
+- `mention`-режим больше не тупиковый: если `Mention` у конкретного peer не дал `@username`, deep-chat делает лёгкий URL fallback для этого же peer и не сжигает шаг целиком впустую.
 
 ### Диагностика stale extension runtime
 - В heartbeat `meta` добавлены `capabilities` по background/content-командам.
@@ -150,19 +151,44 @@
   - в логе уже есть:
     - `INFO: mention context for peer 530627292 opened via anchor avatar`
   - это сужает текущий bottleneck уже до клика по menu item / чтения composer, а не до загрузки старого runtime.
+- Новый прямой live probe после reload подтвердил end-to-end mention-path без history backfill:
+  - для `peer 530627292` основной экспортёр на живом runtime собрал `@Tier555`;
+  - артефакты:
+    - `/tmp/tg_live_nohistory_verify.ZW8Ucj/snapshot.md`
+    - `/tmp/tg_live_nohistory_verify.ZW8Ucj/export_stats.json`
+  - факты:
+    - `history_backfilled_total = 0`
+    - `deep_attempted_total = 1`
+    - `deep_updated_total = 1`
+- Новый общий live smoke без history backfill подтвердил, что mention/deep уже работает серийно, а не только на одном точечном peer:
+  - артефакты:
+    - `/tmp/tg_live_general_nohistory2.IYo4yH/snapshot.md`
+    - `/tmp/tg_live_general_nohistory2.IYo4yH/export_stats.json`
+  - факты:
+    - `members_total = 7`
+    - `members_with_username = 3`
+    - `history_backfilled_total = 0`
+    - `deep_attempted_total = 3`
+    - `deep_updated_total = 3`
+  - живые username, подтверждённые этим run:
+    - `@oleg_klsnkv`
+    - `@Heavy_seas`
+    - `@olegoleg48`
 
 ## Текущие Проблемы
 
-### 1. Deep mention всё ещё flaky
-Есть живые логи вида:
-- `mention context ... opened`
-- `WARN: mention item not clicked`
+### 1. Deep mention уже рабочий, но остаётся неоднородным
+Есть подтверждённые live-run, где mention/deep без history backfill реально собрал новые `@username`.
+Но есть и peer, для которых `Mention` в конкретном DOM-срезе не появляется или даёт miss.
 
-То есть deep-path стал сильнее по scheduling и чтению composer, а live probe подтвердил наличие `Mention` в DOM. Код уже переведён на отдельный `click_menu_text`, stale runtime снят через self-reload, и mention-путь доходит до открытия контекстного меню на новом runtime. Текущий узкий момент сместился ещё глубже: к точному клику по menu item и/или чтению composer после этого.
+То есть deep-path больше не сломан инфраструктурно: stale runtime снят, `click_menu_text` живой, composer-read рабочий. Текущий узкий момент уже прикладной: неодинаковая доступность `Mention` и разный throughput по разным peer/слоям чата.
 
-### 2. Прямое live-подтверждение context-menu fallback ещё неполное
-Короткий smoke подтвердил запуск catch-up mention, но не дал новых `@username`.
-Отдельный target-run для точечного peer снова подвис и был остановлен вручную, но state/log probe уже локализовал проблему точнее: `context_click` проходит, `Mention` есть в DOM, а ломается именно `click_text` path текущего runtime.
+### 2. Throughput deep-path пока ниже желаемого
+Сейчас основной рост по новым `@username` уже пошёл, но скорость пока неровная:
+- на коротких run удаётся собрать новые username без history;
+- на части peer шаг уходит в miss по `Mention` и только затем в fallback.
+
+Следующий смысловой резерв уже не в починке runtime, а в подборе deep-target'ов и в повышении доли peer, для которых шаг завершается реальным `@username`.
 
 ### 3. Reload helper стал рабочим, но fallback-кнопка ещё зависит от геометрии
 Основной stale-runtime блок снят через self-reload страницы расширения.
@@ -175,8 +201,9 @@
 - fallback-клик по кнопке Reload на `chrome://extensions`;
 - его точные координаты всё ещё зависят от сборки Chrome/масштаба окна.
 
-### 4. Exporter тратит слишком много runtime на discovery до deep
-На некоторых прогонах deep успевает обработать 1 профиль, а остальное время уходит на scroll/discovery.
+### 4. Exporter всё ещё тратит слишком много runtime на discovery до deep
+После последних фиксов короткий no-history run уже даёт `3/3` успешных deep-update на видимом слое.
+Но на длинных прогонах discovery всё ещё легко съедает существенную часть бюджета раньше, чем deep успевает пройти достаточно peer.
 
 ### 5. X11 fallback для browser tab actions в этой среде ненадёжен
 Проверка `_x11_send_keys` на реальном Chrome window вернула `True`, но фактический `Ctrl+T` не создал новую вкладку.
@@ -190,21 +217,22 @@
 `export_telegram_members_non_pii.py` всё ещё перегружен ответственностями и требует модульного разделения.
 
 ## Последний Подтверждённый Полезный Результат
-- Живой run на реальном каталоге подтвердил, что even weak current run не ухудшает chat-dir, а latest-снимки восстанавливаются из лучшего known run-artifact.
+- Живой no-history run на новом runtime подтвердил, что основной export path уже собирает новые `@username` без помощи `identity_history.json`.
 - Артефакты проверки:
-  - `/home/max/telegram_contact_batches/chat_-2465948544/runs/20260419T172709Z/run.json`
-  - `/home/max/telegram_contact_batches/chat_-2465948544/runs/20260419T172709Z/export.log`
-  - `/home/max/telegram_contact_batches/chat_-2465948544/latest_full.md`
-  - `/home/max/telegram_contact_batches/chat_-2465948544/latest_safe.txt`
-  - `/home/max/telegram_contact_batches/chat_-2465948544/11.txt`
+  - `/tmp/tg_live_nohistory_verify.ZW8Ucj/snapshot.md`
+  - `/tmp/tg_live_general_nohistory2.IYo4yH/snapshot.md`
+  - `/tmp/tg_live_general_nohistory2.IYo4yH/export_stats.json`
+- Ключевой факт:
+  - `deep_updated_total = 3`
+  - `history_backfilled_total = 0`
+  - это значит, что mention/deep снова приносит новые реальные username, а не только восстанавливает старые знания из истории.
 
 ## Следующий Приоритет
-1. Снять конкретный успешный `mention`-deep прогон по новому peer на уже обновлённом runtime и сравнить `click_menu_text` против legacy fallback.
-2. Доточить диагностические логи и selector-path вокруг menu item / composer, потому что это теперь главный live bottleneck.
-3. При желании допилить fallback-координаты для `chrome://extensions`, но это уже не блокер номер один.
-4. Разделить browser capability/runtime compatibility и Telegram export concerns в отдельные модули/слои.
-5. Отделить понятие `best-known latest` от `most-recent run` в UI и документации, если пользователю важно видеть именно последний прогон как основной артефакт.
-6. Декомпозировать `export_telegram_members_non_pii.py` на модули.
+1. Поднять throughput deep-path: за один короткий run обрабатывать больше unknown peer с приоритетом на тех, где `Mention` вероятнее всего доступен.
+2. Снизить runtime-затраты discovery относительно deep, чтобы новые `@username` росли не только на точечных visible-layer run.
+3. Разделить browser capability/runtime compatibility и Telegram export concerns в отдельные модули/слои.
+4. Отделить понятие `best-known latest` от `most-recent run` в UI и документации, если пользователю важно видеть именно последний прогон как основной артефакт.
+5. Декомпозировать `export_telegram_members_non_pii.py` на модули.
 
 ## Как Продолжать Следующему Агенту
 1. Прочитать `AGENTS.md`.

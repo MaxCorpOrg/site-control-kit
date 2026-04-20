@@ -777,6 +777,82 @@ class TelegramExportParserTests(unittest.TestCase):
 
         self.assertTrue(moved)
 
+    def test_enrich_usernames_deep_chat_mention_mode_falls_back_to_url_probe(self) -> None:
+        members = [
+            {"peer_id": "111", "name": "Alice", "username": "—", "status": "—", "role": "—"},
+        ]
+        all_members = [dict(item) for item in members]
+
+        with mock.patch.object(self.mod.time, "time", side_effect=[0.0, 0.0, 0.0, 0.1, 0.2]):
+            with mock.patch.object(self.mod.time, "sleep", return_value=None):
+                with mock.patch.object(self.mod, "_return_to_group_dialog_reliable", return_value=True):
+                    with mock.patch.object(
+                        self.mod,
+                        "_get_tab_url",
+                        return_value="https://web.telegram.org/k/#-2465948544",
+                    ):
+                        with mock.patch.object(self.mod, "_try_username_via_mention_action", return_value="—"):
+                            with mock.patch.object(self.mod, "_open_peer_dialog_from_group_chat", return_value=True):
+                                with mock.patch.object(
+                                    self.mod,
+                                    "_poll_username_from_tab_url",
+                                    return_value=("@alice_111", "https://web.telegram.org/k/#@alice_111"),
+                                ):
+                                    attempted, updated, opened, opened_peer_ids = self.mod._enrich_usernames_deep_chat(
+                                        server="server",
+                                        token="token",
+                                        client_id="client",
+                                        tab_id=7,
+                                        timeout_sec=5,
+                                        members=members,
+                                        all_members=all_members,
+                                        group_url="https://web.telegram.org/k/#-2465948544",
+                                        max_runtime_sec=3.0,
+                                        mode="mention",
+                                    )
+
+        self.assertEqual(attempted, 1)
+        self.assertEqual(updated, 1)
+        self.assertEqual(opened, 1)
+        self.assertEqual(opened_peer_ids, ["111"])
+        self.assertEqual(members[0]["username"], "@alice_111")
+
+    def test_enrich_usernames_deep_chat_mention_mode_skips_url_probe_after_mention_success(self) -> None:
+        members = [
+            {"peer_id": "111", "name": "Alice", "username": "—", "status": "—", "role": "—"},
+        ]
+        all_members = [dict(item) for item in members]
+
+        with mock.patch.object(self.mod.time, "time", side_effect=[0.0, 0.0, 0.0, 0.1]):
+            with mock.patch.object(self.mod.time, "sleep", return_value=None):
+                with mock.patch.object(self.mod, "_return_to_group_dialog_reliable", return_value=True):
+                    with mock.patch.object(
+                        self.mod,
+                        "_get_tab_url",
+                        return_value="https://web.telegram.org/k/#-2465948544",
+                    ):
+                        with mock.patch.object(self.mod, "_try_username_via_mention_action", return_value="@alice_111"):
+                            with mock.patch.object(self.mod, "_open_peer_dialog_from_group_chat") as open_peer_mock:
+                                attempted, updated, opened, opened_peer_ids = self.mod._enrich_usernames_deep_chat(
+                                    server="server",
+                                    token="token",
+                                    client_id="client",
+                                    tab_id=7,
+                                    timeout_sec=5,
+                                    members=members,
+                                    all_members=all_members,
+                                    group_url="https://web.telegram.org/k/#-2465948544",
+                                    max_runtime_sec=3.0,
+                                    mode="mention",
+                                )
+
+        self.assertEqual(attempted, 1)
+        self.assertEqual(updated, 1)
+        self.assertEqual(opened, 0)
+        self.assertEqual(opened_peer_ids, ["111"])
+        self.assertEqual(members[0]["username"], "@alice_111")
+        open_peer_mock.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

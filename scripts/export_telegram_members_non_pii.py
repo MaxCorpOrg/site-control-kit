@@ -2700,6 +2700,7 @@ def _enrich_usernames_deep_chat(
             print("WARN: deep chat not in target group dialog, skipping user")
             continue
 
+        effective_mode = mode
         if mode in ("mention", "full"):
             mention_username = _try_username_via_mention_action(
                 server=server,
@@ -2736,9 +2737,12 @@ def _enrich_usernames_deep_chat(
                 time.sleep(0.03)
                 continue
 
-        if mode == "mention":
-            # Safe mode: do not leave group chat if mention did not resolve username.
-            continue
+            if mode == "mention":
+                # Mention is the preferred fast path, but if Telegram does not expose the menu item
+                # for this peer, fall back to a lightweight URL probe instead of wasting the rest
+                # of the step on repeated mention retries only.
+                effective_mode = "url"
+                print(f"INFO: mention unresolved for peer {peer_id}, fallback to url probe")
 
         clicked = _open_peer_dialog_from_group_chat(
             server=server,
@@ -2811,7 +2815,7 @@ def _enrich_usernames_deep_chat(
             time.sleep(0.05)
             continue
 
-        if mode == "url":
+        if effective_mode == "url":
             _return_to_group_dialog_reliable(
                 server=server,
                 token=token,
