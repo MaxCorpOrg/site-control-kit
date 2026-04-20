@@ -53,6 +53,7 @@
 - Добавлена отдельная DOM-команда `click_menu_text` для видимых popup/context menu; Telegram mention-path теперь пробует её раньше общего `click_text`.
 - `mention`-режим больше не тупиковый: если `Mention` у конкретного peer не дал `@username`, deep-chat делает лёгкий URL fallback для этого же peer и не сжигает шаг целиком впустую.
 - `mention`-deep теперь может брать несколько peer за один scroll-step, если оставшегося runtime достаточно.
+- Если текущий visible-layer уже даёт хорошие `@username`, deep может сделать дополнительный батч на этом же слое до scroll.
 - Если Telegram два раза подряд отвечает `No visible menu item found by text`, deep раньше прекращает бесполезные повторные попытки и быстрее уходит в fallback.
 - Возврат в group dialog после URL/mention fallback теперь проверяется явно: один сложный peer больше не должен ломать весь остаток deep-шага.
 - `discovery_state.json` теперь хранит `deep_peer_history`: repeated failure peer автоматически опускаются ниже в порядке deep-target selection, а свежие кандидаты идут раньше.
@@ -204,6 +205,17 @@
   - факт:
     - peer `530627292` был заранее помечен как repeated failure в `discovery_state.json`
     - deep первым взял других visible peer (`547163094`, затем `858739581`), а не проблемный peer из seeded history
+- Новый live smoke после усиления group-dialog readiness подтвердил, что warning `deep chat not in target group dialog` больше не вылез в успешном mention-run:
+  - артефакты:
+    - `/tmp/tg_same_view_priority_fix.AVw7fW/export.log`
+    - `/tmp/tg_same_view_priority_fix.AVw7fW/export_stats.json`
+  - факты:
+    - `deep_attempted_total = 3`
+    - `deep_updated_total = 3`
+    - подтверждены:
+      - `@Tier555`
+      - `@oleg_klsnkv`
+      - `@fuckeeva`
 
 ## Текущие Проблемы
 

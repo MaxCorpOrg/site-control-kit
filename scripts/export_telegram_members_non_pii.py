@@ -80,6 +80,8 @@ CHAT_DEEP_DEFAULT_LIMIT = 3
 CHAT_MENTION_DEEP_MAX_PER_STEP = max(int(os.environ.get("TELEGRAM_CHAT_MENTION_DEEP_MAX_PER_STEP", "3") or "3"), 1)
 CHAT_MENTION_DEEP_BATCH_RUNTIME_2 = max(float(os.environ.get("TELEGRAM_CHAT_MENTION_DEEP_BATCH_RUNTIME_2", "36") or "36"), 5.0)
 CHAT_MENTION_DEEP_BATCH_RUNTIME_3 = max(float(os.environ.get("TELEGRAM_CHAT_MENTION_DEEP_BATCH_RUNTIME_3", "75") or "75"), CHAT_MENTION_DEEP_BATCH_RUNTIME_2)
+CHAT_DEEP_PRIORITY_EXTRA_ROUNDS = max(int(os.environ.get("TELEGRAM_CHAT_DEEP_PRIORITY_EXTRA_ROUNDS", "1") or "1"), 0)
+CHAT_DEEP_PRIORITY_MIN_RUNTIME = max(float(os.environ.get("TELEGRAM_CHAT_DEEP_PRIORITY_MIN_RUNTIME", "18") or "18"), 5.0)
 X11_WHEEL_FALLBACK_ENABLED = os.environ.get("TELEGRAM_X11_WHEEL_FALLBACK", "1").strip().lower() not in {"0", "false", "no"}
 X11_WHEEL_BUTTON = int(os.environ.get("TELEGRAM_X11_WHEEL_BUTTON", "5") or "5")
 X11_WHEEL_CLICKS = max(int(os.environ.get("TELEGRAM_X11_WHEEL_CLICKS", "8") or "8"), 1)
@@ -1070,7 +1072,7 @@ def _restore_group_dialog_after_deep_probe(
     reason: str,
     allow_navigate_retry: bool,
 ) -> bool:
-    if _return_to_group_dialog_reliable(
+    if _ensure_group_dialog_ready(
         server=server,
         token=token,
         client_id=client_id,
@@ -1080,7 +1082,7 @@ def _restore_group_dialog_after_deep_probe(
         allow_navigate_fallback=False,
     ):
         return True
-    if allow_navigate_retry and _return_to_group_dialog_reliable(
+    if allow_navigate_retry and _ensure_group_dialog_ready(
         server=server,
         token=token,
         client_id=client_id,
@@ -1092,6 +1094,43 @@ def _restore_group_dialog_after_deep_probe(
         print(f"INFO: restored group dialog via navigate fallback after {reason}")
         return True
     print(f"WARN: could not restore group dialog after {reason}")
+    return False
+
+
+def _ensure_group_dialog_ready(
+    *,
+    server: str,
+    token: str,
+    client_id: str,
+    tab_id: int,
+    group_url: str,
+    timeout_sec: int,
+    allow_navigate_fallback: bool,
+) -> bool:
+    if not _is_specific_tg_dialog_url(group_url):
+        return True
+    if not _return_to_group_dialog_reliable(
+        server=server,
+        token=token,
+        client_id=client_id,
+        tab_id=tab_id,
+        group_url=group_url,
+        timeout_sec=timeout_sec,
+        allow_navigate_fallback=allow_navigate_fallback,
+    ):
+        return False
+    current_url = _get_tab_url(server, token, client_id, tab_id)
+    if _url_matches_expected_dialog(group_url, current_url):
+        return True
+    if allow_navigate_fallback:
+        return _ensure_group_dialog_url(
+            server=server,
+            token=token,
+            client_id=client_id,
+            tab_id=tab_id,
+            group_url=group_url,
+            timeout_sec=timeout_sec,
+        )
     return False
 
 
@@ -1482,6 +1521,52 @@ def _select_chat_deep_targets(
         )
     )
     return deep_targets[:limit]
+
+
+def _count_unresolved_visible_chat_members(
+    members: list[dict[str, str]],
+    chat_members: list[dict[str, str]],
+) -> int:
+    if not members or not chat_members:
+        return 0
+    members_by_peer = {str(item.get("peer_id") or ""): item for item in members if item.get("peer_id")}
+    unresolved = 0
+    seen_peer_ids: set[str] = set()
+    for item in chat_members:
+        peer_id = str(item.get("peer_id") or "").strip()
+        if not peer_id or peer_id in seen_peer_ids:
+            continue
+        seen_peer_ids.add(peer_id)
+        member = members_by_peer.get(peer_id)
+        if member is None:
+            continue
+        if str(member.get("username") or "—").strip() == "—":
+            unresolved += 1
+    return unresolved
+
+
+def _should_continue_same_view_deep(
+    *,
+    mode: str,
+    targeted_probe: bool,
+    extra_round_index: int,
+    last_updated: int,
+    unresolved_visible_count: int,
+    remaining_runtime_sec: float,
+) -> bool:
+    if targeted_probe:
+        return False
+    if str(mode or "").strip().lower() != "mention":
+        return False
+    if extra_round_index > CHAT_DEEP_PRIORITY_EXTRA_ROUNDS:
+        return False
+    if int(last_updated) <= 0:
+        return False
+    if int(unresolved_visible_count) <= 0:
+        return False
+    if float(remaining_runtime_sec) < CHAT_DEEP_PRIORITY_MIN_RUNTIME:
+        return False
+    return True
 
 
 def _extract_chat_view_signature(html_payload: str) -> str:
@@ -2566,6 +2651,7 @@ def _collect_members_from_chat(
     deep_attempted_total = 0
     deep_updated_total = 0
     deep_deferred_steps = 0
+    deep_priority_rounds_total = 0
     runtime_limited = False
     seen_view_signatures: list[str] = []
     seen_view_signature_set: set[str] = set()
@@ -2691,30 +2777,106 @@ def _collect_members_from_chat(
                             f"(members {len(members)}/{max(int(min_members_target), 0)}, mode={chat_deep_mode})"
                         )
                     else:
-                        deep_runtime_budget = remaining_runtime
-                        attempted, updated, opened, opened_peer_ids = _enrich_usernames_deep_chat(
-                            server=server,
-                            token=token,
-                            client_id=client_id,
-                            tab_id=tab_id,
-                            timeout_sec=max(timeout_sec, 5),
-                            members=deep_targets,
-                            all_members=members,
-                            group_url=group_url,
-                            max_runtime_sec=deep_runtime_budget,
-                            mode=chat_deep_mode,
-                            historical_username_to_peer=historical_username_to_peer,
-                            historical_peer_to_username=historical_peer_to_username,
-                            supports_click_menu_text=supports_click_menu_text,
-                            deep_peer_history=deep_peer_history,
-                        )
-                        deep_attempted_total += attempted
-                        deep_updated_total += updated
-                        for peer_id in opened_peer_ids:
-                            deep_seen_peer_ids.add(peer_id)
+                        step_attempted_total = 0
+                        step_updated_total = 0
+                        step_opened_total = 0
+                        step_deep_round_index = 0
+                        while deep_targets:
+                            deep_runtime_budget = remaining_runtime
+                            attempted, updated, opened, opened_peer_ids = _enrich_usernames_deep_chat(
+                                server=server,
+                                token=token,
+                                client_id=client_id,
+                                tab_id=tab_id,
+                                timeout_sec=max(timeout_sec, 5),
+                                members=deep_targets,
+                                all_members=members,
+                                group_url=group_url,
+                                max_runtime_sec=deep_runtime_budget,
+                                mode=chat_deep_mode,
+                                historical_username_to_peer=historical_username_to_peer,
+                                historical_peer_to_username=historical_peer_to_username,
+                                supports_click_menu_text=supports_click_menu_text,
+                                deep_peer_history=deep_peer_history,
+                            )
+                            step_attempted_total += attempted
+                            step_updated_total += updated
+                            step_opened_total += opened
+                            for peer_id in opened_peer_ids:
+                                deep_seen_peer_ids.add(peer_id)
+
+                            elapsed = time.time() - started_at
+                            remaining_runtime = max(2.0, float(max_runtime_sec) - elapsed - 2.0)
+                            unresolved_visible_count = _count_unresolved_visible_chat_members(members, chat_members)
+                            step_deep_round_index += 1
+                            if not _should_continue_same_view_deep(
+                                mode=chat_deep_mode,
+                                targeted_probe=bool(chat_target_peer_id or chat_target_name),
+                                extra_round_index=step_deep_round_index,
+                                last_updated=updated,
+                                unresolved_visible_count=unresolved_visible_count,
+                                remaining_runtime_sec=remaining_runtime,
+                            ):
+                                break
+
+                            refreshed_html_payload = _send_get_html(
+                                server=server,
+                                token=token,
+                                client_id=client_id,
+                                tab_id=tab_id,
+                                timeout_sec=chat_html_timeout,
+                            )
+                            refreshed_chat_members = _parse_chat_members(refreshed_html_payload)
+                            if not refreshed_chat_members:
+                                break
+                            html_payload = refreshed_html_payload
+                            chat_members = refreshed_chat_members
+                            current_view_signature = _extract_chat_view_signature(html_payload)
+                            known_view_signature = bool(
+                                current_view_signature and current_view_signature in seen_view_signature_set
+                            )
+                            members.extend(refreshed_chat_members)
+                            members = _dedupe_members(members)
+                            for item in refreshed_chat_members:
+                                peer_id = str(item.get("peer_id") or "").strip()
+                                if not peer_id or peer_id in seen_peer_id_set:
+                                    continue
+                                seen_peer_ids.append(peer_id)
+                                seen_peer_id_set.add(peer_id)
+
+                            chat_anchor_peer_id = ""
+                            if _count_unresolved_visible_chat_members(members, chat_members) > 0:
+                                chat_anchor_peer_id = _get_chat_anchor_peer_id(server, token, client_id, tab_id)
+                            limit = _compute_chat_deep_batch_size(
+                                mode=chat_deep_mode,
+                                chat_deep_limit=chat_deep_limit,
+                                remaining_runtime_sec=remaining_runtime,
+                                targeted_probe=bool(chat_target_peer_id or chat_target_name),
+                            )
+                            if limit <= 0:
+                                break
+                            deep_targets = _select_chat_deep_targets(
+                                members=members,
+                                chat_members=chat_members,
+                                deep_seen_peer_ids=deep_seen_peer_ids,
+                                chat_target_peer_id=chat_target_peer_id,
+                                chat_target_name=chat_target_name,
+                                chat_anchor_peer_id=chat_anchor_peer_id,
+                                limit=limit,
+                                deep_peer_history=deep_peer_history,
+                            )
+                            if deep_targets:
+                                deep_priority_rounds_total += 1
+                                print(
+                                    f"INFO: continue deep on same chat view at step {step} "
+                                    f"(extra_round={step_deep_round_index}, unresolved={_count_unresolved_visible_chat_members(members, chat_members)})"
+                                )
+
+                        deep_attempted_total += step_attempted_total
+                        deep_updated_total += step_updated_total
                         print(
-                            f"INFO: chat deep step {step}: processed {attempted}, "
-                            f"opened {opened}, filled {updated}, total_filled {deep_updated_total}"
+                            f"INFO: chat deep step {step}: processed {step_attempted_total}, "
+                            f"opened {step_opened_total}, filled {step_updated_total}, total_filled {deep_updated_total}"
                         )
 
         if max_members_effective and len(members) > max_members_effective:
@@ -2843,6 +3005,7 @@ def _collect_members_from_chat(
         "deep_attempted": deep_attempted_total,
         "deep_updated": deep_updated_total,
         "deep_deferred_steps": deep_deferred_steps,
+        "deep_priority_rounds": deep_priority_rounds_total,
         "runtime_limited": int(runtime_limited),
     }
     if isinstance(discovery_state, dict):
@@ -2871,7 +3034,6 @@ def _enrich_usernames_deep_chat(
     members_by_peer = {item["peer_id"]: item for item in members}
     pending_peer_ids = [item["peer_id"] for item in members if item.get("username") == "—"]
     username_to_peer = _seed_username_to_peer(all_members or members)
-    target_fragment = group_url.split("#", 1)[1] if "#" in group_url else ""
     tg_mode = _tg_web_mode_from_url(group_url)
 
     attempted = 0
@@ -2890,7 +3052,7 @@ def _enrich_usernames_deep_chat(
         if not _is_specific_tg_dialog_url(group_url):
             break
 
-        if not _return_to_group_dialog_reliable(
+        if not _ensure_group_dialog_ready(
             server=server,
             token=token,
             client_id=client_id,
@@ -2900,12 +3062,6 @@ def _enrich_usernames_deep_chat(
             allow_navigate_fallback=False,
         ):
             print("WARN: deep chat could not restore group dialog, skipping user")
-            continue
-
-        current_url_before = _get_tab_url(server, token, client_id, tab_id)
-        current_fragment_before = current_url_before.split("#", 1)[1] if "#" in current_url_before else ""
-        if target_fragment and (not current_fragment_before or target_fragment not in current_fragment_before):
-            print("WARN: deep chat not in target group dialog, skipping user")
             continue
 
         effective_mode = mode

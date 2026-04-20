@@ -635,16 +635,24 @@ class TelegramExportParserTests(unittest.TestCase):
             return bool(kwargs.get("allow_navigate_fallback"))
 
         with mock.patch.object(self.mod, "_return_to_group_dialog_reliable", side_effect=_fake_return_to_group_dialog_reliable):
-            restored = self.mod._restore_group_dialog_after_deep_probe(
-                server="server",
-                token="token",
-                client_id="client",
-                tab_id=7,
-                group_url="https://web.telegram.org/k/#-2465948544",
-                timeout_sec=5,
-                reason="url fallback for peer 111",
-                allow_navigate_retry=True,
-            )
+            with mock.patch.object(
+                self.mod,
+                "_get_tab_url",
+                side_effect=[
+                    "https://web.telegram.org/k/#@someone",
+                    "https://web.telegram.org/k/#-2465948544",
+                ],
+            ):
+                restored = self.mod._restore_group_dialog_after_deep_probe(
+                    server="server",
+                    token="token",
+                    client_id="client",
+                    tab_id=7,
+                    group_url="https://web.telegram.org/k/#-2465948544",
+                    timeout_sec=5,
+                    reason="url fallback for peer 111",
+                    allow_navigate_retry=True,
+                )
 
         self.assertTrue(restored)
         self.assertEqual(calls, [False, True])
@@ -657,19 +665,37 @@ class TelegramExportParserTests(unittest.TestCase):
             return False
 
         with mock.patch.object(self.mod, "_return_to_group_dialog_reliable", side_effect=_fake_return_to_group_dialog_reliable):
-            restored = self.mod._restore_group_dialog_after_deep_probe(
-                server="server",
-                token="token",
-                client_id="client",
-                tab_id=7,
-                group_url="https://web.telegram.org/k/#-2465948544",
-                timeout_sec=5,
-                reason="mention success for peer 111",
-                allow_navigate_retry=False,
-            )
+            with mock.patch.object(self.mod, "_get_tab_url", return_value="https://web.telegram.org/k/#@someone"):
+                restored = self.mod._restore_group_dialog_after_deep_probe(
+                    server="server",
+                    token="token",
+                    client_id="client",
+                    tab_id=7,
+                    group_url="https://web.telegram.org/k/#-2465948544",
+                    timeout_sec=5,
+                    reason="mention success for peer 111",
+                    allow_navigate_retry=False,
+                )
 
         self.assertFalse(restored)
         self.assertEqual(calls, [False])
+
+    def test_ensure_group_dialog_ready_falls_back_to_navigate_when_url_still_mismatched(self) -> None:
+        with mock.patch.object(self.mod, "_return_to_group_dialog_reliable", return_value=True):
+            with mock.patch.object(self.mod, "_get_tab_url", return_value="https://web.telegram.org/k/#@someone"):
+                with mock.patch.object(self.mod, "_ensure_group_dialog_url", return_value=True) as ensure_mock:
+                    ready = self.mod._ensure_group_dialog_ready(
+                        server="server",
+                        token="token",
+                        client_id="client",
+                        tab_id=7,
+                        group_url="https://web.telegram.org/k/#-2465948544",
+                        timeout_sec=5,
+                        allow_navigate_fallback=True,
+                    )
+
+        self.assertTrue(ready)
+        ensure_mock.assert_called_once()
 
     def test_select_chat_deep_targets_deprioritizes_repeat_failures(self) -> None:
         members = [
@@ -711,6 +737,91 @@ class TelegramExportParserTests(unittest.TestCase):
         self.assertEqual(history["111"]["failures"], 1)
         self.assertEqual(history["111"]["url_success"], 1)
         self.assertEqual(history["111"]["last_outcome"], "url_success")
+
+    def test_should_continue_same_view_deep_requires_success_and_runtime(self) -> None:
+        should_continue = self.mod._should_continue_same_view_deep(
+            mode="mention",
+            targeted_probe=False,
+            extra_round_index=1,
+            last_updated=1,
+            unresolved_visible_count=2,
+            remaining_runtime_sec=30.0,
+        )
+        should_stop = self.mod._should_continue_same_view_deep(
+            mode="mention",
+            targeted_probe=False,
+            extra_round_index=1,
+            last_updated=0,
+            unresolved_visible_count=2,
+            remaining_runtime_sec=30.0,
+        )
+
+        self.assertTrue(should_continue)
+        self.assertFalse(should_stop)
+
+    def test_collect_members_from_chat_runs_extra_deep_round_on_same_view(self) -> None:
+        chat_members_round1 = [
+            {"peer_id": "111", "name": "Alice", "username": "—", "status": "из чата", "role": "—"},
+            {"peer_id": "222", "name": "Bob", "username": "—", "status": "из чата", "role": "—"},
+        ]
+        chat_members_round2 = [
+            {"peer_id": "111", "name": "Alice", "username": "—", "status": "из чата", "role": "—"},
+            {"peer_id": "222", "name": "Bob", "username": "—", "status": "из чата", "role": "—"},
+        ]
+
+        def _fake_select_chat_deep_targets(**kwargs):
+            unresolved = [item for item in kwargs["members"] if item.get("username") == "—"]
+            return unresolved[:1]
+
+        def _fake_enrich_usernames_deep_chat(**kwargs):
+            targets = kwargs["members"]
+            for item in targets:
+                item["username"] = f"@user_{item['peer_id']}"
+            peer_ids = [str(item["peer_id"]) for item in targets]
+            return len(targets), len(targets), 0, peer_ids
+
+        with mock.patch.object(self.mod.time, "time", return_value=0.0):
+            with mock.patch.object(self.mod.time, "sleep", return_value=None):
+                with mock.patch.object(self.mod, "_return_to_group_dialog_reliable", return_value=True):
+                    with mock.patch.object(self.mod, "_send_get_html", side_effect=["html1", "html2"]):
+                        with mock.patch.object(
+                            self.mod,
+                            "_parse_chat_members",
+                            side_effect=[chat_members_round1, chat_members_round2],
+                        ):
+                            with mock.patch.object(self.mod, "_extract_chat_view_signature", return_value=""):
+                                with mock.patch.object(self.mod, "_get_chat_anchor_peer_id", return_value=""):
+                                    with mock.patch.object(self.mod, "_should_run_chat_deep_step", return_value=True):
+                                        with mock.patch.object(
+                                            self.mod,
+                                            "_select_chat_deep_targets",
+                                            side_effect=_fake_select_chat_deep_targets,
+                                        ):
+                                            with mock.patch.object(
+                                                self.mod,
+                                                "_enrich_usernames_deep_chat",
+                                                side_effect=_fake_enrich_usernames_deep_chat,
+                                            ):
+                                                members, chat_stats = self.mod._collect_members_from_chat(
+                                                    server="server",
+                                                    token="token",
+                                                    client_id="client",
+                                                    tab_id=7,
+                                                    timeout_sec=5,
+                                                    scroll_steps=0,
+                                                    group_url="https://web.telegram.org/k/#-2465948544",
+                                                    deep_usernames=True,
+                                                    chat_deep_limit=5,
+                                                    max_runtime_sec=120,
+                                                    chat_deep_mode="mention",
+                                                )
+
+        usernames = {item["peer_id"]: item["username"] for item in members}
+        self.assertEqual(usernames["111"], "@user_111")
+        self.assertEqual(usernames["222"], "@user_222")
+        self.assertEqual(chat_stats["deep_attempted"], 2)
+        self.assertEqual(chat_stats["deep_updated"], 2)
+        self.assertEqual(chat_stats["deep_priority_rounds"], 1)
 
     def test_extract_chat_view_signature_uses_top_mid_peer_and_timestamp(self) -> None:
         html = (
