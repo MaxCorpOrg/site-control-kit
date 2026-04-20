@@ -26,6 +26,7 @@
 - Есть discovery-first режим, burst-scroll, jump-scroll.
 - Есть chain-runner для серии коротких прогонов с одним состоянием discovery.
 - Chain-runner уже умеет останавливаться по `target_unique_members`, `target_safe_count`, `stop-after-idle`, `stop-after-no-growth`.
+- Chain-runner теперь умеет не ждать обычный интервал после run, который завершился сильным `deep-yield`: если exporter сам остановился на продуктивном deep-шаге, следующая короткая попытка стартует сразу.
 
 ### Диагностика прогонов
 - Каждый run сохраняет `run.json`, `export.log`, `snapshot.md/txt`, `snapshot_safe.md/txt`.
@@ -78,7 +79,7 @@
   - при открытии такой страницы расширение вызывает `chrome.runtime.reload()` само.
 
 ## Проверено
-- Полный unit-набор сейчас зелёный: `101/101`.
+- Полный unit-набор сейчас зелёный: `105/105`.
 - Shell syntax и `py_compile` для последних изменений проходили зелёными.
 - Точечный прогон экспортёрных тестов после capability-preflight:
   - `tests.test_telegram_export_parser`

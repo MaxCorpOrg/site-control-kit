@@ -57,6 +57,18 @@ def reached_chain_target(current_value: int, target_value: int) -> bool:
     return target_value > 0 and current_value >= target_value
 
 
+def is_productive_deep_yield(run_payload: dict[str, Any]) -> bool:
+    if not isinstance(run_payload, dict):
+        return False
+    return bool(int(run_payload.get("chat_deep_yield_stop", 0) or 0)) and int(run_payload.get("deep_updated_total", 0) or 0) > 0
+
+
+def should_skip_interval_after_run(run_payload: dict[str, Any], skip_on_productive_yield: bool) -> bool:
+    if not skip_on_productive_yield:
+        return False
+    return is_productive_deep_yield(run_payload)
+
+
 def write_chain_summary(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -103,6 +115,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=max(int(os.environ.get("TELEGRAM_CHAIN_STOP_AFTER_NO_GROWTH", "0") or "0"), 0),
         help="Stop after N completed runs without improving unique_members or safe_count (0 = disabled).",
     )
+    parser.add_argument(
+        "--skip-interval-on-productive-yield",
+        action=argparse.BooleanOptionalAction,
+        default=os.environ.get("TELEGRAM_CHAIN_SKIP_INTERVAL_ON_PRODUCTIVE_YIELD", "1").strip().lower() not in {"0", "false", "no"},
+        help="Skip the sleep interval after runs that stopped on productive deep-yield.",
+    )
     return parser
 
 
@@ -122,6 +140,7 @@ def main() -> int:
     no_growth_runs = 0
     best_unique_members = 0
     best_safe_count = 0
+    productive_yield_runs = 0
     chain_status = "completed"
 
     with chain_log_path.open("w", encoding="utf-8") as log_fh:
@@ -143,9 +162,15 @@ def main() -> int:
             unique_members = int(run_payload.get("unique_members", 0) or 0)
             safe_count = int(run_payload.get("safe_count", 0) or 0)
             members_with_username = int(run_payload.get("members_with_username", 0) or 0)
+            chat_deep_priority_rounds = int(run_payload.get("chat_deep_priority_rounds", 0) or 0)
+            chat_deep_yield_stop = int(run_payload.get("chat_deep_yield_stop", 0) or 0)
             run_status = str(run_payload.get("status") or ("completed" if completed.returncode == 0 else "failed"))
             unique_progress = False
             safe_progress = False
+            productive_yield = run_status == "completed" and is_productive_deep_yield(run_payload)
+
+            if productive_yield:
+                productive_yield_runs += 1
 
             if run_status == "completed" and new_usernames <= 0:
                 idle_runs += 1
@@ -175,6 +200,9 @@ def main() -> int:
                     "unique_members": unique_members,
                     "safe_count": safe_count,
                     "members_with_username": members_with_username,
+                    "chat_deep_priority_rounds": chat_deep_priority_rounds,
+                    "chat_deep_yield_stop": chat_deep_yield_stop,
+                    "productive_yield": productive_yield,
                     "unique_progress": unique_progress,
                     "safe_progress": safe_progress,
                     "batch_path": str(run_payload.get("batch_path") or ""),
@@ -187,7 +215,8 @@ def main() -> int:
             log_fh.write(
                 f"[{datetime.now(timezone.utc).replace(microsecond=0).isoformat()}] "
                 f"run {attempt_index} exit={completed.returncode} status={run_status} new={new_usernames} "
-                f"unique={unique_members} safe={safe_count} idle={idle_runs} no_growth={no_growth_runs}\n"
+                f"unique={unique_members} safe={safe_count} idle={idle_runs} no_growth={no_growth_runs} "
+                f"deep_yield={int(productive_yield)}\n"
             )
             log_fh.flush()
 
@@ -208,6 +237,14 @@ def main() -> int:
                 break
             if attempt_index >= int(args.runs):
                 break
+            if should_skip_interval_after_run(run_payload, bool(args.skip_interval_on_productive_yield)):
+                print("INFO: skip sleep after productive deep-yield run", flush=True)
+                log_fh.write(
+                    f"[{datetime.now(timezone.utc).replace(microsecond=0).isoformat()}] "
+                    f"run {attempt_index} skip_sleep=productive_deep_yield\n"
+                )
+                log_fh.flush()
+                continue
             if float(args.interval_sec) > 0:
                 print(f"INFO: sleeping {args.interval_sec:.1f}s before next chain run", flush=True)
                 time.sleep(float(args.interval_sec))
@@ -225,6 +262,8 @@ def main() -> int:
         "stop_after_no_growth": int(args.stop_after_no_growth),
         "target_unique_members": int(args.target_unique_members),
         "target_safe_count": int(args.target_safe_count),
+        "skip_interval_on_productive_yield": bool(args.skip_interval_on_productive_yield),
+        "productive_yield_runs": productive_yield_runs,
         "best_unique_members": best_unique_members,
         "best_safe_count": best_safe_count,
         "attempts": attempts,

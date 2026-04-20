@@ -109,6 +109,8 @@ cd /home/max/site-control-kit
   --target-unique-members 30
 ```
 
+По умолчанию chain-runner теперь не ждёт `interval-sec` после run, который завершился на сильном `deep-yield`: если в `run.json` пришли `chat_deep_yield_stop=1` и `deep_updated_total>0`, следующий короткий прогон стартует сразу. Отключить это можно через `--no-skip-interval-on-productive-yield` или `TELEGRAM_CHAIN_SKIP_INTERVAL_ON_PRODUCTIVE_YIELD=0`.
+
 `run.json` теперь дублирует ключевую телеметрию экспортёра: `unique_members`, `members_with_username`, `chat_scroll_steps_done`, `chat_jump_scrolls_done`, `deep_updated_total`, `history_backfilled_total`, `output_usernames_cleared_total`, `chat_deep_priority_rounds`, `chat_deep_yield_stop`, а полный сырой payload лежит в `export_stats.json`.
 Также в `run.json` есть признаки продвижения/сохранения latest-снимков: `latest_full_promoted`, `latest_safe_promoted`, `latest_full_best_source`, `latest_safe_best_source`.
 
