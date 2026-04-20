@@ -109,6 +109,26 @@ cd /home/max/site-control-kit
 
 После обновления файлов в `extension/` Chrome обычно требует `Reload` для unpacked extension на странице `chrome://extensions`, иначе новая логика content-script не подхватится в уже установленном расширении.
 
+Для Linux есть best-effort helper, который открывает страницу расширения на тихой вкладке и жмёт Reload через X11 fallback:
+
+```bash
+cd /home/max/site-control-kit
+./scripts/reload_bridge_extension.sh
+```
+
+Если геометрия окна отличается, координаты можно подстроить через env:
+
+```bash
+SCB_RELOAD_X_RATIO=0.93 SCB_RELOAD_Y_RATIO=0.17 ./scripts/reload_bridge_extension.sh
+```
+
+CLI также получил прямое X11-действие для браузерного окна:
+
+```bash
+cd /home/max/site-control-kit
+PYTHONPATH="$PWD" python3 -m webcontrol browser --tab-id 614278005 x11-click --x-ratio 0.93 --y-ratio 0.17
+```
+
 ## Browser Observability: noVNC
 
 Для визуального контроля браузера и ручного recovery можно поднять локальный noVNC-слой поверх X11:

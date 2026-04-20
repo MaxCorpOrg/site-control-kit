@@ -8,10 +8,13 @@ from webcontrol.cli import (
     _extract_command_result,
     _find_created_tab,
     _find_browser_tab,
+    _find_x11_browser_window_geometry,
     _maybe_apply_browser_tab_fallback,
+    _parse_wmctrl_geometry_windows,
     _pick_client,
     _tab_present,
     _tab_cycle_plan,
+    _x11_window_click_point,
 )
 
 
@@ -113,6 +116,58 @@ class BrowserCliHelperTests(unittest.TestCase):
         )
         self.assertIsNotNone(tab)
         self.assertEqual(tab["id"], 11)
+
+    def test_parse_wmctrl_geometry_windows_reads_rect_and_title(self) -> None:
+        windows = _parse_wmctrl_geometry_windows(
+            "0x03400020  4 164  64   2478 1048 GIGA Новая вкладка - Google Chrome\n"
+        )
+        self.assertEqual(len(windows), 1)
+        self.assertEqual(windows[0]["window_id"], "0x03400020")
+        self.assertEqual(windows[0]["x"], 164)
+        self.assertEqual(windows[0]["width"], 2478)
+        self.assertEqual(windows[0]["title"], "Новая вкладка - Google Chrome")
+
+    def test_find_x11_browser_window_geometry_prefers_matching_title(self) -> None:
+        import webcontrol.cli as cli
+
+        original_platform = cli.sys.platform
+        original_display = cli.os.environ.get("DISPLAY")
+        original_run = cli.subprocess.run
+        try:
+            cli.sys.platform = "linux"
+            cli.os.environ["DISPLAY"] = ":1"
+
+            def _fake_run(*args, **kwargs):
+                class _Proc:
+                    stdout = (
+                        "0x03400020  4 164  64   2478 1048 GIGA Новая вкладка - Google Chrome\n"
+                        "0x03400022  3 164  64   2478 1048 GIGA Home | ElevenLabs - Google Chrome\n"
+                    )
+
+                return _Proc()
+
+            cli.subprocess.run = _fake_run
+            window = _find_x11_browser_window_geometry(
+                [{"title": "Home | ElevenLabs", "active": True}]
+            )
+        finally:
+            cli.sys.platform = original_platform
+            if original_display is None:
+                cli.os.environ.pop("DISPLAY", None)
+            else:
+                cli.os.environ["DISPLAY"] = original_display
+            cli.subprocess.run = original_run
+
+        self.assertIsNotNone(window)
+        self.assertEqual(window["window_id"], "0x03400022")
+
+    def test_x11_window_click_point_uses_relative_coordinates(self) -> None:
+        point = _x11_window_click_point(
+            {"x": 100, "y": 50, "width": 1000, "height": 500},
+            x_ratio=0.9,
+            y_ratio=0.2,
+        )
+        self.assertEqual(point, (1000, 150))
 
     def test_tab_present_detects_known_tab(self) -> None:
         client = {"tabs": [{"id": 10}, {"id": 11}]}

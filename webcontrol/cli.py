@@ -232,6 +232,34 @@ def _parse_wmctrl_windows(output: str) -> list[dict[str, str]]:
     return rows
 
 
+def _parse_wmctrl_geometry_windows(output: str) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for raw_line in str(output or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        parts = line.split(None, 7)
+        if len(parts) < 8:
+            continue
+        window_id, desktop, x, y, width, height, host, title = parts
+        try:
+            rows.append(
+                {
+                    "window_id": window_id,
+                    "desktop": int(desktop),
+                    "x": int(x),
+                    "y": int(y),
+                    "width": int(width),
+                    "height": int(height),
+                    "host": host,
+                    "title": title,
+                }
+            )
+        except ValueError:
+            continue
+    return rows
+
+
 def _find_x11_browser_window(window_tabs: list[dict[str, Any]]) -> str:
     if sys.platform != "linux" or not os.environ.get("DISPLAY"):
         return ""
@@ -259,6 +287,57 @@ def _find_x11_browser_window(window_tabs: list[dict[str, Any]]) -> str:
     return ""
 
 
+def _find_x11_browser_window_geometry(window_tabs: list[dict[str, Any]]) -> dict[str, Any] | None:
+    if sys.platform != "linux" or not os.environ.get("DISPLAY"):
+        return None
+    try:
+        proc = subprocess.run(["wmctrl", "-lG"], check=False, capture_output=True, text=True)
+    except OSError:
+        return None
+    windows = _parse_wmctrl_geometry_windows(proc.stdout)
+    if not windows:
+        return None
+
+    preferred_titles: list[str] = []
+    for tab in window_tabs:
+        title = str(tab.get("title") or "").strip()
+        if title:
+            preferred_titles.append(title)
+    active_titles = [str(tab.get("title") or "").strip() for tab in window_tabs if bool(tab.get("active"))]
+    title_candidates = active_titles + [title for title in preferred_titles if title not in active_titles]
+
+    for title in title_candidates:
+        for window in windows:
+            full_title = str(window.get("title") or "")
+            if title and title in full_title:
+                return window
+
+    for window in windows:
+        full_title = str(window.get("title") or "")
+        if "chrome" in full_title.lower():
+            return window
+    return None
+
+
+def _x11_window_click_point(window: dict[str, Any], *, x_ratio: float, y_ratio: float) -> tuple[int, int] | None:
+    try:
+        x = int(window.get("x", 0))
+        y = int(window.get("y", 0))
+        width = int(window.get("width", 0))
+        height = int(window.get("height", 0))
+        xr = float(x_ratio)
+        yr = float(y_ratio)
+    except (TypeError, ValueError):
+        return None
+    if width <= 2 or height <= 2:
+        return None
+    xr = min(max(xr, 0.0), 1.0)
+    yr = min(max(yr, 0.0), 1.0)
+    target_x = x + max(1, min(int(width * xr), width - 2))
+    target_y = y + max(1, min(int(height * yr), height - 2))
+    return target_x, target_y
+
+
 def _x11_send_keys(window_id: str, sequences: list[list[str]]) -> bool:
     if not window_id or sys.platform != "linux" or not os.environ.get("DISPLAY"):
         return False
@@ -267,6 +346,51 @@ def _x11_send_keys(window_id: str, sequences: list[list[str]]) -> bool:
         from Xlib.ext import xtest  # type: ignore
     except Exception:
         return False
+
+
+def _x11_click_window(window: dict[str, Any], *, x_ratio: float, y_ratio: float, button: int = 1) -> dict[str, Any] | None:
+    window_id = str(window.get("window_id") or "").strip()
+    point = _x11_window_click_point(window, x_ratio=x_ratio, y_ratio=y_ratio)
+    if not window_id or point is None or sys.platform != "linux" or not os.environ.get("DISPLAY"):
+        return None
+    if int(button) < 1:
+        return None
+
+    try:
+        from Xlib import X, display  # type: ignore
+        from Xlib.ext import xtest  # type: ignore
+    except Exception:
+        return None
+
+    try:
+        subprocess.run(["wmctrl", "-ia", window_id], check=False)
+        time.sleep(0.18)
+        d = display.Display()
+        root = d.screen().root
+        pointer = root.query_pointer()
+        original_x = int(pointer.root_x)
+        original_y = int(pointer.root_y)
+        target_x, target_y = point
+
+        xtest.fake_input(d, X.MotionNotify, x=target_x, y=target_y)
+        d.sync()
+        time.sleep(0.05)
+        xtest.fake_input(d, X.ButtonPress, int(button))
+        xtest.fake_input(d, X.ButtonRelease, int(button))
+        d.sync()
+        time.sleep(0.08)
+
+        xtest.fake_input(d, X.MotionNotify, x=original_x, y=original_y)
+        d.sync()
+        return {
+            "windowId": window_id,
+            "x": target_x,
+            "y": target_y,
+            "button": int(button),
+            "via": "x11_click",
+        }
+    except Exception:
+        return None
 
     try:
         subprocess.run(["wmctrl", "-ia", window_id], check=False)
@@ -700,6 +824,64 @@ def _x11_close_tab_fallback(
     )
 
 
+def _x11_click_fallback(
+    *,
+    server: str,
+    token: str,
+    client: dict[str, Any],
+    target: dict[str, Any],
+    x_ratio: float,
+    y_ratio: float,
+    button: int,
+    wait_sec: int,
+) -> dict[str, Any] | None:
+    target_tab = _find_browser_tab(client, target)
+    if not target_tab:
+        return None
+    client_id = str(client.get("client_id") or "").strip()
+    tab_id = int(target_tab.get("id", -1))
+    if tab_id < 0:
+        return None
+    window_id = int(target_tab.get("windowId", -1))
+    window_tabs = _tabs_for_window(client, window_id)
+
+    active_target = target_tab
+    if not bool(target_tab.get("active")) and len(window_tabs) > 1:
+        activated = _x11_activate_tab_fallback(
+            server=server,
+            token=token,
+            client=client,
+            target={"client_id": client_id, "tab_id": tab_id, "active": True},
+            wait_sec=wait_sec,
+        )
+        if not activated:
+            return None
+        refreshed_client, refreshed_tab = _wait_for_tab_state(
+            server=server,
+            token=token,
+            client_id=client_id,
+            timeout_sec=max(wait_sec, 3),
+            predicate=lambda current_client: _find_browser_tab(
+                current_client, {"client_id": client_id, "tab_id": tab_id, "active": True}
+            ),
+        )
+        if not refreshed_client or not refreshed_tab:
+            return None
+        client = refreshed_client
+        active_target = refreshed_tab
+        window_id = int(active_target.get("windowId", -1))
+        window_tabs = _tabs_for_window(client, window_id)
+    window = _find_x11_browser_window_geometry(window_tabs)
+    if not window:
+        return None
+    data = _x11_click_window(window, x_ratio=x_ratio, y_ratio=y_ratio, button=button)
+    if not data:
+        return None
+    data["tabId"] = tab_id
+    data["windowBrowserId"] = window_id
+    return _synthetic_command_record(client_id, data=data)
+
+
 def _maybe_apply_browser_tab_fallback(
     *,
     action: str,
@@ -881,6 +1063,27 @@ def cmd_browser(args: argparse.Namespace) -> int:
         action = args.browser_action
         command: dict[str, Any]
         output_path: str | None = None
+
+        if action == "x11-click":
+            command_record = _x11_click_fallback(
+                server=server,
+                token=token,
+                client=client,
+                target=target,
+                x_ratio=args.x_ratio,
+                y_ratio=args.y_ratio,
+                button=args.button,
+                wait_sec=args.wait,
+            )
+            if not command_record:
+                raise RuntimeError("X11 click fallback is unavailable for the selected browser tab/window.")
+            _print_browser_summary(
+                action=action,
+                client=client,
+                command=command_record,
+                raw=args.raw,
+            )
+            return 0
 
         if action == "open":
             command = {"type": "navigate", "url": args.url}
@@ -1326,6 +1529,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     browser_close = browser_sub.add_parser("close-tab", help="Close the selected tab")
     browser_close.set_defaults(func=cmd_browser)
+
+    browser_x11_click = browser_sub.add_parser("x11-click", help="Click inside the browser window using X11 coordinates")
+    browser_x11_click.add_argument("--x-ratio", type=float, required=True, help="Horizontal position within window (0..1)")
+    browser_x11_click.add_argument("--y-ratio", type=float, required=True, help="Vertical position within window (0..1)")
+    browser_x11_click.add_argument("--button", type=int, default=1, help="Mouse button number (default: 1)")
+    browser_x11_click.set_defaults(func=cmd_browser)
 
     browser_scroll = browser_sub.add_parser("scroll", help="Scroll to selector or coordinates")
     browser_scroll.add_argument("--selector")

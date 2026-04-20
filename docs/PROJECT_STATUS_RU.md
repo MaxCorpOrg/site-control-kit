@@ -58,9 +58,12 @@
 - Telegram-экспортёр теперь делает preflight по `meta.capabilities` выбранного клиента:
   - если runtime не рекламирует `click_menu_text`, mention-deep не тратит попытки на неподдерживаемую DOM-команду;
   - экспортёр явно предупреждает, что будет использован legacy text-click fallback до reload unpacked extension.
+- CLI получил отдельное действие `browser x11-click`:
+  - можно кликать по системным страницам и окнам без content script через относительные координаты окна;
+  - это стало базой для best-effort helper `scripts/reload_bridge_extension.sh`.
 
 ## Проверено
-- Полный unit-набор проходил зелёным: `78/78`.
+- Полный unit-набор проходил зелёным: `81/81`.
 - Shell syntax и `py_compile` для последних изменений проходили зелёными.
 - Точечный прогон экспортёрных тестов после capability-preflight:
   - `tests.test_telegram_export_parser`
@@ -114,6 +117,15 @@
   - артефакт:
     - `/tmp/tg_cap_preflight_smoke.hpX3VV/export.log`
   - тестовая вкладка `614277598` после smoke возвращена обратно на `https://yandex.ru/internet/`.
+- В живом X11-контуре подтверждено:
+  - helper может открыть отдельную quiet-tab на `chrome://extensions/?id=...` через browser wrapper;
+  - для дальнейшего reload не нужен content script, потому что появился `browser x11-click`.
+- Живой smoke нового CLI-действия подтверждён:
+  - `browser x11-click` успешно отработал на системной quiet-tab `chrome://newtab/`;
+  - результат вернул X11-координаты и window id:
+    - `tabId = 614278005`
+    - `windowId = 0x03400020`
+    - `via = x11_click`
 
 ## Текущие Проблемы
 
@@ -133,6 +145,17 @@
 - `browser new-tab` в живом окружении упал как `Unsupported command type in content script: new_tab`;
 - это означает, что загруженная версия background/content runtime в Chrome отстаёт от кода в репозитории.
 Без reload unpacked extension часть новых правок нельзя подтвердить end-to-end.
+
+### 3a. Reload helper пока best-effort
+Есть новый `scripts/reload_bridge_extension.sh`, но координаты Reload в Chrome UI всё ещё зависят от сборки/масштаба окна.
+Инфраструктурная часть уже есть:
+- quiet-tab selection;
+- переход на `chrome://extensions/?id=...`;
+- X11 click fallback;
+- проверка появления `content_commands` после reload.
+
+Осталось добить стабильное live-подтверждение именно координаты/фокуса кнопки Reload.
+Ещё один нюанс live-среды: если выбранная quiet-tab неактивна внутри многотабового окна, `x11-click` сейчас корректно требует сначала сделать её видимой. Для отдельных однотабовых quiet-window helper уже рабочий.
 
 ### 4. Exporter тратит слишком много runtime на discovery до deep
 На некоторых прогонах deep успевает обработать 1 профиль, а остальное время уходит на scroll/discovery.
@@ -158,7 +181,7 @@
   - `/home/max/telegram_contact_batches/chat_-2465948544/11.txt`
 
 ## Следующий Приоритет
-1. Перезагрузить unpacked extension и повторить точечный peer-run на чистом Telegram tab без history backfill.
+1. Дожать live-координаты/фокус для `scripts/reload_bridge_extension.sh` и подтвердить, что после него в heartbeat появляются `content_commands`.
 2. После reload снять конкретный успешный `mention`-deep прогон по новому peer и сравнить `click_menu_text` против legacy fallback.
 3. Починить или переосмыслить X11 fallback для `browser new-tab`.
 4. Разделить browser capability/runtime compatibility и Telegram export concerns в отдельные модули/слои.

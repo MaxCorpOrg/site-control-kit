@@ -62,6 +62,12 @@ browser.cmd scroll --selector "#footer"
 browser.cmd scroll-by --dy 1200
 ```
 
+X11 fallback для системных страниц и окон без content script:
+
+```cmd
+browser.cmd --tab-id 150000238 x11-click --x-ratio 0.93 --y-ratio 0.17
+```
+
 Скриншот:
 
 ```cmd
@@ -110,6 +116,19 @@ browser.cmd --client-id client-REPLACE tabs
 1. Перезагрузить расширение.
 2. Снова проверить `browser.cmd status`.
 3. Проверить, что токен и URL в настройках расширения совпадают с хабом.
+
+Для best-effort reload unpacked extension на Linux есть helper:
+
+```bash
+cd /home/max/site-control-kit
+./scripts/reload_bridge_extension.sh
+```
+
+Если кнопка Reload в вашей сборке Chrome сдвинута, можно подстроить координаты:
+
+```bash
+SCB_RELOAD_X_RATIO=0.93 SCB_RELOAD_Y_RATIO=0.17 ./scripts/reload_bridge_extension.sh
+```
 
 ## Ограничения
 - `chrome://*` и похожие системные страницы недоступны для content script.
