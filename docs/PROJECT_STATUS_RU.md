@@ -27,6 +27,7 @@
 - Есть chain-runner для серии коротких прогонов с одним состоянием discovery.
 - Chain-runner уже умеет останавливаться по `target_unique_members`, `target_safe_count`, `stop-after-idle`, `stop-after-no-growth`.
 - Chain-runner теперь умеет не ждать обычный интервал после run, который завершился сильным `deep-yield`: если exporter сам остановился на продуктивном deep-шаге, следующая короткая попытка стартует сразу.
+- Chain-runner получил профили `fast`, `balanced`, `deep`: они задают дефолтный интервал и набор env-настроек для collect-script, при этом ручные env всё ещё имеют приоритет.
 
 ### Диагностика прогонов
 - Каждый run сохраняет `run.json`, `export.log`, `snapshot.md/txt`, `snapshot_safe.md/txt`.
@@ -79,7 +80,7 @@
   - при открытии такой страницы расширение вызывает `chrome.runtime.reload()` само.
 
 ## Проверено
-- Полный unit-набор сейчас зелёный: `105/105`.
+- Полный unit-набор сейчас зелёный: `107/107`.
 - Shell syntax и `py_compile` для последних изменений проходили зелёными.
 - Точечный прогон экспортёрных тестов после capability-preflight:
   - `tests.test_telegram_export_parser`

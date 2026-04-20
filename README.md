@@ -102,6 +102,7 @@ CHAT_MIN_MEMBERS=10 CHAT_MAX_MEMBERS=10 CHAT_SCROLL_STEPS=40 CHAT_DEEP_LIMIT=20 
 cd /home/max/site-control-kit
 ./scripts/collect_new_telegram_contacts_chain.sh "https://web.telegram.org/k/#-2465948544" \
   "/home/max/telegram_contact_batches" \
+  --profile balanced \
   --runs 5 \
   --interval-sec 20 \
   --stop-after-idle 2 \
@@ -110,6 +111,7 @@ cd /home/max/site-control-kit
 ```
 
 По умолчанию chain-runner теперь не ждёт `interval-sec` после run, который завершился на сильном `deep-yield`: если в `run.json` пришли `chat_deep_yield_stop=1` и `deep_updated_total>0`, следующий короткий прогон стартует сразу. Отключить это можно через `--no-skip-interval-on-productive-yield` или `TELEGRAM_CHAIN_SKIP_INTERVAL_ON_PRODUCTIVE_YIELD=0`.
+Также у chain-runner появились профили `fast`, `balanced`, `deep`: они задают дефолтный `interval-sec` и безопасный набор env для collect-script. `fast` быстрее идёт по коротким проходам, `deep` даёт более длинный runtime и агрессивнее включает discovery/deep настройки, а ручные env по-прежнему имеют приоритет над профилем.
 
 `run.json` теперь дублирует ключевую телеметрию экспортёра: `unique_members`, `members_with_username`, `chat_scroll_steps_done`, `chat_jump_scrolls_done`, `deep_updated_total`, `history_backfilled_total`, `output_usernames_cleared_total`, `chat_deep_priority_rounds`, `chat_deep_yield_stop`, а полный сырой payload лежит в `export_stats.json`.
 Также в `run.json` есть признаки продвижения/сохранения latest-снимков: `latest_full_promoted`, `latest_safe_promoted`, `latest_full_best_source`, `latest_safe_best_source`.

@@ -102,6 +102,21 @@ class TelegramContactChainTests(unittest.TestCase):
             )
         )
 
+    def test_resolve_interval_sec_uses_profile_default_and_env_override(self) -> None:
+        self.assertEqual(self.mod.resolve_interval_sec(None, "fast"), 8.0)
+        with mock.patch.dict("os.environ", {"TELEGRAM_CHAIN_INTERVAL_SEC": "11.5"}, clear=False):
+            self.assertEqual(self.mod.resolve_interval_sec(None, "fast"), 11.5)
+        self.assertEqual(self.mod.resolve_interval_sec(6.0, "deep"), 6.0)
+
+    def test_build_collect_env_applies_profile_defaults_without_overwrite(self) -> None:
+        with mock.patch.dict("os.environ", {"CHAT_MAX_RUNTIME": "999"}, clear=False):
+            env = self.mod.build_collect_env("deep")
+
+        self.assertEqual(env["TELEGRAM_CHAIN_PROFILE"], "deep")
+        self.assertEqual(env["CHAT_MAX_RUNTIME"], "999")
+        self.assertEqual(env["CHAT_DEEP_LIMIT"], "60")
+        self.assertEqual(env["TELEGRAM_CHAT_DISCOVERY_SCROLL_BURST"], "3")
+
     def test_main_skips_sleep_after_productive_yield_run(self) -> None:
         group_url = "https://web.telegram.org/k/#-2465948544"
         payloads = [
@@ -132,6 +147,8 @@ class TelegramContactChainTests(unittest.TestCase):
 
             def fake_run(*_args, **_kwargs):
                 run_index["value"] += 1
+                self.assertEqual(_kwargs["env"]["TELEGRAM_CHAIN_PROFILE"], "fast")
+                self.assertEqual(_kwargs["env"]["CHAT_MAX_RUNTIME"], "120")
                 run_dir = chat_dir / "runs" / f"20260420T12000{run_index['value']}Z"
                 run_dir.mkdir(parents=True, exist_ok=True)
                 (run_dir / "run.json").write_text(
@@ -146,8 +163,8 @@ class TelegramContactChainTests(unittest.TestCase):
                 str(output_root),
                 "--runs",
                 "2",
-                "--interval-sec",
-                "99",
+                "--profile",
+                "fast",
             ]
 
             with (
@@ -162,6 +179,8 @@ class TelegramContactChainTests(unittest.TestCase):
 
             chain_json = sorted((chat_dir / "chains").glob("*/chain.json"))[-1]
             payload = json.loads(chain_json.read_text(encoding="utf-8"))
+            self.assertEqual(payload["profile"], "fast")
+            self.assertEqual(payload["interval_sec"], 8.0)
             self.assertEqual(payload["productive_yield_runs"], 1)
             self.assertTrue(payload["attempts"][0]["productive_yield"])
             self.assertFalse(payload["attempts"][1]["productive_yield"])
@@ -185,6 +204,8 @@ class TelegramContactChainTests(unittest.TestCase):
 
             def fake_run(*_args, **_kwargs):
                 run_index["value"] += 1
+                self.assertEqual(_kwargs["env"]["TELEGRAM_CHAIN_PROFILE"], "deep")
+                self.assertEqual(_kwargs["env"]["CHAT_DEEP_LIMIT"], "60")
                 run_dir = chat_dir / "runs" / f"20260420T13000{run_index['value']}Z"
                 run_dir.mkdir(parents=True, exist_ok=True)
                 (run_dir / "run.json").write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
@@ -196,6 +217,8 @@ class TelegramContactChainTests(unittest.TestCase):
                 str(output_root),
                 "--runs",
                 "2",
+                "--profile",
+                "deep",
                 "--interval-sec",
                 "7",
                 "--no-skip-interval-on-productive-yield",

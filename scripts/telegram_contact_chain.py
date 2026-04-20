@@ -15,6 +15,35 @@ from typing import Any
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 COLLECT_SCRIPT = ROOT_DIR / "scripts" / "collect_new_telegram_contacts.sh"
+CHAIN_PROFILES: dict[str, dict[str, Any]] = {
+    "fast": {
+        "interval_sec": 8.0,
+        "env": {
+            "CHAT_SCROLL_STEPS": "10",
+            "CHAT_DEEP_LIMIT": "24",
+            "CHAT_MAX_RUNTIME": "120",
+            "TELEGRAM_CHAT_MENTION_DEEP_MAX_PER_STEP": "4",
+            "TELEGRAM_CHAT_DEEP_PRIORITY_MIN_RUNTIME": "14",
+        },
+    },
+    "balanced": {
+        "interval_sec": 20.0,
+        "env": {},
+    },
+    "deep": {
+        "interval_sec": 30.0,
+        "env": {
+            "CHAT_SCROLL_STEPS": "18",
+            "CHAT_DEEP_LIMIT": "60",
+            "CHAT_MAX_RUNTIME": "360",
+            "TELEGRAM_CHAT_MENTION_DEEP_MAX_PER_STEP": "4",
+            "TELEGRAM_CHAT_DEEP_PRIORITY_EXTRA_ROUNDS": "2",
+            "TELEGRAM_CHAT_DEEP_PRIORITY_MIN_RUNTIME": "24",
+            "TELEGRAM_CHAT_DISCOVERY_SCROLL_BURST": "3",
+            "TELEGRAM_CHAT_JUMP_SCROLL_TRIGGER_STALL": "2",
+        },
+    },
+}
 
 
 def chat_slug_from_group_url(group_url: str) -> str:
@@ -69,6 +98,32 @@ def should_skip_interval_after_run(run_payload: dict[str, Any], skip_on_producti
     return is_productive_deep_yield(run_payload)
 
 
+def resolve_chain_profile(profile_name: str) -> dict[str, Any]:
+    return CHAIN_PROFILES.get(str(profile_name or "balanced").strip().lower(), CHAIN_PROFILES["balanced"])
+
+
+def resolve_interval_sec(explicit_value: float | None, profile_name: str) -> float:
+    if explicit_value is not None:
+        return max(float(explicit_value), 0.0)
+    env_value = os.environ.get("TELEGRAM_CHAIN_INTERVAL_SEC", "").strip()
+    if env_value:
+        try:
+            return max(float(env_value), 0.0)
+        except ValueError:
+            pass
+    profile = resolve_chain_profile(profile_name)
+    return max(float(profile.get("interval_sec", 20.0) or 20.0), 0.0)
+
+
+def build_collect_env(profile_name: str) -> dict[str, str]:
+    env = os.environ.copy()
+    profile = resolve_chain_profile(profile_name)
+    for key, value in dict(profile.get("env") or {}).items():
+        env.setdefault(str(key), str(value))
+    env["TELEGRAM_CHAIN_PROFILE"] = str(profile_name or "balanced").strip().lower()
+    return env
+
+
 def write_chain_summary(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -80,11 +135,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("group_url", help="Telegram group URL")
     parser.add_argument("output_root", nargs="?", default=str(Path.home() / "telegram_contact_batches"))
+    parser.add_argument(
+        "--profile",
+        choices=sorted(CHAIN_PROFILES),
+        default=str(os.environ.get("TELEGRAM_CHAIN_PROFILE", "balanced") or "balanced").strip().lower(),
+        help="Preset chain profile for collect-script env and default interval.",
+    )
     parser.add_argument("--runs", type=int, default=max(int(os.environ.get("TELEGRAM_CHAIN_RUNS", "5") or "5"), 1))
     parser.add_argument(
         "--interval-sec",
         type=float,
-        default=max(float(os.environ.get("TELEGRAM_CHAIN_INTERVAL_SEC", "20") or "20"), 0.0),
+        default=None,
     )
     parser.add_argument(
         "--stop-after-idle",
@@ -127,6 +188,9 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     args = build_parser().parse_args()
 
+    profile_name = str(args.profile or "balanced").strip().lower()
+    interval_sec = resolve_interval_sec(args.interval_sec, profile_name)
+    collect_env = build_collect_env(profile_name)
     output_root = Path(args.output_root).expanduser()
     chat_dir = chat_dir_for(args.group_url, output_root)
     chain_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -146,14 +210,15 @@ def main() -> int:
     with chain_log_path.open("w", encoding="utf-8") as log_fh:
         for attempt_index in range(1, max(int(args.runs), 1) + 1):
             started_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
-            print(f"INFO: chain run {attempt_index}/{args.runs} started", flush=True)
-            log_fh.write(f"[{started_at}] run {attempt_index}/{args.runs} started\n")
+            print(f"INFO: chain run {attempt_index}/{args.runs} started (profile={profile_name})", flush=True)
+            log_fh.write(f"[{started_at}] run {attempt_index}/{args.runs} started profile={profile_name}\n")
             log_fh.flush()
 
             completed = subprocess.run(
                 ["bash", str(COLLECT_SCRIPT), args.group_url, str(output_root)],
                 cwd=str(ROOT_DIR),
                 check=False,
+                env=collect_env,
             )
 
             run_json_path = latest_run_json(chat_dir)
@@ -192,6 +257,7 @@ def main() -> int:
             attempts.append(
                 {
                     "attempt": attempt_index,
+                    "profile": profile_name,
                     "started_at": started_at,
                     "exit_code": int(completed.returncode),
                     "run_json": str(run_json_path) if run_json_path else "",
@@ -245,25 +311,27 @@ def main() -> int:
                 )
                 log_fh.flush()
                 continue
-            if float(args.interval_sec) > 0:
-                print(f"INFO: sleeping {args.interval_sec:.1f}s before next chain run", flush=True)
-                time.sleep(float(args.interval_sec))
+            if interval_sec > 0:
+                print(f"INFO: sleeping {interval_sec:.1f}s before next chain run", flush=True)
+                time.sleep(interval_sec)
 
     summary = {
         "status": chain_status,
+        "profile": profile_name,
         "group_url": args.group_url,
         "output_root": str(output_root),
         "chat_dir": str(chat_dir),
         "chain_dir": str(chain_dir),
         "chain_log": str(chain_log_path),
         "runs_requested": int(args.runs),
-        "interval_sec": float(args.interval_sec),
+        "interval_sec": float(interval_sec),
         "stop_after_idle": int(args.stop_after_idle),
         "stop_after_no_growth": int(args.stop_after_no_growth),
         "target_unique_members": int(args.target_unique_members),
         "target_safe_count": int(args.target_safe_count),
         "skip_interval_on_productive_yield": bool(args.skip_interval_on_productive_yield),
         "productive_yield_runs": productive_yield_runs,
+        "collect_env_overrides": dict(resolve_chain_profile(profile_name).get("env") or {}),
         "best_unique_members": best_unique_members,
         "best_safe_count": best_safe_count,
         "attempts": attempts,
