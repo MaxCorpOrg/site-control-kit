@@ -417,6 +417,57 @@ class TelegramExportParserTests(unittest.TestCase):
         self.assertIn("click_menu_text", command_types)
         self.assertNotIn("click_text", command_types)
 
+    def test_try_username_via_mention_action_skips_click_menu_text_when_runtime_lacks_it(self) -> None:
+        command_types: list[str] = []
+
+        def _fake_send_command_result(**kwargs):
+            command = kwargs.get("command") or {}
+            command_type = str(command.get("type") or "")
+            command_types.append(command_type)
+            if command_type == "wait_selector":
+                return {"ok": True}
+            if command_type == "click_text":
+                return {"ok": True}
+            return {"ok": True}
+
+        with mock.patch.object(self.mod, "_clear_composer_text"):
+            with mock.patch.object(self.mod, "_open_chat_peer_context_menu", return_value=(True, "peer")):
+                with mock.patch.object(self.mod, "_read_username_from_composer", return_value="@Alice_111"):
+                    with mock.patch.object(self.mod, "_send_command_result", side_effect=_fake_send_command_result):
+                        username = self.mod._try_username_via_mention_action(
+                            "server",
+                            "token",
+                            "client",
+                            7,
+                            "111",
+                            supports_click_menu_text=False,
+                        )
+
+        self.assertEqual(username, "@Alice_111")
+        self.assertNotIn("click_menu_text", command_types)
+        self.assertIn("click_text", command_types)
+
+    def test_extract_bridge_capabilities_reads_background_and_content_lists(self) -> None:
+        background, content = self.mod._extract_bridge_capabilities(
+            {
+                "meta": {
+                    "capabilities": {
+                        "background_commands": ["open_tab", "activate_tab"],
+                        "content_commands": ["click", "click_menu_text"],
+                    }
+                }
+            }
+        )
+
+        self.assertEqual(background, {"open_tab", "activate_tab"})
+        self.assertEqual(content, {"click", "click_menu_text"})
+
+    def test_extract_bridge_capabilities_returns_empty_sets_for_missing_meta(self) -> None:
+        background, content = self.mod._extract_bridge_capabilities({"client_id": "client-a"})
+
+        self.assertEqual(background, set())
+        self.assertEqual(content, set())
+
     def test_should_run_chat_deep_step_runs_immediately_without_discovery_target(self) -> None:
         should_run = self.mod._should_run_chat_deep_step(
             step=2,

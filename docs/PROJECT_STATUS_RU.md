@@ -1,6 +1,6 @@
 # Project Status RU
 
-Последнее обновление: 2026-04-19
+Последнее обновление: 2026-04-20
 
 Этот файл нужен как точка входа для любого нового чата и любого нового агента.
 Перед новой задачей его нужно прочитать целиком.
@@ -55,10 +55,16 @@
 ### Диагностика stale extension runtime
 - В heartbeat `meta` добавлены `capabilities` по background/content-командам.
 - CLI теперь умеет помечать browser tab-level ошибки вида `Unsupported command type in content script ...` как вероятный stale runtime и подсказывает reload в `chrome://extensions`.
+- Telegram-экспортёр теперь делает preflight по `meta.capabilities` выбранного клиента:
+  - если runtime не рекламирует `click_menu_text`, mention-deep не тратит попытки на неподдерживаемую DOM-команду;
+  - экспортёр явно предупреждает, что будет использован legacy text-click fallback до reload unpacked extension.
 
 ## Проверено
-- Полный unit-набор проходил зелёным: `75/75`.
+- Полный unit-набор проходил зелёным: `78/78`.
 - Shell syntax и `py_compile` для последних изменений проходили зелёными.
+- Точечный прогон экспортёрных тестов после capability-preflight:
+  - `tests.test_telegram_export_parser`
+  - `44/44 OK`
 - Живой smoke chain-runner подтверждён на временном каталоге:
   - `target_unique_members_reached`
   - `best_unique_members = 10`
@@ -101,6 +107,13 @@
 - Живой smoke по browser bridge подтвердил новую stale-runtime диагностику:
   - `browser new-tab` сейчас падает в живой среде как `Unsupported command type in content script: new_tab`;
   - CLI теперь добавляет явный `hint` про reload unpacked extension в `chrome://extensions`.
+- Новый live smoke на неактивной вкладке подтвердил exporter capability-preflight:
+  - живой клиент по `/api/clients` не рекламирует `content_commands`;
+  - экспортёр до deep-шагов печатает:
+    - `WARN: bridge runtime does not advertise content capabilities...`
+  - артефакт:
+    - `/tmp/tg_cap_preflight_smoke.hpX3VV/export.log`
+  - тестовая вкладка `614277598` после smoke возвращена обратно на `https://yandex.ru/internet/`.
 
 ## Текущие Проблемы
 
@@ -109,7 +122,7 @@
 - `mention context ... opened`
 - `WARN: mention item not clicked`
 
-То есть deep-path стал сильнее по scheduling и чтению composer, а live probe подтвердил наличие `Mention` в DOM. Код уже переведён на отдельный `click_menu_text`, но live-подтверждение этого нового пути всё ещё упирается в stale runtime расширения до его reload.
+То есть deep-path стал сильнее по scheduling и чтению composer, а live probe подтвердил наличие `Mention` в DOM. Код уже переведён на отдельный `click_menu_text`, а экспортёр теперь умеет сам распознавать отсутствие этой команды по bridge capabilities и переключаться на legacy fallback. Но live-подтверждение нового пути всё ещё упирается в stale runtime расширения до его reload.
 
 ### 2. Прямое live-подтверждение context-menu fallback ещё неполное
 Короткий smoke подтвердил запуск catch-up mention, но не дал новых `@username`.
@@ -146,7 +159,7 @@
 
 ## Следующий Приоритет
 1. Перезагрузить unpacked extension и повторить точечный peer-run на чистом Telegram tab без history backfill.
-2. После reload снять конкретный успешный `mention`-deep прогон по новому peer.
+2. После reload снять конкретный успешный `mention`-deep прогон по новому peer и сравнить `click_menu_text` против legacy fallback.
 3. Починить или переосмыслить X11 fallback для `browser new-tab`.
 4. Разделить browser capability/runtime compatibility и Telegram export concerns в отдельные модули/слои.
 5. Отделить понятие `best-known latest` от `most-recent run` в UI и документации, если пользователю важно видеть именно последний прогон как основной артефакт.

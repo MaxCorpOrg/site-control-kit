@@ -230,6 +230,40 @@ def _wait_for_fresh_clients(
         time.sleep(0.5)
 
 
+def _find_client_record(clients: list[dict[str, Any]], client_id: str) -> dict[str, Any] | None:
+    selected = str(client_id or "").strip()
+    if not selected:
+        return None
+    for client in clients:
+        if str(client.get("client_id") or "").strip() == selected:
+            return client
+    return None
+
+
+def _extract_bridge_capabilities(client: dict[str, Any] | None) -> tuple[set[str], set[str]]:
+    if not isinstance(client, dict):
+        return set(), set()
+    meta = client.get("meta")
+    if not isinstance(meta, dict):
+        return set(), set()
+    capabilities = meta.get("capabilities")
+    if not isinstance(capabilities, dict):
+        return set(), set()
+
+    def _as_set(key: str) -> set[str]:
+        values = capabilities.get(key)
+        if not isinstance(values, list):
+            return set()
+        result: set[str] = set()
+        for value in values:
+            item = str(value or "").strip()
+            if item:
+                result.add(item)
+        return result
+
+    return _as_set("background_commands"), _as_set("content_commands")
+
+
 def _is_specific_tg_dialog_url(value: str) -> bool:
     return bool(SPECIFIC_TG_DIALOG_URL_RE.match((value or "").strip()))
 
@@ -734,6 +768,8 @@ def _try_username_via_mention_action(
     client_id: str,
     tab_id: int,
     peer_id: str,
+    *,
+    supports_click_menu_text: bool = True,
 ) -> str:
     # Prevent stale @username from previous attempts.
     _clear_composer_text(server, token, client_id, tab_id)
@@ -781,22 +817,23 @@ def _try_username_via_mention_action(
     ]
     if not mention_click_ok:
         for _ in range(4):
-            mention_click = _send_command_result(
-                server=server,
-                token=token,
-                client_id=client_id,
-                tab_id=tab_id,
-                timeout_sec=2,
-                command={
-                    "type": "click_menu_text",
-                    "terms": mention_terms,
-                    "near_last_context": True,
-                },
-                raise_on_fail=False,
-            )
-            if mention_click.get("ok"):
-                mention_click_ok = True
-                break
+            if supports_click_menu_text:
+                mention_click = _send_command_result(
+                    server=server,
+                    token=token,
+                    client_id=client_id,
+                    tab_id=tab_id,
+                    timeout_sec=2,
+                    command={
+                        "type": "click_menu_text",
+                        "terms": mention_terms,
+                        "near_last_context": True,
+                    },
+                    raise_on_fail=False,
+                )
+                if mention_click.get("ok"):
+                    mention_click_ok = True
+                    break
             for root_selector in (
                 "#bubble-contextmenu.active",
                 "#bubble-contextmenu",
@@ -2277,6 +2314,7 @@ def _collect_members_from_chat(
     historical_username_to_peer: dict[str, str] | None = None,
     historical_peer_to_username: dict[str, str] | None = None,
     discovery_state: dict[str, Any] | None = None,
+    supports_click_menu_text: bool = True,
     on_progress: Callable[[list[dict[str, str]], str], None] | None = None,
 ) -> tuple[list[dict[str, str]], dict[str, int]]:
     members: list[dict[str, str]] = []
@@ -2452,6 +2490,7 @@ def _collect_members_from_chat(
                             mode=chat_deep_mode,
                             historical_username_to_peer=historical_username_to_peer,
                             historical_peer_to_username=historical_peer_to_username,
+                            supports_click_menu_text=supports_click_menu_text,
                         )
                         deep_attempted_total += attempted
                         deep_updated_total += updated
@@ -2605,6 +2644,7 @@ def _enrich_usernames_deep_chat(
     mode: str = "url",
     historical_username_to_peer: dict[str, str] | None = None,
     historical_peer_to_username: dict[str, str] | None = None,
+    supports_click_menu_text: bool = True,
 ) -> tuple[int, int, int, list[str]]:
     members_by_peer = {item["peer_id"]: item for item in members}
     pending_peer_ids = [item["peer_id"] for item in members if item.get("username") == "—"]
@@ -2653,6 +2693,7 @@ def _enrich_usernames_deep_chat(
                 client_id=client_id,
                 tab_id=tab_id,
                 peer_id=peer_id,
+                supports_click_menu_text=supports_click_menu_text,
             )
             if mention_username != "—":
                 assigned, existing_peer, conflict_reason = _assign_username_if_unique(
@@ -3722,6 +3763,36 @@ def main() -> int:
             tab_id=args.tab_id,
             url_pattern=group_url,
         )
+        selected_client = _find_client_record(clients, client_id)
+        _, content_capabilities = _extract_bridge_capabilities(selected_client)
+        client_meta = selected_client.get("meta") if isinstance(selected_client, dict) else None
+        capabilities_payload = client_meta.get("capabilities") if isinstance(client_meta, dict) else None
+        advertised_content_capabilities = (
+            isinstance(capabilities_payload, dict)
+            and isinstance(capabilities_payload.get("content_commands"), list)
+        )
+        supports_click_menu_text = True
+        warned_click_menu_runtime = False
+        if advertised_content_capabilities:
+            supports_click_menu_text = "click_menu_text" in content_capabilities
+        elif args.deep_usernames and args.source in ("chat", "both") and args.chat_deep_mode in ("mention", "full"):
+            supports_click_menu_text = False
+            warned_click_menu_runtime = True
+            print(
+                "WARN: bridge runtime does not advertise content capabilities. "
+                "Telegram mention-deep will use legacy text click fallback until the unpacked extension is reloaded."
+            )
+        if (
+            args.deep_usernames
+            and args.source in ("chat", "both")
+            and args.chat_deep_mode in ("mention", "full")
+            and not supports_click_menu_text
+            and not warned_click_menu_runtime
+        ):
+            print(
+                "WARN: current bridge runtime does not advertise click_menu_text. "
+                "Telegram mention-deep may stay flaky until the unpacked extension is reloaded in chrome://extensions."
+            )
         if args.source in ("chat", "both") and not _is_specific_tg_dialog_url(group_url):
             detected_group_url = _detect_current_dialog_url(
                 server=server,
@@ -3833,6 +3904,7 @@ def main() -> int:
                 historical_username_to_peer=historical_username_to_peer,
                 historical_peer_to_username=historical_peer_to_username,
                 discovery_state=discovery_state,
+                supports_click_menu_text=supports_click_menu_text,
                 on_progress=_on_chat_progress,
             )
             if not chat_members:
