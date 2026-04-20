@@ -13,12 +13,14 @@
 ## Обязательный Порядок Чтения Перед Работой
 Прочитать в таком порядке:
 1. `AGENTS.md`
-2. `docs/PROJECT_WORKFLOW_RU.md`
-3. `docs/PROJECT_STATUS_RU.md`
-4. `README.md`
-5. `BROWSER_QUICKSTART.md`
-6. `docs/AI_MAINTAINER_GUIDE.md`
-7. Для Telegram-задач: `docs/TELEGRAM_CLIENT_ROADMAP_RU.md`
+2. `docs/agent_handoff_ru/00_START_HERE.md`
+3. весь пакет `docs/agent_handoff_ru/` по порядку
+4. `docs/PROJECT_WORKFLOW_RU.md`
+5. `docs/PROJECT_STATUS_RU.md`
+6. `README.md`
+7. `BROWSER_QUICKSTART.md`
+8. `docs/AI_MAINTAINER_GUIDE.md`
+9. Для Telegram-задач: `docs/TELEGRAM_CLIENT_ROADMAP_RU.md`
 
 Если задача затрагивает browser bridge, после чтения документации обязательно посмотреть последние изменения и текущее дерево.
 
