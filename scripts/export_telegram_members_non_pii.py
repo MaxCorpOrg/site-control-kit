@@ -82,6 +82,7 @@ CHAT_MENTION_DEEP_BATCH_RUNTIME_2 = max(float(os.environ.get("TELEGRAM_CHAT_MENT
 CHAT_MENTION_DEEP_BATCH_RUNTIME_3 = max(float(os.environ.get("TELEGRAM_CHAT_MENTION_DEEP_BATCH_RUNTIME_3", "75") or "75"), CHAT_MENTION_DEEP_BATCH_RUNTIME_2)
 CHAT_DEEP_PRIORITY_EXTRA_ROUNDS = max(int(os.environ.get("TELEGRAM_CHAT_DEEP_PRIORITY_EXTRA_ROUNDS", "1") or "1"), 0)
 CHAT_DEEP_PRIORITY_MIN_RUNTIME = max(float(os.environ.get("TELEGRAM_CHAT_DEEP_PRIORITY_MIN_RUNTIME", "18") or "18"), 5.0)
+CHAT_DEEP_FAILURE_COOLDOWN = max(int(os.environ.get("TELEGRAM_CHAT_DEEP_FAILURE_COOLDOWN", "3") or "3"), 0)
 X11_WHEEL_FALLBACK_ENABLED = os.environ.get("TELEGRAM_X11_WHEEL_FALLBACK", "1").strip().lower() not in {"0", "false", "no"}
 X11_WHEEL_BUTTON = int(os.environ.get("TELEGRAM_X11_WHEEL_BUTTON", "5") or "5")
 X11_WHEEL_CLICKS = max(int(os.environ.get("TELEGRAM_X11_WHEEL_CLICKS", "8") or "8"), 1)
@@ -1469,6 +1470,20 @@ def _deep_target_sort_key(
     )
 
 
+def _is_chat_deep_peer_cooled_down(
+    member: dict[str, str],
+    *,
+    deep_peer_history: dict[str, dict[str, int | str]] | None = None,
+) -> bool:
+    if CHAT_DEEP_FAILURE_COOLDOWN <= 0:
+        return False
+    peer_id = str(member.get("peer_id") or "").strip()
+    history = (deep_peer_history or {}).get(peer_id) or {}
+    failures = max(int(history.get("failures", 0) or 0), 0)
+    success_count = max(int(history.get("mention_success", 0) or 0), 0) + max(int(history.get("url_success", 0) or 0), 0)
+    return failures >= CHAT_DEEP_FAILURE_COOLDOWN and success_count <= 0
+
+
 def _select_chat_deep_targets(
     *,
     members: list[dict[str, str]],
@@ -1520,7 +1535,18 @@ def _select_chat_deep_targets(
             deep_peer_history=deep_peer_history,
         )
     )
-    return deep_targets[:limit]
+    healthy_targets = [
+        item for item in deep_targets
+        if not _is_chat_deep_peer_cooled_down(item, deep_peer_history=deep_peer_history)
+    ]
+    cooled_targets = [
+        item for item in deep_targets
+        if _is_chat_deep_peer_cooled_down(item, deep_peer_history=deep_peer_history)
+    ]
+    selected = healthy_targets[:limit]
+    if len(selected) < limit:
+        selected.extend(cooled_targets[: max(limit - len(selected), 0)])
+    return selected[:limit]
 
 
 def _count_unresolved_visible_chat_members(
