@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import itertools
 import tempfile
 import unittest
 from http.client import RemoteDisconnected
@@ -880,6 +881,90 @@ class TelegramExportParserTests(unittest.TestCase):
         self.assertEqual(chat_stats["deep_attempted"], 2)
         self.assertEqual(chat_stats["deep_updated"], 2)
         self.assertEqual(chat_stats["deep_priority_rounds"], 1)
+
+    def test_should_stop_after_productive_deep_requires_yield_and_low_runtime(self) -> None:
+        should_stop = self.mod._should_stop_after_productive_deep(
+            mode="mention",
+            targeted_probe=False,
+            min_members_target=0,
+            members_count=8,
+            step_updated_total=2,
+            unresolved_visible_count=0,
+            remaining_runtime_sec=20.0,
+        )
+        should_continue = self.mod._should_stop_after_productive_deep(
+            mode="mention",
+            targeted_probe=False,
+            min_members_target=0,
+            members_count=8,
+            step_updated_total=1,
+            unresolved_visible_count=0,
+            remaining_runtime_sec=20.0,
+        )
+
+        self.assertTrue(should_stop)
+        self.assertFalse(should_continue)
+
+    def test_collect_members_from_chat_stops_after_productive_deep(self) -> None:
+        chat_members_round1 = [
+            {"peer_id": "111", "name": "Alice", "username": "—", "status": "из чата", "role": "—"},
+            {"peer_id": "222", "name": "Bob", "username": "—", "status": "из чата", "role": "—"},
+        ]
+
+        def _fake_select_chat_deep_targets(**kwargs):
+            unresolved = [item for item in kwargs["members"] if item.get("username") == "—"]
+            return unresolved[:2]
+
+        def _fake_enrich_usernames_deep_chat(**kwargs):
+            targets = kwargs["members"]
+            for item in targets:
+                item["username"] = f"@user_{item['peer_id']}"
+            peer_ids = [str(item["peer_id"]) for item in targets]
+            return len(targets), len(targets), 0, peer_ids
+
+        with mock.patch.object(
+            self.mod,
+            "CHAT_DEEP_YIELD_STOP_MAX_REMAINING",
+            40.0,
+        ):
+            with mock.patch.object(self.mod.time, "time", side_effect=itertools.chain([0.0], itertools.repeat(95.0))):
+                with mock.patch.object(self.mod.time, "sleep", return_value=None):
+                    with mock.patch.object(self.mod, "_return_to_group_dialog_reliable", return_value=True):
+                        with mock.patch.object(self.mod, "_send_get_html", return_value="html1"):
+                            with mock.patch.object(self.mod, "_parse_chat_members", return_value=chat_members_round1):
+                                with mock.patch.object(self.mod, "_extract_chat_view_signature", return_value=""):
+                                    with mock.patch.object(self.mod, "_get_chat_anchor_peer_id", return_value=""):
+                                        with mock.patch.object(self.mod, "_should_run_chat_deep_step", return_value=True):
+                                            with mock.patch.object(
+                                                self.mod,
+                                                "_select_chat_deep_targets",
+                                                side_effect=_fake_select_chat_deep_targets,
+                                            ):
+                                                with mock.patch.object(
+                                                    self.mod,
+                                                    "_enrich_usernames_deep_chat",
+                                                    side_effect=_fake_enrich_usernames_deep_chat,
+                                                ):
+                                                    with mock.patch.object(self.mod, "_scroll_chat_up") as scroll_mock:
+                                                        members, chat_stats = self.mod._collect_members_from_chat(
+                                                            server="server",
+                                                            token="token",
+                                                            client_id="client",
+                                                            tab_id=7,
+                                                            timeout_sec=5,
+                                                            scroll_steps=5,
+                                                            group_url="https://web.telegram.org/k/#-2465948544",
+                                                            deep_usernames=True,
+                                                            chat_deep_limit=5,
+                                                            max_runtime_sec=120,
+                                                            chat_deep_mode="mention",
+                                                        )
+
+        self.assertEqual(len(members), 2)
+        self.assertEqual(chat_stats["deep_attempted"], 2)
+        self.assertEqual(chat_stats["deep_updated"], 2)
+        self.assertEqual(chat_stats["deep_yield_stop"], 1)
+        scroll_mock.assert_not_called()
 
     def test_extract_chat_view_signature_uses_top_mid_peer_and_timestamp(self) -> None:
         html = (

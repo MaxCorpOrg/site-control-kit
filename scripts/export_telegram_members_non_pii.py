@@ -83,6 +83,9 @@ CHAT_MENTION_DEEP_BATCH_RUNTIME_3 = max(float(os.environ.get("TELEGRAM_CHAT_MENT
 CHAT_DEEP_PRIORITY_EXTRA_ROUNDS = max(int(os.environ.get("TELEGRAM_CHAT_DEEP_PRIORITY_EXTRA_ROUNDS", "1") or "1"), 0)
 CHAT_DEEP_PRIORITY_MIN_RUNTIME = max(float(os.environ.get("TELEGRAM_CHAT_DEEP_PRIORITY_MIN_RUNTIME", "18") or "18"), 5.0)
 CHAT_DEEP_FAILURE_COOLDOWN = max(int(os.environ.get("TELEGRAM_CHAT_DEEP_FAILURE_COOLDOWN", "3") or "3"), 0)
+CHAT_DEEP_YIELD_STOP_ENABLED = os.environ.get("TELEGRAM_CHAT_DEEP_YIELD_STOP", "1").strip().lower() not in {"0", "false", "no"}
+CHAT_DEEP_YIELD_STOP_MIN_UPDATES = max(int(os.environ.get("TELEGRAM_CHAT_DEEP_YIELD_STOP_MIN_UPDATES", "2") or "2"), 1)
+CHAT_DEEP_YIELD_STOP_MAX_REMAINING = max(float(os.environ.get("TELEGRAM_CHAT_DEEP_YIELD_STOP_MAX_REMAINING", "30") or "30"), 5.0)
 X11_WHEEL_FALLBACK_ENABLED = os.environ.get("TELEGRAM_X11_WHEEL_FALLBACK", "1").strip().lower() not in {"0", "false", "no"}
 X11_WHEEL_BUTTON = int(os.environ.get("TELEGRAM_X11_WHEEL_BUTTON", "5") or "5")
 X11_WHEEL_CLICKS = max(int(os.environ.get("TELEGRAM_X11_WHEEL_CLICKS", "8") or "8"), 1)
@@ -1595,6 +1598,33 @@ def _should_continue_same_view_deep(
     return True
 
 
+def _should_stop_after_productive_deep(
+    *,
+    mode: str,
+    targeted_probe: bool,
+    min_members_target: int,
+    members_count: int,
+    step_updated_total: int,
+    unresolved_visible_count: int,
+    remaining_runtime_sec: float,
+) -> bool:
+    if not CHAT_DEEP_YIELD_STOP_ENABLED:
+        return False
+    if targeted_probe:
+        return False
+    if str(mode or "").strip().lower() != "mention":
+        return False
+    if int(min_members_target) > 0 and int(members_count) < int(min_members_target):
+        return False
+    if int(step_updated_total) < CHAT_DEEP_YIELD_STOP_MIN_UPDATES:
+        return False
+    if int(unresolved_visible_count) > 0:
+        return False
+    if float(remaining_runtime_sec) > CHAT_DEEP_YIELD_STOP_MAX_REMAINING:
+        return False
+    return True
+
+
 def _extract_chat_view_signature(html_payload: str) -> str:
     if not html_payload:
         return ""
@@ -2678,6 +2708,7 @@ def _collect_members_from_chat(
     deep_updated_total = 0
     deep_deferred_steps = 0
     deep_priority_rounds_total = 0
+    deep_yield_stop = False
     runtime_limited = False
     seen_view_signatures: list[str] = []
     seen_view_signature_set: set[str] = set()
@@ -2904,6 +2935,23 @@ def _collect_members_from_chat(
                             f"INFO: chat deep step {step}: processed {step_attempted_total}, "
                             f"opened {step_opened_total}, filled {step_updated_total}, total_filled {deep_updated_total}"
                         )
+                        unresolved_visible_count = _count_unresolved_visible_chat_members(members, chat_members)
+                        elapsed = time.time() - started_at
+                        remaining_runtime = max(2.0, float(max_runtime_sec) - elapsed - 2.0)
+                        if _should_stop_after_productive_deep(
+                            mode=chat_deep_mode,
+                            targeted_probe=bool(chat_target_peer_id or chat_target_name),
+                            min_members_target=min_members_target,
+                            members_count=len(members),
+                            step_updated_total=step_updated_total,
+                            unresolved_visible_count=unresolved_visible_count,
+                            remaining_runtime_sec=remaining_runtime,
+                        ):
+                            deep_yield_stop = True
+                            print(
+                                f"INFO: stop chat discovery after productive deep at step {step} "
+                                f"(filled={step_updated_total}, remaining_runtime={remaining_runtime:.1f}s)"
+                            )
 
         if max_members_effective and len(members) > max_members_effective:
             members = members[:max_members_effective]
@@ -2914,6 +2962,9 @@ def _collect_members_from_chat(
 
         if max_members_effective and len(members) >= max_members_effective:
             print(f"INFO: chat max-members reached ({max_members_effective}), stopping")
+            break
+        if deep_yield_stop:
+            print("INFO: chat stopped early after productive deep yield")
             break
 
         timestamps = [int(value) for value in re.findall(r'data-timestamp="(\d+)"', html_payload)]
@@ -3032,6 +3083,7 @@ def _collect_members_from_chat(
         "deep_updated": deep_updated_total,
         "deep_deferred_steps": deep_deferred_steps,
         "deep_priority_rounds": deep_priority_rounds_total,
+        "deep_yield_stop": int(deep_yield_stop),
         "runtime_limited": int(runtime_limited),
     }
     if isinstance(discovery_state, dict):

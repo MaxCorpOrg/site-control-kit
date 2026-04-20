@@ -302,6 +302,8 @@ payload = {
     "chat_deep_attempted": int(chat_stats.get("deep_attempted", 0) or 0),
     "chat_deep_updated": int(chat_stats.get("deep_updated", 0) or 0),
     "chat_deep_deferred_steps": int(chat_stats.get("deep_deferred_steps", 0) or 0),
+    "chat_deep_priority_rounds": int(chat_stats.get("deep_priority_rounds", 0) or 0),
+    "chat_deep_yield_stop": int(chat_stats.get("deep_yield_stop", 0) or 0),
     "chat_runtime_limited": int(chat_stats.get("runtime_limited", 0) or 0),
     "info_scroll_steps_done": int(info_stats.get("scroll_steps_done", 0) or 0),
     "info_total_hint": int(info_stats.get("total_hint", 0) or 0),

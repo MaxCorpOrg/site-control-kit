@@ -71,6 +71,7 @@ cd /home/max/site-control-kit
 - если Telegram два раза подряд отвечает `No visible menu item found by text`, deep раньше прекращает бесполезные повторные попытки и быстрее уходит в fallback;
 - repeated failure peer теперь автоматически деградируют в приоритете deep-выбора, а fresh peer идут раньше;
 - repeated failure peer теперь ещё и попадают в мягкий cooldown: если есть более свежие кандидаты, deep не тратит первую волну на заведомо проблемный peer;
+- если текущий deep-step уже дал сильный результат и до конца runtime осталось мало, exporter может закончить run раньше, не сжигая хвост времени на малополезный discovery;
 - если задан высокий `CHAT_MIN_MEMBERS`, chat-экспорт переходит в discovery-first режим: сначала быстрее добирает новых авторов, отслеживает смену видимого слоя чата по `data-mid/data-peer-id` и при застое делает мягкий burst-скролл, а deep запускает реже, чтобы не сжечь весь runtime на первых шагах;
 - парсит не только явные sender-label блоки, но и avatar-only группы сообщений, поэтому видимых участников из текущего DOM собирается больше;
 - сохраняет полный последний снимок в `latest_full.md` и `latest_full.txt`;
@@ -108,7 +109,7 @@ cd /home/max/site-control-kit
   --target-unique-members 30
 ```
 
-`run.json` теперь дублирует ключевую телеметрию экспортёра: `unique_members`, `members_with_username`, `chat_scroll_steps_done`, `chat_jump_scrolls_done`, `deep_updated_total`, `history_backfilled_total`, `output_usernames_cleared_total`, а полный сырой payload лежит в `export_stats.json`.
+`run.json` теперь дублирует ключевую телеметрию экспортёра: `unique_members`, `members_with_username`, `chat_scroll_steps_done`, `chat_jump_scrolls_done`, `deep_updated_total`, `history_backfilled_total`, `output_usernames_cleared_total`, `chat_deep_priority_rounds`, `chat_deep_yield_stop`, а полный сырой payload лежит в `export_stats.json`.
 Также в `run.json` есть признаки продвижения/сохранения latest-снимков: `latest_full_promoted`, `latest_safe_promoted`, `latest_full_best_source`, `latest_safe_best_source`.
 
 Если Telegram Web перестал реально прокручиваться, chat-экспорт теперь завершится предупреждением `chat scroll stuck after 3 attempts`, вместо длинного пустого прогона.
