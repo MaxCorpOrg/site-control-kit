@@ -338,6 +338,51 @@ class TelegramExportRuntimeTests(unittest.TestCase):
         self.assertFalse(self.mod._client_supports_content_command(clients, "client-1", "run_script"))
         self.assertFalse(self.mod._client_supports_content_command(clients, "missing", "click_menu_text"))
 
+    def test_sanitize_output_keeps_fresh_live_username_when_history_is_stale(self) -> None:
+        members = [
+            {
+                "peer_id": "555101371",
+                "name": "Teimur",
+                "username": "@Teimur_92",
+                "status": "из чата",
+                "role": "—",
+            }
+        ]
+
+        restored, cleared = self.mod._sanitize_member_usernames_for_output(
+            members=members,
+            historical_username_to_peer={"@abuzayd06": "555101371"},
+            historical_peer_to_username={"555101371": "@abuzayd06"},
+        )
+
+        self.assertEqual(restored, 0)
+        self.assertEqual(cleared, 0)
+        self.assertEqual(members[0]["username"], "@Teimur_92")
+
+    def test_sanitize_output_restores_historical_username_when_live_value_conflicts(self) -> None:
+        members = [
+            {
+                "peer_id": "555101371",
+                "name": "Teimur",
+                "username": "@shared_name",
+                "status": "из чата",
+                "role": "—",
+            }
+        ]
+
+        restored, cleared = self.mod._sanitize_member_usernames_for_output(
+            members=members,
+            historical_username_to_peer={
+                "@shared_name": "999",
+                "@abuzayd06": "555101371",
+            },
+            historical_peer_to_username={"555101371": "@abuzayd06"},
+        )
+
+        self.assertEqual(restored, 1)
+        self.assertEqual(cleared, 0)
+        self.assertEqual(members[0]["username"], "@abuzayd06")
+
 
 if __name__ == "__main__":
     unittest.main()

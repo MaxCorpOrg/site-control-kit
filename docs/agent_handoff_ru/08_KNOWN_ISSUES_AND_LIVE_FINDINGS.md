@@ -117,6 +117,28 @@ Self-reload и capability handshake уже подтверждены живьём
   - текущий limit уже не только в menu/helper throughput;
   - есть отдельный downstream bug, где history backfill или final sanitize может перетирать свежий live username более старым значением.
 
+### Статус этого history/safe дефекта
+Снят.
+
+Подтверждение:
+- live run: `/home/max/telegram_contact_batches/chat_-1002465948544/runs/20260423T134454Z/run.json`
+- log: `/home/max/telegram_contact_batches/chat_-1002465948544/runs/20260423T134454Z/export.log`
+- stats: `/home/max/telegram_contact_batches/chat_-1002465948544/runs/20260423T134454Z/export_stats.json`
+- `export.log` снова содержит:
+  - `INFO: chat helper 555101371 -> @Teimur_92`
+- но теперь это значение дошло и в downstream outputs:
+  - `/home/max/telegram_contact_batches/chat_-1002465948544/runs/20260423T134454Z/snapshot_safe.md`
+  - `/home/max/telegram_contact_batches/chat_-1002465948544/5.txt`
+  - `/home/max/telegram_contact_batches/chat_-1002465948544/identity_history.json`
+- в `identity_history.json`:
+  - `peer_to_username["555101371"] == "@teimur_92"`
+  - `username_to_peer["@teimur_92"] == "555101371"`
+  - старой `username_to_peer["@abuzayd06"]` больше нет
+
+Новый остаточный нюанс уже не в самом safe/history conflict:
+- wrapper может оставить `latest_safe.*` на старом baseline snapshot, если свежий run слабее по общему числу usernames;
+- то есть run-level snapshot уже корректный, а вот promotion policy всё ещё оптимизирует под quantity, а не под freshness of changed peer identity.
+
 ### Group dialog restore в целом работает лучше, чем раньше
 Раньше один тяжёлый peer мог ломать остаток deep-step.
 Теперь path заметно устойчивее, хотя warning-поведение всё ещё встречается.
@@ -124,8 +146,9 @@ Self-reload и capability handshake уже подтверждены живьём
 ## Основные Открытые Риски
 1. Главный текущий limit: в текущем Telegram Web menu-path часто вообще не содержит `Mention`, даже когда context menu открылось корректно.
 2. Даже в `deep`-профиле runtime часто уходит в helper fallback вместо прямого menu-click path.
-3. Текущий честный baseline всё ещё только `9` safe usernames, а целевая планка остаётся `40+`.
-4. `export_telegram_members_non_pii.py` остаётся монолитным.
+3. Run-level safe outputs уже могут быть корректнее `latest_safe.*`, потому что promotion policy пока ориентируется на общее количество usernames, а не на freshness peer rename.
+4. Текущий честный baseline всё ещё только `9` safe usernames, а целевая планка остаётся `40+`.
+5. `export_telegram_members_non_pii.py` остаётся монолитным.
 
 ## Самый Полезный Мысленный Фильтр Для Следующего Агента
 Если следующий баг снова звучит как "не собрал username", не надо начинать с нуля.

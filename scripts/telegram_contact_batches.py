@@ -328,17 +328,11 @@ def evaluate_identity_records(
             continue
 
         historical_username = peer_to_username.get(peer_id)
-        if historical_username and historical_username != username:
-            conflicts.append(
-                {
-                    "reason": "peer_changed_username",
-                    "username": username,
-                    "peer_id": peer_id,
-                    "previous_username": historical_username,
-                    "name": record.name,
-                }
-            )
-            continue
+        if historical_username:
+            historical_username_normalized = normalize_username(historical_username)
+            if historical_username_normalized and historical_username_normalized != username:
+                if username_to_peer.get(historical_username_normalized) == peer_id:
+                    username_to_peer.pop(historical_username_normalized, None)
 
         current_username_to_peer[username] = peer_id
         current_peer_to_username[peer_id] = username

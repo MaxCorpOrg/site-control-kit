@@ -234,6 +234,57 @@ class TelegramContactBatchesTests(unittest.TestCase):
         self.assertTrue(conflicts_json.exists())
         self.assertIn("@alice_111", conflicts_json.read_text(encoding="utf-8"))
 
+    def test_save_new_batch_accepts_username_change_for_same_peer(self) -> None:
+        batch_dir = self.root / "chat"
+        batch_dir.mkdir()
+
+        first_source = self.root / "first_source.txt"
+        first_source.write_text("@abuzayd06\n", encoding="utf-8")
+        first_md = self.root / "first_latest_full.md"
+        first_md.write_text(
+            "# Report\n\n"
+            "| # | Имя | Username | Статус | Роль | Peer ID |\n"
+            "|---|---|---|---|---|---|\n"
+            "| 1 | Teimur | @abuzayd06 | — | — | 555101371 |\n",
+            encoding="utf-8",
+        )
+
+        count, path, review_count, review_path, safe_md, safe_txt, safe_count = self.mod.save_new_batch(first_source, batch_dir, first_md)
+        self.assertEqual(count, 1)
+        self.assertEqual(path, batch_dir / "1.txt")
+        self.assertEqual(review_count, 0)
+        self.assertIsNone(review_path)
+        self.assertEqual(safe_count, 1)
+        self.assertEqual(safe_txt.read_text(encoding="utf-8"), "@abuzayd06\n")
+
+        second_source = self.root / "second_source.txt"
+        second_source.write_text("@teimur_92\n", encoding="utf-8")
+        second_md = self.root / "second_latest_full.md"
+        second_md.write_text(
+            "# Report\n\n"
+            "| # | Имя | Username | Статус | Роль | Peer ID |\n"
+            "|---|---|---|---|---|---|\n"
+            "| 1 | Teimur | @teimur_92 | — | — | 555101371 |\n",
+            encoding="utf-8",
+        )
+
+        count, path, review_count, review_path, safe_md, safe_txt, safe_count = self.mod.save_new_batch(second_source, batch_dir, second_md)
+
+        self.assertEqual(count, 1)
+        self.assertEqual(path, batch_dir / "2.txt")
+        self.assertEqual(path.read_text(encoding="utf-8"), "@teimur_92\n")
+        self.assertEqual(review_count, 0)
+        self.assertIsNone(review_path)
+        self.assertEqual(safe_count, 1)
+        self.assertEqual(safe_txt, batch_dir / "latest_safe.txt")
+        self.assertEqual(safe_txt.read_text(encoding="utf-8"), "@teimur_92\n")
+        self.assertIn("@teimur_92", safe_md.read_text(encoding="utf-8"))
+
+        history = self.mod.load_history(batch_dir)
+        self.assertEqual(history["peer_to_username"]["555101371"], "@teimur_92")
+        self.assertEqual(history["username_to_peer"]["@teimur_92"], "555101371")
+        self.assertNotIn("@abuzayd06", history["username_to_peer"])
+
 
 if __name__ == "__main__":
     unittest.main()

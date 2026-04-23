@@ -7,6 +7,10 @@
 - усиливать discovery/scroll и helper-tab throughput, чтобы за тот же runtime проходить больше peer;
 - только так двигать общий набор usernames к цели `40+`.
 
+Отдельный подшаг рядом с этим приоритетом:
+- решить, как promotion policy должна обращаться со свежим peer-rename run;
+- сейчас run-level `snapshot_safe.md` уже может быть правильнее history/latest, но `latest_safe.*` остаётся на старом baseline, если тот сильнее по общему count.
+
 ## Почему Это Следующий Приоритет
 Потому что live smoke уже доказал:
 - pipeline рабочий;
@@ -33,7 +37,8 @@
    - `deep_updated_total`
    - `members_with_username`
    - содержимое `latest_full.txt` и `latest_safe.txt`
-6. Если helper/discovery optimisation всё ещё не даёт роста, искать следующий источник usernames внутри Telegram Web, а не тратить ещё один цикл на obsolete `Mention` path.
+6. Отдельно проверить, не осталось ли `latest_safe.*` на старом baseline, если новый run обновил username у уже известного peer.
+7. Если helper/discovery optimisation всё ещё не даёт роста, искать следующий источник usernames внутри Telegram Web, а не тратить ещё один цикл на obsolete `Mention` path.
 
 ## Следующий Приоритет P1
 ### Разрезать Монолитный Exporter
@@ -67,4 +72,5 @@
     - `members_with_username = 9`
     - `deep_updated_total = 9`
 - в `export.log` меньше пустых retry на menu-path и больше реально обработанных peer через helper/discovery;
-- `latest_full.txt` / `latest_safe.txt` растут дальше к целевой планке `40+`.
+- `latest_full.txt` / `latest_safe.txt` растут дальше к целевой планке `40+`;
+- если run обновил username у уже известного peer, это изменение не теряется ни в `snapshot_safe`, ни в `identity_history`, ни при необходимости в `latest_safe.*`.

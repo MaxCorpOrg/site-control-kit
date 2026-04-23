@@ -11,6 +11,22 @@
 ## Сделано
 
 ### Обновление 2026-04-23
+- Починен downstream overwrite свежих live usernames:
+  - в `scripts/export_telegram_members_non_pii.py` final sanitize больше не восстанавливает historical username поверх свежего live/helper результата автоматически;
+  - historical restore теперь включается только если текущий username реально конфликтует с другим peer/history, а не просто отличается от старого значения;
+  - в `scripts/telegram_contact_batches.py` safe/history layer теперь принимает смену username у того же `peer_id` как допустимое обновление, если новый username не принадлежит другому peer.
+- Новый live fast-run подтвердил это на том же конфликтном кейсе:
+  - run: `/home/max/telegram_contact_batches/chat_-1002465948544/runs/20260423T134454Z/run.json`
+  - log: `/home/max/telegram_contact_batches/chat_-1002465948544/runs/20260423T134454Z/export.log`
+  - stats: `/home/max/telegram_contact_batches/chat_-1002465948544/runs/20260423T134454Z/export_stats.json`
+  - helper снова добыл `@Teimur_92` для peer `555101371`;
+  - `snapshot_safe.md` этого run уже содержит `@teimur_92`, а numbered batch `5.txt` тоже содержит `@teimur_92`;
+  - `identity_history.json` обновился на `555101371 -> @teimur_92`, а старая запись `@abuzayd06` удалена из `username_to_peer`.
+- Остаточный нюанс после этого фикса уже другой:
+  - `latest_safe.txt` в chat-dir может остаться старым не из-за safe-conflict, а потому что wrapper выбирает более сильный snapshot по общему числу usernames;
+  - в live run `20260423T134454Z` это и произошло: safe snapshot был корректный, но не был promoted в `latest_safe.*`, потому что baseline snapshot содержал `8` usernames против `7`.
+
+### Обновление 2026-04-23
 - Добавлен отдельный Firefox dev/debug contour для bridge:
   - `extension/manifest.json` теперь содержит и `background.service_worker`, и `background.scripts` c `preferred_environment`, чтобы один и тот же background path поднимался и в Chromium, и в Firefox;
   - добавлен `browser_specific_settings.gecko.id`, чтобы Firefox-path был стабильнее для dev-run;
@@ -213,7 +229,7 @@
   - при открытии такой страницы расширение вызывает `chrome.runtime.reload()` само.
 
 ## Проверено
-- Текущий локальный unit-набор зелёный: `83/83`.
+- Текущий локальный unit-набор зелёный: `86/86`.
 - `python3 -m py_compile webcontrol/cli.py` -> OK.
 - `bash -n scripts/auto_collect_usernames.sh` -> OK.
 - Живой reload helper подтверждён на локальной `main`:

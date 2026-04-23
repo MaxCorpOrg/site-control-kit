@@ -1368,32 +1368,57 @@ def _sanitize_member_usernames_for_output(
     restored = 0
     cleared = 0
 
+    def can_use_username(peer_id: str, username: str) -> tuple[bool, str | None, str | None]:
+        normalized = _normalize_username(str(username or ""))
+        if normalized == "—":
+            return False, "", "empty"
+        key = normalized.lower()
+        historical_owner = str((historical_username_to_peer or {}).get(key) or "").strip()
+        if historical_owner and historical_owner != peer_id:
+            return False, historical_owner, "historical_username_owner"
+        existing_peer = username_to_peer.get(key)
+        if existing_peer and existing_peer != peer_id:
+            return False, existing_peer, "runtime_duplicate"
+        return True, None, None
+
     for item in members:
         peer_id = str(item.get("peer_id") or "").strip()
         current_username = _normalize_username(str(item.get("username") or ""))
         historical_username = normalized_peer_history.get(peer_id, "—")
         if historical_username != "—" and current_username != "—" and historical_username.lower() != current_username.lower():
-            item["username"] = historical_username
-            current_username = historical_username
-            restored += 1
+            current_ok, _, _ = can_use_username(peer_id, current_username)
+            if not current_ok:
+                historical_ok, _, _ = can_use_username(peer_id, historical_username)
+                if historical_ok:
+                    item["username"] = historical_username
+                    current_username = historical_username
+                    restored += 1
+                else:
+                    item["username"] = "—"
+                    cleared += 1
+                    continue
 
         if current_username == "—":
             continue
 
-        key = current_username.lower()
-        historical_owner = str((historical_username_to_peer or {}).get(key) or "").strip()
-        if historical_owner and historical_owner != peer_id:
-            item["username"] = "—"
-            cleared += 1
-            continue
+        current_ok, _, _ = can_use_username(peer_id, current_username)
+        if not current_ok:
+            if historical_username != "—" and historical_username.lower() != current_username.lower():
+                historical_ok, _, _ = can_use_username(peer_id, historical_username)
+                if historical_ok:
+                    item["username"] = historical_username
+                    current_username = historical_username
+                    restored += 1
+                else:
+                    item["username"] = "—"
+                    cleared += 1
+                    continue
+            else:
+                item["username"] = "—"
+                cleared += 1
+                continue
 
-        existing_peer = username_to_peer.get(key)
-        if existing_peer and existing_peer != peer_id:
-            item["username"] = "—"
-            cleared += 1
-            continue
-
-        username_to_peer[key] = peer_id
+        username_to_peer[current_username.lower()] = peer_id
 
     return restored, cleared
 
