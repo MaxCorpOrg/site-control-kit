@@ -193,6 +193,7 @@ class HubRequestHandler(BaseHTTPRequestHandler):
                     "command_id": record["id"],
                     "status": record["status"],
                     "target_client_ids": record.get("target_client_ids", []),
+                    "error": record.get("rejection_reason"),
                 },
             )
             return

@@ -22,6 +22,21 @@ class BrowserCliHelperTests(unittest.TestCase):
         selected = _pick_client(clients)
         self.assertEqual(selected["client_id"], "client-b")
 
+    def test_pick_client_uses_freshest_online_when_required(self) -> None:
+        clients = [
+            {"client_id": "client-a", "last_seen": "2026-03-31T12:00:00+00:00", "is_online": False},
+            {"client_id": "client-b", "last_seen": "2026-03-31T11:00:00+00:00", "is_online": True},
+        ]
+        selected = _pick_client(clients, require_online=True)
+        self.assertEqual(selected["client_id"], "client-b")
+
+    def test_pick_client_rejects_offline_requested_client_when_online_required(self) -> None:
+        clients = [
+            {"client_id": "client-a", "last_seen": "2026-03-31T12:00:00+00:00", "is_online": False},
+        ]
+        with self.assertRaisesRegex(RuntimeError, "offline"):
+            _pick_client(clients, "client-a", require_online=True)
+
     def test_extract_command_result_for_selected_client(self) -> None:
         command = {
             "deliveries": {

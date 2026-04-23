@@ -27,6 +27,17 @@ browser.cmd tabs
 
 Если `status` показывает клиента, контур готов к работе.
 
+Для Linux есть единый запускной вход:
+
+```bash
+cd /home/max/site-control-kit
+./start-browser.sh
+./browser.sh status
+./browser.sh tabs
+```
+
+Скрипт `start-browser.sh` сам поднимет хаб и попытается запустить совместимый браузерный клиент.
+
 ## Базовые Команды
 
 Открыть страницу:
@@ -40,6 +51,8 @@ browser.cmd new-tab https://example.com
 
 ```cmd
 browser.cmd click "button[type='submit']"
+browser.cmd context-click ".item"
+browser.cmd clear "#editable-message-text"
 browser.cmd fill "#email" "user@example.com"
 browser.cmd focus "#search"
 browser.cmd press Enter
@@ -77,8 +90,10 @@ browser.cmd js "return { title: document.title, href: location.href };"
 ## Выбор Клиента И Вкладки
 
 По умолчанию инструмент:
-- берёт самый свежий подключённый браузерный клиент;
+- берёт самый свежий онлайн браузерный клиент;
 - работает с активной вкладкой, если не задано иное.
+
+Если онлайн-клиентов несколько и вы работаете через low-level `send`, лучше всегда указывать `--client-id` или `--broadcast`. Без явного target команда будет автоматически направлена только когда онлайн-клиент ровно один.
 
 Работа по URL-фрагменту:
 
@@ -110,6 +125,12 @@ browser.cmd --client-id client-REPLACE tabs
 1. Перезагрузить расширение.
 2. Снова проверить `browser.cmd status`.
 3. Проверить, что токен и URL в настройках расширения совпадают с хабом.
+
+Если на Linux доступен только branded `google-chrome`, учтите:
+1. current Chrome builds могут игнорировать `--load-extension` и `--disable-extensions-except`;
+2. в этом случае `./start-browser.sh` откроет выделенный профиль на `chrome://extensions`;
+3. unpacked extension нужно загрузить один раз вручную из папки `extension/`;
+4. после этого дальше можно работать обычными командами `./browser.sh ...`.
 
 ## Ограничения
 - `chrome://*` и похожие системные страницы недоступны для content script.

@@ -121,6 +121,10 @@ tab-level API   content.js -> DOM страницы
 - `client_ids` — список клиентов;
 - `broadcast=true` — всем клиентам.
 
+Без явного target:
+- если онлайн-клиент ровно один, хаб может безопасно направить команду ему;
+- если онлайн-клиентов несколько, команда должна быть отклонена как неоднозначная.
+
 Выбор вкладки внутри клиента:
 1. `target.tab_id`
 2. `target.url_pattern`
@@ -143,7 +147,9 @@ tab-level API   content.js -> DOM страницы
 ### DOM-команды
 Выполняются внутри страницы через `content.js`:
 - `click`
+- `context_click`
 - `click_text`
+- `clear_editable`
 - `fill`
 - `focus`
 - `extract_text`

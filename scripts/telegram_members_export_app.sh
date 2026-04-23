@@ -4,6 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 EXPORT_SCRIPT="${SCRIPT_DIR}/export_telegram_members_non_pii.py"
 START_HUB_SCRIPT="${SCRIPT_DIR}/start_hub.sh"
+START_TELEGRAM_SCRIPT="${SCRIPT_DIR}/start_telegram.sh"
 
 if ! command -v zenity >/dev/null 2>&1; then
   echo "ERROR: zenity is not installed. Install package 'zenity' and rerun." >&2
@@ -58,6 +59,12 @@ hub_is_alive() {
   curl -fsS "${url}/health" >/dev/null 2>&1
 }
 
+have_bridge_client() {
+  local server_url="$1"
+  local access_token="$2"
+  curl -fsS --max-time 3 -H "X-Access-Token: ${access_token}" "${server_url}/api/clients" | rg -q '"client_id"'
+}
+
 list_open_telegram_dialogs() {
   local server_url="$1"
   local access_token="$2"
@@ -109,6 +116,21 @@ if ! hub_is_alive "${server}"; then
   exit 1
 fi
 
+if ! have_bridge_client "${server}" "${token}" && [[ -x "${START_TELEGRAM_SCRIPT}" ]]; then
+  nohup env SITECTL_TOKEN="${token}" bash "${START_TELEGRAM_SCRIPT}" >/tmp/telegram_members_export_browser.log 2>&1 &
+  for _ in {1..20}; do
+    if have_bridge_client "${server}" "${token}"; then
+      break
+    fi
+    sleep 0.5
+  done
+fi
+
+if ! have_bridge_client "${server}" "${token}"; then
+  zenity --warning --title="Telegram Members Export" --text="Telegram-клиент ещё не подключён.\n\nЯ открыл рабочий Telegram-профиль браузера. Если это Google Chrome, один раз загрузите unpacked extension из:\n${SCRIPT_DIR}/../extension\n\nПосле появления клиента повторите экспорт."
+  exit 1
+fi
+
 output_path="$(
   zenity \
     --file-selection \
@@ -127,12 +149,12 @@ mode_choice="$(
     --list \
     --radiolist \
     --title="Режим сбора" \
-    --text="Выберите источник участников:" \
+    --text="Выберите источник участников (рекомендуется: чат + инфо):" \
     --column="" \
     --column="Режим" \
-    TRUE "Взять из инфо группы" \
+    FALSE "Взять из инфо группы" \
     FALSE "Взять из чата группы" \
-    FALSE "Объединить: чат + инфо" \
+    TRUE "Объединить: чат + инфо" \
     --height=260 \
     --width=420
 )"
@@ -141,11 +163,13 @@ if [[ -z "${mode_choice:-}" ]]; then
   exit 0
 fi
 
-source_mode="info"
+source_mode="both"
 if [[ "${mode_choice}" == "Взять из чата группы" ]]; then
   source_mode="chat"
 elif [[ "${mode_choice}" == "Объединить: чат + инфо" ]]; then
   source_mode="both"
+elif [[ "${mode_choice}" == "Взять из инфо группы" ]]; then
+  source_mode="info"
 fi
 
 group_url=""

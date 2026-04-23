@@ -26,6 +26,7 @@ browser.cmd open https://example.com
 Если репозиторий открыт в рабочей папке агента, считайте `site-control-kit` основным локальным инструментом управления браузером.
 
 Что читать агенту:
+- [AUTOPILOT.yaml](AUTOPILOT.yaml) — repo-local автопилот: как действовать без лишних подтверждений и чем проверять результат.
 - [BROWSER_QUICKSTART.md](BROWSER_QUICKSTART.md) — короткий вход и рабочие команды.
 - [AGENTS.md](AGENTS.md) — правила и политика использования инструмента в репозитории.
 - [docs/AI_MAINTAINER_GUIDE.md](docs/AI_MAINTAINER_GUIDE.md) — как использовать, изменять и улучшать инструмент.
@@ -125,6 +126,29 @@ cd /home/max/site-control-kit
 
 Готовый архив: `dist/site-control-bridge-extension.zip`
 
+### Быстрый запуск рабочего контура на Linux
+
+Если нужен один вход в рабочий контур, используйте:
+
+```bash
+cd /home/max/site-control-kit
+./start-browser.sh
+```
+
+Что делает скрипт:
+- поднимает хаб автоматически, если он ещё не запущен;
+- предпочитает Chromium-совместимый браузер, где можно загрузить unpacked extension флагами;
+- если доступен только branded `google-chrome`, открывает выделенный профиль и даёт one-time шаги для ручной загрузки `extension/`.
+
+После этого рабочие команды:
+
+```bash
+cd /home/max/site-control-kit
+./browser.sh status
+./browser.sh tabs
+./browser.sh open https://example.com
+```
+
 ## 3) Проверка связи
 
 ```bash
@@ -142,20 +166,92 @@ scripts\browser.cmd status
 scripts\browser.cmd tabs
 scripts\browser.cmd open https://example.com
 scripts\browser.cmd click "button[type='submit']"
+scripts\browser.cmd context-click ".item"
+scripts\browser.cmd clear "#editable-message-text"
 scripts\browser.cmd fill "#email" "user@example.com"
 scripts\browser.cmd text main
 scripts\browser.cmd screenshot --output .\shot.png
 ```
 
-Если клиент один, он выбирается автоматически. Если клиентов несколько, по умолчанию берётся самый свежий, либо можно указать `--client-id`.
+Если онлайн-клиент один, он выбирается автоматически. Для реальных действий `browser ...` берёт самый свежий онлайн-клиент. Если онлайн-клиентов несколько, по умолчанию берётся самый свежий, либо можно указать `--client-id`.
 
 CLI внутри Python-пакета:
 
 ```bash
 sitectl browser status
 sitectl browser open https://example.com
+sitectl browser clear "#editable-message-text"
 sitectl browser press Enter
 ```
+
+Linux-обёртка:
+
+```bash
+./browser.sh status
+./browser.sh text body
+```
+
+## Telegram Workflow
+
+Для Telegram Web есть отдельный рабочий вход:
+
+```bash
+cd /home/max/site-control-kit
+./start-telegram.sh
+```
+
+Что делает этот запуск:
+- поднимает хаб;
+- открывает браузерный профиль на `web.telegram.org`;
+- если bridge-клиента ещё нет, Telegram export-скрипты сами попытаются открыть этот профиль повторно.
+
+CLI-экспорт:
+
+```bash
+cd /home/max/site-control-kit
+./telegram-export.sh --source both --deep-usernames
+```
+
+Примечание:
+- `--force-navigate` теперь умеет переживать Telegram redirect в `web.telegram.org/k/` и сам доводит вкладку до реального открытого диалога;
+- если Telegram Web не даёт автоматически открыть `Group Info -> Members`, режим `--source both` теперь не падает, а продолжает выгрузку через `chat` fallback;
+- если Telegram Web в `Group Info` отдаёт только preview админов/модераторов вместо полного каталога участников, экспортёр теперь помечает это как `info-preview` и рекомендует `--source both`;
+- если `Group Info -> Members` открылся, но в DOM загружена только часть списка, экспортёр честно предупредит сколько участников видно сейчас и какой общий hint вернул Telegram;
+- направление скролла тут важно только для `chat`-режима: чат читается прокруткой вверх, а `info`-режим использует прокрутку вниз только когда Telegram реально отдал список участников; в `info-preview` смена направления колеса обычно ничего не меняет;
+- в текущем Telegram Web chat-проход больше не опирается на старые `.bubbles`-селектора: инструмент умеет листать историю через новый `MessageList/backwards-trigger` DOM и реально поднимать новых авторов из истории;
+- chat-проход теперь может автоматически продлеваться после `--chat-scroll-steps`, пока реально появляются новые авторы; лимит задаётся через `--chat-auto-extra-steps`;
+- каждый экспорт дополнительно архивируется в [artifacts/telegram_exports](/home/max/site-control-kit/artifacts/telegram_exports) и записывается в индекс [INDEX.md](/home/max/site-control-kit/artifacts/telegram_exports/INDEX.md);
+- рядом с каждым экспортом теперь автоматически пишутся отдельные sidecar-файлы `*_usernames.txt` и `*_usernames.json`, чтобы собранные `@username` можно было брать без парсинга markdown-таблицы;
+- `--deep-usernames` больше не должен уводить основную групповую вкладку в личные диалоги: usernames дочитываются через временные helper tabs;
+- `--deep-usernames` в `info`-режиме может работать заметно дольше обычного запуска, потому что Telegram последовательно открывает видимые профили;
+- для максимально полного списка участников всё равно лучше вручную открыть `Group Info -> Members` перед повторным запуском.
+
+GUI-экспорт:
+
+```bash
+cd /home/max/site-control-kit
+./scripts/telegram_members_export_app.sh
+```
+
+Быстрый сбор именно `@username`, встречающихся в chat history/mentions:
+
+```bash
+cd /home/max/site-control-kit
+python3 scripts/export_telegram_chat_mentions.py --target-count 40
+```
+
+Этот режим не пытается привязать username к карточке участника. Он просто листает историю чата и сохраняет найденные `@username` в `*.txt` / `*.json`.
+
+Разовый CLI-сценарий для chat-mode:
+
+```bash
+cd /home/max/site-control-kit
+./scripts/run_chat_export_once.sh "$SITECTL_TOKEN"
+```
+
+Важно:
+- если на Linux доступен только branded `google-chrome`, one-time загрузите unpacked extension из `extension/` в выделенном профиле;
+- после этого Telegram-скрипты будут использовать уже этот профиль и искать Telegram-вкладку по всем живым клиентам, а не только по первому найденному.
 
 ## 4) Примеры команд
 
@@ -184,10 +280,30 @@ python3 -m webcontrol send --type wait_selector --client-id client-REPLACE_ME --
 python3 -m webcontrol send --type extract_text --client-id client-REPLACE_ME --selector "main" --wait 20
 ```
 
+Важно:
+- `send` без явного target теперь безопаснее: если онлайн-клиент ровно один, он выбирается автоматически.
+- Если онлайн-клиентов несколько, команда без `--client-id`, `--client-ids` или `--broadcast` будет отклонена хабом.
+
 ## 5) Просмотр состояния хаба
 
 ```bash
 python3 -m webcontrol state
+```
+
+## 6) Автоматическая Проверка
+
+Базовый verify-контур одной командой:
+
+```bash
+cd /home/max/site-control-kit
+./scripts/verify.sh
+```
+
+Если уже есть живой браузерный клиент и нужно прогнать live smoke:
+
+```bash
+cd /home/max/site-control-kit
+./scripts/verify.sh --live-browser
 ```
 
 ## Установка CLI как команды `sitectl`

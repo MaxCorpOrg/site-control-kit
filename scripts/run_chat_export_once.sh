@@ -18,6 +18,7 @@ CHAT_DEEP_MODE="${8:-url}"
 ROOT="/home/max/site-control-kit"
 HUB_URL="http://127.0.0.1:8765"
 STARTED_HUB=0
+START_TELEGRAM_SCRIPT="$ROOT/scripts/start_telegram.sh"
 
 cd "$ROOT"
 cleanup() {
@@ -67,7 +68,20 @@ for _ in {1..40}; do
 done
 
 if ! curl -fsS --max-time 2 -H "X-Access-Token: ${TOKEN}" "${HUB_URL}/api/clients" | rg -q '"client_id"'; then
-  echo "ERROR: no connected bridge clients. Open Telegram Web tab and wait 2-3s." >&2
+  if [[ -x "${START_TELEGRAM_SCRIPT}" ]]; then
+    echo "INFO: no connected bridge clients, opening Telegram Web profile..." >&2
+    nohup env SITECTL_TOKEN="${TOKEN}" bash "${START_TELEGRAM_SCRIPT}" >/tmp/sitectl_telegram_browser.log 2>&1 &
+    for _ in {1..30}; do
+      if curl -fsS --max-time 2 -H "X-Access-Token: ${TOKEN}" "${HUB_URL}/api/clients" | rg -q '"client_id"'; then
+        break
+      fi
+      sleep 0.5
+    done
+  fi
+fi
+
+if ! curl -fsS --max-time 2 -H "X-Access-Token: ${TOKEN}" "${HUB_URL}/api/clients" | rg -q '"client_id"'; then
+  echo "ERROR: no connected bridge clients. The Telegram browser profile was opened; finish the one-time extension setup there if needed, then rerun." >&2
   exit 1
 fi
 

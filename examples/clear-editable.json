@@ -1,0 +1,15 @@
+{
+  "issued_by": "example",
+  "timeout_ms": 30000,
+  "target": {
+    "client_id": "client-REPLACE",
+    "active": true
+  },
+  "command": {
+    "type": "clear_editable",
+    "selectors": [
+      "#editable-message-text",
+      ".input-message-input[contenteditable='true']"
+    ]
+  }
+}

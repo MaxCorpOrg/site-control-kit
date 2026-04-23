@@ -33,7 +33,7 @@
 ```
 
 Ключевые DOM-команды:
-- `click`, `click_text`, `fill`, `focus`
+- `click`, `context_click`, `click_text`, `clear_editable`, `fill`, `focus`
 - `extract_text`, `get_html`, `get_attribute`, `get_page_url`
 - `wait_selector`, `scroll`, `scroll_by`
 - `back`, `forward`, `press_key`, `run_script`

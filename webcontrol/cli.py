@@ -97,7 +97,16 @@ def _get_clients(server: str, token: str) -> list[dict[str, Any]]:
     return clients
 
 
-def _pick_client(clients: list[dict[str, Any]], requested_client_id: str | None = None) -> dict[str, Any]:
+def _client_is_online(client: dict[str, Any]) -> bool:
+    return bool(client.get("is_online", True))
+
+
+def _pick_client(
+    clients: list[dict[str, Any]],
+    requested_client_id: str | None = None,
+    *,
+    require_online: bool = False,
+) -> dict[str, Any]:
     if not clients:
         raise RuntimeError("No connected browser clients. Check the extension and run `sitectl clients`.")
 
@@ -105,10 +114,20 @@ def _pick_client(clients: list[dict[str, Any]], requested_client_id: str | None 
         requested = requested_client_id.strip()
         for client in clients:
             if str(client.get("client_id", "")).strip() == requested:
+                if require_online and not _client_is_online(client):
+                    raise RuntimeError(
+                        f"Browser client is known but currently offline: {requested}. "
+                        "Wait for a fresh heartbeat or choose another client."
+                    )
                 return client
         raise RuntimeError(f"Browser client not found: {requested}")
 
     ordered = sorted(clients, key=lambda item: str(item.get("last_seen", "")), reverse=True)
+    if require_online:
+        online_clients = [client for client in ordered if _client_is_online(client)]
+        if online_clients:
+            return online_clients[0]
+        raise RuntimeError("No online browser clients. Check the extension heartbeat and run `sitectl clients`.")
     return ordered[0]
 
 
@@ -171,6 +190,9 @@ def _browser_send_command(
     )
     if not response.get("ok"):
         raise RuntimeError(str(response))
+
+    if response.get("status") == "rejected":
+        raise RuntimeError(str(response.get("error") or "Command rejected by hub"))
 
     command_id = str(response.get("command_id", "")).strip()
     if not command_id:
@@ -245,7 +267,7 @@ def cmd_browser(args: argparse.Namespace) -> int:
             )
             return 0
 
-        client = _pick_client(clients, args.client_id)
+        client = _pick_client(clients, args.client_id, require_online=True)
         target = _browser_target(args, str(client.get("client_id", "")).strip())
 
         action = args.browser_action
@@ -258,6 +280,8 @@ def cmd_browser(args: argparse.Namespace) -> int:
             command = {"type": "new_tab", "url": args.url, "active": not args.background}
         elif action == "click":
             command = {"type": "click", "selector": args.selector}
+        elif action == "context-click":
+            command = {"type": "context_click", "selector": args.selector}
         elif action == "click-text":
             command = {
                 "type": "click_text",
@@ -265,6 +289,8 @@ def cmd_browser(args: argparse.Namespace) -> int:
                 "root_selector": args.root_selector,
                 "near_last_context": args.near_last_context,
             }
+        elif action == "clear":
+            command = {"type": "clear_editable", "selectors": args.selectors}
         elif action == "fill":
             command = {"type": "fill", "selector": args.selector, "value": args.value}
         elif action == "focus":
@@ -459,13 +485,20 @@ def cmd_send(args: argparse.Namespace) -> int:
 
     command_id = response.get("command_id")
     print(f"command_id={command_id}")
-    print(f"status={response.get('status')}")
+    status = str(response.get("status", "")).strip()
+    print(f"status={status}")
     print(f"targets={','.join(response.get('target_client_ids', []))}")
+    if response.get("error"):
+        print(f"error={response.get('error')}")
+
+    if status == "rejected":
+        return 1
 
     if args.wait > 0 and command_id:
         command = _wait_command(server, token, command_id, timeout_sec=args.wait, interval_sec=max(args.poll_interval, 0.1))
         print("\nfinal_command_state:")
         _print_json(command)
+        return 0 if command.get("status") == "completed" else 1
     return 0
 
 
@@ -550,7 +583,14 @@ def build_parser() -> argparse.ArgumentParser:
     send = sub.add_parser("send", help="Send command to browser extension client(s)")
     add_runtime_options(send)
     send.add_argument("--payload-file", help="JSON file with full request payload")
-    send.add_argument("--type", help="Command type (navigate/click/fill/extract_text/get_html/screenshot/wait_selector/scroll/run_script)")
+    send.add_argument(
+        "--type",
+        help=(
+            "Command type "
+            "(navigate/click/context_click/fill/clear_editable/extract_text/get_html/"
+            "screenshot/wait_selector/scroll/run_script)"
+        ),
+    )
 
     send.add_argument("--client-id", help="Target one client ID")
     send.add_argument("--client-ids", help="Comma-separated list of client IDs")
@@ -633,11 +673,19 @@ def build_parser() -> argparse.ArgumentParser:
     browser_click.add_argument("selector")
     browser_click.set_defaults(func=cmd_browser)
 
+    browser_context_click = browser_sub.add_parser("context-click", help="Open context menu on element by CSS selector")
+    browser_context_click.add_argument("selector")
+    browser_context_click.set_defaults(func=cmd_browser)
+
     browser_click_text = browser_sub.add_parser("click-text", help="Click visible element by text")
     browser_click_text.add_argument("text")
     browser_click_text.add_argument("--root-selector", default="", help="Limit search to a subtree")
     browser_click_text.add_argument("--near-last-context", action="store_true", help="Prefer matches near last context click")
     browser_click_text.set_defaults(func=cmd_browser)
+
+    browser_clear = browser_sub.add_parser("clear", help="Clear editable field by trying one or more selectors")
+    browser_clear.add_argument("selectors", nargs="+")
+    browser_clear.set_defaults(func=cmd_browser)
 
     browser_fill = browser_sub.add_parser("fill", help="Fill input by selector")
     browser_fill.add_argument("selector")

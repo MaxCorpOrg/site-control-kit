@@ -68,6 +68,153 @@ function focusElement(element) {
   }
 }
 
+function elementCenter(element) {
+  const rect = element.getBoundingClientRect();
+  return {
+    x: Math.round(rect.left + rect.width / 2),
+    y: Math.round(rect.top + rect.height / 2)
+  };
+}
+
+function dispatchPointerEvent(element, type, init) {
+  if (typeof window.PointerEvent === "function") {
+    element.dispatchEvent(new PointerEvent(type, init));
+    return;
+  }
+  if (type.startsWith("pointer")) {
+    return;
+  }
+  element.dispatchEvent(new MouseEvent(type, init));
+}
+
+function dispatchMouseClickSequence(element, options = {}) {
+  const button = Number.isFinite(options.button) ? Number(options.button) : 0;
+  const buttons = Number.isFinite(options.buttons) ? Number(options.buttons) : (button === 2 ? 2 : 1);
+  const { x, y } = elementCenter(element);
+  const common = {
+    bubbles: true,
+    cancelable: true,
+    composed: true,
+    view: window,
+    button,
+    buttons,
+    clientX: x,
+    clientY: y,
+    pointerId: 1,
+    pointerType: "mouse",
+    isPrimary: true
+  };
+
+  focusElement(element);
+
+  for (const type of ["pointerover", "pointerenter", "mouseover", "mouseenter", "pointermove", "mousemove"]) {
+    dispatchPointerEvent(element, type, common);
+  }
+
+  for (const type of ["pointerdown", "mousedown"]) {
+    dispatchPointerEvent(element, type, common);
+  }
+
+  for (const type of ["pointerup", "mouseup"]) {
+    dispatchPointerEvent(element, type, common);
+  }
+
+  if (button === 2) {
+    dispatchPointerEvent(element, "contextmenu", common);
+    return { x, y };
+  }
+
+  if (typeof element.click === "function") {
+    element.click();
+  } else {
+    dispatchPointerEvent(element, "click", common);
+  }
+  return { x, y };
+}
+
+function dispatchWheelSequence(target, deltaX, deltaY) {
+  const { x, y } = elementCenter(target);
+  const init = {
+    bubbles: true,
+    cancelable: true,
+    composed: true,
+    view: window,
+    clientX: x,
+    clientY: y,
+    deltaX,
+    deltaY,
+    deltaMode: typeof window.WheelEvent === "function" ? window.WheelEvent.DOM_DELTA_PIXEL : 0
+  };
+  if (typeof window.WheelEvent === "function") {
+    target.dispatchEvent(new WheelEvent("wheel", init));
+  } else {
+    target.dispatchEvent(new Event("wheel", { bubbles: true, cancelable: true }));
+  }
+}
+
+function isScrollableElement(node) {
+  if (!(node instanceof Element)) {
+    return false;
+  }
+  const canScrollY = Number(node.scrollHeight || 0) > Number(node.clientHeight || 0) + 2;
+  const canScrollX = Number(node.scrollWidth || 0) > Number(node.clientWidth || 0) + 2;
+  return (canScrollY || canScrollX) && (Number(node.clientHeight || 0) > 0 || Number(node.clientWidth || 0) > 0);
+}
+
+function preferredScrollableElement(startNode, rootNode) {
+  let node = startNode;
+  let match = null;
+  while (node) {
+    if (node instanceof Element) {
+      if (isScrollableElement(node)) {
+        match = node;
+      }
+      if (node === rootNode) {
+        break;
+      }
+    }
+    node = node?.parentElement || null;
+  }
+  if (match) {
+    return match;
+  }
+  return isScrollableElement(rootNode) ? rootNode : rootNode;
+}
+
+function resolveScrollTargets(element) {
+  const point = elementCenter(element);
+  if (isScrollableElement(element)) {
+    return { point, wheelTarget: element, scrollTarget: element };
+  }
+  const pointTarget = document.elementFromPoint(point.x, point.y);
+  const wheelTarget =
+    pointTarget instanceof Element && element.contains(pointTarget)
+      ? pointTarget
+      : element;
+  const scrollTarget = preferredScrollableElement(wheelTarget, element);
+  const effectiveWheelTarget = scrollTarget === element ? element : wheelTarget;
+  return { point, wheelTarget: effectiveWheelTarget, scrollTarget };
+}
+
+async function performSteppedScroll(wheelTarget, scrollTarget, deltaX, deltaY) {
+  const total = Math.max(Math.abs(deltaX), Math.abs(deltaY));
+  const steps = Math.max(1, Math.ceil(total / 160));
+  const stepX = deltaX / steps;
+  const stepY = deltaY / steps;
+  for (let i = 0; i < steps; i += 1) {
+    dispatchWheelSequence(wheelTarget, stepX, stepY);
+    if (typeof scrollTarget.scrollBy === "function") {
+      scrollTarget.scrollBy({ left: stepX, top: stepY, behavior: "auto" });
+    } else {
+      scrollTarget.scrollTop = Number(scrollTarget.scrollTop || 0) + stepY;
+      scrollTarget.scrollLeft = Number(scrollTarget.scrollLeft || 0) + stepX;
+    }
+    scrollTarget.dispatchEvent(new Event("scroll", { bubbles: false }));
+    window.dispatchEvent(new Event("scroll"));
+    await wait(24);
+  }
+}
+
 function keyCodeForKey(key) {
   const normalized = String(key || "");
   if (normalized.length === 1) {
@@ -118,6 +265,31 @@ function normalizedText(value) {
 
 let lastContextPoint = null;
 
+function closestClickable(node) {
+  if (!node || typeof node.closest !== "function") {
+    return node || null;
+  }
+  return (
+    node.closest("button, a, [role='menuitem'], [role='button'], .btn-menu-item, .MenuItem, .menu-item, [class*='menu-item'], .row") ||
+    node
+  );
+}
+
+function interactableRect(node) {
+  if (!node) {
+    return null;
+  }
+  const rect = node.getBoundingClientRect();
+  if (rect.width < 2 || rect.height < 2 || rect.bottom <= 0 || rect.right <= 0 || rect.top >= window.innerHeight || rect.left >= window.innerWidth) {
+    return null;
+  }
+  const style = window.getComputedStyle(node);
+  if (!style || style.display === "none" || style.visibility === "hidden" || style.pointerEvents === "none" || Number(style.opacity || "1") === 0) {
+    return null;
+  }
+  return { rect, style };
+}
+
 function findByText(terms, rootSelector, nearLastContext = false) {
   const root = rootSelector ? document.querySelector(rootSelector) : document;
   if (!root) {
@@ -129,7 +301,7 @@ function findByText(terms, rootSelector, nearLastContext = false) {
   }
   const nodes = Array.from(
     root.querySelectorAll(
-      "button, a, [role='menuitem'], [role='button'], .btn-menu-item, .MenuItem, .menu-item, [class*='menu-item'], .row"
+      "button, a, [role='menuitem'], [role='button'], .btn-menu-item, .MenuItem, .menu-item, [class*='menu-item'], [class*='menu-item-text'], .btn-menu-item-text, .row, span.i18n"
     )
   );
   const cx =
@@ -137,32 +309,101 @@ function findByText(terms, rootSelector, nearLastContext = false) {
   const cy =
     nearLastContext && lastContextPoint ? Number(lastContextPoint.y || window.innerHeight / 2) : window.innerHeight / 2;
   const candidates = [];
+  const seen = new Set();
   for (const node of nodes) {
-    const txt = normalizedText(node.textContent);
+    const target = closestClickable(node);
+    if (!target || seen.has(target)) {
+      continue;
+    }
+    seen.add(target);
+    const txt = normalizedText(target.textContent || node.textContent);
     if (!txt) {
       continue;
     }
     if (!needles.some((needle) => txt.includes(needle))) {
       continue;
     }
-    const rect = node.getBoundingClientRect();
-    if (rect.width < 2 || rect.height < 2 || rect.bottom <= 0 || rect.right <= 0 || rect.top >= window.innerHeight || rect.left >= window.innerWidth) {
+    const visible = interactableRect(target);
+    if (!visible) {
       continue;
     }
-    const style = window.getComputedStyle(node);
-    if (!style || style.display === "none" || style.visibility === "hidden" || style.pointerEvents === "none" || Number(style.opacity || "1") === 0) {
-      continue;
-    }
+    const { rect, style } = visible;
     const z = Number(style.zIndex) || 0;
     const dx = rect.left + rect.width / 2 - cx;
     const dy = rect.top + rect.height / 2 - cy;
     const dist = Math.abs(dx) + Math.abs(dy);
-    candidates.push({ node, z, dist });
+    candidates.push({ node: target, z, dist });
   }
   if (!candidates.length) {
     return null;
   }
   candidates.sort((a, b) => (b.z - a.z) || (a.dist - b.dist));
+  return candidates[0].node;
+}
+
+function findMenuItemByText(terms, nearLastContext = false) {
+  const needles = (Array.isArray(terms) ? terms : [terms]).map(normalizedText).filter(Boolean);
+  if (!needles.length) {
+    return null;
+  }
+  const cx =
+    nearLastContext && lastContextPoint ? Number(lastContextPoint.x || window.innerWidth / 2) : window.innerWidth / 2;
+  const cy =
+    nearLastContext && lastContextPoint ? Number(lastContextPoint.y || window.innerHeight / 2) : window.innerHeight / 2;
+
+  const menuRoots = Array.from(document.querySelectorAll(".btn-menu, [role='menu'], [class*='contextmenu'], [class*='popup'], [class*='dropdown']"));
+  const visibleRoots = [];
+  for (const root of menuRoots) {
+    const visible = interactableRect(root);
+    if (!visible) {
+      continue;
+    }
+    const { rect, style } = visible;
+    const z = Number(style.zIndex) || 0;
+    const dx = rect.left + rect.width / 2 - cx;
+    const dy = rect.top + rect.height / 2 - cy;
+    const dist = Math.abs(dx) + Math.abs(dy);
+    visibleRoots.push({ root, z, dist });
+  }
+  if (!visibleRoots.length) {
+    return null;
+  }
+  visibleRoots.sort((a, b) => (b.z - a.z) || (a.dist - b.dist));
+
+  const seen = new Set();
+  const candidates = [];
+  for (const { root, z: rootZ, dist: rootDist } of visibleRoots) {
+    const nodes = Array.from(
+      root.querySelectorAll(
+        ".btn-menu-item, [role='menuitem'], button, a, .menu-item, [class*='menu-item'], .row, .btn-menu-item-text, [class*='menu-item-text'], .i18n, span"
+      )
+    );
+    for (const node of nodes) {
+      const target = closestClickable(node);
+      if (!target || seen.has(target)) {
+        continue;
+      }
+      seen.add(target);
+      const txt = normalizedText(target.textContent || node.textContent);
+      if (!txt || !needles.some((needle) => txt.includes(needle))) {
+        continue;
+      }
+      const visible = interactableRect(target);
+      if (!visible) {
+        continue;
+      }
+      const { rect, style } = visible;
+      const z = Math.max(rootZ, Number(style.zIndex) || 0);
+      const dx = rect.left + rect.width / 2 - cx;
+      const dy = rect.top + rect.height / 2 - cy;
+      const dist = Math.abs(dx) + Math.abs(dy);
+      candidates.push({ node: target, z, dist, rootDist });
+    }
+  }
+  if (!candidates.length) {
+    return null;
+  }
+  candidates.sort((a, b) => (b.z - a.z) || (a.rootDist - b.rootDist) || (a.dist - b.dist));
   return candidates[0].node;
 }
 
@@ -203,23 +444,8 @@ async function runCommand(command) {
 
     case "context_click": {
       const el = queryElement(command.selector);
-      const rect = el.getBoundingClientRect();
-      const x = Math.round(rect.left + rect.width / 2);
-      const y = Math.round(rect.top + rect.height / 2);
+      const { x, y } = dispatchMouseClickSequence(el, { button: 2, buttons: 2 });
       lastContextPoint = { x, y };
-      for (const evt of ["mousedown", "mouseup", "contextmenu"]) {
-        el.dispatchEvent(
-          new MouseEvent(evt, {
-            bubbles: true,
-            cancelable: true,
-            view: window,
-            button: 2,
-            buttons: 2,
-            clientX: x,
-            clientY: y
-          })
-        );
-      }
       return { selector: command.selector, context_clicked: true };
     }
 
@@ -232,11 +458,17 @@ async function runCommand(command) {
       if (!node) {
         throw new Error("No clickable element found by text");
       }
-      node.scrollIntoView({ block: "center", inline: "nearest", behavior: "auto" });
-      node.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));
-      node.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window }));
-      node.click();
+      dispatchMouseClickSequence(node);
       return { clicked: true, text: String(node.textContent || "").trim() };
+    }
+
+    case "click_menu_text": {
+      const node = findMenuItemByText(command.terms || command.text || [], Boolean(command.near_last_context));
+      if (!node) {
+        throw new Error("No visible menu item found by text");
+      }
+      dispatchMouseClickSequence(node);
+      return { clicked: true, text: String(node.textContent || "").trim(), menu: true };
     }
 
     case "clear_editable": {
@@ -264,7 +496,7 @@ async function runCommand(command) {
 
     case "click": {
       const el = queryElement(command.selector);
-      el.click();
+      dispatchMouseClickSequence(el);
       return { selector: command.selector, clicked: true };
     }
 
@@ -342,21 +574,21 @@ async function runCommand(command) {
       const dy = Number.isFinite(command.delta_y) ? Number(command.delta_y) : 0;
       if (command.selector) {
         const el = queryElement(command.selector);
-        if (typeof el.scrollBy === "function") {
-          el.scrollBy({ left: dx, top: dy, behavior: "auto" });
-        } else {
-          el.scrollTop = Number(el.scrollTop || 0) + dy;
-          el.scrollLeft = Number(el.scrollLeft || 0) + dx;
-        }
+        focusElement(el);
+        const { wheelTarget, scrollTarget } = resolveScrollTargets(el);
+        await performSteppedScroll(wheelTarget, scrollTarget, dx, dy);
         return {
           selector: command.selector,
           delta_x: dx,
           delta_y: dy,
-          scrollTop: Number(el.scrollTop || 0),
+          wheelTarget: wheelTarget.className || wheelTarget.tagName,
+          scrollTarget: scrollTarget.className || scrollTarget.tagName,
+          scrollTop: Number(scrollTarget.scrollTop || 0),
           scrolled: true
         };
       }
-      window.scrollBy({ left: dx, top: dy, behavior: "auto" });
+      const pageTarget = document.scrollingElement || document.documentElement || document.body;
+      await performSteppedScroll(pageTarget, pageTarget, dx, dy);
       return { delta_x: dx, delta_y: dy, scrolled: true };
     }
 

@@ -17,15 +17,19 @@ TERMINAL_COMMAND_STATUSES = {
     "expired",
     "rejected",
 }
+CLIENT_ONLINE_WINDOW_SECONDS = 30
 
 
 def _parse_iso(ts: str | None) -> datetime | None:
     if not ts:
         return None
     try:
-        return datetime.fromisoformat(ts)
+        parsed = datetime.fromisoformat(ts)
     except ValueError:
         return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
 
 
 class ControlStore:
@@ -50,6 +54,13 @@ class ControlStore:
     def _save(self) -> None:
         dump_json(self.state_file, self._state)
 
+    def _client_is_online(self, client: dict[str, Any], *, now: datetime | None = None) -> bool:
+        last_seen = _parse_iso(str(client.get("last_seen", "")).strip())
+        if not last_seen:
+            return False
+        current = now or datetime.now(timezone.utc)
+        return last_seen >= current - timedelta(seconds=CLIENT_ONLINE_WINDOW_SECONDS)
+
     def register_client(
         self,
         *,
@@ -63,6 +74,7 @@ class ControlStore:
             clients = self._state["clients"]
             client = clients.get(client_id)
             now = now_utc_iso()
+            changed = False
             if not client:
                 client = {
                     "client_id": client_id,
@@ -74,40 +86,68 @@ class ControlStore:
                     "extension_version": extension_version,
                 }
                 clients[client_id] = client
+                changed = True
             else:
                 client["last_seen"] = now
-                if tabs is not None:
+                if tabs is not None and client.get("tabs") != tabs:
                     client["tabs"] = tabs
+                    changed = True
                 if meta:
-                    client["meta"] = {**client.get("meta", {}), **meta}
-                if user_agent:
+                    merged_meta = {**client.get("meta", {}), **meta}
+                    if client.get("meta") != merged_meta:
+                        client["meta"] = merged_meta
+                        changed = True
+                if user_agent and client.get("user_agent") != user_agent:
                     client["user_agent"] = user_agent
-                if extension_version:
+                    changed = True
+                if extension_version and client.get("extension_version") != extension_version:
                     client["extension_version"] = extension_version
+                    changed = True
 
             self._state["queues"].setdefault(client_id, [])
-            self._save()
-            return client
+            if changed:
+                self._save()
+            return {**client, "is_online": True}
 
     def list_clients(self) -> list[dict[str, Any]]:
         with self._lock:
-            clients = list(self._state["clients"].values())
+            now = datetime.now(timezone.utc)
+            clients = [{**client, "is_online": self._client_is_online(client, now=now)} for client in self._state["clients"].values()]
             clients.sort(key=lambda c: c.get("last_seen", ""), reverse=True)
             return clients
 
-    def _resolve_target_clients(self, target: dict[str, Any]) -> list[str]:
+    def _resolve_target_clients(self, target: dict[str, Any]) -> tuple[list[str], str | None]:
         client_id = target.get("client_id")
         if client_id:
-            return [str(client_id)]
+            normalized = str(client_id).strip()
+            if normalized in self._state["clients"]:
+                return [normalized], None
+            return [], f"Target client not found: {normalized}"
 
         client_ids = target.get("client_ids")
         if isinstance(client_ids, list) and client_ids:
-            return sorted({str(x) for x in client_ids if x})
+            known = sorted({str(x).strip() for x in client_ids if str(x).strip() in self._state["clients"]})
+            if known:
+                return known, None
+            return [], "No known target clients matched client_ids"
 
         if target.get("broadcast"):
-            return sorted(self._state["clients"].keys())
+            known_clients = sorted(self._state["clients"].keys())
+            if known_clients:
+                return known_clients, None
+            return [], "No browser clients are registered for broadcast"
 
-        return sorted(self._state["clients"].keys())
+        now = datetime.now(timezone.utc)
+        online_clients = sorted(
+            client_id
+            for client_id, client in self._state["clients"].items()
+            if self._client_is_online(client, now=now)
+        )
+        if len(online_clients) == 1:
+            return online_clients, None
+        if not online_clients:
+            return [], "No online browser clients available"
+        return [], "Multiple online browser clients available; specify client_id/client_ids or broadcast"
 
     def enqueue_command(
         self,
@@ -121,7 +161,7 @@ class ControlStore:
             target = target or {}
             now = datetime.now(timezone.utc)
             command_id = str(uuid.uuid4())
-            target_clients = self._resolve_target_clients(target)
+            target_clients, rejection_reason = self._resolve_target_clients(target)
 
             deliveries: dict[str, Any] = {}
             for client_id in target_clients:
@@ -144,6 +184,7 @@ class ControlStore:
                 "command": command,
                 "deliveries": deliveries,
                 "last_update": now_utc_iso(),
+                "rejection_reason": rejection_reason,
             }
             self._state["commands"][command_id] = record
             self._save()
@@ -155,46 +196,58 @@ class ControlStore:
             return False
         return datetime.now(timezone.utc) > expires_at
 
-    def _refresh_command_status(self, command: dict[str, Any]) -> None:
+    def _refresh_command_status(self, command: dict[str, Any]) -> bool:
         deliveries = command.get("deliveries", {})
         statuses = [item.get("status", "pending") for item in deliveries.values()]
+        changed = False
         if not statuses:
-            command["status"] = "rejected"
-            command["last_update"] = now_utc_iso()
-            return
+            if command.get("status") != "rejected":
+                command["status"] = "rejected"
+                changed = True
+            if changed:
+                command["last_update"] = now_utc_iso()
+            return changed
 
         if self._is_expired(command) and any(s not in TERMINAL_DELIVERY_STATUSES for s in statuses):
             for delivery in deliveries.values():
                 if delivery.get("status") not in TERMINAL_DELIVERY_STATUSES:
                     delivery["status"] = "expired"
                     delivery["updated_at"] = now_utc_iso()
+                    changed = True
             statuses = [item.get("status", "pending") for item in deliveries.values()]
 
         if all(s == "completed" for s in statuses):
-            command["status"] = "completed"
+            next_status = "completed"
         elif all(s == "failed" for s in statuses):
-            command["status"] = "failed"
+            next_status = "failed"
         elif all(s in TERMINAL_DELIVERY_STATUSES for s in statuses):
             if all(s == "cancelled" for s in statuses):
-                command["status"] = "cancelled"
+                next_status = "cancelled"
             elif all(s == "expired" for s in statuses):
-                command["status"] = "expired"
+                next_status = "expired"
             else:
-                command["status"] = "partial"
+                next_status = "partial"
         elif any(s == "dispatched" for s in statuses):
-            command["status"] = "in_progress"
+            next_status = "in_progress"
         else:
-            command["status"] = "pending"
+            next_status = "pending"
 
-        command["last_update"] = now_utc_iso()
+        if command.get("status") != next_status:
+            command["status"] = next_status
+            changed = True
+        if changed:
+            command["last_update"] = now_utc_iso()
+        return changed
 
     def pop_next_command(self, client_id: str) -> dict[str, Any] | None:
         with self._lock:
             queue = self._state["queues"].setdefault(client_id, [])
             commands = self._state["commands"]
+            changed = False
 
             while queue:
                 command_id = queue.pop(0)
+                changed = True
                 command = commands.get(command_id)
                 if not command:
                     continue
@@ -224,7 +277,8 @@ class ControlStore:
                     "command": command.get("command", {}),
                 }
 
-            self._save()
+            if changed:
+                self._save()
             return None
 
     def submit_result(
@@ -284,15 +338,17 @@ class ControlStore:
             command = self._state["commands"].get(command_id)
             if not command:
                 return None
-            self._refresh_command_status(command)
-            self._save()
+            changed = self._refresh_command_status(command)
+            if changed:
+                self._save()
             return command
 
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
             # Refresh statuses on read so clients receive up-to-date state.
+            changed = False
             for command in self._state["commands"].values():
-                self._refresh_command_status(command)
+                changed = self._refresh_command_status(command) or changed
 
             commands = list(self._state["commands"].values())
             commands.sort(key=lambda c: c.get("created_at", ""), reverse=True)
@@ -309,5 +365,6 @@ class ControlStore:
                 "queue_sizes": queues,
                 "commands": summary_commands,
             }
-            self._save()
+            if changed:
+                self._save()
             return payload

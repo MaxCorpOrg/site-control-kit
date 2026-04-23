@@ -1,0 +1,61 @@
+version: 1
+mode: aggressive-default
+
+purpose:
+  repo: site-control-kit
+  goal: keep the browser-control tool working end-to-end with minimal operator friction
+
+agent_policy:
+  autonomy: high
+  default_behavior:
+    - inspect_the_relevant_code
+    - implement_the_fix_or_improvement
+    - run_verification
+    - update_docs_and_examples_if_behavior_changed
+    - continue_to_the_next_clear_improvement_without_waiting_for_extra_confirmation
+  ask_user_only_when:
+    - an action is destructive or irreversible
+    - secrets or external production systems must be changed
+    - the task is ambiguous enough that two different implementations are both plausible
+  avoid:
+    - analysis_only_cycles
+    - temporary_manual_workarounds_when_the_tool_can_be_improved
+    - silent_contract_changes
+
+execution_order:
+  1_inspect:
+    - BROWSER_QUICKSTART.md
+    - AGENTS.md
+    - docs/API.md
+    - docs/ARCHITECTURE.md
+    - docs/EXTENSION.md
+  2_change:
+    - prefer_root_cause_fixes
+    - keep_cli_server_extension_in_sync
+    - keep_defaults_safe_and_predictable
+  3_verify:
+    default_command: ./scripts/verify.sh
+    live_browser_command: ./scripts/verify.sh --live-browser
+  4_sync_docs:
+    - README.md
+    - BROWSER_QUICKSTART.md
+    - docs/API.md
+    - docs/EXTENSION.md
+    - examples
+
+verification:
+  required:
+    - python3 -m unittest discover -s tests -p 'test_*.py'
+    - python3 -m webcontrol --help
+    - python3 -m webcontrol browser --help
+  optional_live_browser:
+    - python3 -m webcontrol browser status
+    - python3 -m webcontrol browser tabs
+    - python3 -m webcontrol browser open https://example.com
+    - python3 -m webcontrol browser text h1
+
+done_definition:
+  - code_changed_if_needed
+  - tests_green
+  - docs_updated_if_behavior_changed
+  - no_known_regression_left_unmentioned

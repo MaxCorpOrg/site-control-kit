@@ -50,6 +50,9 @@
 { "ok": true, "clients": [ ... ] }
 ```
 
+Каждый клиент может содержать служебное поле:
+- `is_online` — есть ли свежий heartbeat и можно ли безопасно использовать клиента по умолчанию.
+
 ## Команды
 
 ## `POST /api/commands`
@@ -81,9 +84,17 @@
   "ok": true,
   "command_id": "uuid",
   "status": "pending",
-  "target_client_ids": ["client-123"]
+  "target_client_ids": ["client-123"],
+  "error": null
 }
 ```
+
+Правила target:
+- `client_id` — отправить одному известному клиенту;
+- `client_ids` — отправить известным клиентам из списка;
+- `broadcast=true` — отправить всем известным клиентам;
+- если target не задан и онлайн-клиент ровно один, команда будет направлена ему автоматически;
+- если target не задан и онлайн-клиентов несколько, команда будет отклонена со `status: "rejected"`.
 
 ## `GET /api/commands/next?client_id=<id>`
 Выдаёт следующую команду клиенту.
@@ -156,8 +167,12 @@
   - поля: `url`, опционально `active`
 - `click`
   - поля: `selector`
+- `context_click`
+  - поля: `selector`
 - `click_text`
   - поля: `text`, опционально `root_selector`, `near_last_context`
+- `clear_editable`
+  - поля: `selectors` — массив CSS-селекторов, проверяемых по очереди
 - `fill`
   - поля: `selector`, `value`
 - `focus`
