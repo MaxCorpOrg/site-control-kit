@@ -15,7 +15,10 @@
 ## Файлы Инструмента
 - `scripts/telegram_invite_manager.py`
 - `scripts/telegram_invite_manager_gui.sh`
+- `scripts/telegram_invite_executor.py`
+- `scripts/telegram_invite_executor_gui.sh`
 - `tests/test_telegram_invite_manager.py`
+- `tests/test_telegram_invite_executor.py`
 
 ## Где Хранится Состояние
 По умолчанию job-каталоги лежат в:
@@ -142,16 +145,19 @@ bash scripts/telegram_invite_manager_gui.sh
 - run artifacts
 - explicit mark command
 - summary report
+- execution-config внутри `invite_state.json`
+- execution-plan через отдельный `Telegram Invite Executor`
+- browser-assisted `open-chat` через `site-control`
+- execution-record артефакты и update статусов после ручных действий
 
 ## Что Пока Не Реализовано
-На текущем этапе нет живого Telegram invite execution path.
-Это осознанно.
-Сначала собран надёжный manager/state слой.
+На текущем этапе есть только безопасный operator-assisted execution path.
+Нет forced-add/mass-add логики и нет обхода лимитов Telegram.
 
 Следующий шаг можно делать отдельно:
 - invite link workflow
 - join request workflow
-- полуавтоматический browser-assisted flow
+- живой smoke на поднятом browser bridge
 
 ## Следующий Логичный Шаг
-Самый правильный следующий шаг: добавить безопасный `invite link / join request` orchestration path, а не автоматическое массовое добавление людей в чат.
+Самый правильный следующий шаг: добить живой `invite link / join request` orchestration path поверх нового execution-слоя, а не автоматическое массовое добавление людей в чат.

@@ -98,6 +98,18 @@ Chain-runner.
 Базовый zenity-wrapper над Invite Manager CLI.
 Это операторский слой, а не источник истины.
 
+### `scripts/telegram_invite_executor.py`
+Execution-слой поверх Invite Manager.
+На текущем этапе умеет:
+- хранить execution-config в `invite_state.json`;
+- строить `execution_plan.json`;
+- открывать нужный Telegram chat через `site-control`;
+- писать `execution_record.json` после ручного действия оператора.
+
+### `scripts/telegram_invite_executor_gui.sh`
+Базовый zenity-wrapper над Invite Executor CLI.
+Тоже не источник истины: правда остаётся в `invite_state.json` и execution-артефактах.
+
 ### `scripts/write_telegram_safe_snapshot.py`
 Построение safe-snapshot из raw markdown.
 

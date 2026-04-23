@@ -25,10 +25,12 @@
 ## Отдельный Трек: Invite Manager
 
 Новый `Telegram Invite Manager` уже существует как manager/state слой.
-Следующий шаг для него:
+Поверх него теперь есть и `Telegram Invite Executor` как execution-слой.
+Следующий шаг для этого трека:
 1. не добавлять опасный массовый path;
-2. спроектировать безопасный orchestration через invite links или join requests;
-3. сохранить тот же уровень артефактов и state discipline, что уже есть у export pipeline.
+2. поднять hub и сделать первый live smoke для `open-chat`;
+3. добить безопасный orchestration через invite links или join requests;
+4. сохранить тот же уровень артефактов и state discipline, что уже есть у export pipeline.
 
 ## Следующий Приоритет P1
 ### Разрезать Монолитный Exporter

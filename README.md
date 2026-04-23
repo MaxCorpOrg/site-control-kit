@@ -126,7 +126,10 @@ cd /home/max/site-control-kit
 
 - `scripts/telegram_invite_manager.py`
 - `scripts/telegram_invite_manager_gui.sh`
+- `scripts/telegram_invite_executor.py`
+- `scripts/telegram_invite_executor_gui.sh`
 - `docs/TELEGRAM_INVITE_MANAGER_RU.md`
+- `docs/TELEGRAM_INVITE_EXECUTOR_RU.md`
 
 Это не инструмент массового добавления пользователей. На текущем этапе он решает безопасную manager-задачу:
 - импорт CSV/JSON;
@@ -136,6 +139,12 @@ cd /home/max/site-control-kit
 - `dry-run`;
 - run-артефакты `invite_run.json` и `invite.log`;
 - ручная смена статусов через CLI.
+
+Поверх него теперь есть execution-слой для operator-assisted workflow через `site-control`:
+- хранение execution-config внутри `invite_state.json`;
+- `execution_plan.json` и execution-логи;
+- `open-chat` через `python3 -m webcontrol browser ...`;
+- запись операторских результатов обратно в state через `record`.
 
 Пример:
 
@@ -148,6 +157,21 @@ python3 scripts/telegram_invite_manager.py init \
 python3 scripts/telegram_invite_manager.py run \
   --job-dir "/home/max/telegram_invite_jobs/chat_-2465948544" \
   --limit 3 \
+  --dry-run
+
+python3 scripts/telegram_invite_executor.py configure \
+  --job-dir "/home/max/telegram_invite_jobs/chat_-2465948544" \
+  --invite-link "https://t.me/+example" \
+  --url-pattern "web.telegram.org/k/#-2465948544" \
+  --requires-approval
+
+python3 scripts/telegram_invite_executor.py plan \
+  --job-dir "/home/max/telegram_invite_jobs/chat_-2465948544" \
+  --limit 3 \
+  --reserve
+
+python3 scripts/telegram_invite_executor.py open-chat \
+  --job-dir "/home/max/telegram_invite_jobs/chat_-2465948544" \
   --dry-run
 ```
 

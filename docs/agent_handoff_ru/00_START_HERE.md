@@ -75,5 +75,6 @@ find /home/max/telegram_contact_batches/chat_-2465948544/runs -maxdepth 2 -name 
 - Telegram export работает;
 - batch/safe/quarantine слои работают.
 - Telegram Invite Manager как новый stateful инструмент уже существует.
+- Telegram Invite Executor как execution-слой поверх Invite Manager тоже уже существует.
 
 Главный текущий технический долг уже сместился в performance и resilience deep-path, а не в базовую функциональность.

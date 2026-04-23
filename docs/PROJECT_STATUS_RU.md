@@ -32,6 +32,15 @@
   - `runs/<timestamp>/invite_run.json` и `invite.log`.
 - Добавлен базовый GUI wrapper: `scripts/telegram_invite_manager_gui.sh`.
 - Добавлена отдельная документация: `docs/TELEGRAM_INVITE_MANAGER_RU.md`.
+- Поверх manager-слоя добавлен execution-слой:
+  - `scripts/telegram_invite_executor.py`
+  - `scripts/telegram_invite_executor_gui.sh`
+  - `docs/TELEGRAM_INVITE_EXECUTOR_RU.md`
+- Новый execution-слой умеет:
+  - хранить invite-link и browser-target в `invite_state.json`;
+  - строить `execution_plan.json`;
+  - открывать/активировать Telegram chat через `site-control`;
+  - писать `execution_record.json` после ручных действий оператора.
 
 ### Безопасность данных Telegram
 - Введены `identity_history.json`, `review.txt`, `conflicts.json` и quarantine-логика.
@@ -100,10 +109,27 @@
 ## Проверено
 - Полный unit-набор сейчас зелёный: `110/110`.
 - После добавления Invite Manager полный unit-набор зелёный: `117/117`.
+- После добавления Invite Executor полный unit-набор зелёный: `123/123`.
 - Новый `Invite Manager` покрыт unit-тестами:
   - `tests/test_telegram_invite_manager.py`
   - `7/7 OK`
-- Для Invite Manager пока есть только state/reporting acceptance, без живого Telegram invite smoke.
+- Новый `Invite Executor` покрыт unit-тестами:
+  - `tests/test_telegram_invite_executor.py`
+  - `6/6 OK`
+- Для Invite Manager / Invite Executor пока нет живого Telegram invite smoke: hub в момент работы не был поднят, поэтому проверен только dry-run/CLI слой.
+- Dry-run smoke нового execution-слоя подтверждён:
+  - job dir:
+    - `/tmp/tg_invite_executor_smoke.GKdXBN/job`
+  - configure:
+    - `/tmp/tg_invite_executor_configure.json`
+  - plan:
+    - `/tmp/tg_invite_executor_plan.json`
+  - open-chat dry-run:
+    - `/tmp/tg_invite_executor_open.json`
+  - факты:
+    - execution-plan выбрал `2` consented users;
+    - `reserve` перевёл их в `invite_link_created`;
+    - `open-chat` собрал корректную browser-команду через `--url-pattern ... activate`.
 - Shell syntax и `py_compile` для последних изменений проходили зелёными.
 - Точечный прогон экспортёрных тестов после capability-preflight:
   - `tests.test_telegram_export_parser`
@@ -263,11 +289,15 @@
 
 ## Текущие Проблемы
 
-### 0. Invite Manager пока только manager/state слой
-Новый `Telegram Invite Manager` сейчас не выполняет живой Telegram invite path.
-Это сделано осознанно:
-- сначала собран надёжный state/reporting слой;
-- только потом можно отдельно делать безопасный `invite link / join request` orchestration path.
+### 0. Invite execution пока operator-assisted
+Теперь кроме manager/state слоя есть и execution-слой, но он пока безопасно ограничен:
+- configure/plan/open-chat/record/report;
+- `open-chat` уже использует `site-control`;
+- actual Telegram invite action по-прежнему остаётся за оператором.
+
+Это осознанно:
+- сначала собран надёжный state/reporting/execution каркас;
+- только потом можно делать живой `invite link / join request` orchestration path.
 
 ### 1. Deep mention уже рабочий, но остаётся неоднородным
 Есть подтверждённые live-run, где mention/deep без history backfill реально собрал новые `@username`.
@@ -290,6 +320,7 @@
 - повторный live smoke `fast` vs `deep`.
 
 ### Для Invite Manager
+- поднять hub и сделать первый живой smoke для `telegram_invite_executor.py open-chat`;
 - добавить безопасный orchestration path через invite links / join requests;
 - не делать принудительное массовое добавление пользователей;
 - при первом live-шаге обязательно сохранять `run.json`/`log` аналогично существующим Telegram артефактам.

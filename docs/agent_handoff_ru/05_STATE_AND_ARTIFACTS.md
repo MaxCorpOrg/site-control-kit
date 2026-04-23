@@ -118,6 +118,10 @@ chat_<id>/chains/<timestamp>/
 - `invite_state.json`
 - `runs/<timestamp>/invite_run.json`
 - `runs/<timestamp>/invite.log`
+- `executions/<timestamp>/execution_plan.json`
+- `executions/<timestamp>/execution.log`
+- `executions/<timestamp>/execution_record.json`
+- `executions/<timestamp>/execution_record.log`
 
 ### Что Смотреть В `invite_state.json`
 - `chat_url`
@@ -125,6 +129,7 @@ chat_<id>/chains/<timestamp>/
 - `source_file`
 - `users`
 - `import_stats`
+- `execution`
 
 ### Что Смотреть В `invite_run.json`
 - `status`
@@ -136,3 +141,19 @@ chat_<id>/chains/<timestamp>/
 - `from_statuses`
 - `target_status`
 - `results`
+
+### Что Смотреть В `execution_plan.json`
+- `execution_id`
+- `selected_users`
+- `reserved`
+- `execution.invite_link`
+- `execution.browser_target`
+- `users`
+- `operator_checklist`
+
+### Что Смотреть В `execution_record.json`
+- `execution_id`
+- `reason`
+- `updated`
+- `missing`
+- `target_status`
