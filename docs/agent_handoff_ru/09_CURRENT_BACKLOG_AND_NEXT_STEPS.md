@@ -9,6 +9,10 @@
 - текущий baseline после helper-only switch уже лучше прежнего:
   - fast run `20260423T141227Z` обрабатывает `4` peer за `120s`;
   - значит следующий шаг должен улучшать именно этот throughput, а не снова чинить history/latest layer.
+- scheduler cap уже внедрён в код (`TELEGRAM_CHAT_DEEP_STEP_MAX_SEC`), поэтому следующий практический шаг теперь такой:
+  - сначала восстановить online browser bridge после hub restart;
+  - затем повторить live fast/deep run уже на capped scheduler;
+  - и только потом судить, дал ли cap рост по `scroll_steps_done` / `unique_members`.
 
 Отдельный подшаг рядом с этим приоритетом:
 - больше не нужен как P0:
@@ -32,7 +36,7 @@
    - сильнее сокращать profile-open path внутри helper;
    - агрессивнее заполнять несколько peer за один visible-layer.
 2. Усилить discovery:
-   - проходить больше scroll steps за тот же runtime;
+   - проверить, дал ли новый deep-step cap больше scroll steps за тот же runtime;
    - раньше отбрасывать peer без практического шанса на новый username.
 3. Повторить batch-run `CHAT_PROFILE=deep`.
 5. Сравнить:

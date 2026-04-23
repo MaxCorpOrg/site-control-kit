@@ -11,6 +11,21 @@
 ## Сделано
 
 ### Обновление 2026-04-23
+- В chat deep scheduler добавлен cap на runtime одного visible-layer:
+  - `scripts/export_telegram_members_non_pii.py` теперь учитывает `TELEGRAM_CHAT_DEEP_STEP_MAX_SEC`;
+  - `scripts/telegram_profiles.py` задаёт profile defaults:
+    - `fast = 45s`
+    - `balanced = 60s`
+    - `deep = 90s`
+  - это нужно, чтобы первый deep-step не съедал весь runtime run’а и exporter чаще доходил до следующих scroll layers.
+- Регрессия закрыта тестом:
+  - `tests/test_telegram_export_runtime.py` проверяет, что budget deep-step реально режется по cap.
+- Важный operational note:
+  - live verification именно этого scheduler-cap шага в конце текущей итерации сорвалась не кодом, а контуром;
+  - после очередного автостарта хаба browser bridge ушёл в `is_online=false`, и новый run завис ещё до meaningful telemetry;
+  - значит следующий live verify этого шага надо начинать только после восстановления heartbeat-клиента.
+
+### Обновление 2026-04-23
 - Ускорен deep helper path в текущем Telegram Web:
   - если первый же `context menu` в шаге показывает, что `Mention` отсутствует (`menu_missing`), exporter больше не тратит оставшийся deep-step на повторные mention-попытки;
   - оставшиеся peer этого же visible-layer сразу переводятся в helper-only path;
@@ -250,7 +265,7 @@
   - при открытии такой страницы расширение вызывает `chrome.runtime.reload()` само.
 
 ## Проверено
-- Текущий локальный unit-набор зелёный: `90/90`.
+- Текущий локальный unit-набор зелёный: `91/91`.
 - `python3 -m py_compile webcontrol/cli.py` -> OK.
 - `bash -n scripts/auto_collect_usernames.sh` -> OK.
 - Живой reload helper подтверждён на локальной `main`:

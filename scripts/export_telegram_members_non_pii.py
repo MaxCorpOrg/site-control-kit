@@ -56,6 +56,10 @@ CHAT_SCROLL_DISTANCE_PX = 900
 INFO_SCROLL_SETTLE_SEC = 0.8
 CHAT_DEEP_DEFAULT_LIMIT = 3
 CHAT_AUTO_EXTRA_DEFAULT = 12
+try:
+    CHAT_DEEP_STEP_MAX_SEC = max(float(os.getenv("TELEGRAM_CHAT_DEEP_STEP_MAX_SEC", "0") or "0"), 0.0)
+except ValueError:
+    CHAT_DEEP_STEP_MAX_SEC = 0.0
 SPECIFIC_TG_DIALOG_URL_RE = re.compile(r"^https?://web\.telegram\.org/(k|a)/#[^#\s]+$", flags=re.I)
 RIGHT_COLUMN_SELECTOR = "#RightColumn, #column-right"
 RIGHT_PANEL_READY_SELECTOR = (
@@ -1969,6 +1973,8 @@ def _collect_members_from_chat(
                     elapsed = time.time() - started_at
                     remaining_runtime = max(2.0, float(max_runtime_sec) - elapsed - 2.0)
                     deep_runtime_budget = remaining_runtime
+                    if CHAT_DEEP_STEP_MAX_SEC > 0:
+                        deep_runtime_budget = min(deep_runtime_budget, max(6.0, CHAT_DEEP_STEP_MAX_SEC))
                     attempted, updated, opened, opened_peer_ids = _enrich_usernames_deep_chat(
                         server=server,
                         token=token,

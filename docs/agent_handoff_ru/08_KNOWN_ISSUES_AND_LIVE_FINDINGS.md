@@ -165,6 +165,20 @@ Self-reload и capability handshake уже подтверждены живьём
   - `deep_updated_total = 1`
 - это не сняло потолок `7 safe usernames`, но уже доказало, что текущий путь можно ускорять без нового переписывания хаба/bridge.
 
+### Новый engineering-step после этого baseline
+- В exporter уже добавлен `TELEGRAM_CHAT_DEEP_STEP_MAX_SEC`, чтобы один deep-step не съедал весь runtime run’а.
+- Profile defaults уже заведены:
+  - `fast = 45s`
+  - `balanced = 60s`
+  - `deep = 90s`
+- Но живой verify именно этого scheduler-cap пока не завершён:
+  - в конце текущей итерации hub был перезапущен автоматически;
+  - после этого browser bridge остался в `is_online=false`;
+  - новый run `20260423T152850Z` завис ещё до meaningful exporter telemetry и не дошёл до `run.json`.
+- Практический смысл:
+  - код и тесты для нового scheduler-cap уже есть;
+  - следующий live запуск нужно делать только после восстановления heartbeat-клиента.
+
 ### Group dialog restore в целом работает лучше, чем раньше
 Раньше один тяжёлый peer мог ломать остаток deep-step.
 Теперь path заметно устойчивее, хотя warning-поведение всё ещё встречается.
@@ -173,8 +187,9 @@ Self-reload и capability handshake уже подтверждены живьём
 1. Главный текущий limit: в текущем Telegram Web menu-path часто вообще не содержит `Mention`, даже когда context menu открылось корректно.
 2. Даже в `deep`-профиле runtime часто уходит в helper fallback вместо прямого menu-click path.
 3. Даже после helper-only switch deep throughput пока всё ещё ограничен: fast run обрабатывает `4` peer за `120s`, а не десятки.
-4. Текущий честный baseline всё ещё только `7` safe usernames в latest-safe контуре этой группы, а целевая планка остаётся `40+`.
-5. `export_telegram_members_non_pii.py` остаётся монолитным.
+4. Новый scheduler-cap добавлен, но ещё не подтверждён живьём из-за offline bridge после hub restart.
+5. Текущий честный baseline всё ещё только `7` safe usernames в latest-safe контуре этой группы, а целевая планка остаётся `40+`.
+6. `export_telegram_members_non_pii.py` остаётся монолитным.
 
 ## Самый Полезный Мысленный Фильтр Для Следующего Агента
 Если следующий баг снова звучит как "не собрал username", не надо начинать с нуля.

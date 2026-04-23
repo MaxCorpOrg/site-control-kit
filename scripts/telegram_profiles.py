@@ -14,13 +14,16 @@ PROFILE_PRESETS: dict[str, dict[str, Any]] = {
             "CHAT_SCROLL_STEPS": "10",
             "CHAT_DEEP_LIMIT": "24",
             "CHAT_MAX_RUNTIME": "120",
+            "TELEGRAM_CHAT_DEEP_STEP_MAX_SEC": "45",
             "TELEGRAM_CHAT_MENTION_DEEP_MAX_PER_STEP": "4",
             "TELEGRAM_CHAT_DEEP_PRIORITY_MIN_RUNTIME": "14",
         },
     },
     "balanced": {
         "interval_sec": 20.0,
-        "env": {},
+        "env": {
+            "TELEGRAM_CHAT_DEEP_STEP_MAX_SEC": "60",
+        },
     },
     "deep": {
         "interval_sec": 30.0,
@@ -28,6 +31,7 @@ PROFILE_PRESETS: dict[str, dict[str, Any]] = {
             "CHAT_SCROLL_STEPS": "18",
             "CHAT_DEEP_LIMIT": "60",
             "CHAT_MAX_RUNTIME": "360",
+            "TELEGRAM_CHAT_DEEP_STEP_MAX_SEC": "90",
             "TELEGRAM_CHAT_MENTION_DEEP_MAX_PER_STEP": "4",
             "TELEGRAM_CHAT_DEEP_PRIORITY_EXTRA_ROUNDS": "2",
             "TELEGRAM_CHAT_DEEP_PRIORITY_MIN_RUNTIME": "24",

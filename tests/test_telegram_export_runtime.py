@@ -62,6 +62,39 @@ class TelegramExportRuntimeTests(unittest.TestCase):
         self.assertEqual(stats["auto_extra_steps"], 3)
         self.assertEqual(mock_scroll.call_count, 4)
 
+    def test_collect_members_from_chat_caps_deep_step_runtime_budget(self) -> None:
+        member1 = {"peer_id": "1", "name": "One", "username": "—", "status": "из чата", "role": "—"}
+        deep_budgets: list[float] = []
+
+        def fake_deep_chat(**kwargs):
+            deep_budgets.append(float(kwargs["max_runtime_sec"]))
+            return 1, 0, 0, []
+
+        with (
+            patch.object(self.mod, "CHAT_DEEP_STEP_MAX_SEC", 7.0),
+            patch.object(self.mod, "_send_get_html", return_value=""),
+            patch.object(self.mod, "_parse_chat_members", return_value=[member1]),
+            patch.object(self.mod, "_enrich_usernames_deep_chat", side_effect=fake_deep_chat),
+            patch.object(self.mod, "_scroll_chat_up", return_value=False),
+        ):
+            members, stats = self.mod._collect_members_from_chat(
+                server="http://127.0.0.1:8765",
+                token="token",
+                client_id="client-1",
+                tab_id=1,
+                timeout_sec=5,
+                scroll_steps=0,
+                group_url="https://web.telegram.org/a/#-1002465948544",
+                deep_usernames=True,
+                chat_deep_limit=3,
+                max_runtime_sec=120,
+                chat_deep_mode="mention",
+            )
+
+        self.assertEqual(len(members), 1)
+        self.assertEqual(stats["deep_attempted"], 1)
+        self.assertEqual(deep_budgets, [7.0])
+
     def test_archive_export_copy_writes_index(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
