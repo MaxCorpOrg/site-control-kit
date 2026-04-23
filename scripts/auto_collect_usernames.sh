@@ -73,10 +73,6 @@ start_hub_if_needed() {
 }
 
 open_telegram_tab() {
-  if ! command -v xdg-open >/dev/null 2>&1; then
-    return
-  fi
-
   if python3 - "$HUB_URL" "$TOKEN" "$GROUP_URL" <<'PY'
 import json
 import sys
@@ -110,6 +106,65 @@ PY
     return
   fi
 
+  local bridge_client_id=""
+  bridge_client_id="$(
+    python3 - "$HUB_URL" "$TOKEN" "$CHAT_CLIENT_ID" <<'PY'
+import json
+import sys
+from urllib.request import Request, urlopen
+
+hub_url, token, forced_client_id = sys.argv[1], sys.argv[2], sys.argv[3].strip()
+req = Request(
+    f"{hub_url}/api/clients",
+    headers={"Accept": "application/json", "X-Access-Token": token},
+)
+try:
+    with urlopen(req, timeout=3) as r:
+        payload = json.loads(r.read().decode("utf-8"))
+except Exception:
+    raise SystemExit(0)
+
+clients = payload.get("clients") or []
+if not isinstance(clients, list):
+    raise SystemExit(0)
+
+def client_id_of(client):
+    return str(client.get("client_id") or "").strip()
+
+if forced_client_id:
+    for client in clients:
+        if client_id_of(client) == forced_client_id:
+            print(forced_client_id)
+            raise SystemExit(0)
+    raise SystemExit(0)
+
+ordered = sorted(clients, key=lambda item: str(item.get("last_seen") or ""), reverse=True)
+online = [client for client in ordered if bool(client.get("is_online", True))]
+candidates = online or ordered
+for client in candidates:
+    client_id = client_id_of(client)
+    if client_id:
+        print(client_id)
+        raise SystemExit(0)
+PY
+  )"
+
+  if [[ -n "${bridge_client_id}" ]]; then
+    if PYTHONPATH="${ROOT_DIR}" python3 -m webcontrol browser \
+      --server "${HUB_URL}" \
+      --token "${TOKEN}" \
+      --client-id "${bridge_client_id}" \
+      new-tab "${GROUP_URL}" >/dev/null 2>&1
+    then
+      echo "INFO: opened Telegram tab via bridge client ${bridge_client_id}"
+      return
+    fi
+    echo "WARN: bridge new-tab failed for client ${bridge_client_id}, fallback to xdg-open" >&2
+  fi
+
+  if ! command -v xdg-open >/dev/null 2>&1; then
+    return
+  fi
   xdg-open "${GROUP_URL}" >/dev/null 2>&1 || true
 }
 

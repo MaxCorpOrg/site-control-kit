@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import argparse
 import base64
+import ctypes
 import json
 import os
+import re
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -154,6 +157,222 @@ def _write_data_url_to_file(data_url: str, output_path: str) -> str:
     return str(path)
 
 
+def _tabs_for_window(client: dict[str, Any], window_id: int) -> list[dict[str, Any]]:
+    tabs = client.get("tabs")
+    if not isinstance(tabs, list):
+        return []
+    return [tab for tab in tabs if int(tab.get("windowId", -1)) == int(window_id)]
+
+
+def _find_browser_tab(client: dict[str, Any], target: dict[str, Any]) -> dict[str, Any] | None:
+    tabs = client.get("tabs")
+    if not isinstance(tabs, list) or not tabs:
+        return None
+
+    tab_id = target.get("tab_id")
+    if isinstance(tab_id, int):
+        for tab in tabs:
+            if int(tab.get("id", -1)) == tab_id:
+                return tab
+
+    url_pattern = str(target.get("url_pattern") or "").strip()
+    if url_pattern:
+        for tab in tabs:
+            if url_pattern in str(tab.get("url") or ""):
+                return tab
+
+    if target.get("active", True):
+        for tab in tabs:
+            if bool(tab.get("active")):
+                return tab
+
+    return tabs[0]
+
+
+def _parse_xwininfo_windows(output: str) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    pattern = re.compile(
+        r'^\s*(0x[0-9a-f]+)\s+"([^"]*)":\s+\("([^"]*)"\s+"([^"]*)"\)\s+'
+        r'(\d+)x(\d+)\+(-?\d+)\+(-?\d+)\s+\+(-?\d+)\+(-?\d+)',
+        flags=re.I,
+    )
+    for raw_line in str(output or "").splitlines():
+        match = pattern.match(raw_line)
+        if not match:
+            continue
+        window_id, title, wm_class, wm_name, width, height, _rel_x, _rel_y, abs_x, abs_y = match.groups()
+        try:
+            rows.append(
+                {
+                    "window_id": window_id,
+                    "title": title,
+                    "wm_class": wm_class,
+                    "wm_name": wm_name,
+                    "width": int(width),
+                    "height": int(height),
+                    "x": int(abs_x),
+                    "y": int(abs_y),
+                }
+            )
+        except ValueError:
+            continue
+    return rows
+
+
+def _list_x11_windows() -> list[dict[str, Any]]:
+    if sys.platform != "linux" or not os.environ.get("DISPLAY"):
+        return []
+    try:
+        proc = subprocess.run(["xwininfo", "-root", "-tree"], check=False, capture_output=True, text=True)
+    except OSError:
+        return []
+    return _parse_xwininfo_windows(proc.stdout)
+
+
+def _find_x11_browser_window(window_tabs: list[dict[str, Any]]) -> dict[str, Any] | None:
+    windows = _list_x11_windows()
+    if not windows:
+        return None
+
+    active_titles = [str(tab.get("title") or "").strip() for tab in window_tabs if bool(tab.get("active"))]
+    preferred_titles = [str(tab.get("title") or "").strip() for tab in window_tabs if str(tab.get("title") or "").strip()]
+    title_candidates = active_titles + [title for title in preferred_titles if title not in active_titles]
+
+    def is_browser_window(window: dict[str, Any]) -> bool:
+        wm_class = str(window.get("wm_class") or "").lower()
+        wm_name = str(window.get("wm_name") or "").lower()
+        title = str(window.get("title") or "").lower()
+        return "chrome" in wm_class or "chrome" in wm_name or "chrome" in title
+
+    browser_windows = [window for window in windows if is_browser_window(window)]
+    for title in title_candidates:
+        if not title:
+            continue
+        for window in browser_windows:
+            if title in str(window.get("title") or ""):
+                return window
+
+    if browser_windows:
+        browser_windows.sort(key=lambda item: int(item.get("width", 0)) * int(item.get("height", 0)), reverse=True)
+        return browser_windows[0]
+    return None
+
+
+def _x11_click_absolute(window: dict[str, Any], *, x_ratio: float, y_ratio: float, button: int) -> dict[str, Any] | None:
+    if sys.platform != "linux" or not os.environ.get("DISPLAY"):
+        return None
+    if int(button) < 1:
+        return None
+
+    try:
+        lib_x11 = ctypes.CDLL("libX11.so.6")
+        lib_xtst = ctypes.CDLL("libXtst.so.6")
+    except OSError:
+        return None
+
+    lib_x11.XOpenDisplay.argtypes = [ctypes.c_char_p]
+    lib_x11.XOpenDisplay.restype = ctypes.c_void_p
+    lib_x11.XCloseDisplay.argtypes = [ctypes.c_void_p]
+    lib_x11.XDefaultRootWindow.argtypes = [ctypes.c_void_p]
+    lib_x11.XDefaultRootWindow.restype = ctypes.c_ulong
+    lib_x11.XWarpPointer.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_ulong,
+        ctypes.c_ulong,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_uint,
+        ctypes.c_uint,
+        ctypes.c_int,
+        ctypes.c_int,
+    ]
+    lib_x11.XRaiseWindow.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+    lib_x11.XSetInputFocus.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_int, ctypes.c_ulong]
+    lib_x11.XFlush.argtypes = [ctypes.c_void_p]
+    lib_xtst.XTestFakeButtonEvent.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_int, ctypes.c_ulong]
+
+    width = int(window.get("width", 0))
+    height = int(window.get("height", 0))
+    x = int(window.get("x", 0))
+    y = int(window.get("y", 0))
+    if width <= 2 or height <= 2:
+        return None
+
+    xr = min(max(float(x_ratio), 0.0), 1.0)
+    yr = min(max(float(y_ratio), 0.0), 1.0)
+    target_x = x + max(1, min(int(width * xr), width - 2))
+    target_y = y + max(1, min(int(height * yr), height - 2))
+
+    display_handle = lib_x11.XOpenDisplay(None)
+    if not display_handle:
+        return None
+
+    try:
+        root = lib_x11.XDefaultRootWindow(display_handle)
+        window_id_raw = str(window.get("window_id") or "").strip()
+        if not window_id_raw:
+            return None
+        window_id = int(window_id_raw, 16) if window_id_raw.lower().startswith("0x") else int(window_id_raw)
+
+        try:
+            lib_x11.XRaiseWindow(display_handle, ctypes.c_ulong(window_id))
+            lib_x11.XSetInputFocus(display_handle, ctypes.c_ulong(window_id), 1, 0)
+        except Exception:
+            pass
+
+        lib_x11.XWarpPointer(display_handle, ctypes.c_ulong(0), root, 0, 0, 0, 0, target_x, target_y)
+        lib_x11.XFlush(display_handle)
+        time.sleep(0.08)
+        lib_xtst.XTestFakeButtonEvent(display_handle, int(button), 1, 0)
+        lib_xtst.XTestFakeButtonEvent(display_handle, int(button), 0, 0)
+        lib_x11.XFlush(display_handle)
+        return {
+            "windowId": window_id_raw,
+            "x": target_x,
+            "y": target_y,
+            "button": int(button),
+            "via": "x11_click",
+        }
+    finally:
+        lib_x11.XCloseDisplay(display_handle)
+
+
+def _synthetic_command_record(client_id: str, *, data: dict[str, Any] | None = None, error: dict[str, Any] | None = None) -> dict[str, Any]:
+    ok = error is None
+    return {
+        "status": "completed" if ok else "failed",
+        "deliveries": {
+            client_id: {
+                "result": {
+                    "ok": ok,
+                    "status": "completed" if ok else "failed",
+                    "data": data,
+                    "error": error,
+                }
+            }
+        },
+    }
+
+
+def _x11_click_fallback(client: dict[str, Any], target: dict[str, Any], *, x_ratio: float, y_ratio: float, button: int) -> dict[str, Any] | None:
+    target_tab = _find_browser_tab(client, target)
+    if not target_tab:
+        return None
+    window_id = int(target_tab.get("windowId", -1))
+    if window_id < 0:
+        return None
+    window_tabs = _tabs_for_window(client, window_id)
+    window = _find_x11_browser_window(window_tabs)
+    if not window:
+        return None
+    data = _x11_click_absolute(window, x_ratio=x_ratio, y_ratio=y_ratio, button=button)
+    if not data:
+        return None
+    data["tabId"] = int(target_tab.get("id", -1))
+    data["windowBrowserId"] = window_id
+    return _synthetic_command_record(str(client.get("client_id") or "").strip(), data=data)
+
+
 def _browser_target(args: argparse.Namespace, client_id: str) -> dict[str, Any]:
     return compact(
         {
@@ -273,6 +492,26 @@ def cmd_browser(args: argparse.Namespace) -> int:
         action = args.browser_action
         command: dict[str, Any]
         output_path: str | None = None
+
+        if action == "x11-click":
+            command_record = _x11_click_fallback(
+                client,
+                target,
+                x_ratio=args.x_ratio,
+                y_ratio=args.y_ratio,
+                button=args.button,
+            )
+            if not command_record:
+                raise RuntimeError(
+                    "X11 click fallback failed. Check DISPLAY, xwininfo visibility, and that the Chrome window is open."
+                )
+            _print_browser_summary(
+                action=action,
+                client=client,
+                command=command_record,
+                raw=args.raw,
+            )
+            return 0 if command_record.get("status") == "completed" else 1
 
         if action == "open":
             command = {"type": "navigate", "url": args.url}
@@ -744,6 +983,12 @@ def build_parser() -> argparse.ArgumentParser:
     browser_scroll_by.add_argument("--dx", type=int, default=0)
     browser_scroll_by.add_argument("--dy", type=int, default=0)
     browser_scroll_by.set_defaults(func=cmd_browser)
+
+    browser_x11_click = browser_sub.add_parser("x11-click", help="Click inside the browser window using X11 coordinates")
+    browser_x11_click.add_argument("--x-ratio", type=float, required=True, help="Horizontal ratio inside the window [0..1]")
+    browser_x11_click.add_argument("--y-ratio", type=float, required=True, help="Vertical ratio inside the window [0..1]")
+    browser_x11_click.add_argument("--button", type=int, default=1, help="X11 mouse button number")
+    browser_x11_click.set_defaults(func=cmd_browser)
 
     browser_press = browser_sub.add_parser("press", help="Press a keyboard key")
     browser_press.add_argument("key")

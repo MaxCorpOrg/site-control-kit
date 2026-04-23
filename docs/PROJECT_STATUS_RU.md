@@ -11,6 +11,41 @@
 ## Сделано
 
 ### Обновление 2026-04-23
+- На локальной `main` добит automation-layer для reload/runtime и wrapper-open path:
+  - `webcontrol/cli.py` получил рабочий `browser x11-click` через `xwininfo + libX11/libXtst` без зависимости от `wmctrl/xdotool/python-xlib`;
+  - `scripts/reload_bridge_extension.sh` теперь реально проходит end-to-end на этой машине;
+  - после reload heartbeat снова рекламирует `meta.capabilities.content_commands`, включая `click_menu_text`.
+- `scripts/auto_collect_usernames.sh` теперь сначала открывает Telegram через уже подключённый bridge client (`browser new-tab`), и только потом падает в `xdg-open` fallback:
+  - это сняло ложный fail-fast после reload, когда клиент жив, но в его tabs пока нет `web.telegram.org`;
+  - живой smoke подтвердил, что wrapper сам открыл Telegram tab и дошёл до export без ручного `browser new-tab`.
+- Новые live run-артефакты на реальном чате `https://web.telegram.org/a/#-1002465948544`:
+  - auto-open smoke:
+    - `/home/max/telegram_contact_batches/chat_-1002465948544/runs/20260423T121918Z/run.json`
+    - `/home/max/telegram_contact_batches/chat_-1002465948544/runs/20260423T121918Z/export.log`
+    - `/home/max/telegram_contact_batches/chat_-1002465948544/runs/20260423T121918Z/export_stats.json`
+  - deep run после стабилизации runtime/wrapper:
+    - `/home/max/telegram_contact_batches/chat_-1002465948544/runs/20260423T122059Z/run.json`
+    - `/home/max/telegram_contact_batches/chat_-1002465948544/runs/20260423T122059Z/export.log`
+    - `/home/max/telegram_contact_batches/chat_-1002465948544/runs/20260423T122059Z/export_stats.json`
+  - результат deep run:
+    - `new_usernames = 4`
+    - `members_with_username = 9`
+    - `deep_attempted_total = 10`
+    - `deep_updated_total = 9`
+    - `safe_count = 9`
+  - новые archive artifacts:
+    - `/home/max/site-control-kit/artifacts/telegram_exports/20260423_162026_chat_1002465948544_6.md`
+    - `/home/max/site-control-kit/artifacts/telegram_exports/20260423_162026_chat_1002465948544_6_usernames_txt.txt`
+    - `/home/max/site-control-kit/artifacts/telegram_exports/20260423_162026_chat_1002465948544_6_usernames_json.json`
+    - `/home/max/site-control-kit/artifacts/telegram_exports/20260423_162710_chat_1002465948544_14.md`
+    - `/home/max/site-control-kit/artifacts/telegram_exports/20260423_162710_chat_1002465948544_14_usernames_txt.txt`
+    - `/home/max/site-control-kit/artifacts/telegram_exports/20260423_162710_chat_1002465948544_14_usernames_json.json`
+- Текущий честный ceiling уже измерен:
+  - transport/runtime/wrapper слой работает;
+  - главный остаточный bottleneck сместился в Telegram mention-path, где часто встречается `WARN: mention context menu not opened for peer ...`;
+  - даже при этом helper fallback и helper-tab path продолжают добывать реальные `@username`, так что deep run больше не бесполезный.
+
+### Обновление 2026-04-23
 - Из удалённой ветки `origin/codex/telegram-client-hardening` возвращены missing onboarding/status docs и Telegram batch/profile слой:
   - `docs/agent_handoff_ru/00..10`
   - `docs/PROJECT_WORKFLOW_RU.md`
@@ -138,7 +173,15 @@
   - при открытии такой страницы расширение вызывает `chrome.runtime.reload()` само.
 
 ## Проверено
-- Полный unit-набор сейчас зелёный: `110/110`.
+- Текущий локальный unit-набор зелёный: `77/77`.
+- `python3 -m py_compile webcontrol/cli.py` -> OK.
+- `bash -n scripts/auto_collect_usernames.sh` -> OK.
+- Живой reload helper подтверждён на локальной `main`:
+  - `bash scripts/reload_bridge_extension.sh`
+  - heartbeat после reload содержит `content_commands`, включая `click_menu_text`.
+- Живой auto-open smoke подтверждён:
+  - wrapper сам напечатал `INFO: opened Telegram tab via bridge client ...`
+  - run завершился успешно без ручного `browser new-tab`.
 - Shell syntax и `py_compile` для последних изменений проходили зелёными.
 - Точечный прогон экспортёрных тестов после capability-preflight:
   - `tests.test_telegram_export_parser`
