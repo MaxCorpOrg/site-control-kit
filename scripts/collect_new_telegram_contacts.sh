@@ -145,7 +145,8 @@ backup_if_exists() {
 snapshot_decision() {
   local candidate_md="$1"
   local baseline_md="$2"
-  python3 - "$BATCH_HELPER" "$candidate_md" "$baseline_md" <<'PY'
+  local compare_mode="${3:-default}"
+  python3 - "$BATCH_HELPER" "$candidate_md" "$baseline_md" "$compare_mode" <<'PY'
 import importlib.util
 import json
 import sys
@@ -154,6 +155,7 @@ from pathlib import Path
 module_path = Path(sys.argv[1]).expanduser()
 candidate_path = Path(sys.argv[2]).expanduser()
 baseline_path = Path(sys.argv[3]).expanduser()
+compare_mode = str(sys.argv[4] or "default").strip().lower()
 spec = importlib.util.spec_from_file_location("telegram_contact_batches", module_path)
 if spec is None or spec.loader is None:
     raise RuntimeError(f"Unable to load helper module from {module_path}")
@@ -162,7 +164,17 @@ spec.loader.exec_module(module)
 
 candidate = module.summarize_markdown_snapshot(candidate_path)
 baseline = module.summarize_markdown_snapshot(baseline_path if baseline_path.exists() else None)
-promote = 1 if (not baseline_path.exists() or module.should_promote_snapshot(candidate, baseline)) else 0
+prefer_peer_updates = compare_mode == "safe"
+promote = 1 if (
+    not baseline_path.exists()
+    or module.should_promote_snapshot(
+        candidate,
+        baseline,
+        candidate_path=candidate_path,
+        current_path=baseline_path if baseline_path.exists() else None,
+        prefer_peer_updates=prefer_peer_updates,
+    )
+) else 0
 print(f"promote={promote}")
 print("candidate=" + json.dumps(candidate, ensure_ascii=False, sort_keys=True))
 print("baseline=" + json.dumps(baseline, ensure_ascii=False, sort_keys=True))
@@ -172,7 +184,8 @@ PY
 best_snapshot_source() {
   local latest_md="$1"
   local snapshot_name="$2"
-  python3 - "$BATCH_HELPER" "$chat_dir" "$latest_md" "$snapshot_name" <<'PY'
+  local compare_mode="${3:-default}"
+  python3 - "$BATCH_HELPER" "$chat_dir" "$latest_md" "$snapshot_name" "$compare_mode" <<'PY'
 import importlib.util
 import json
 import sys
@@ -182,6 +195,7 @@ module_path = Path(sys.argv[1]).expanduser()
 chat_dir = Path(sys.argv[2]).expanduser()
 latest_md = Path(sys.argv[3]).expanduser()
 snapshot_name = sys.argv[4]
+compare_mode = str(sys.argv[5] or "default").strip().lower()
 spec = importlib.util.spec_from_file_location("telegram_contact_batches", module_path)
 if spec is None or spec.loader is None:
     raise RuntimeError(f"Unable to load helper module from {module_path}")
@@ -192,7 +206,7 @@ paths = []
 if latest_md.exists():
     paths.append(latest_md)
 paths.extend(sorted((chat_dir / "runs").glob(f"*/{snapshot_name}")))
-best_path, best_summary = module.select_best_snapshot(paths)
+best_path, best_summary = module.select_best_snapshot(paths, prefer_peer_updates=(compare_mode == "safe"))
 print(f"path={best_path if best_path else ''}")
 print("summary=" + json.dumps(best_summary, ensure_ascii=False, sort_keys=True))
 PY
@@ -368,7 +382,7 @@ backup_latest_full_txt="$(backup_if_exists "${chat_dir}/latest_full.txt" || true
 cp "${temp_md}" "${run_dir}/snapshot.md"
 cp "${temp_txt}" "${run_dir}/snapshot.txt"
 
-full_decision="$(snapshot_decision "${temp_md}" "${backup_latest_full_md:-/nonexistent}" )"
+full_decision="$(snapshot_decision "${temp_md}" "${backup_latest_full_md:-/nonexistent}" "default")"
 latest_full_promoted="$(printf '%s\n' "${full_decision}" | sed -n 's/^promote=//p')"
 latest_full_decision_candidate="$(printf '%s\n' "${full_decision}" | sed -n 's/^candidate=//p')"
 latest_full_decision_baseline="$(printf '%s\n' "${full_decision}" | sed -n 's/^baseline=//p')"
@@ -415,7 +429,7 @@ if [[ -n "${safe_txt}" ]]; then
     cp "${safe_txt}" "${run_dir}/snapshot_safe.txt"
   fi
 
-  safe_decision="$(snapshot_decision "${safe_md}" "${backup_latest_safe_md:-/nonexistent}" )"
+  safe_decision="$(snapshot_decision "${safe_md}" "${backup_latest_safe_md:-/nonexistent}" "safe")"
   latest_safe_promoted="$(printf '%s\n' "${safe_decision}" | sed -n 's/^promote=//p')"
   latest_safe_decision_candidate="$(printf '%s\n' "${safe_decision}" | sed -n 's/^candidate=//p')"
   latest_safe_decision_baseline="$(printf '%s\n' "${safe_decision}" | sed -n 's/^baseline=//p')"
@@ -436,7 +450,7 @@ if [[ -n "${safe_txt}" ]]; then
 fi
 
 latest_full_best_source="${chat_dir}/latest_full.md"
-full_best="$(best_snapshot_source "${chat_dir}/latest_full.md" "snapshot.md")"
+full_best="$(best_snapshot_source "${chat_dir}/latest_full.md" "snapshot.md" "default")"
 full_best_path="$(printf '%s\n' "${full_best}" | sed -n 's/^path=//p')"
 if [[ -n "${full_best_path}" ]]; then
   latest_full_best_source="${full_best_path}"
@@ -453,7 +467,7 @@ if [[ -n "${full_best_path}" ]]; then
 fi
 
 latest_safe_best_source="${chat_dir}/latest_safe.md"
-safe_best="$(best_snapshot_source "${chat_dir}/latest_safe.md" "snapshot_safe.md")"
+safe_best="$(best_snapshot_source "${chat_dir}/latest_safe.md" "snapshot_safe.md" "safe")"
 safe_best_path="$(printf '%s\n' "${safe_best}" | sed -n 's/^path=//p')"
 if [[ -n "${safe_best_path}" ]]; then
   latest_safe_best_source="${safe_best_path}"

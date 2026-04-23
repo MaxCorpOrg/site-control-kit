@@ -237,6 +237,33 @@ def summarize_markdown_snapshot(path: Path | None) -> dict[str, int]:
     }
 
 
+def snapshot_peer_username_map(path: Path | None) -> dict[str, str]:
+    if path is None or not path.exists():
+        return {}
+
+    peer_to_username: dict[str, str] = {}
+    for row in load_markdown_member_rows(path):
+        peer_id = str(row.peer_id or "").strip()
+        username = normalize_username(row.username)
+        if not peer_id or not username:
+            continue
+        peer_to_username[peer_id] = username
+    return peer_to_username
+
+
+def count_snapshot_peer_renames(candidate_path: Path | None, current_path: Path | None) -> int:
+    if candidate_path is None or current_path is None or not candidate_path.exists() or not current_path.exists():
+        return 0
+
+    candidate_map = snapshot_peer_username_map(candidate_path)
+    current_map = snapshot_peer_username_map(current_path)
+    return sum(
+        1
+        for peer_id, candidate_username in candidate_map.items()
+        if peer_id in current_map and current_map[peer_id] != candidate_username
+    )
+
+
 def snapshot_rank(summary: dict[str, int]) -> tuple[int, int, int, int]:
     return (
         int(summary.get("unique_usernames", 0) or 0),
@@ -246,18 +273,47 @@ def snapshot_rank(summary: dict[str, int]) -> tuple[int, int, int, int]:
     )
 
 
-def should_promote_snapshot(candidate: dict[str, int], current: dict[str, int]) -> bool:
-    return snapshot_rank(candidate) >= snapshot_rank(current)
+def should_promote_snapshot(
+    candidate: dict[str, int],
+    current: dict[str, int],
+    *,
+    candidate_path: Path | None = None,
+    current_path: Path | None = None,
+    prefer_peer_updates: bool = False,
+) -> bool:
+    if snapshot_rank(candidate) >= snapshot_rank(current):
+        return True
+
+    if not prefer_peer_updates:
+        return False
+
+    renamed_peers = count_snapshot_peer_renames(candidate_path, current_path)
+    if renamed_peers <= 0:
+        return False
+
+    candidate_effective_unique = int(candidate.get("unique_usernames", 0) or 0) + renamed_peers
+    current_unique = int(current.get("unique_usernames", 0) or 0)
+    return candidate_effective_unique >= current_unique
 
 
-def select_best_snapshot(paths: list[Path]) -> tuple[Path | None, dict[str, int]]:
+def select_best_snapshot(
+    paths: list[Path],
+    *,
+    prefer_peer_updates: bool = False,
+) -> tuple[Path | None, dict[str, int]]:
     best_path: Path | None = None
     best_summary = summarize_markdown_snapshot(None)
     for path in paths:
         if path is None or not path.exists():
             continue
         summary = summarize_markdown_snapshot(path)
-        if best_path is None or should_promote_snapshot(summary, best_summary):
+        if best_path is None or should_promote_snapshot(
+            summary,
+            best_summary,
+            candidate_path=path,
+            current_path=best_path,
+            prefer_peer_updates=prefer_peer_updates,
+        ):
             best_path = path
             best_summary = summary
     return best_path, best_summary

@@ -11,6 +11,14 @@
 ## Сделано
 
 ### Обновление 2026-04-23
+- Починена promotion policy для `latest_safe.*`:
+  - в `scripts/telegram_contact_batches.py` `select_best_snapshot(..., prefer_peer_updates=True)` теперь path-aware и учитывает rename того же `peer_id` как полезный identity update;
+  - в `scripts/collect_new_telegram_contacts.sh` safe-path сравнение и выбор best snapshot переведены в `safe`-mode, где peer-rename может перевесить старый, но более жирный baseline.
+- Проверка на текущем каталоге `/home/max/telegram_contact_batches/chat_-1002465948544` подтвердила новый выбор:
+  - helper теперь выбирает `/home/max/telegram_contact_batches/chat_-1002465948544/runs/20260423T134454Z/snapshot_safe.md` как лучший safe snapshot;
+  - `latest_safe.txt` обновлён и теперь содержит `@teimur_92` вместо старого `@abuzayd06`.
+
+### Обновление 2026-04-23
 - Починен downstream overwrite свежих live usernames:
   - в `scripts/export_telegram_members_non_pii.py` final sanitize больше не восстанавливает historical username поверх свежего live/helper результата автоматически;
   - historical restore теперь включается только если текущий username реально конфликтует с другим peer/history, а не просто отличается от старого значения;
@@ -229,7 +237,7 @@
   - при открытии такой страницы расширение вызывает `chrome.runtime.reload()` само.
 
 ## Проверено
-- Текущий локальный unit-набор зелёный: `86/86`.
+- Текущий локальный unit-набор зелёный: `88/88`.
 - `python3 -m py_compile webcontrol/cli.py` -> OK.
 - `bash -n scripts/auto_collect_usernames.sh` -> OK.
 - Живой reload helper подтверждён на локальной `main`:

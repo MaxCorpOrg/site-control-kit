@@ -152,6 +152,90 @@ class TelegramContactBatchesTests(unittest.TestCase):
 
         self.assertTrue(self.mod.should_promote_snapshot(candidate, current))
 
+    def test_should_promote_snapshot_safe_prefers_peer_rename_even_if_count_is_lower(self) -> None:
+        current_path = self.root / "current_safe.md"
+        current_path.write_text(
+            "# Safe Telegram Usernames\n\n"
+            "| # | Имя | Username | Статус | Роль | Peer ID |\n"
+            "|---|---|---|---|---|---|\n"
+            "| 1 | Teimur | @abuzayd06 | — | — | 555101371 |\n"
+            "| 2 | Olga | @osipoly | — | — | 123 |\n"
+            "| 3 | Bulka | @bulan04 | — | — | 456 |\n"
+            "| 4 | Kamaz | @kamaz_master1 | — | — | 789 |\n"
+            "| 5 | Bychkov | @bychkov_aa | — | — | 100 |\n"
+            "| 6 | Iris | @iris_bs_bot | — | — | 101 |\n"
+            "| 7 | Fuckeeva | @fuckeeva | — | — | 102 |\n"
+            "| 8 | Wander | @wanderlinde_baza | — | — | 103 |\n",
+            encoding="utf-8",
+        )
+        candidate_path = self.root / "candidate_safe.md"
+        candidate_path.write_text(
+            "# Safe Telegram Usernames\n\n"
+            "| # | Имя | Username | Статус | Роль | Peer ID |\n"
+            "|---|---|---|---|---|---|\n"
+            "| 1 | Teimur | @teimur_92 | — | — | 555101371 |\n"
+            "| 2 | Olga | @osipoly | — | — | 123 |\n"
+            "| 3 | Bulka | @bulan04 | — | — | 456 |\n"
+            "| 4 | Kamaz | @kamaz_master1 | — | — | 789 |\n"
+            "| 5 | Bychkov | @bychkov_aa | — | — | 100 |\n"
+            "| 6 | Wander | @wanderlinde_baza | — | — | 103 |\n"
+            "| 7 | Super | @super_pavlik | — | — | 104 |\n",
+            encoding="utf-8",
+        )
+
+        current = self.mod.summarize_markdown_snapshot(current_path)
+        candidate = self.mod.summarize_markdown_snapshot(candidate_path)
+
+        self.assertFalse(self.mod.should_promote_snapshot(candidate, current))
+        self.assertTrue(
+            self.mod.should_promote_snapshot(
+                candidate,
+                current,
+                candidate_path=candidate_path,
+                current_path=current_path,
+                prefer_peer_updates=True,
+            )
+        )
+
+    def test_select_best_snapshot_safe_prefers_peer_rename_candidate(self) -> None:
+        current_path = self.root / "current_safe.md"
+        current_path.write_text(
+            "# Safe Telegram Usernames\n\n"
+            "| # | Имя | Username | Статус | Роль | Peer ID |\n"
+            "|---|---|---|---|---|---|\n"
+            "| 1 | Teimur | @abuzayd06 | — | — | 555101371 |\n"
+            "| 2 | Olga | @osipoly | — | — | 123 |\n"
+            "| 3 | Bulka | @bulan04 | — | — | 456 |\n"
+            "| 4 | Kamaz | @kamaz_master1 | — | — | 789 |\n"
+            "| 5 | Bychkov | @bychkov_aa | — | — | 100 |\n"
+            "| 6 | Iris | @iris_bs_bot | — | — | 101 |\n"
+            "| 7 | Fuckeeva | @fuckeeva | — | — | 102 |\n"
+            "| 8 | Wander | @wanderlinde_baza | — | — | 103 |\n",
+            encoding="utf-8",
+        )
+        candidate_path = self.root / "candidate_safe.md"
+        candidate_path.write_text(
+            "# Safe Telegram Usernames\n\n"
+            "| # | Имя | Username | Статус | Роль | Peer ID |\n"
+            "|---|---|---|---|---|---|\n"
+            "| 1 | Teimur | @teimur_92 | — | — | 555101371 |\n"
+            "| 2 | Olga | @osipoly | — | — | 123 |\n"
+            "| 3 | Bulka | @bulan04 | — | — | 456 |\n"
+            "| 4 | Kamaz | @kamaz_master1 | — | — | 789 |\n"
+            "| 5 | Bychkov | @bychkov_aa | — | — | 100 |\n"
+            "| 6 | Wander | @wanderlinde_baza | — | — | 103 |\n"
+            "| 7 | Super | @super_pavlik | — | — | 104 |\n",
+            encoding="utf-8",
+        )
+
+        best_path, best_summary = self.mod.select_best_snapshot(
+            [current_path, candidate_path],
+            prefer_peer_updates=True,
+        )
+
+        self.assertEqual(best_path, candidate_path)
+        self.assertEqual(best_summary["unique_usernames"], 7)
+
     def test_select_best_snapshot_prefers_cleaner_candidate(self) -> None:
         first = self.root / "first.md"
         first.write_text(

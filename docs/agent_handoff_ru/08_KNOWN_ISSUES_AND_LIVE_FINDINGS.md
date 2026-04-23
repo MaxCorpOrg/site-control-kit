@@ -136,8 +136,18 @@ Self-reload и capability handshake уже подтверждены живьём
   - старой `username_to_peer["@abuzayd06"]` больше нет
 
 Новый остаточный нюанс уже не в самом safe/history conflict:
-- wrapper может оставить `latest_safe.*` на старом baseline snapshot, если свежий run слабее по общему числу usernames;
-- то есть run-level snapshot уже корректный, а вот promotion policy всё ещё оптимизирует под quantity, а не под freshness of changed peer identity.
+Снят.
+
+Подтверждение:
+- safe promotion policy теперь path-aware для peer rename:
+  - `scripts/telegram_contact_batches.py` умеет сравнивать snapshots в `prefer_peer_updates=True` режиме;
+  - `scripts/collect_new_telegram_contacts.sh` использует этот режим для `latest_safe.*`.
+- На текущем chat-dir helper уже выбирает:
+  - `/home/max/telegram_contact_batches/chat_-1002465948544/runs/20260423T134454Z/snapshot_safe.md`
+  как лучший safe snapshot вместо старого baseline.
+- После применения новой policy текущий:
+  - `/home/max/telegram_contact_batches/chat_-1002465948544/latest_safe.txt`
+  уже содержит `@teimur_92`.
 
 ### Group dialog restore в целом работает лучше, чем раньше
 Раньше один тяжёлый peer мог ломать остаток deep-step.
@@ -146,9 +156,8 @@ Self-reload и capability handshake уже подтверждены живьём
 ## Основные Открытые Риски
 1. Главный текущий limit: в текущем Telegram Web menu-path часто вообще не содержит `Mention`, даже когда context menu открылось корректно.
 2. Даже в `deep`-профиле runtime часто уходит в helper fallback вместо прямого menu-click path.
-3. Run-level safe outputs уже могут быть корректнее `latest_safe.*`, потому что promotion policy пока ориентируется на общее количество usernames, а не на freshness peer rename.
-4. Текущий честный baseline всё ещё только `9` safe usernames, а целевая планка остаётся `40+`.
-5. `export_telegram_members_non_pii.py` остаётся монолитным.
+3. Текущий честный baseline всё ещё только `9` safe usernames, а целевая планка остаётся `40+`.
+4. `export_telegram_members_non_pii.py` остаётся монолитным.
 
 ## Самый Полезный Мысленный Фильтр Для Следующего Агента
 Если следующий баг снова звучит как "не собрал username", не надо начинать с нуля.
