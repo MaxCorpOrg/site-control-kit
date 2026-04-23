@@ -1,6 +1,6 @@
 # Project Status RU
 
-Последнее обновление: 2026-04-20
+Последнее обновление: 2026-04-23
 
 Этот файл нужен как точка входа для любого нового чата и любого нового агента.
 Перед новой задачей его нужно прочитать целиком.
@@ -20,6 +20,18 @@
 - Есть рабочий сценарий пакетного сохранения новых контактов в `~/telegram_contact_batches/chat_<id>/1.txt`, `2.txt`, `3.txt` и далее.
 - Есть `latest_full.md/txt` и `latest_safe.md/txt`.
 - Есть numbered batch files и safe snapshots.
+
+### Telegram Invite Manager
+- Добавлен новый безопасный инструмент `scripts/telegram_invite_manager.py`.
+- Он не делает массовый инвайт и не обходит лимиты Telegram.
+- На текущем этапе это stateful manager для consent-based invite workflow:
+  - импорт CSV/JSON;
+  - `invite_state.json`;
+  - `next/run/mark/report`;
+  - `dry-run`;
+  - `runs/<timestamp>/invite_run.json` и `invite.log`.
+- Добавлен базовый GUI wrapper: `scripts/telegram_invite_manager_gui.sh`.
+- Добавлена отдельная документация: `docs/TELEGRAM_INVITE_MANAGER_RU.md`.
 
 ### Безопасность данных Telegram
 - Введены `identity_history.json`, `review.txt`, `conflicts.json` и quarantine-логика.
@@ -87,6 +99,11 @@
 
 ## Проверено
 - Полный unit-набор сейчас зелёный: `110/110`.
+- После добавления Invite Manager полный unit-набор зелёный: `117/117`.
+- Новый `Invite Manager` покрыт unit-тестами:
+  - `tests/test_telegram_invite_manager.py`
+  - `7/7 OK`
+- Для Invite Manager пока есть только state/reporting acceptance, без живого Telegram invite smoke.
 - Shell syntax и `py_compile` для последних изменений проходили зелёными.
 - Точечный прогон экспортёрных тестов после capability-preflight:
   - `tests.test_telegram_export_parser`
@@ -246,6 +263,12 @@
 
 ## Текущие Проблемы
 
+### 0. Invite Manager пока только manager/state слой
+Новый `Telegram Invite Manager` сейчас не выполняет живой Telegram invite path.
+Это сделано осознанно:
+- сначала собран надёжный state/reporting слой;
+- только потом можно отдельно делать безопасный `invite link / join request` orchestration path.
+
 ### 1. Deep mention уже рабочий, но остаётся неоднородным
 Есть подтверждённые live-run, где mention/deep без history backfill реально собрал новые `@username`.
 Но есть и peer, для которых `Mention` в конкретном DOM-срезе не появляется или даёт miss.
@@ -258,6 +281,18 @@
 - один неудачный peer больше не ломает весь batch-step.
 
 Следующий резерв уже не в починке path, а в общем балансе runtime между discovery и deep на длинных прогонах.
+
+## Следующий Приоритет
+
+### Для Telegram export
+- delivery-aware bailout после `expired no delivery`;
+- более ранний URL fallback;
+- повторный live smoke `fast` vs `deep`.
+
+### Для Invite Manager
+- добавить безопасный orchestration path через invite links / join requests;
+- не делать принудительное массовое добавление пользователей;
+- при первом live-шаге обязательно сохранять `run.json`/`log` аналогично существующим Telegram артефактам.
 
 ### 3. Reload helper стал рабочим, но fallback-кнопка ещё зависит от геометрии
 Основной stale-runtime блок снят через self-reload страницы расширения.

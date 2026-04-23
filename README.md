@@ -120,6 +120,37 @@ cd /home/max/site-control-kit
 
 Вывод по факту: `deep` лучше добывает новые реальные `@username`, а `fast` лучше для короткого повторного прохода по уже известной истории.
 
+## Telegram Invite Manager
+
+Для аккуратной работы с пользователями, которые уже дали согласие на вступление в чат, добавлен отдельный manager/state слой:
+
+- `scripts/telegram_invite_manager.py`
+- `scripts/telegram_invite_manager_gui.sh`
+- `docs/TELEGRAM_INVITE_MANAGER_RU.md`
+
+Это не инструмент массового добавления пользователей. На текущем этапе он решает безопасную manager-задачу:
+- импорт CSV/JSON;
+- нормализация `@username`;
+- хранение `invite_state.json`;
+- выбор следующей пачки пользователей;
+- `dry-run`;
+- run-артефакты `invite_run.json` и `invite.log`;
+- ручная смена статусов через CLI.
+
+Пример:
+
+```bash
+cd /home/max/site-control-kit
+python3 scripts/telegram_invite_manager.py init \
+  --chat-url "https://web.telegram.org/k/#-2465948544" \
+  --input "/home/max/telegram_invite_jobs/chat_-2465948544/users.csv"
+
+python3 scripts/telegram_invite_manager.py run \
+  --job-dir "/home/max/telegram_invite_jobs/chat_-2465948544" \
+  --limit 3 \
+  --dry-run
+```
+
 `run.json` теперь дублирует ключевую телеметрию экспортёра: `unique_members`, `members_with_username`, `chat_scroll_steps_done`, `chat_jump_scrolls_done`, `deep_updated_total`, `history_backfilled_total`, `output_usernames_cleared_total`, `chat_deep_priority_rounds`, `chat_deep_yield_stop`, а полный сырой payload лежит в `export_stats.json`.
 Также в `run.json` есть признаки продвижения/сохранения latest-снимков: `latest_full_promoted`, `latest_safe_promoted`, `latest_full_best_source`, `latest_safe_best_source`.
 

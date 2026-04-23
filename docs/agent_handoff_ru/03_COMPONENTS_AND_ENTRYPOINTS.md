@@ -85,6 +85,19 @@ Chain-runner.
 - batch shell;
 - GUI wrappers.
 
+### `scripts/telegram_invite_manager.py`
+Новый безопасный manager/state инструмент для consent-based invite workflow.
+На текущем этапе умеет:
+- импорт CSV/JSON;
+- строить `invite_state.json`;
+- выбирать следующую пачку usernames;
+- писать `invite_run.json` и `invite.log`;
+- переводить записи по status lifecycle.
+
+### `scripts/telegram_invite_manager_gui.sh`
+Базовый zenity-wrapper над Invite Manager CLI.
+Это операторский слой, а не источник истины.
+
 ### `scripts/write_telegram_safe_snapshot.py`
 Построение safe-snapshot из raw markdown.
 
@@ -114,4 +127,11 @@ PYTHONPATH="$PWD" python3 -m webcontrol clients
 ./scripts/collect_new_telegram_contacts_chain.sh "https://web.telegram.org/k/#-2465948544" \
   "/home/max/telegram_contact_batches" \
   --profile deep --runs 3
+```
+
+4. Invite manager:
+```bash
+python3 scripts/telegram_invite_manager.py init \
+  --chat-url "https://web.telegram.org/k/#-2465948544" \
+  --input "/home/max/telegram_invite_jobs/chat_-2465948544/users.csv"
 ```

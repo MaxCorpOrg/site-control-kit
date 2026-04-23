@@ -22,6 +22,14 @@
 5. Добавить тесты на эту ветку.
 6. Повторить live comparison `fast` vs `deep`.
 
+## Отдельный Трек: Invite Manager
+
+Новый `Telegram Invite Manager` уже существует как manager/state слой.
+Следующий шаг для него:
+1. не добавлять опасный массовый path;
+2. спроектировать безопасный orchestration через invite links или join requests;
+3. сохранить тот же уровень артефактов и state discipline, что уже есть у export pipeline.
+
 ## Следующий Приоритет P1
 ### Разрезать Монолитный Exporter
 `export_telegram_members_non_pii.py` уже слишком большой.

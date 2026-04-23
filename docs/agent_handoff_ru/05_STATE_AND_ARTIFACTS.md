@@ -105,3 +105,34 @@ chat_<id>/chains/<timestamp>/
 - `chain.log`
 
 `chain.json` важен для сравнения профилей и stop logic.
+
+## Invite Manager Artifacts
+
+Для invite manager используется отдельный корень:
+
+```text
+~/telegram_invite_jobs/chat_<slug>/
+```
+
+Внутри:
+- `invite_state.json`
+- `runs/<timestamp>/invite_run.json`
+- `runs/<timestamp>/invite.log`
+
+### Что Смотреть В `invite_state.json`
+- `chat_url`
+- `chat_slug`
+- `source_file`
+- `users`
+- `import_stats`
+
+### Что Смотреть В `invite_run.json`
+- `status`
+- `limit`
+- `dry_run`
+- `selected_users`
+- `processed`
+- `updated`
+- `from_statuses`
+- `target_status`
+- `results`
