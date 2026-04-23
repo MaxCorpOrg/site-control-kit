@@ -11,6 +11,28 @@
 ## Сделано
 
 ### Обновление 2026-04-23
+- Живой DOM Telegram Web на этой группе уточнён ещё сильнее:
+  - старые `.bubbles .bubbles-group-avatar.user-avatar...` селекторы больше не являются основным anchor-path;
+  - текущий рабочий peer-anchor это `sender-group-container` + `.Avatar[data-peer-id]` / `.message-title-name-container.interactive`.
+- В `scripts/export_telegram_members_non_pii.py` mention/open-dialog path переведён на текущие anchor selectors:
+  - это сняло старый слой `mention context menu not opened` для части peer;
+  - теперь exporter чаще доходит до меню и уже там понимает, что `Mention` в текущем Telegram UI обычно отсутствует.
+- Новый live-факт по текущему Telegram Web:
+  - после context-click на sender-name открывается `MessageContextMenu`;
+  - его реальные item сейчас такие: `Reply`, `Copy Text`, `Copy Message Link`, `Forward`, `Select`, `Report`;
+  - `Mention` в нём нет;
+  - значит главный остаточный limit уже не в доставке или selector lookup, а в самом product-path Telegram.
+- В exporter добавлен ранний bailout:
+  - если открытое menu-text не содержит `Mention`, exporter сразу прыгает в helper fallback и не тратит лишние retry на `click_menu_text`.
+- Новый live smoke после этой правки:
+  - `/home/max/telegram_contact_batches/chat_-1002465948544/runs/20260423T130122Z/run.json`
+  - `/home/max/telegram_contact_batches/chat_-1002465948544/runs/20260423T130122Z/export.log`
+  - `/home/max/telegram_contact_batches/chat_-1002465948544/runs/20260423T130122Z/export_stats.json`
+  - новый реальный helper-resolve в fast path:
+    - `@Teimur_92`
+  - safe ceiling пока не вырос выше `9`, но exporter теперь тратит время уже ближе к полезному path.
+
+### Обновление 2026-04-23
 - На локальной `main` добит automation-layer для reload/runtime и wrapper-open path:
   - `webcontrol/cli.py` получил рабочий `browser x11-click` через `xwininfo + libX11/libXtst` без зависимости от `wmctrl/xdotool/python-xlib`;
   - `scripts/reload_bridge_extension.sh` теперь реально проходит end-to-end на этой машине;

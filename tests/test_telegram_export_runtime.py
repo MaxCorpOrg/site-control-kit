@@ -233,15 +233,26 @@ class TelegramExportRuntimeTests(unittest.TestCase):
         self.assertIn("delivery_status=expired", str(ctx.exception))
 
     def test_try_username_via_mention_action_bails_out_on_delivery_failure(self) -> None:
-        responses = [
-            {"ok": True},
-            {"ok": True},
-            {"ok": False, "error": {"message": "command click_menu_text finished without result (command_status=expired, delivery_status=expired)"}},
-        ]
+        def fake_send_command_result(**kwargs):
+            command_type = kwargs["command"]["type"]
+            if command_type == "context_click":
+                return {"ok": True}
+            if command_type == "wait_selector":
+                return {"ok": True}
+            if command_type == "extract_text":
+                return {"ok": False, "error": {"message": "Element not found for selector: .MessageContextMenu_items"}}
+            if command_type == "click_menu_text":
+                return {
+                    "ok": False,
+                    "error": {
+                        "message": "command click_menu_text finished without result (command_status=expired, delivery_status=expired)"
+                    },
+                }
+            raise AssertionError(f"Unexpected command type: {command_type}")
 
         with (
             patch.object(self.mod, "_clear_composer_text", return_value=None),
-            patch.object(self.mod, "_send_command_result", side_effect=responses) as mock_send,
+            patch.object(self.mod, "_send_command_result", side_effect=fake_send_command_result) as mock_send,
         ):
             username, outcome = self.mod._try_username_via_mention_action(
                 server="http://127.0.0.1:8765",
@@ -254,6 +265,34 @@ class TelegramExportRuntimeTests(unittest.TestCase):
 
         self.assertEqual(username, "—")
         self.assertEqual(outcome, "delivery_failure")
+        self.assertEqual(mock_send.call_count, 4)
+
+    def test_try_username_via_mention_action_short_circuits_when_menu_has_no_mention(self) -> None:
+        def fake_send_command_result(**kwargs):
+            command_type = kwargs["command"]["type"]
+            if command_type == "context_click":
+                return {"ok": True}
+            if command_type == "wait_selector":
+                return {"ok": True}
+            if command_type == "extract_text":
+                return {"ok": True, "data": {"text": "Reply\nCopy Text\nForward\nSelect\nReport"}}
+            raise AssertionError(f"Unexpected command type: {command_type}")
+
+        with (
+            patch.object(self.mod, "_clear_composer_text", return_value=None),
+            patch.object(self.mod, "_send_command_result", side_effect=fake_send_command_result) as mock_send,
+        ):
+            username, outcome = self.mod._try_username_via_mention_action(
+                server="http://127.0.0.1:8765",
+                token="token",
+                client_id="client-1",
+                tab_id=1,
+                peer_id="42",
+                supports_click_menu_text=True,
+            )
+
+        self.assertEqual(username, "—")
+        self.assertEqual(outcome, "menu_missing")
         self.assertEqual(mock_send.call_count, 3)
 
     def test_enrich_usernames_deep_chat_uses_helper_fallback_in_mention_mode(self) -> None:

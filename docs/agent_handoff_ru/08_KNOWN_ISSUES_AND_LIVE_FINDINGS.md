@@ -80,12 +80,34 @@ Self-reload и capability handshake уже подтверждены живьём
   - deep path уже продуктивный;
   - но упирается в `mention context menu not opened`, а не в transport/runtime.
 
+### Новый live-факт после selector refresh
+Он уточнил bottleneck ещё сильнее:
+- current Telegram DOM действительно использует `sender-group-container` + `.Avatar[data-peer-id]` / `.message-title-name-container.interactive`;
+- после перевода mention/open-dialog path на эти anchors старый `context_missing` почти исчез;
+- но затем открылось следующее ограничение: текущий `MessageContextMenu` не содержит `Mention`.
+
+Подтверждение через live body snapshot:
+- `/tmp/tg_body_context_name.json`
+- в нём у открытого `MessageContextMenu_items` реальные items:
+  - `Reply`
+  - `Copy Text`
+  - `Copy Message Link`
+  - `Forward`
+  - `Select`
+  - `Report`
+- значит старый `Mention` path в этой версии Telegram Web не является надёжным источником usernames.
+
+Из этого уже сделан следующий практический шаг:
+- exporter теперь читает menu snapshot;
+- если в нём нет `Mention`, он сразу идёт в helper fallback;
+- это не подняло ceiling выше `9` safe usernames мгновенно, но сняло часть пустых retry.
+
 ### Group dialog restore в целом работает лучше, чем раньше
 Раньше один тяжёлый peer мог ломать остаток deep-step.
 Теперь path заметно устойчивее, хотя warning-поведение всё ещё встречается.
 
 ## Основные Открытые Риски
-1. Главный текущий limit: Telegram не всегда открывает mention context menu по текущим anchor/selectors.
+1. Главный текущий limit: в текущем Telegram Web menu-path часто вообще не содержит `Mention`, даже когда context menu открылось корректно.
 2. Даже в `deep`-профиле runtime часто уходит в helper fallback вместо прямого menu-click path.
 3. Текущий честный baseline всё ещё только `9` safe usernames, а целевая планка остаётся `40+`.
 4. `export_telegram_members_non_pii.py` остаётся монолитным.

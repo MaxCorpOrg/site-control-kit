@@ -550,6 +550,26 @@ def _is_delivery_failure_error(message: str) -> bool:
     )
 
 
+def _chat_peer_anchor_selectors(peer_id: str) -> tuple[str, ...]:
+    # Current Telegram Web exposes chat authors via `sender-group-container`
+    # and a clickable sender-name block. Prefer name/title anchors first so we
+    # open the message-specific context menu before falling back to avatar roots.
+    return (
+        f'.sender-group-container:has(.Avatar[data-peer-id="{peer_id}"]) .message-title-name-container.interactive',
+        f'.sender-group-container:has(.Avatar[data-peer-id="{peer_id}"]) .message-title-name',
+        f'.sender-group-container:has(.Avatar[data-peer-id="{peer_id}"]) .sender-title',
+        f'.sender-group-container .Avatar.interactive[data-peer-id="{peer_id}"]',
+        f'.sender-group-container .Avatar[data-peer-id="{peer_id}"]',
+        f'.MessageList .Avatar.interactive[data-peer-id="{peer_id}"]',
+        f'.MessageList .Avatar[data-peer-id="{peer_id}"]',
+        f'.bubbles .bubbles-group-avatar.user-avatar[data-peer-id="{peer_id}"] .avatar-photo',
+        f'.bubbles .bubbles-group-avatar.user-avatar[data-peer-id="{peer_id}"]',
+        f'.colored-name.name.floating-part[data-peer-id="{peer_id}"]',
+        f'.peer-title.bubble-name-first[data-peer-id="{peer_id}"]',
+        f'.bubbles .peer-title[data-peer-id="{peer_id}"]',
+    )
+
+
 def _try_username_via_mention_action(
     server: str,
     token: str,
@@ -563,12 +583,7 @@ def _try_username_via_mention_action(
     _clear_composer_text(server, token, client_id, tab_id)
 
     clicked_context = False
-    for selector in (
-        f'.bubbles .bubbles-group-avatar.user-avatar[data-peer-id="{peer_id}"] .avatar-photo',
-        f'.bubbles .bubbles-group-avatar.user-avatar[data-peer-id="{peer_id}"]',
-        f'.peer-title.bubble-name-first[data-peer-id="{peer_id}"]',
-        f'.bubbles .peer-title[data-peer-id="{peer_id}"]',
-    ):
+    for selector in _chat_peer_anchor_selectors(peer_id):
         opened = _send_command_result(
             server=server,
             token=token,
@@ -603,6 +618,30 @@ def _try_username_via_mention_action(
         raise_on_fail=False,
     )
 
+    menu_snapshot = _send_command_result(
+        server=server,
+        token=token,
+        client_id=client_id,
+        tab_id=tab_id,
+        timeout_sec=1,
+        command={
+            "type": "extract_text",
+            "selector": (
+                ".MessageContextMenu_items, "
+                ".menu-container.shown.open, "
+                ".menu-container.open, "
+                "#bubble-contextmenu.active, "
+                ".btn-menu.contextmenu.active"
+            ),
+            "timeout_ms": 900,
+        },
+        raise_on_fail=False,
+    )
+    menu_snapshot_data = menu_snapshot.get("data") or {}
+    menu_snapshot_text = _compact(
+        str((menu_snapshot_data.get("text") if isinstance(menu_snapshot_data, dict) else "") or "")
+    )
+
     mention_click_ok = False
     mention_terms = [
         "mention",
@@ -613,6 +652,14 @@ def _try_username_via_mention_action(
         "menção",
         "mencao",
     ]
+    lowered_menu_snapshot = menu_snapshot_text.lower()
+    if lowered_menu_snapshot and not any(term in lowered_menu_snapshot for term in mention_terms):
+        print(
+            f"INFO: current Telegram context menu for peer {peer_id} does not expose Mention, "
+            "switch to helper fallback"
+        )
+        return "—", "menu_missing"
+
     no_visible_menu_item_misses = 0
     delivery_failure = False
     if not mention_click_ok:
@@ -721,13 +768,7 @@ def _open_peer_dialog_from_group_chat(
     peer_id: str,
     timeout_sec: int,
 ) -> bool:
-    for selector in (
-        f'.bubbles .bubbles-group-avatar.user-avatar[data-peer-id="{peer_id}"] .avatar-photo',
-        f'.colored-name.name.floating-part[data-peer-id="{peer_id}"]',
-        f'.bubbles .bubbles-group-avatar.user-avatar[data-peer-id="{peer_id}"]',
-        f'.peer-title.bubble-name-first[data-peer-id="{peer_id}"]',
-        f'.bubbles .peer-title[data-peer-id="{peer_id}"]',
-    ):
+    for selector in _chat_peer_anchor_selectors(peer_id):
         result = _send_command_result(
             server=server,
             token=token,
@@ -1801,7 +1842,15 @@ def _enrich_chat_usernames_via_mentions(
                 timeout_sec=min(timeout_sec, 7),
                 command={
                     "type": "wait_selector",
-                    "selector": ".bubbles .sticky_sentinel--top, .bubbles [data-mid], .bubbles .bubbles-group-avatar",
+                    "selector": (
+                        ".MessageList .backwards-trigger, "
+                        ".MessageList .sender-group-container, "
+                        ".MessageList .Message, "
+                        ".messages-container > :first-child, "
+                        ".bubbles .sticky_sentinel--top, "
+                        ".bubbles [data-mid], "
+                        ".bubbles .bubbles-group-avatar"
+                    ),
                     "timeout_ms": 5000,
                     "visible_only": False,
                 },

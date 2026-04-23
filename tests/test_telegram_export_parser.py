@@ -183,6 +183,13 @@ class TelegramExportParserTests(unittest.TestCase):
         username = self.mod._extract_username_from_profile_html(html)
         self.assertEqual(username, "—")
 
+    def test_chat_peer_anchor_selectors_include_current_tg_web_avatar(self) -> None:
+        selectors = self.mod._chat_peer_anchor_selectors("1291639730")
+        self.assertIn('.sender-group-container .Avatar.interactive[data-peer-id="1291639730"]', selectors)
+        self.assertIn('.sender-group-container .Avatar[data-peer-id="1291639730"]', selectors)
+        self.assertIn('.MessageList .Avatar[data-peer-id="1291639730"]', selectors)
+        self.assertIn('.bubbles .bubbles-group-avatar.user-avatar[data-peer-id="1291639730"]', selectors)
+
     def test_build_parser_defaults_to_both(self) -> None:
         parser = self.mod.build_parser()
         args = parser.parse_args([])

@@ -1,11 +1,11 @@
 # Current Backlog And Next Steps
 
 ## Следующий Приоритет P0
-### Добор Username Через Починку Telegram Mention-Open Path
+### Добор Username Через Более Агрессивный Helper/Discovery Path
 Нужен следующий логический шаг:
-- локализовать, почему `context_click`/anchor path не открывает mention menu для части peer;
-- усилить selectors/anchor strategy до открытия context menu на большем числе сообщений;
-- только после этого снова гнать `deep` и двигать общий набор usernames к цели `40+`.
+- не тратить ещё цикл на старый `Mention` path как на основной;
+- усиливать discovery/scroll и helper-tab throughput, чтобы за тот же runtime проходить больше peer;
+- только так двигать общий набор usernames к цели `40+`.
 
 ## Почему Это Следующий Приоритет
 Потому что live smoke уже доказал:
@@ -16,19 +16,24 @@
 - runtime reload уже рабочий, heartbeat рекламирует `click_menu_text`;
 - wrapper уже сам открывает Telegram tab через bridge client;
 - helper fallback в `mention`-режиме уже приносит реальных людей на живом чате;
-- теперь главный остаточный limit уже в самом Telegram UI-path, а не в базовой архитектуре.
+- live body snapshot подтвердил, что текущий `MessageContextMenu` не содержит `Mention`;
+- значит главный остаточный limit уже в product-path Telegram и в throughput helper/discovery слоя.
 
 ## Предлагаемый План Для Следующего Инженерного Шага
-1. На живом DOM проверить текущие anchor/selectors для peer-avatar / peer-title, которые используются перед `context_click`.
-2. Если selectors слишком узкие, расширить их или добавить alternate anchor path.
-3. Если menu реально открывается, но плохо детектится, усилить post-context detection до `click_menu_text`.
-4. Повторить batch-run `CHAT_PROFILE=deep CHAT_DEEP_MODE=mention`.
+1. Поднять throughput helper fallback:
+   - уменьшить лишние return-to-group паузы;
+   - сократить повторные waits вокруг helper tabs;
+   - агрессивнее заполнять несколько peer за один visible-layer.
+2. Усилить discovery:
+   - проходить больше scroll steps за тот же runtime;
+   - раньше отбрасывать peer без практического шанса на новый username.
+3. Повторить batch-run `CHAT_PROFILE=deep`.
 5. Сравнить:
    - `new_usernames`
    - `deep_updated_total`
    - `members_with_username`
    - содержимое `latest_full.txt` и `latest_safe.txt`
-6. Если даже после усиления selectors прироста нет, переходить к следующему источнику usernames внутри Telegram Web, а не тратить ещё один цикл на wrapper/hub слой.
+6. Если helper/discovery optimisation всё ещё не даёт роста, искать следующий источник usernames внутри Telegram Web, а не тратить ещё один цикл на obsolete `Mention` path.
 
 ## Следующий Приоритет P1
 ### Разрезать Монолитный Exporter
@@ -61,5 +66,5 @@
     - `new_usernames = 4`
     - `members_with_username = 9`
     - `deep_updated_total = 9`
-- в `export.log` меньше `mention context menu not opened` и больше прямых mention-open/click-path срабатываний;
+- в `export.log` меньше пустых retry на menu-path и больше реально обработанных peer через helper/discovery;
 - `latest_full.txt` / `latest_safe.txt` растут дальше к целевой планке `40+`.
