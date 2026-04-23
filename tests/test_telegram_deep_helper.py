@@ -112,6 +112,39 @@ class TelegramDeepHelperTests(unittest.TestCase):
         self.assertEqual(helper_session["tab_id"], 777)
         self.assertEqual(mock_open.call_count, 1)
 
+    def test_read_username_via_helper_tab_can_leave_helper_active_between_peers(self) -> None:
+        helper_session = {"tab_id": None}
+
+        def fake_send_command_result(**kwargs):
+            command_type = kwargs["command"]["type"]
+            if command_type in {"wait_selector", "activate_tab"}:
+                return {"ok": True}
+            raise AssertionError(f"Unexpected command type: {command_type}")
+
+        with (
+            patch.object(self.mod, "_open_helper_tab", return_value=777),
+            patch.object(self.mod, "_activate_tab_best_effort", return_value=None) as mock_activate,
+            patch.object(self.mod, "_send_command_result", side_effect=fake_send_command_result),
+            patch.object(self.mod, "_poll_username_from_tab_url", return_value=("—", False)),
+            patch.object(self.mod, "_poll_username_from_page_location", return_value=("@alpha_fit", False)),
+        ):
+            username, opened = self.mod._read_username_via_helper_tab(
+                server="http://127.0.0.1:8765",
+                token="token",
+                client_id="client-1",
+                base_tab_id=100,
+                peer_id="111",
+                timeout_sec=5,
+                tg_mode="a",
+                helper_session=helper_session,
+                restore_base_tab=False,
+            )
+
+        self.assertEqual(username, "@alpha_fit")
+        self.assertTrue(opened)
+        self.assertEqual(helper_session["tab_id"], 777)
+        mock_activate.assert_not_called()
+
     def test_close_helper_session_best_effort_closes_reused_tab(self) -> None:
         helper_session = {"tab_id": 777}
         with (

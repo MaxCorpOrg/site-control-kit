@@ -2062,6 +2062,7 @@ def _enrich_usernames_deep_chat(
     opened_peer_ids: list[str] = []
     started_at = time.time()
     helper_session: dict[str, Any] = {"tab_id": None}
+    helper_only_for_rest = False
 
     try:
         for peer_id in pending_peer_ids:
@@ -2074,24 +2075,25 @@ def _enrich_usernames_deep_chat(
             if not _is_specific_tg_dialog_url(group_url):
                 break
 
-            if not _return_to_group_dialog_reliable(
-                server=server,
-                token=token,
-                client_id=client_id,
-                tab_id=tab_id,
-                group_url=group_url,
-                timeout_sec=min(timeout_sec, 3),
-            ):
-                print("WARN: deep chat could not restore group dialog, skipping user")
-                continue
+            if not helper_only_for_rest:
+                if not _return_to_group_dialog_reliable(
+                    server=server,
+                    token=token,
+                    client_id=client_id,
+                    tab_id=tab_id,
+                    group_url=group_url,
+                    timeout_sec=min(timeout_sec, 3),
+                ):
+                    print("WARN: deep chat could not restore group dialog, skipping user")
+                    continue
 
-            current_url_before = _get_tab_url(server, token, client_id, tab_id)
-            current_fragment_before = current_url_before.split("#", 1)[1] if "#" in current_url_before else ""
-            if target_fragment and (not current_fragment_before or target_fragment not in current_fragment_before):
-                print("WARN: deep chat not in target group dialog, skipping user")
-                continue
+                current_url_before = _get_tab_url(server, token, client_id, tab_id)
+                current_fragment_before = current_url_before.split("#", 1)[1] if "#" in current_url_before else ""
+                if target_fragment and (not current_fragment_before or target_fragment not in current_fragment_before):
+                    print("WARN: deep chat not in target group dialog, skipping user")
+                    continue
 
-            if mode in ("mention", "full"):
+            if not helper_only_for_rest and mode in ("mention", "full"):
                 mention_result = _try_username_via_mention_action(
                     server=server,
                     token=token,
@@ -2125,6 +2127,9 @@ def _enrich_usernames_deep_chat(
                     )
                     time.sleep(0.03)
                     continue
+                if mention_outcome == "menu_missing":
+                    helper_only_for_rest = True
+                    print("INFO: current menu lacks Mention; switching remaining peers in this step to helper-only")
                 if mode == "mention":
                     if mention_outcome == "delivery_failure":
                         print(f"INFO: mention delivery failed for peer {peer_id}, fallback to helper tab")
@@ -2140,6 +2145,7 @@ def _enrich_usernames_deep_chat(
                 timeout_sec=min(timeout_sec, 5),
                 tg_mode=tg_mode,
                 helper_session=helper_session,
+                restore_base_tab=not helper_only_for_rest,
             )
             if helper_opened:
                 opened += 1
@@ -2690,6 +2696,7 @@ def _read_username_via_helper_tab(
     timeout_sec: int,
     tg_mode: str,
     helper_session: dict[str, Any] | None = None,
+    restore_base_tab: bool = True,
 ) -> tuple[str, bool]:
     mode = tg_mode if tg_mode in {"a", "k"} else "a"
     helper_url = f"https://web.telegram.org/{mode}/#{peer_id}"
@@ -2823,7 +2830,8 @@ def _read_username_via_helper_tab(
         )
         return username, True
     finally:
-        _activate_tab_best_effort(server, token, client_id, base_tab_id, timeout_sec=min(timeout_sec, 3))
+        if restore_base_tab:
+            _activate_tab_best_effort(server, token, client_id, base_tab_id, timeout_sec=min(timeout_sec, 3))
         if helper_session is None:
             _close_tab_best_effort(server, token, client_id, helper_tab_id, timeout_sec=min(timeout_sec, 4))
         elif created_now and isinstance(helper_session, dict):

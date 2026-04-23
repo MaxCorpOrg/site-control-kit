@@ -11,6 +11,19 @@
 ## Сделано
 
 ### Обновление 2026-04-23
+- Ускорен deep helper path в текущем Telegram Web:
+  - если первый же `context menu` в шаге показывает, что `Mention` отсутствует (`menu_missing`), exporter больше не тратит оставшийся deep-step на повторные mention-попытки;
+  - оставшиеся peer этого же visible-layer сразу переводятся в helper-only path;
+  - helper tab теперь может оставаться активной между peer внутри такого шага, без лишнего возврата на base tab после каждого helper-read.
+- Новый live fast-run подтвердил измеримый прирост throughput:
+  - run: `/home/max/telegram_contact_batches/chat_-1002465948544/runs/20260423T141227Z/run.json`
+  - log: `/home/max/telegram_contact_batches/chat_-1002465948544/runs/20260423T141227Z/export.log`
+  - stats: `/home/max/telegram_contact_batches/chat_-1002465948544/runs/20260423T141227Z/export_stats.json`
+  - за те же `120s` deep-step теперь обработал `4` peer, а не `3`;
+  - `deep_attempted_total` вырос `3 -> 4`;
+  - `latest_safe.*` после wrapper refresh остаётся на корректном snapshot с `@teimur_92`.
+
+### Обновление 2026-04-23
 - Починена promotion policy для `latest_safe.*`:
   - в `scripts/telegram_contact_batches.py` `select_best_snapshot(..., prefer_peer_updates=True)` теперь path-aware и учитывает rename того же `peer_id` как полезный identity update;
   - в `scripts/collect_new_telegram_contacts.sh` safe-path сравнение и выбор best snapshot переведены в `safe`-mode, где peer-rename может перевесить старый, но более жирный baseline.
@@ -237,7 +250,7 @@
   - при открытии такой страницы расширение вызывает `chrome.runtime.reload()` само.
 
 ## Проверено
-- Текущий локальный unit-набор зелёный: `88/88`.
+- Текущий локальный unit-набор зелёный: `90/90`.
 - `python3 -m py_compile webcontrol/cli.py` -> OK.
 - `bash -n scripts/auto_collect_usernames.sh` -> OK.
 - Живой reload helper подтверждён на локальной `main`:

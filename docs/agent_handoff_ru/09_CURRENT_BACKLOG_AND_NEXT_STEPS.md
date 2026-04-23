@@ -6,6 +6,9 @@
 - не тратить ещё цикл на старый `Mention` path как на основной;
 - усиливать discovery/scroll и helper-tab throughput, чтобы за тот же runtime проходить больше peer;
 - только так двигать общий набор usernames к цели `40+`.
+- текущий baseline после helper-only switch уже лучше прежнего:
+  - fast run `20260423T141227Z` обрабатывает `4` peer за `120s`;
+  - значит следующий шаг должен улучшать именно этот throughput, а не снова чинить history/latest layer.
 
 Отдельный подшаг рядом с этим приоритетом:
 - больше не нужен как P0:
@@ -25,8 +28,8 @@
 
 ## Предлагаемый План Для Следующего Инженерного Шага
 1. Поднять throughput helper fallback:
-   - уменьшить лишние return-to-group паузы;
-   - сократить повторные waits вокруг helper tabs;
+   - уменьшить лишние waits вокруг helper tabs;
+   - сильнее сокращать profile-open path внутри helper;
    - агрессивнее заполнять несколько peer за один visible-layer.
 2. Усилить discovery:
    - проходить больше scroll steps за тот же runtime;
@@ -65,11 +68,11 @@
 ## Хороший Следующий Acceptance
 Хороший следующий результат будет таким:
 - новый live run после mention-open фикса даёт больше, чем текущий baseline:
-  - baseline run: `/home/max/telegram_contact_batches/chat_-1002465948544/runs/20260423T122059Z/run.json`
+  - baseline run: `/home/max/telegram_contact_batches/chat_-1002465948544/runs/20260423T141227Z/run.json`
   - baseline:
-    - `new_usernames = 4`
-    - `members_with_username = 9`
-    - `deep_updated_total = 9`
+    - `members_with_username = 7`
+    - `deep_attempted_total = 4`
+    - `deep_updated_total = 1`
 - в `export.log` меньше пустых retry на menu-path и больше реально обработанных peer через helper/discovery;
 - `latest_full.txt` / `latest_safe.txt` растут дальше к целевой планке `40+`;
 - если run обновил username у уже известного peer, это изменение не теряется ни в `snapshot_safe`, ни в `identity_history`, ни в `latest_safe.*`.

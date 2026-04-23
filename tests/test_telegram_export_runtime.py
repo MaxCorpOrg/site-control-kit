@@ -322,6 +322,58 @@ class TelegramExportRuntimeTests(unittest.TestCase):
         self.assertEqual(opened_peer_ids, ["42"])
         self.assertEqual(mock_helper.call_count, 1)
 
+    def test_enrich_usernames_deep_chat_switches_remaining_peers_to_helper_only_after_menu_missing(self) -> None:
+        members = [
+            {"peer_id": "42", "name": "Alice", "username": "—", "status": "из чата", "role": "—"},
+            {"peer_id": "43", "name": "Bob", "username": "—", "status": "из чата", "role": "—"},
+        ]
+
+        helper_calls: list[dict[str, object]] = []
+
+        def fake_helper(**kwargs):
+            helper_calls.append(kwargs)
+            peer_id = kwargs["peer_id"]
+            if peer_id == "42":
+                return "@alice_42", True
+            if peer_id == "43":
+                return "@bob_43", True
+            raise AssertionError(f"Unexpected peer_id: {peer_id}")
+
+        with (
+            patch.object(self.mod, "_return_to_group_dialog_reliable", return_value=True) as mock_return,
+            patch.object(self.mod, "_get_tab_url", return_value="https://web.telegram.org/a/#-1002465948544"),
+            patch.object(
+                self.mod,
+                "_try_username_via_mention_action",
+                side_effect=[("—", "menu_missing")],
+            ) as mock_mention,
+            patch.object(self.mod, "_read_username_via_helper_tab", side_effect=fake_helper),
+            patch.object(self.mod, "_close_helper_session_best_effort", return_value=None),
+        ):
+            attempted, updated, opened, opened_peer_ids = self.mod._enrich_usernames_deep_chat(
+                server="http://127.0.0.1:8765",
+                token="token",
+                client_id="client-1",
+                tab_id=1,
+                timeout_sec=5,
+                members=members,
+                group_url="https://web.telegram.org/a/#-1002465948544",
+                max_runtime_sec=12,
+                mode="mention",
+                supports_click_menu_text=True,
+            )
+
+        self.assertEqual(attempted, 2)
+        self.assertEqual(updated, 2)
+        self.assertEqual(opened, 2)
+        self.assertEqual(opened_peer_ids, ["42", "43"])
+        self.assertEqual(mock_mention.call_count, 1)
+        self.assertEqual(mock_return.call_count, 1)
+        self.assertEqual(helper_calls[0]["restore_base_tab"], False)
+        self.assertEqual(helper_calls[1]["restore_base_tab"], False)
+        self.assertEqual(members[0]["username"], "@alice_42")
+        self.assertEqual(members[1]["username"], "@bob_43")
+
     def test_client_supports_content_command_detects_click_menu_text(self) -> None:
         clients = [
             {

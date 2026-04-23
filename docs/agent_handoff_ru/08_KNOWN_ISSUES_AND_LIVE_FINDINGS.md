@@ -7,6 +7,11 @@
 - wrapper уже умеет сам открыть Telegram tab через bridge client;
 - но на части peer по-прежнему повторяется `WARN: mention context menu not opened for peer ...`.
 
+Новый конкретный прогресс внутри этого bottleneck:
+- exporter теперь умеет внутри одного deep-step рано понять, что текущий Telegram menu-path бесполезен;
+- если первый peer возвращает `menu_missing`, оставшиеся peer этого же visible-layer сразу идут в helper-only path;
+- это уже дало реальный throughput gain на живом чате.
+
 Отдельно:
 - branded Chrome по-прежнему может мешать именно установке unpacked extension флагами;
 - для этого теперь добавлен отдельный Firefox dev-path через `./start-firefox.sh` / `./start-telegram-firefox.sh`;
@@ -149,6 +154,17 @@ Self-reload и capability handshake уже подтверждены живьём
   - `/home/max/telegram_contact_batches/chat_-1002465948544/latest_safe.txt`
   уже содержит `@teimur_92`.
 
+### Новый live baseline после helper-only switch
+- run: `/home/max/telegram_contact_batches/chat_-1002465948544/runs/20260423T141227Z/run.json`
+- log: `/home/max/telegram_contact_batches/chat_-1002465948544/runs/20260423T141227Z/export.log`
+- stats: `/home/max/telegram_contact_batches/chat_-1002465948544/runs/20260423T141227Z/export_stats.json`
+- подтверждённый факт:
+  - после первого `menu_missing` exporter переключил остаток шага в helper-only;
+  - за `120s` fast profile теперь обработал `4` peer, а не `3`;
+  - `deep_attempted_total = 4`
+  - `deep_updated_total = 1`
+- это не сняло потолок `7 safe usernames`, но уже доказало, что текущий путь можно ускорять без нового переписывания хаба/bridge.
+
 ### Group dialog restore в целом работает лучше, чем раньше
 Раньше один тяжёлый peer мог ломать остаток deep-step.
 Теперь path заметно устойчивее, хотя warning-поведение всё ещё встречается.
@@ -156,8 +172,9 @@ Self-reload и capability handshake уже подтверждены живьём
 ## Основные Открытые Риски
 1. Главный текущий limit: в текущем Telegram Web menu-path часто вообще не содержит `Mention`, даже когда context menu открылось корректно.
 2. Даже в `deep`-профиле runtime часто уходит в helper fallback вместо прямого menu-click path.
-3. Текущий честный baseline всё ещё только `9` safe usernames, а целевая планка остаётся `40+`.
-4. `export_telegram_members_non_pii.py` остаётся монолитным.
+3. Даже после helper-only switch deep throughput пока всё ещё ограничен: fast run обрабатывает `4` peer за `120s`, а не десятки.
+4. Текущий честный baseline всё ещё только `7` safe usernames в latest-safe контуре этой группы, а целевая планка остаётся `40+`.
+5. `export_telegram_members_non_pii.py` остаётся монолитным.
 
 ## Самый Полезный Мысленный Фильтр Для Следующего Агента
 Если следующий баг снова звучит как "не собрал username", не надо начинать с нуля.
