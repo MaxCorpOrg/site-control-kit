@@ -11,6 +11,24 @@
 ## Сделано
 
 ### Обновление 2026-04-23
+- Добавлен отдельный Firefox dev/debug contour для bridge:
+  - `extension/manifest.json` теперь содержит и `background.service_worker`, и `background.scripts` c `preferred_environment`, чтобы один и тот же background path поднимался и в Chromium, и в Firefox;
+  - добавлен `browser_specific_settings.gecko.id`, чтобы Firefox-path был стабильнее для dev-run;
+  - `extension/background.js` больше не падает на `runtime.onSuspend`, если среда его не предоставляет.
+- Добавлены launcher-скрипты:
+  - `./start-firefox.sh`
+  - `./start-telegram-firefox.sh`
+  - `scripts/start_firefox.sh`
+- Firefox path использует `web-ext run` и выделенный профиль `~/.site-control-kit/firefox-profile`:
+  - это снимает Chrome-specific блокировку на `--load-extension`;
+  - но это именно dev/debug path, а не доказательство, что Telegram bottleneck уже снят сам собой.
+  - на этой машине обнаружен ещё один конкретный нюанс: системный Firefox установлен как snap wrapper, и `web-ext` не поднимает temporary add-on автоматически из-за refused debugger port; поэтому helper на snap Firefox падает в `about:debugging` manual fallback.
+- Заодно подтверждён и следующий настоящий продуктовый дефект уже внутри Telegram pipeline:
+  - в live fast-run `20260423T131912Z` helper добыл `@Teimur_92` для peer `555101371`;
+  - но финальный safe/full output вернул этому peer старое историческое значение `@abuzayd06`;
+  - значит после helper/discovery есть downstream overwrite в history-backfill или sanitize layer.
+
+### Обновление 2026-04-23
 - Живой DOM Telegram Web на этой группе уточнён ещё сильнее:
   - старые `.bubbles .bubbles-group-avatar.user-avatar...` селекторы больше не являются основным anchor-path;
   - текущий рабочий peer-anchor это `sender-group-container` + `.Avatar[data-peer-id]` / `.message-title-name-container.interactive`.
@@ -195,7 +213,7 @@
   - при открытии такой страницы расширение вызывает `chrome.runtime.reload()` само.
 
 ## Проверено
-- Текущий локальный unit-набор зелёный: `77/77`.
+- Текущий локальный unit-набор зелёный: `83/83`.
 - `python3 -m py_compile webcontrol/cli.py` -> OK.
 - `bash -n scripts/auto_collect_usernames.sh` -> OK.
 - Живой reload helper подтверждён на локальной `main`:

@@ -301,6 +301,7 @@ class TelegramExportRuntimeTests(unittest.TestCase):
             patch.object(self.mod, "_get_tab_url", return_value="https://web.telegram.org/a/#-1002465948544"),
             patch.object(self.mod, "_try_username_via_mention_action", return_value=("—", "delivery_failure")),
             patch.object(self.mod, "_read_username_via_helper_tab", return_value=("@alice_42", True)) as mock_helper,
+            patch.object(self.mod, "_close_helper_session_best_effort", return_value=None),
         ):
             attempted, updated, opened, opened_peer_ids = self.mod._enrich_usernames_deep_chat(
                 server="http://127.0.0.1:8765",

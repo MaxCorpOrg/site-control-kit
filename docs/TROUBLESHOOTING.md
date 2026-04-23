@@ -11,6 +11,19 @@
 - В таком случае загрузите `extension/` через `Load unpacked` один раз в выделенном профиле, который открыл `start-browser.sh`.
 - После one-time установки используйте тот же профиль и команды `./browser.sh status`, `./browser.sh tabs`.
 
+## Брендированный Chrome мешает, а нужен быстрый dev/debug-путь
+- Используйте `./start-firefox.sh --url https://web.telegram.org/a/`.
+- На обычном Firefox этот путь запускает `web-ext run` и ставит `extension/` как temporary add-on автоматически.
+- На snap Firefox helper честно переводит вас в `about:debugging`, потому что `web-ext` может не достучаться до debugger port snap-сборки.
+- Temporary add-on поднимается заново на каждом запуске Firefox dev-контура; это нормально для Firefox dev workflow.
+- Профиль Firefox хранится отдельно в `~/.site-control-kit/firefox-profile`, поэтому Telegram cookies/session можно не терять между прогонами.
+- Для snap Firefox manual шаги такие:
+  - `Load Temporary Add-on`
+  - выбрать `/home/max/site-control-kit/extension/manifest.json`
+- Проверка та же:
+  - `./browser.sh status`
+  - `./browser.sh tabs`
+
 ## Telegram export не находит нужную группу, хотя Telegram открыт
 - Раньше экспортёр мог смотреть только в первый клиент; теперь он ищет Telegram-вкладку по всем живым клиентам.
 - Если клиентов несколько и нужен конкретный, всё равно лучше явно указать `--client-id` или `--tab-id`.

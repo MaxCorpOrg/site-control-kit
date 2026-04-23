@@ -16,8 +16,15 @@
     "http://localhost:8765/*"
   ],
   "background": {
+    "scripts": ["background.js"],
     "service_worker": "background.js",
+    "preferred_environment": ["service_worker", "document"],
     "type": "module"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "site-control-bridge@maxcorp.local"
+    }
   },
   "action": {
     "default_title": "Site Control Bridge (Локальное управление)",

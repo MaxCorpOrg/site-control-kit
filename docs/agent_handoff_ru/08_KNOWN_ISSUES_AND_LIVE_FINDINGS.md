@@ -7,6 +7,12 @@
 - wrapper уже умеет сам открыть Telegram tab через bridge client;
 - но на части peer по-прежнему повторяется `WARN: mention context menu not opened for peer ...`.
 
+Отдельно:
+- branded Chrome по-прежнему может мешать именно установке unpacked extension флагами;
+- для этого теперь добавлен отдельный Firefox dev-path через `./start-firefox.sh` / `./start-telegram-firefox.sh`;
+- он полезен как альтернативный runtime для отладки, но не отменяет текущий Telegram-layer bottleneck сам по себе;
+- на текущей машине Firefox установлен через snap wrapper, и `web-ext` не может стабильно подключиться к debugger port, поэтому для snap Firefox helper использует `about:debugging` manual fallback вместо ложного обещания “полностью автоматически”.
+
 На 2026-04-23 инфраструктурные слои уже сняты:
 - `mention`-режим больше не тупиковый: при unresolved/delivery-failure он сразу падает в helper-tab fallback;
 - `webcontrol/store.py` больше не пишет `state.json` на каждый heartbeat и пустой poll, поэтому `/api/clients` снова отвечает быстро и batch wrapper снова живой.
@@ -101,6 +107,15 @@ Self-reload и capability handshake уже подтверждены живьём
 - exporter теперь читает menu snapshot;
 - если в нём нет `Mention`, он сразу идёт в helper fallback;
 - это не подняло ceiling выше `9` safe usernames мгновенно, но сняло часть пустых retry.
+
+### Новый live-факт по history/safe слою
+- Есть подтверждённый случай, где fresh helper-resolve не сохранился в финальный safe/full output.
+- В fast run `20260423T131912Z` exporter живьём напечатал:
+  - `INFO: chat helper 555101371 -> @Teimur_92`
+- Но в итоговых batch/snapshot артефактах этот peer снова оказался как `@abuzayd06`.
+- Практический вывод:
+  - текущий limit уже не только в menu/helper throughput;
+  - есть отдельный downstream bug, где history backfill или final sanitize может перетирать свежий live username более старым значением.
 
 ### Group dialog restore в целом работает лучше, чем раньше
 Раньше один тяжёлый peer мог ломать остаток deep-step.

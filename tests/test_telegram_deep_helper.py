@@ -24,7 +24,10 @@ class TelegramDeepHelperTests(unittest.TestCase):
 
     def test_info_deep_uses_helper_tab_username(self) -> None:
         members = [{"peer_id": "123", "name": "Alice", "username": "—", "role": "", "status": ""}]
-        with patch.object(self.mod, "_read_username_via_helper_tab", return_value=("@alicefit", True)):
+        with (
+            patch.object(self.mod, "_read_username_via_helper_tab", return_value=("@alicefit", True)),
+            patch.object(self.mod, "_close_helper_session_best_effort", return_value=None),
+        ):
             attempted, updated, opened_peer_ids = self.mod._enrich_usernames_deep(
                 server="http://127.0.0.1:8765",
                 token="token",
@@ -46,6 +49,7 @@ class TelegramDeepHelperTests(unittest.TestCase):
             patch.object(self.mod, "_get_tab_url", return_value="https://web.telegram.org/a/#-1002465948544"),
             patch.object(self.mod, "_try_username_via_mention_action", return_value="—"),
             patch.object(self.mod, "_read_username_via_helper_tab", return_value=("@bobmass", True)),
+            patch.object(self.mod, "_close_helper_session_best_effort", return_value=None),
         ):
             attempted, updated, opened, opened_peer_ids = self.mod._enrich_usernames_deep_chat(
                 server="http://127.0.0.1:8765",
@@ -63,6 +67,101 @@ class TelegramDeepHelperTests(unittest.TestCase):
         self.assertEqual(opened, 1)
         self.assertEqual(opened_peer_ids, ["456"])
         self.assertEqual(members[0]["username"], "@bobmass")
+
+    def test_read_username_via_helper_tab_reuses_session_tab(self) -> None:
+        helper_session = {"tab_id": None}
+
+        def fake_send_command_result(**kwargs):
+            command_type = kwargs["command"]["type"]
+            if command_type in {"wait_selector", "navigate", "activate_tab"}:
+                return {"ok": True}
+            raise AssertionError(f"Unexpected command type: {command_type}")
+
+        with (
+            patch.object(self.mod, "_open_helper_tab", return_value=777) as mock_open,
+            patch.object(self.mod, "_activate_tab_best_effort", return_value=None),
+            patch.object(self.mod, "_send_command_result", side_effect=fake_send_command_result),
+            patch.object(self.mod, "_poll_username_from_tab_url", side_effect=[("—", False), ("—", False)]),
+            patch.object(self.mod, "_poll_username_from_page_location", side_effect=[("@alpha_fit", False), ("@beta_fit", False)]),
+        ):
+            username_a, opened_a = self.mod._read_username_via_helper_tab(
+                server="http://127.0.0.1:8765",
+                token="token",
+                client_id="client-1",
+                base_tab_id=100,
+                peer_id="111",
+                timeout_sec=5,
+                tg_mode="a",
+                helper_session=helper_session,
+            )
+            username_b, opened_b = self.mod._read_username_via_helper_tab(
+                server="http://127.0.0.1:8765",
+                token="token",
+                client_id="client-1",
+                base_tab_id=100,
+                peer_id="222",
+                timeout_sec=5,
+                tg_mode="a",
+                helper_session=helper_session,
+            )
+
+        self.assertEqual(username_a, "@alpha_fit")
+        self.assertEqual(username_b, "@beta_fit")
+        self.assertTrue(opened_a)
+        self.assertTrue(opened_b)
+        self.assertEqual(helper_session["tab_id"], 777)
+        self.assertEqual(mock_open.call_count, 1)
+
+    def test_close_helper_session_best_effort_closes_reused_tab(self) -> None:
+        helper_session = {"tab_id": 777}
+        with (
+            patch.object(self.mod, "_close_tab_best_effort", return_value=None) as mock_close,
+            patch.object(self.mod, "_activate_tab_best_effort", return_value=None) as mock_activate,
+        ):
+            self.mod._close_helper_session_best_effort(
+                server="http://127.0.0.1:8765",
+                token="token",
+                client_id="client-1",
+                base_tab_id=100,
+                helper_session=helper_session,
+                timeout_sec=3,
+            )
+
+        mock_close.assert_called_once()
+        mock_activate.assert_called_once()
+        self.assertIsNone(helper_session["tab_id"])
+
+    def test_read_username_via_helper_tab_tolerates_missing_header_shell(self) -> None:
+        helper_session = {"tab_id": None}
+
+        def fake_send_command_result(**kwargs):
+            command_type = kwargs["command"]["type"]
+            if command_type in {"wait_selector", "activate_tab"}:
+                return {"ok": True}
+            raise AssertionError(f"Unexpected command type: {command_type}")
+
+        with (
+            patch.object(self.mod, "_open_helper_tab", return_value=888),
+            patch.object(self.mod, "_activate_tab_best_effort", return_value=None),
+            patch.object(self.mod, "_send_command_result", side_effect=fake_send_command_result),
+            patch.object(self.mod, "_poll_username_from_tab_url", return_value=("—", False)),
+            patch.object(self.mod, "_poll_username_from_page_location", return_value=("—", False)),
+            patch.object(self.mod, "_send_get_html", side_effect=RuntimeError("missing header")),
+            patch.object(self.mod, "_open_current_chat_user_info_and_read_username", return_value="@gamma_fit"),
+        ):
+            username, opened = self.mod._read_username_via_helper_tab(
+                server="http://127.0.0.1:8765",
+                token="token",
+                client_id="client-1",
+                base_tab_id=100,
+                peer_id="333",
+                timeout_sec=5,
+                tg_mode="a",
+                helper_session=helper_session,
+            )
+
+        self.assertEqual(username, "@gamma_fit")
+        self.assertTrue(opened)
 
 
 if __name__ == "__main__":

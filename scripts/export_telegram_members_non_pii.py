@@ -2036,96 +2036,108 @@ def _enrich_usernames_deep_chat(
     opened = 0
     opened_peer_ids: list[str] = []
     started_at = time.time()
+    helper_session: dict[str, Any] = {"tab_id": None}
 
-    for peer_id in pending_peer_ids:
-        if time.time() - started_at > max_runtime_sec:
-            print("WARN: deep chat step budget exhausted, continue with next scroll step")
-            break
-        attempted += 1
-        # Mark as processed for this run to avoid re-clicking the same peer again and again.
-        opened_peer_ids.append(peer_id)
-        if not _is_specific_tg_dialog_url(group_url):
-            break
+    try:
+        for peer_id in pending_peer_ids:
+            if time.time() - started_at > max_runtime_sec:
+                print("WARN: deep chat step budget exhausted, continue with next scroll step")
+                break
+            attempted += 1
+            # Mark as processed for this run to avoid re-clicking the same peer again and again.
+            opened_peer_ids.append(peer_id)
+            if not _is_specific_tg_dialog_url(group_url):
+                break
 
-        if not _return_to_group_dialog_reliable(
-            server=server,
-            token=token,
-            client_id=client_id,
-            tab_id=tab_id,
-            group_url=group_url,
-            timeout_sec=min(timeout_sec, 3),
-        ):
-            print("WARN: deep chat could not restore group dialog, skipping user")
-            continue
-
-        current_url_before = _get_tab_url(server, token, client_id, tab_id)
-        current_fragment_before = current_url_before.split("#", 1)[1] if "#" in current_url_before else ""
-        if target_fragment and (not current_fragment_before or target_fragment not in current_fragment_before):
-            print("WARN: deep chat not in target group dialog, skipping user")
-            continue
-
-        if mode in ("mention", "full"):
-            mention_result = _try_username_via_mention_action(
+            if not _return_to_group_dialog_reliable(
                 server=server,
                 token=token,
                 client_id=client_id,
                 tab_id=tab_id,
-                peer_id=peer_id,
-                supports_click_menu_text=supports_click_menu_text,
-            )
-            if isinstance(mention_result, tuple):
-                mention_username, mention_outcome = mention_result
-            else:
-                mention_username = str(mention_result or "—")
-                mention_outcome = "success" if mention_username != "—" else "unresolved"
-            if mention_username != "—":
-                key = mention_username.lower()
-                existing_peer = username_to_peer.get(key)
-                if existing_peer and existing_peer != peer_id:
-                    print(f"WARN: skip duplicate username {mention_username} for peer {peer_id} (already {existing_peer})")
-                    continue
-                members_by_peer[peer_id]["username"] = mention_username
-                username_to_peer[key] = peer_id
-                updated += 1
-                print(f"INFO: chat mention {peer_id} -> {mention_username}")
-                _return_to_group_dialog_reliable(
+                group_url=group_url,
+                timeout_sec=min(timeout_sec, 3),
+            ):
+                print("WARN: deep chat could not restore group dialog, skipping user")
+                continue
+
+            current_url_before = _get_tab_url(server, token, client_id, tab_id)
+            current_fragment_before = current_url_before.split("#", 1)[1] if "#" in current_url_before else ""
+            if target_fragment and (not current_fragment_before or target_fragment not in current_fragment_before):
+                print("WARN: deep chat not in target group dialog, skipping user")
+                continue
+
+            if mode in ("mention", "full"):
+                mention_result = _try_username_via_mention_action(
                     server=server,
                     token=token,
                     client_id=client_id,
                     tab_id=tab_id,
-                    group_url=group_url,
-                    timeout_sec=min(timeout_sec, 2),
+                    peer_id=peer_id,
+                    supports_click_menu_text=supports_click_menu_text,
                 )
-                time.sleep(0.03)
-                continue
-            if mode == "mention":
-                if mention_outcome == "delivery_failure":
-                    print(f"INFO: mention delivery failed for peer {peer_id}, fallback to helper tab")
+                if isinstance(mention_result, tuple):
+                    mention_username, mention_outcome = mention_result
                 else:
-                    print(f"INFO: mention unresolved for peer {peer_id}, fallback to helper tab")
+                    mention_username = str(mention_result or "—")
+                    mention_outcome = "success" if mention_username != "—" else "unresolved"
+                if mention_username != "—":
+                    key = mention_username.lower()
+                    existing_peer = username_to_peer.get(key)
+                    if existing_peer and existing_peer != peer_id:
+                        print(f"WARN: skip duplicate username {mention_username} for peer {peer_id} (already {existing_peer})")
+                        continue
+                    members_by_peer[peer_id]["username"] = mention_username
+                    username_to_peer[key] = peer_id
+                    updated += 1
+                    print(f"INFO: chat mention {peer_id} -> {mention_username}")
+                    _return_to_group_dialog_reliable(
+                        server=server,
+                        token=token,
+                        client_id=client_id,
+                        tab_id=tab_id,
+                        group_url=group_url,
+                        timeout_sec=min(timeout_sec, 2),
+                    )
+                    time.sleep(0.03)
+                    continue
+                if mode == "mention":
+                    if mention_outcome == "delivery_failure":
+                        print(f"INFO: mention delivery failed for peer {peer_id}, fallback to helper tab")
+                    else:
+                        print(f"INFO: mention unresolved for peer {peer_id}, fallback to helper tab")
 
-        helper_username, helper_opened = _read_username_via_helper_tab(
+            helper_username, helper_opened = _read_username_via_helper_tab(
+                server=server,
+                token=token,
+                client_id=client_id,
+                base_tab_id=tab_id,
+                peer_id=peer_id,
+                timeout_sec=min(timeout_sec, 5),
+                tg_mode=tg_mode,
+                helper_session=helper_session,
+            )
+            if helper_opened:
+                opened += 1
+            if helper_username != "—":
+                key = helper_username.lower()
+                existing_peer = username_to_peer.get(key)
+                if existing_peer and existing_peer != peer_id:
+                    print(f"WARN: skip duplicate username {helper_username} for peer {peer_id} (already {existing_peer})")
+                else:
+                    members_by_peer[peer_id]["username"] = helper_username
+                    username_to_peer[key] = peer_id
+                    updated += 1
+                    print(f"INFO: chat helper {peer_id} -> {helper_username}")
+            time.sleep(0.03)
+    finally:
+        _close_helper_session_best_effort(
             server=server,
             token=token,
             client_id=client_id,
             base_tab_id=tab_id,
-            peer_id=peer_id,
-            timeout_sec=min(timeout_sec, 5),
-            tg_mode=tg_mode,
+            helper_session=helper_session,
+            timeout_sec=min(timeout_sec, 4),
         )
-        if helper_opened:
-            opened += 1
-        if helper_username != "—":
-            key = helper_username.lower()
-            existing_peer = username_to_peer.get(key)
-            if existing_peer and existing_peer != peer_id:
-                print(f"WARN: skip duplicate username {helper_username} for peer {peer_id} (already {existing_peer})")
-            else:
-                members_by_peer[peer_id]["username"] = helper_username
-                username_to_peer[key] = peer_id
-                updated += 1
-                print(f"INFO: chat helper {peer_id} -> {helper_username}")
-        time.sleep(0.08)
 
     return attempted, updated, opened, opened_peer_ids
 
@@ -2617,6 +2629,33 @@ def _close_tab_best_effort(server: str, token: str, client_id: str, tab_id: int,
     )
 
 
+def _helper_session_tab_id(helper_session: dict[str, Any] | None) -> int | None:
+    if not isinstance(helper_session, dict):
+        return None
+    value = helper_session.get("tab_id")
+    try:
+        tab_id = int(value)
+    except (TypeError, ValueError):
+        return None
+    return tab_id if tab_id > 0 else None
+
+
+def _close_helper_session_best_effort(
+    server: str,
+    token: str,
+    client_id: str,
+    base_tab_id: int,
+    helper_session: dict[str, Any] | None,
+    timeout_sec: int,
+) -> None:
+    helper_tab_id = _helper_session_tab_id(helper_session)
+    if helper_tab_id is not None:
+        _close_tab_best_effort(server, token, client_id, helper_tab_id, timeout_sec=max(2, timeout_sec))
+    if isinstance(helper_session, dict):
+        helper_session["tab_id"] = None
+    _activate_tab_best_effort(server, token, client_id, base_tab_id, timeout_sec=min(max(timeout_sec, 2), 3))
+
+
 def _read_username_via_helper_tab(
     server: str,
     token: str,
@@ -2625,19 +2664,54 @@ def _read_username_via_helper_tab(
     peer_id: str,
     timeout_sec: int,
     tg_mode: str,
+    helper_session: dict[str, Any] | None = None,
 ) -> tuple[str, bool]:
     mode = tg_mode if tg_mode in {"a", "k"} else "a"
     helper_url = f"https://web.telegram.org/{mode}/#{peer_id}"
-    helper_tab_id = _open_helper_tab(
-        server=server,
-        token=token,
-        client_id=client_id,
-        tab_id=base_tab_id,
-        url=helper_url,
-        timeout_sec=max(4, timeout_sec),
-    )
+    created_now = False
+    helper_tab_id = _helper_session_tab_id(helper_session)
     if helper_tab_id is None:
-        return "—", False
+        helper_tab_id = _open_helper_tab(
+            server=server,
+            token=token,
+            client_id=client_id,
+            tab_id=base_tab_id,
+            url=helper_url,
+            timeout_sec=max(4, timeout_sec),
+        )
+        if helper_tab_id is None:
+            return "—", False
+        created_now = True
+        if isinstance(helper_session, dict):
+            helper_session["tab_id"] = helper_tab_id
+    else:
+        _activate_tab_best_effort(server, token, client_id, helper_tab_id, timeout_sec=min(max(timeout_sec, 2), 3))
+        navigate_result = _send_command_result(
+            server=server,
+            token=token,
+            client_id=client_id,
+            tab_id=helper_tab_id,
+            timeout_sec=max(3, timeout_sec),
+            command={"type": "navigate", "url": helper_url},
+            raise_on_fail=False,
+        )
+        if not navigate_result.get("ok"):
+            if isinstance(helper_session, dict):
+                helper_session["tab_id"] = None
+            _close_tab_best_effort(server, token, client_id, helper_tab_id, timeout_sec=min(max(timeout_sec, 2), 3))
+            helper_tab_id = _open_helper_tab(
+                server=server,
+                token=token,
+                client_id=client_id,
+                tab_id=base_tab_id,
+                url=helper_url,
+                timeout_sec=max(4, timeout_sec),
+            )
+            if helper_tab_id is None:
+                return "—", False
+            created_now = True
+            if isinstance(helper_session, dict):
+                helper_session["tab_id"] = helper_tab_id
 
     try:
         _send_command_result(
@@ -2645,23 +2719,23 @@ def _read_username_via_helper_tab(
             token=token,
             client_id=client_id,
             tab_id=helper_tab_id,
-            timeout_sec=max(4, timeout_sec),
+            timeout_sec=min(max(timeout_sec, 2), 4),
             command={
                 "type": "wait_selector",
                 "selector": "body",
-                "timeout_ms": 9000,
+                "timeout_ms": 2400,
                 "visible_only": False,
             },
             raise_on_fail=False,
         )
-        time.sleep(0.2)
+        time.sleep(0.06)
 
         quick_username, _ = _poll_username_from_tab_url(
             server=server,
             token=token,
             client_id=client_id,
             tab_id=helper_tab_id,
-            timeout_sec=1.2,
+            timeout_sec=0.7,
         )
         if quick_username != "—":
             return quick_username, True
@@ -2671,19 +2745,23 @@ def _read_username_via_helper_tab(
             token=token,
             client_id=client_id,
             tab_id=helper_tab_id,
-            timeout_sec=1.2,
+            timeout_sec=0.7,
         )
         if page_username != "—":
             return page_username, True
 
-        header_html = _send_get_html(
-            server=server,
-            token=token,
-            client_id=client_id,
-            tab_id=helper_tab_id,
-            timeout_sec=max(3, min(timeout_sec, 5)),
-            selector=".MiddleHeader, .chat-info, .sidebar-header",
-        )
+        header_html = ""
+        try:
+            header_html = _send_get_html(
+                server=server,
+                token=token,
+                client_id=client_id,
+                tab_id=helper_tab_id,
+                timeout_sec=max(3, min(timeout_sec, 5)),
+                selector=".MiddleHeader, .chat-info, .sidebar-header",
+            )
+        except RuntimeError:
+            header_html = ""
         header_username = _extract_username(header_html)
         if header_username != "—":
             return header_username, True
@@ -2720,8 +2798,11 @@ def _read_username_via_helper_tab(
         )
         return username, True
     finally:
-        _close_tab_best_effort(server, token, client_id, helper_tab_id, timeout_sec=min(timeout_sec, 4))
         _activate_tab_best_effort(server, token, client_id, base_tab_id, timeout_sec=min(timeout_sec, 3))
+        if helper_session is None:
+            _close_tab_best_effort(server, token, client_id, helper_tab_id, timeout_sec=min(timeout_sec, 4))
+        elif created_now and isinstance(helper_session, dict):
+            helper_session["tab_id"] = helper_tab_id
 
 
 def _close_profile_card(server: str, token: str, client_id: str, tab_id: int) -> None:
@@ -2773,30 +2854,42 @@ def _enrich_usernames_deep(
     attempted = 0
     updated = 0
     opened_peer_ids: list[str] = []
+    helper_session: dict[str, Any] = {"tab_id": None}
 
-    for peer_id in pending_peer_ids:
-        attempted += 1
-        opened_peer_ids.append(peer_id)
-        username, _opened = _read_username_via_helper_tab(
+    try:
+        for peer_id in pending_peer_ids:
+            attempted += 1
+            opened_peer_ids.append(peer_id)
+            username, _opened = _read_username_via_helper_tab(
+                server=server,
+                token=token,
+                client_id=client_id,
+                base_tab_id=tab_id,
+                peer_id=peer_id,
+                timeout_sec=min(timeout_sec, 8),
+                tg_mode=tg_mode,
+                helper_session=helper_session,
+            )
+            if username == "—":
+                continue
+            key = username.lower()
+            existing_peer = username_to_peer.get(key)
+            if existing_peer and existing_peer != peer_id:
+                print(f"WARN: skip duplicate username {username} for peer {peer_id} (already {existing_peer})")
+                continue
+            members_by_peer[peer_id]["username"] = username
+            username_to_peer[key] = peer_id
+            updated += 1
+            time.sleep(0.03)
+    finally:
+        _close_helper_session_best_effort(
             server=server,
             token=token,
             client_id=client_id,
             base_tab_id=tab_id,
-            peer_id=peer_id,
-            timeout_sec=min(timeout_sec, 8),
-            tg_mode=tg_mode,
+            helper_session=helper_session,
+            timeout_sec=min(timeout_sec, 4),
         )
-        if username == "—":
-            continue
-        key = username.lower()
-        existing_peer = username_to_peer.get(key)
-        if existing_peer and existing_peer != peer_id:
-            print(f"WARN: skip duplicate username {username} for peer {peer_id} (already {existing_peer})")
-            continue
-        members_by_peer[peer_id]["username"] = username
-        username_to_peer[key] = peer_id
-        updated += 1
-        time.sleep(0.08)
 
     return attempted, updated, opened_peer_ids
 

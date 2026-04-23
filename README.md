@@ -140,6 +140,24 @@ cd /home/max/site-control-kit
 - предпочитает Chromium-совместимый браузер, где можно загрузить unpacked extension флагами;
 - если доступен только branded `google-chrome`, открывает выделенный профиль и даёт one-time шаги для ручной загрузки `extension/`.
 
+Если branded Chrome мешает, есть отдельный Firefox dev-path:
+
+```bash
+cd /home/max/site-control-kit
+./start-firefox.sh --url https://web.telegram.org/a/
+```
+
+Что делает этот запуск:
+- поднимает хаб;
+- на обычном Firefox запускает `web-ext run` и ставит `extension/` автоматически;
+- на snap Firefox честно падает в `about:debugging` temporary-add-on path;
+- использует выделенный debug-profile, чтобы Telegram cookies/session не терялись между прогонами.
+
+Важно:
+- это именно dev/debug-контур;
+- temporary add-on поднимается заново на каждом запуске `start-firefox.sh`;
+- на этой машине snap Firefox не даёт `web-ext` надёжно подключиться к debugger port, поэтому manual fallback для snap-сборки ожидаем.
+
 После этого рабочие команды:
 
 ```bash
@@ -198,6 +216,13 @@ Linux-обёртка:
 ```bash
 cd /home/max/site-control-kit
 ./start-telegram.sh
+```
+
+Firefox-вариант для Telegram:
+
+```bash
+cd /home/max/site-control-kit
+./start-telegram-firefox.sh
 ```
 
 Что делает этот запуск:
@@ -338,6 +363,9 @@ sitectl send --type navigate --client-id client-... --url https://example.com --
 - Chromium
 - Opera
 - Яндекс Браузер
+
+Отдельно для локальной отладки:
+- Firefox через `web-ext run` и временную установку расширения
 
 ## Документация
 - [CHANGES_RU.md](docs/CHANGES_RU.md) — полный перечень реализованных изменений.
