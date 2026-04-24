@@ -22,6 +22,11 @@
 - Есть numbered batch files и safe snapshots.
 
 ### Telegram Invite Manager
+- Добавлена видимая папка инструмента:
+  - `tools/telegram_invite_manager/`
+  - `tools/telegram_invite_manager/AGENT_GUIDE_RU.md`
+  - `tools/telegram_invite_manager/ONE_USER_FLOW_RU.md`
+  - `tools/telegram_invite_manager/bin/*`
 - Добавлен новый безопасный инструмент `scripts/telegram_invite_manager.py`.
 - Он не делает массовый инвайт и не обходит лимиты Telegram.
 - На текущем этапе это stateful manager для consent-based invite workflow:
@@ -146,6 +151,17 @@
     - один consented user попал в `new`;
     - manager `run --limit 1` перевёл его в `checked`;
     - executor `plan --limit 1 --reserve` перевёл его в `invite_link_created`.
+- Живой one-user smoke в рабочем каталоге подтверждён:
+  - job dir:
+    - `/home/max/telegram_invite_jobs/chat_-2465948544`
+  - execution plan:
+    - `/home/max/telegram_invite_jobs/chat_-2465948544/executions/20260424T123754Z/execution_plan.json`
+  - execution record:
+    - `/home/max/telegram_invite_jobs/chat_-2465948544/executions/20260424T123800Z/execution_record.json`
+  - bridge result:
+    - `open-chat` создал Telegram tab `614280462`
+    - URL: `https://web.telegram.org/k/#-2465948544`
+  - тестовая запись `@sitectl_smoke_user` после проверки помечена как `skipped`, чтобы не мешать реальной очереди.
 - Shell syntax и `py_compile` для последних изменений проходили зелёными.
 - Точечный прогон экспортёрных тестов после capability-preflight:
   - `tests.test_telegram_export_parser`

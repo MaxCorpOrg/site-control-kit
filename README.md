@@ -124,6 +124,7 @@ cd /home/max/site-control-kit
 
 Для аккуратной работы с пользователями, которые уже дали согласие на вступление в чат, добавлен отдельный manager/state слой:
 
+- `tools/telegram_invite_manager/`
 - `scripts/telegram_invite_manager.py`
 - `scripts/telegram_invite_manager_gui.sh`
 - `scripts/telegram_invite_executor.py`
@@ -179,6 +180,14 @@ python3 scripts/telegram_invite_executor.py plan \
 python3 scripts/telegram_invite_executor.py open-chat \
   --job-dir "/home/max/telegram_invite_jobs/chat_-2465948544" \
   --dry-run
+```
+
+Видимый вход в инструмент:
+
+```bash
+cd /home/max/site-control-kit/tools/telegram_invite_manager
+./bin/telegram-invite-manager --help
+./bin/telegram-invite-executor --help
 ```
 
 `run.json` теперь дублирует ключевую телеметрию экспортёра: `unique_members`, `members_with_username`, `chat_scroll_steps_done`, `chat_jump_scrolls_done`, `deep_updated_total`, `history_backfilled_total`, `output_usernames_cleared_total`, `chat_deep_priority_rounds`, `chat_deep_yield_stop`, а полный сырой payload лежит в `export_stats.json`.

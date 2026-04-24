@@ -141,6 +141,12 @@ PYTHONPATH="$PWD" python3 -m webcontrol clients
   "/home/max/telegram_contact_batches" \
   --profile deep --runs 3
 ```
+4. Invite Manager:
+```bash
+cd /home/max/site-control-kit/tools/telegram_invite_manager
+./bin/telegram-invite-manager --help
+./bin/telegram-invite-executor --help
+```
 
 4. Invite manager:
 ```bash
