@@ -59,6 +59,44 @@ function dispatchInputEvents(element) {
   element.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
+function bytesFromBase64(base64) {
+  const binary = atob(String(base64 || ""));
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes;
+}
+
+function buildFileTransfer(command) {
+  const fileName = String(command.file_name || "upload.bin");
+  const mimeType = String(command.mime_type || "application/octet-stream");
+  const bytes = bytesFromBase64(command.file_base64);
+  const file = new File([bytes], fileName, {
+    type: mimeType,
+    lastModified: Number(command.last_modified || Date.now())
+  });
+  const dataTransfer = new DataTransfer();
+  dataTransfer.items.add(file);
+  return { file, dataTransfer };
+}
+
+function dispatchDropEvent(target, eventType, dataTransfer) {
+  const rect = target.getBoundingClientRect();
+  const clientX = Math.round(rect.left + Math.max(1, rect.width / 2));
+  const clientY = Math.round(rect.top + Math.max(1, rect.height / 2));
+  target.dispatchEvent(
+    new DragEvent(eventType, {
+      bubbles: true,
+      cancelable: true,
+      view: window,
+      dataTransfer,
+      clientX,
+      clientY
+    })
+  );
+}
+
 function focusElement(element) {
   if (typeof element.scrollIntoView === "function") {
     element.scrollIntoView({ block: "center", inline: "nearest", behavior: "auto" });
@@ -389,6 +427,38 @@ async function runCommand(command) {
       const el = queryElement(command.selector);
       focusElement(el);
       return { selector: command.selector, focused: true };
+    }
+
+    case "upload_file": {
+      if (!command.file_base64 || typeof command.file_base64 !== "string") {
+        throw new Error("file_base64 is required for upload_file");
+      }
+      const el = queryElement(command.selector);
+      focusElement(el);
+      const { file, dataTransfer } = buildFileTransfer(command);
+      const input = el.matches?.("input[type='file']")
+        ? el
+        : el.querySelector?.("input[type='file']") || document.querySelector("input[type='file']");
+      let inputChanged = false;
+      if (input) {
+        Object.defineProperty(input, "files", {
+          value: dataTransfer.files,
+          configurable: true
+        });
+        dispatchInputEvents(input);
+        inputChanged = true;
+      }
+      dispatchDropEvent(el, "dragenter", dataTransfer);
+      dispatchDropEvent(el, "dragover", dataTransfer);
+      dispatchDropEvent(el, "drop", dataTransfer);
+      return {
+        selector: command.selector,
+        fileName: file.name,
+        fileSize: file.size,
+        mimeType: file.type,
+        inputChanged,
+        dropped: true
+      };
     }
 
     case "extract_text": {

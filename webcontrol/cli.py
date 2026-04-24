@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import base64
 import json
+import mimetypes
 import os
 import subprocess
 import sys
@@ -1194,6 +1195,29 @@ def cmd_browser(args: argparse.Namespace) -> int:
             command = {"type": "fill", "selector": args.selector, "value": args.value}
         elif action == "focus":
             command = {"type": "focus", "selector": args.selector}
+        elif action == "upload-file":
+            upload_path = Path(args.path).expanduser()
+            if not upload_path.is_file():
+                raise ValueError(f"Upload file not found: {upload_path}")
+            mime_type = args.mime_type or mimetypes.guess_type(str(upload_path))[0] or "application/octet-stream"
+            command = {
+                "type": "upload_file",
+                "selector": args.selector,
+                "file_name": args.file_name or upload_path.name,
+                "mime_type": mime_type,
+                "last_modified": int(upload_path.stat().st_mtime * 1000),
+                "file_base64": base64.b64encode(upload_path.read_bytes()).decode("ascii"),
+            }
+        elif action == "native-upload-file":
+            upload_paths = [Path(path).expanduser() for path in args.paths]
+            missing_paths = [str(path) for path in upload_paths if not path.is_file()]
+            if missing_paths:
+                raise ValueError(f"Upload file not found: {', '.join(missing_paths)}")
+            command = {
+                "type": "set_file_input_files",
+                "selector": args.selector,
+                "files": [str(path.resolve()) for path in upload_paths],
+            }
         elif action == "wait":
             command = {
                 "type": "wait_selector",
@@ -1584,6 +1608,21 @@ def build_parser() -> argparse.ArgumentParser:
     browser_focus = browser_sub.add_parser("focus", help="Focus element by selector")
     browser_focus.add_argument("selector")
     browser_focus.set_defaults(func=cmd_browser)
+
+    browser_upload_file = browser_sub.add_parser("upload-file", help="Upload a local file into a DOM dropzone or file input")
+    browser_upload_file.add_argument("selector")
+    browser_upload_file.add_argument("path")
+    browser_upload_file.add_argument("--file-name", help="Override uploaded file name")
+    browser_upload_file.add_argument("--mime-type", help="Override MIME type")
+    browser_upload_file.set_defaults(func=cmd_browser)
+
+    browser_native_upload_file = browser_sub.add_parser(
+        "native-upload-file",
+        help="Set a file input using Chrome Debugger Protocol and a local path",
+    )
+    browser_native_upload_file.add_argument("selector")
+    browser_native_upload_file.add_argument("paths", nargs="+")
+    browser_native_upload_file.set_defaults(func=cmd_browser)
 
     browser_wait = browser_sub.add_parser("wait", help="Wait for selector")
     browser_wait.add_argument("selector")

@@ -7,7 +7,7 @@ const DEFAULT_CONFIG = {
 };
 
 const BRIDGE_CAPABILITIES = {
-  background_commands: ["navigate", "new_tab", "reload", "activate_tab", "close_tab", "screenshot"],
+  background_commands: ["navigate", "new_tab", "reload", "activate_tab", "close_tab", "screenshot", "set_file_input_files"],
   content_commands: [
     "back",
     "forward",
@@ -19,6 +19,7 @@ const BRIDGE_CAPABILITIES = {
     "click",
     "fill",
     "focus",
+    "upload_file",
     "extract_text",
     "get_html",
     "get_attribute",
@@ -237,6 +238,99 @@ function captureVisibleTab(windowId) {
   });
 }
 
+function debuggerAttach(tabId, protocolVersion = "1.3") {
+  return new Promise((resolve, reject) => {
+    chrome.debugger.attach({ tabId }, protocolVersion, () => {
+      const err = chrome.runtime.lastError;
+      if (err) {
+        reject(new Error(err.message));
+        return;
+      }
+      resolve(true);
+    });
+  });
+}
+
+function debuggerDetach(tabId) {
+  return new Promise((resolve) => {
+    chrome.debugger.detach({ tabId }, () => {
+      resolve(!chrome.runtime.lastError);
+    });
+  });
+}
+
+function debuggerSendCommand(tabId, method, params = {}) {
+  return new Promise((resolve, reject) => {
+    chrome.debugger.sendCommand({ tabId }, method, params, (result) => {
+      const err = chrome.runtime.lastError;
+      if (err) {
+        reject(new Error(err.message));
+        return;
+      }
+      resolve(result || {});
+    });
+  });
+}
+
+async function setFileInputFiles(tabId, selector, files) {
+  if (!selector || typeof selector !== "string") {
+    throw new Error("selector is required");
+  }
+  const safeFiles = Array.isArray(files) ? files.filter((item) => typeof item === "string" && item.trim()) : [];
+  if (!safeFiles.length) {
+    throw new Error("files must contain at least one local path");
+  }
+
+  await debuggerAttach(tabId);
+  try {
+    await debuggerSendCommand(tabId, "DOM.enable");
+    const documentResult = await debuggerSendCommand(tabId, "DOM.getDocument", { depth: -1, pierce: true });
+    const rootNodeId = documentResult?.root?.nodeId;
+    if (!rootNodeId) {
+      throw new Error("Unable to read document root");
+    }
+    const queryResult = await debuggerSendCommand(tabId, "DOM.querySelector", {
+      nodeId: rootNodeId,
+      selector
+    });
+    const nodeId = queryResult?.nodeId;
+    if (!nodeId) {
+      throw new Error(`No element matches selector: ${selector}`);
+    }
+
+    await debuggerSendCommand(tabId, "DOM.setFileInputFiles", {
+      nodeId,
+      files: safeFiles
+    });
+
+    const expression = `(() => {
+      const input = document.querySelector(${JSON.stringify(selector)});
+      if (!input) return { exists: false };
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      return {
+        exists: true,
+        tagName: input.tagName,
+        type: input.type || "",
+        fileCount: input.files ? input.files.length : 0,
+        fileNames: input.files ? Array.from(input.files).map((file) => file.name) : []
+      };
+    })()`;
+    const evalResult = await debuggerSendCommand(tabId, "Runtime.evaluate", {
+      expression,
+      returnByValue: true,
+      awaitPromise: true
+    });
+
+    return {
+      selector,
+      files: safeFiles,
+      input: evalResult?.result?.value || null
+    };
+  } finally {
+    await debuggerDetach(tabId);
+  }
+}
+
 async function collectTabs() {
   const tabs = await tabsQuery({});
   return tabs.map((tab) => ({
@@ -423,6 +517,18 @@ async function executeCommandEnvelope(envelope) {
       data: {
         tabId: tab.id,
         closed: true
+      }
+    };
+  }
+
+  if (type === "set_file_input_files") {
+    const result = await setFileInputFiles(tab.id, command.selector, command.files);
+    return {
+      ok: true,
+      status: "completed",
+      data: {
+        tabId: tab.id,
+        ...result
       }
     };
   }

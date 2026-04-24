@@ -2,13 +2,14 @@
   "manifest_version": 3,
   "name": "Site Control Bridge",
   "description": "Локальный мост управления сайтами через Site Control Hub.",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "permissions": [
     "storage",
     "tabs",
     "activeTab",
     "scripting",
-    "alarms"
+    "alarms",
+    "debugger"
   ],
   "host_permissions": [
     "<all_urls>",
