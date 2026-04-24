@@ -162,6 +162,22 @@
     - `open-chat` создал Telegram tab `614280462`
     - URL: `https://web.telegram.org/k/#-2465948544`
   - тестовая запись `@sitectl_smoke_user` после проверки помечена как `skipped`, чтобы не мешать реальной очереди.
+- Живой one-user test для `@Kamaz_master1 -> https://t.me/Zhirotop_shop` подтверждён:
+  - job dir:
+    - `/home/max/telegram_invite_jobs/chat_Zhirotop_shop`
+  - invite run:
+    - `/home/max/telegram_invite_jobs/chat_Zhirotop_shop/runs/20260424T142342Z/invite_run.json`
+  - execution plan:
+    - `/home/max/telegram_invite_jobs/chat_Zhirotop_shop/executions/20260424T142347Z/execution_plan.json`
+  - live browser evidence:
+    - `/tmp/tg_invite_zhiritop_page_url.json`
+    - `/tmp/tg_invite_zhiritop_body_text.json`
+    - `/tmp/tg_invite_zhiritop_report.json`
+  - bridge result:
+    - открыт Telegram tab `614280505`;
+    - URL подтверждён как `https://web.telegram.org/k/#@Zhirotop_shop`;
+    - body text подтверждает открытый чат `Жиротоп Shop`.
+  - фактическая отправка сообщения пользователю не выполнялась; текущий статус `@kamaz_master1`: `invite_link_created`.
 - Shell syntax и `py_compile` для последних изменений проходили зелёными.
 - Точечный прогон экспортёрных тестов после capability-preflight:
   - `tests.test_telegram_export_parser`

@@ -162,3 +162,55 @@ $JOB_DIR/executions/<timestamp>/execution_plan.json
 /home/max/telegram_invite_jobs/chat_-2465948544/executions/20260424T123754Z/execution_plan.json
 /home/max/telegram_invite_jobs/chat_-2465948544/executions/20260424T123800Z/execution_record.json
 ```
+
+## Live Test: `@Kamaz_master1`
+
+Дата: `2026-04-24`
+
+Цель:
+
+```text
+https://t.me/Zhirotop_shop
+```
+
+Job:
+
+```text
+/home/max/telegram_invite_jobs/chat_Zhirotop_shop/
+```
+
+Команды прошли:
+- `add-user`
+- `run --limit 1 --to-status checked`
+- `configure --invite-link https://t.me/Zhirotop_shop`
+- `plan --limit 1 --reserve`
+- `open-chat`
+
+Результат:
+- `@Kamaz_master1` находится в статусе `invite_link_created`;
+- открыт Telegram Web tab `614280505`;
+- URL вкладки: `https://web.telegram.org/k/#@Zhirotop_shop`;
+- фактическая отправка сообщения пользователю не выполнялась.
+
+Артефакты:
+
+```text
+/home/max/telegram_invite_jobs/chat_Zhirotop_shop/invite_state.json
+/home/max/telegram_invite_jobs/chat_Zhirotop_shop/runs/20260424T142342Z/invite_run.json
+/home/max/telegram_invite_jobs/chat_Zhirotop_shop/executions/20260424T142347Z/execution_plan.json
+/tmp/tg_invite_zhiritop_page_url.json
+/tmp/tg_invite_zhiritop_body_text.json
+/tmp/tg_invite_zhiritop_report.json
+```
+
+Чтобы зафиксировать реальную отправку после ручного действия:
+
+```bash
+cd /home/max/site-control-kit/tools/telegram_invite_manager
+
+./bin/telegram-invite-executor record \
+  --job-dir "/home/max/telegram_invite_jobs/chat_Zhirotop_shop" \
+  --username "@Kamaz_master1" \
+  --status sent \
+  --reason manual_link_sent
+```

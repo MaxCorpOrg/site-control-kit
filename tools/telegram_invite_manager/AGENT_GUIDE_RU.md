@@ -132,3 +132,47 @@ bash -n scripts/telegram_invite_manager_gui.sh scripts/telegram_invite_executor_
 - реальный invite-link нужного чата.
 
 Без этих двух значений агент может проверять только manager/executor/open-chat, но не факт отправки приглашения.
+
+## Live Test: `@Kamaz_master1` -> `Zhirotop_shop`
+
+Дата: `2026-04-24`
+
+Пользователь:
+
+```text
+@Kamaz_master1
+```
+
+Цель:
+
+```text
+https://t.me/Zhirotop_shop
+```
+
+Рабочий каталог:
+
+```text
+/home/max/telegram_invite_jobs/chat_Zhirotop_shop/
+```
+
+Что выполнено:
+- создан отдельный job под `https://t.me/Zhirotop_shop`;
+- `@Kamaz_master1` добавлен как consented one-user entry;
+- запись прошла `new -> checked -> invite_link_created`;
+- создан execution-plan на одного пользователя;
+- через `site-control` открыт Telegram Web tab `614280505`;
+- live page URL подтверждён как `https://web.telegram.org/k/#@Zhirotop_shop`;
+- текст страницы подтверждает, что открыт чат `Жиротоп Shop`.
+
+Артефакты:
+- `/home/max/telegram_invite_jobs/chat_Zhirotop_shop/invite_state.json`
+- `/home/max/telegram_invite_jobs/chat_Zhirotop_shop/runs/20260424T142342Z/invite_run.json`
+- `/home/max/telegram_invite_jobs/chat_Zhirotop_shop/executions/20260424T142347Z/execution_plan.json`
+- `/tmp/tg_invite_zhiritop_page_url.json`
+- `/tmp/tg_invite_zhiritop_body_text.json`
+- `/tmp/tg_invite_zhiritop_report.json`
+
+Важно:
+- фактическая отправка сообщения пользователю не выполнялась;
+- текущий статус пользователя в job: `invite_link_created`;
+- после ручной отправки ссылки нужно вызвать `telegram-invite-executor record --status sent`.

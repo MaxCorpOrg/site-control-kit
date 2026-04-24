@@ -160,3 +160,25 @@ bash scripts/telegram_invite_executor_gui.sh
 - безопасный invite link / join request orchestration;
 - optional operator checklist для реального Telegram UI;
 - затем живой smoke на поднятом browser bridge.
+
+## Live Notes
+
+### `@Kamaz_master1` -> `Zhirotop_shop`
+
+Дата: `2026-04-24`
+
+Проверен one-user flow:
+- `add-user`;
+- `run --limit 1 --to-status checked`;
+- `configure --invite-link https://t.me/Zhirotop_shop`;
+- `plan --limit 1 --reserve`;
+- `open-chat`.
+
+Результат:
+- job: `/home/max/telegram_invite_jobs/chat_Zhirotop_shop`;
+- execution plan: `/home/max/telegram_invite_jobs/chat_Zhirotop_shop/executions/20260424T142347Z/execution_plan.json`;
+- Telegram Web tab: `614280505`;
+- live URL: `https://web.telegram.org/k/#@Zhirotop_shop`;
+- статус пользователя: `invite_link_created`.
+
+Фактическая отправка сообщения пользователю не выполнялась.
