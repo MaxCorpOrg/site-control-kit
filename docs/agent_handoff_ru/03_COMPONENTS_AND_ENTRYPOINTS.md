@@ -89,6 +89,7 @@ Chain-runner.
 Новый безопасный manager/state инструмент для consent-based invite workflow.
 На текущем этапе умеет:
 - импорт CSV/JSON;
+- добавлять одного consented user через `add-user`;
 - строить `invite_state.json`;
 - выбирать следующую пачку usernames;
 - писать `invite_run.json` и `invite.log`;

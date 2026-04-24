@@ -193,6 +193,125 @@ class TelegramInviteManagerTests(unittest.TestCase):
             self.assertEqual(state["users"][0]["status"], "sent")
             self.assertEqual(state["users"][0]["history"][0]["reason"], "manual_send")
 
+    def test_add_user_adds_one_consented_user(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            job_dir = tmp / "job"
+            payload = {
+                "version": 1,
+                "chat_url": "https://web.telegram.org/k/#-2465948544",
+                "chat_slug": "-2465948544",
+                "created_at": "2026-04-23T12:00:00Z",
+                "updated_at": "2026-04-23T12:00:00Z",
+                "source_file": str(tmp / "users.csv"),
+                "users": [],
+            }
+            self.mod.save_state(job_dir, payload)
+            rc = self._call_silent(
+                self.mod.command_add_user,
+                Namespace(
+                    job_dir=str(job_dir),
+                    chat_url=None,
+                    username="Alice_123",
+                    display_name="Alice",
+                    note="one user test",
+                    source="manual",
+                    consent="yes",
+                    update=False,
+                ),
+            )
+            self.assertEqual(rc, 0)
+            state = self.mod.load_state(job_dir)
+            self.assertEqual(len(state["users"]), 1)
+            self.assertEqual(state["users"][0]["username"], "@alice_123")
+            self.assertEqual(state["users"][0]["status"], "new")
+            self.assertEqual(state["users"][0]["history"][0]["reason"], "manual_add_user")
+
+    def test_add_user_requires_explicit_consent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            job_dir = tmp / "job"
+            payload = {
+                "version": 1,
+                "chat_url": "https://web.telegram.org/k/#-2465948544",
+                "chat_slug": "-2465948544",
+                "created_at": "2026-04-23T12:00:00Z",
+                "updated_at": "2026-04-23T12:00:00Z",
+                "source_file": str(tmp / "users.csv"),
+                "users": [],
+            }
+            self.mod.save_state(job_dir, payload)
+            with self.assertRaises(ValueError):
+                self.mod.command_add_user(
+                    Namespace(
+                        job_dir=str(job_dir),
+                        chat_url=None,
+                        username="Alice_123",
+                        display_name="Alice",
+                        note="one user test",
+                        source="manual",
+                        consent="no",
+                        update=False,
+                    )
+                )
+
+    def test_add_user_existing_without_update_is_noop(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            job_dir = tmp / "job"
+            payload = {
+                "version": 1,
+                "chat_url": "https://web.telegram.org/k/#-2465948544",
+                "chat_slug": "-2465948544",
+                "created_at": "2026-04-23T12:00:00Z",
+                "updated_at": "2026-04-23T12:00:00Z",
+                "source_file": str(tmp / "users.csv"),
+                "users": [
+                    {"username": "@alice_123", "consent": True, "status": "new", "attempts": 0, "last_attempt_at": "", "history": [], "display_name": "Alice", "note": "", "source": "manual"},
+                ],
+            }
+            self.mod.save_state(job_dir, payload)
+            rc = self._call_silent(
+                self.mod.command_add_user,
+                Namespace(
+                    job_dir=str(job_dir),
+                    chat_url=None,
+                    username="@alice_123",
+                    display_name="Alice Changed",
+                    note="changed",
+                    source="manual",
+                    consent="yes",
+                    update=False,
+                ),
+            )
+            self.assertEqual(rc, 0)
+            state = self.mod.load_state(job_dir)
+            self.assertEqual(len(state["users"]), 1)
+            self.assertEqual(state["users"][0]["display_name"], "Alice")
+
+    def test_add_user_can_create_one_user_job(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            job_dir = Path(tmpdir) / "job"
+            rc = self._call_silent(
+                self.mod.command_add_user,
+                Namespace(
+                    job_dir=str(job_dir),
+                    chat_url="https://web.telegram.org/k/#-2465948544",
+                    username="Alice_123",
+                    display_name="Alice",
+                    note="created from add-user",
+                    source="manual",
+                    consent="yes",
+                    update=False,
+                ),
+            )
+            self.assertEqual(rc, 0)
+            state = self.mod.load_state(job_dir)
+            self.assertEqual(state["chat_slug"], "-2465948544")
+            self.assertEqual(state["source_file"], "manual:add-user")
+            self.assertEqual(state["users"][0]["username"], "@alice_123")
+            self.assertEqual(state["import_stats"]["imported"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

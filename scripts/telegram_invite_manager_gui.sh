@@ -31,6 +31,7 @@ while true; do
       TRUE "init" \
       FALSE "status" \
       FALSE "next" \
+      FALSE "add user" \
       FALSE "run dry" \
       FALSE "run" \
       FALSE "mark" \
@@ -57,6 +58,14 @@ while true; do
     next)
       limit="$(zenity --entry --title="Batch size" --text="Сколько пользователей показать?" --entry-text="3")" || continue
       output="$(run_json "${MANAGER_SCRIPT}" next --job-dir "${job_dir}" --limit "${limit}")"
+      ;;
+    "add user")
+      chat_url="$(zenity --entry --title="Chat URL" --text="Если job новый, укажите URL чата:" --entry-text="https://web.telegram.org/k/#-2465948544")" || continue
+      username="$(zenity --entry --title="Username" --text="Введите username пользователя с подтверждённым согласием:" --entry-text="@username")" || continue
+      display_name="$(zenity --entry --title="Display name" --text="Имя для заметки:" --entry-text="")" || continue
+      note="$(zenity --entry --title="Note" --text="Заметка:" --entry-text="one user invite")" || continue
+      source="$(zenity --entry --title="Source" --text="Источник:" --entry-text="manual")" || continue
+      output="$(run_json "${MANAGER_SCRIPT}" add-user --job-dir "${job_dir}" --chat-url "${chat_url}" --username "${username}" --display-name "${display_name}" --note "${note}" --source "${source}" --consent yes)"
       ;;
     "run dry")
       limit="$(zenity --entry --title="Batch size" --text="Сколько пользователей взять в dry-run?" --entry-text="3")" || continue

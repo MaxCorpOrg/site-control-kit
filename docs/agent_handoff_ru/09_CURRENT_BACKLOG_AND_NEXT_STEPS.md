@@ -30,7 +30,8 @@
 1. не добавлять опасный массовый path;
 2. поднять hub и сделать первый live smoke для `open-chat`;
 3. добить безопасный orchestration через invite links или join requests;
-4. сохранить тот же уровень артефактов и state discipline, что уже есть у export pipeline.
+4. после выбора реального consented username прогнать one-user flow уже не на `/tmp`, а на рабочем `~/telegram_invite_jobs/...`;
+5. сохранить тот же уровень артефактов и state discipline, что уже есть у export pipeline.
 
 ## Следующий Приоритет P1
 ### Разрезать Монолитный Exporter

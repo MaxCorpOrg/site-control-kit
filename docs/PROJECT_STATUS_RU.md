@@ -26,6 +26,7 @@
 - Он не делает массовый инвайт и не обходит лимиты Telegram.
 - На текущем этапе это stateful manager для consent-based invite workflow:
   - импорт CSV/JSON;
+  - добавление одного пользователя через `add-user`;
   - `invite_state.json`;
   - `next/run/mark/report`;
   - `dry-run`;
@@ -108,8 +109,9 @@
 
 ## Проверено
 - Полный unit-набор сейчас зелёный: `110/110`.
-- После добавления Invite Manager полный unit-набор зелёный: `117/117`.
-- После добавления Invite Executor полный unit-набор зелёный: `123/123`.
+- После добавления Invite Manager полный unit-набор был зелёный: `117/117`.
+- После добавления Invite Executor полный unit-набор был зелёный: `123/123`.
+- После добавления one-user режима полный unit-набор зелёный: `127/127`.
 - Новый `Invite Manager` покрыт unit-тестами:
   - `tests/test_telegram_invite_manager.py`
   - `7/7 OK`
@@ -130,6 +132,20 @@
     - execution-plan выбрал `2` consented users;
     - `reserve` перевёл их в `invite_link_created`;
     - `open-chat` собрал корректную browser-команду через `--url-pattern ... activate`.
+- One-user smoke подтверждён:
+  - job dir:
+    - `/tmp/tg_invite_one_user.qsvVAc/job`
+  - add-user:
+    - `/tmp/tg_invite_one_add.json`
+  - plan:
+    - `/tmp/tg_invite_one_plan.json`
+  - open-chat dry-run:
+    - `/tmp/tg_invite_one_open.json`
+  - факты:
+    - `add-user` создал job с нуля через `--chat-url`;
+    - один consented user попал в `new`;
+    - manager `run --limit 1` перевёл его в `checked`;
+    - executor `plan --limit 1 --reserve` перевёл его в `invite_link_created`.
 - Shell syntax и `py_compile` для последних изменений проходили зелёными.
 - Точечный прогон экспортёрных тестов после capability-preflight:
   - `tests.test_telegram_export_parser`

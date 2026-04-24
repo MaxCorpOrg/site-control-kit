@@ -87,6 +87,23 @@ python3 scripts/telegram_invite_manager.py init \
 ### `next`
 Возвращает следующую пачку пользователей для обработки.
 
+### `add-user`
+Добавляет одного пользователя в существующий job.
+Команда требует явный `--consent yes`, чтобы случайно не отправить в обработку пользователя без подтверждения.
+
+Пример:
+
+```bash
+python3 scripts/telegram_invite_manager.py add-user \
+  --job-dir "/home/max/telegram_invite_jobs/chat_-2465948544" \
+  --chat-url "https://web.telegram.org/k/#-2465948544" \
+  --username @alice_123 \
+  --display-name "Alice" \
+  --note "one user test" \
+  --source manual \
+  --consent yes
+```
+
 ### `run`
 Обрабатывает следующую пачку и создаёт run-артефакты.
 По умолчанию переводит `new -> checked`.
@@ -113,6 +130,12 @@ python3 scripts/telegram_invite_manager.py status \
 python3 scripts/telegram_invite_manager.py next \
   --job-dir "/home/max/telegram_invite_jobs/chat_-2465948544" \
   --limit 3
+
+python3 scripts/telegram_invite_manager.py add-user \
+  --job-dir "/home/max/telegram_invite_jobs/chat_-2465948544" \
+  --chat-url "https://web.telegram.org/k/#-2465948544" \
+  --username @alice_123 \
+  --consent yes
 
 python3 scripts/telegram_invite_manager.py run \
   --job-dir "/home/max/telegram_invite_jobs/chat_-2465948544" \
@@ -141,6 +164,7 @@ bash scripts/telegram_invite_manager_gui.sh
 - consent filtering
 - state file
 - next-batch selection
+- one-user add command
 - dry-run
 - run artifacts
 - explicit mark command

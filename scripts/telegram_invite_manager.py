@@ -56,6 +56,10 @@ def parse_consent(value: Any) -> bool:
     return normalized in {"1", "true", "yes", "y", "да", "ok"}
 
 
+def consent_label(value: bool) -> str:
+    return "yes" if value else "no"
+
+
 def load_input_rows(path: Path) -> list[dict[str, Any]]:
     suffix = path.suffix.lower()
     if suffix == ".csv":
@@ -268,6 +272,105 @@ def command_next(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_add_user(args: argparse.Namespace) -> int:
+    job_dir = Path(args.job_dir).expanduser()
+    state_path = state_path_for(job_dir)
+    if state_path.exists():
+        payload = load_state(job_dir)
+    else:
+        if not args.chat_url:
+            raise ValueError("state does not exist; pass --chat-url to create a one-user job")
+        at = now_utc()
+        payload = {
+            "version": STATE_VERSION,
+            "chat_url": args.chat_url,
+            "chat_slug": chat_slug_from_chat_url(args.chat_url),
+            "created_at": at,
+            "updated_at": at,
+            "source_file": "manual:add-user",
+            "users": [],
+            "import_stats": {
+                "rows_total": 0,
+                "imported": 0,
+                "duplicates": 0,
+                "invalid_username": 0,
+                "consent_yes": 0,
+                "consent_no": 0,
+            },
+        }
+    username = normalize_username(args.username)
+    if not username:
+        raise ValueError(f"invalid username: {args.username}")
+
+    consent = parse_consent(args.consent)
+    if not consent:
+        raise ValueError("add-user requires explicit --consent yes for processing")
+
+    users = payload.get("users")
+    if not isinstance(users, list):
+        raise ValueError("state missing users list")
+
+    at = now_utc()
+    existing = next((row for row in users if isinstance(row, dict) and str(row.get("username") or "") == username), None)
+    if existing is not None:
+        if not args.update:
+            response = {
+                "job_dir": str(job_dir),
+                "username": username,
+                "status": "exists",
+                "user": existing,
+            }
+            print(json.dumps(response, ensure_ascii=False, indent=2))
+            return 0
+
+        from_status = str(existing.get("status") or "")
+        existing["display_name"] = str(args.display_name or existing.get("display_name") or "").strip()
+        existing["note"] = str(args.note or existing.get("note") or "").strip()
+        existing["source"] = str(args.source or existing.get("source") or "manual").strip()
+        existing["consent"] = True
+        if from_status == "skipped":
+            existing["status"] = "new"
+        append_history(existing, from_status, str(existing.get("status") or ""), "manual_add_user_update", at)
+        save_state(job_dir, payload)
+        response = {
+            "job_dir": str(job_dir),
+            "username": username,
+            "status": "updated",
+            "user": existing,
+        }
+        print(json.dumps(response, ensure_ascii=False, indent=2))
+        return 0
+
+    record, error = build_user_record(
+        {
+            "username": username,
+            "display_name": args.display_name,
+            "note": args.note,
+            "consent": consent_label(consent),
+            "source": args.source or "manual",
+        },
+        at,
+    )
+    if error or record is None:
+        raise ValueError(error or f"unable to build user record for {username}")
+    append_history(record, "", "new", "manual_add_user", at)
+    users.append(record)
+    import_stats = payload.get("import_stats")
+    if isinstance(import_stats, dict):
+        import_stats["rows_total"] = int(import_stats.get("rows_total", 0) or 0) + 1
+        import_stats["imported"] = int(import_stats.get("imported", 0) or 0) + 1
+        import_stats["consent_yes"] = int(import_stats.get("consent_yes", 0) or 0) + 1
+    save_state(job_dir, payload)
+    response = {
+        "job_dir": str(job_dir),
+        "username": username,
+        "status": "added",
+        "user": record,
+    }
+    print(json.dumps(response, ensure_ascii=False, indent=2))
+    return 0
+
+
 def command_run(args: argparse.Namespace) -> int:
     job_dir = Path(args.job_dir).expanduser()
     payload = load_state(job_dir)
@@ -418,6 +521,17 @@ def build_parser() -> argparse.ArgumentParser:
     next_parser.add_argument("--limit", type=int, default=3)
     next_parser.add_argument("--statuses", nargs="*", default=list(DEFAULT_SELECTABLE_STATUSES))
     next_parser.set_defaults(func=command_next)
+
+    add_user_parser = subparsers.add_parser("add-user", help="Add one explicit consented user to an existing invite job.")
+    add_user_parser.add_argument("--job-dir", required=True)
+    add_user_parser.add_argument("--chat-url", help="Create the job if invite_state.json does not exist.")
+    add_user_parser.add_argument("--username", required=True)
+    add_user_parser.add_argument("--display-name", default="")
+    add_user_parser.add_argument("--note", default="")
+    add_user_parser.add_argument("--source", default="manual")
+    add_user_parser.add_argument("--consent", required=True, help="Must be yes for processing.")
+    add_user_parser.add_argument("--update", action="store_true", help="Update existing user instead of returning exists.")
+    add_user_parser.set_defaults(func=command_add_user)
 
     run_parser = subparsers.add_parser("run", help="Process next batch and write run artifacts.")
     run_parser.add_argument("--job-dir", required=True)

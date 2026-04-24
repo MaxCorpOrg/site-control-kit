@@ -159,6 +159,12 @@ python3 scripts/telegram_invite_manager.py run \
   --limit 3 \
   --dry-run
 
+python3 scripts/telegram_invite_manager.py add-user \
+  --job-dir "/home/max/telegram_invite_jobs/chat_-2465948544" \
+  --chat-url "https://web.telegram.org/k/#-2465948544" \
+  --username @alice_123 \
+  --consent yes
+
 python3 scripts/telegram_invite_executor.py configure \
   --job-dir "/home/max/telegram_invite_jobs/chat_-2465948544" \
   --invite-link "https://t.me/+example" \
