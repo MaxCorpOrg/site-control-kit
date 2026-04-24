@@ -1,0 +1,50 @@
+{
+  "group_url": "https://web.telegram.org/a/#-1002465948544",
+  "source_mode": "chat",
+  "generated_at": "2026-04-23T16:17:24",
+  "count": 5,
+  "usernames": [
+    "@abuzayd06",
+    "@osipoly",
+    "@bulan04",
+    "@bychkov_aa",
+    "@gadkiygri"
+  ],
+  "rows": [
+    {
+      "username": "@abuzayd06",
+      "peer_id": "555101371",
+      "name": "Тэймур Гусейнов",
+      "status": "из чата",
+      "role": "—"
+    },
+    {
+      "username": "@osipoly",
+      "peer_id": "1238534353",
+      "name": "Ольга",
+      "status": "из чата",
+      "role": "—"
+    },
+    {
+      "username": "@bulan04",
+      "peer_id": "891274018",
+      "name": "Bulka",
+      "status": "из чата",
+      "role": "Модератор"
+    },
+    {
+      "username": "@bychkov_aa",
+      "peer_id": "1291639730",
+      "name": "ДОКМЕД от Алексея Андреевича",
+      "status": "из чата",
+      "role": "—"
+    },
+    {
+      "username": "@gadkiygri",
+      "peer_id": "736607998",
+      "name": "Григорий Спиридонов",
+      "status": "из чата",
+      "role": "—"
+    }
+  ]
+}

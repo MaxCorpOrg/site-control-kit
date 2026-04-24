@@ -247,8 +247,13 @@ cd /home/max/site-control-kit
 - chat-проход теперь может автоматически продлеваться после `--chat-scroll-steps`, пока реально появляются новые авторы; лимит задаётся через `--chat-auto-extra-steps`;
 - каждый экспорт дополнительно архивируется в [artifacts/telegram_exports](/home/max/site-control-kit/artifacts/telegram_exports) и записывается в индекс [INDEX.md](/home/max/site-control-kit/artifacts/telegram_exports/INDEX.md);
 - рядом с каждым экспортом теперь автоматически пишутся отдельные sidecar-файлы `*_usernames.txt` и `*_usernames.json`, чтобы собранные `@username` можно было брать без парсинга markdown-таблицы;
+- экспортёр теперь автоматически ведёт per-chat history в [artifacts/telegram_exports/state](/home/max/site-control-kit/artifacts/telegram_exports/state) и при следующем прогоне поднимает уже известные `@username` из прошлых archived sidecars;
+- sticky-author path теперь работает через `telegram_sticky_author`: правый клик делается по нижней прилипшей 34px иконке автора, а не по тексту сообщения и не через открытие профиля левой кнопкой;
 - `--deep-usernames` больше не должен уводить основную групповую вкладку в личные диалоги: usernames дочитываются через временные helper tabs;
+- если текущий Telegram Web отвечает `No visible menu item found by text`, это теперь трактуется как честный признак отсутствия `Mention` в текущем menu-path: exporter сразу уходит в helper-only path и не тратит оставшийся deep-step на пустые retry;
+- exporter и safe/batch слой теперь отфильтровывают ложные `@username`, состоящие только из цифр: артефакты вида `@1291639730` больше не должны попадать в новые `latest_safe.*`, `identity_history.json` и numbered batches;
 - `--deep-usernames` в `info`-режиме может работать заметно дольше обычного запуска, потому что Telegram последовательно открывает видимые профили;
+- live baseline на 2026-04-23 для чата `https://web.telegram.org/a/#-1002465948544`: `fast` batch-run `20260423T173223Z` дошёл до `27` visible members и `10` safe usernames, а `latest_full.*` и `latest_safe.*` были обновлены на этот run;
 - для максимально полного списка участников всё равно лучше вручную открыть `Group Info -> Members` перед повторным запуском.
 
 GUI-экспорт:

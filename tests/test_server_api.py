@@ -88,6 +88,56 @@ class ServerApiTests(unittest.TestCase):
         self.assertEqual(payload["clients"][0]["client_id"], "c1")
         self.assertTrue(payload["clients"][0]["is_online"])
 
+    def test_telegram_webhook_collects_message_from_identity(self) -> None:
+        status, payload = self._request(
+            "/api/telegram/webhook",
+            method="POST",
+            payload={
+                "update_id": 1,
+                "message": {
+                    "message_id": 10,
+                    "from": {"id": 123456, "username": "alice"},
+                    "text": "/start",
+                },
+            },
+        )
+
+        self.assertEqual(status, 200)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["source"], "message.from")
+        self.assertEqual(payload["telegram_user"]["telegram_id"], 123456)
+        self.assertEqual(payload["telegram_user"]["username"], "@alice")
+
+    def test_telegram_webhook_upserts_callback_from_username_change(self) -> None:
+        self._request(
+            "/api/telegram/webhook",
+            method="POST",
+            payload={"message": {"from": {"id": 123456, "username": "old_name"}}},
+        )
+
+        status, payload = self._request(
+            "/api/telegram/webhook",
+            method="POST",
+            payload={
+                "callback_query": {
+                    "id": "callback-1",
+                    "from": {"id": 123456, "username": "new_name"},
+                    "data": "next",
+                },
+            },
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["source"], "callback_query.from")
+        self.assertTrue(payload["telegram_user"]["changed"])
+        self.assertEqual(payload["telegram_user"]["username"], "@new_name")
+
+        status, state_payload = self._request("/api/state")
+        self.assertEqual(status, 200)
+        user = state_payload["state"]["telegram_users"]["123456"]
+        self.assertEqual(user["telegram_id"], 123456)
+        self.assertEqual(user["username"], "@new_name")
+
     def test_single_online_client_is_auto_targeted_through_api(self) -> None:
         self._heartbeat("c1")
 

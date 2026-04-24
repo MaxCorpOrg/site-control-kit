@@ -53,6 +53,44 @@
 Каждый клиент может содержать служебное поле:
 - `is_online` — есть ли свежий heartbeat и можно ли безопасно использовать клиента по умолчанию.
 
+## Telegram webhook
+
+## `POST /api/telegram/webhook`
+Принимает Telegram Bot API update и сохраняет identity пользователя из `message.from` или `callback_query.from`.
+
+Сохраняемые поля:
+- `telegram_id = from.id`
+- `username = from.username ? "@<username>" : null`
+
+Повторный update для того же `telegram_id` делает upsert и обновляет `username`, если пользователь сменил его или удалил.
+
+Пример запроса:
+```json
+{
+  "update_id": 1,
+  "message": {
+    "message_id": 10,
+    "from": { "id": 123456, "username": "alice" },
+    "text": "/start"
+  }
+}
+```
+
+Ответ:
+```json
+{
+  "ok": true,
+  "source": "message.from",
+  "telegram_user": {
+    "telegram_id": 123456,
+    "username": "@alice",
+    "created_at": "...",
+    "updated_at": "...",
+    "changed": true
+  }
+}
+```
+
 ## Команды
 
 ## `POST /api/commands`
@@ -153,6 +191,7 @@
   "state": {
     "version": 1,
     "clients": [...],
+    "telegram_users": {"123456": {"telegram_id": 123456, "username": "@alice"}},
     "queue_sizes": {"client-123": 0},
     "commands": [...]
   }
@@ -171,6 +210,11 @@
   - поля: `selector`
 - `click_text`
   - поля: `text`, опционально `root_selector`, `near_last_context`
+- `telegram_sticky_author`
+  - поля: опционально `expected_peer_id`, `click`, `context_click`
+  - возвращает нижний sticky author avatar Telegram Web: `peer_id`, `name`, `role`, `username`, `source`, `point`, `rect`, `candidates`
+  - `context_click=true` открывает context menu правой кнопкой только на большой 34px avatar, найденной нижней `elementsFromPoint`-пробой; fallback на текст сообщения для клика не используется
+  - если `expected_peer_id` задан и такой нижней point-avatar сейчас нет, команда возвращает `found=false`, чтобы exporter не кликал не туда
 - `clear_editable`
   - поля: `selectors` — массив CSS-селекторов, проверяемых по очереди
 - `fill`

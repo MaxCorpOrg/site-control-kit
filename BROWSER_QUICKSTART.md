@@ -137,6 +137,11 @@ browser.cmd --client-id client-REPLACE tabs
 - `run_script` может блокироваться CSP конкретного сайта.
 - После обновления расширения всегда сначала делайте `browser.cmd status`.
 
+## Telegram Quick Note
+- Для sticky-author username path использовать правый клик по нижней прилипшей 34px иконке автора через `telegram_sticky_author`; не кликать по тексту сообщения и не открывать профиль левой кнопкой.
+- В текущем Telegram Web отсутствие `Mention` в context menu является нормальным сценарием; если export-лог пишет `No visible menu item found by text`, текущий pipeline должен сам уйти в helper fallback.
+- Чисто числовые значения вида `@1291639730` не считать валидными username: на состоянии от 2026-04-23 они фильтруются как peer-id артефакты.
+
 ## Что Обновлять При Изменениях
 - `docs/API.md` — если меняется протокол или payload команд.
 - `docs/EXTENSION.md` — если меняются background/content возможности.

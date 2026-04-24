@@ -52,10 +52,20 @@
 - Если нужен более широкий охват участников, увеличивайте `--chat-scroll-steps` и `--chat-max-runtime`; после этого экспортёр сам может сделать ещё несколько шагов через `--chat-auto-extra-steps`, если рост участников продолжается.
 - Все новые выгрузки дополнительно складываются в `/home/max/site-control-kit/artifacts/telegram_exports`, а список путей хранится в `INDEX.md` рядом.
 - `@username` больше не нужно выковыривать из markdown вручную: рядом с каждым экспортом пишутся `*_usernames.txt` и `*_usernames.json`, а их пути тоже попадают в `INDEX.md`.
+- Для повторных прогонов больше не нужно отдельно руками собирать `identity_history.json`: экспортёр сам хранит per-chat history в `artifacts/telegram_exports/state` и подхватывает уже найденные `@username` из прежних archived sidecars.
 
 ## `--deep-usernames` уводил группу в личные диалоги
 - Для `deep-usernames` экспортёр теперь использует временные helper tabs и возвращает активной исходную групповую вкладку.
 - Если deep-проход кажется долгим, это нормально: Telegram последовательно открывает видимые профили, а не отдаёт usernames пачкой.
+- Если в `export.log` видно `No visible menu item found by text`, это уже не считается инфраструктурным фейлом: текущий Telegram Web часто не показывает `Mention`, и exporter сразу переключается в helper fallback для оставшихся peer этого visible-layer.
+- Для sticky-author path не надо открывать профиль левой кнопкой: текущий рабочий способ это `telegram_sticky_author` + правый клик по нижней прилипшей 34px иконке автора. Live-проверка extension `0.1.5` подтвердила `source=point` и `context_clicked=true`.
+- Если sticky path дошёл до `menu_missing`, новый ожидаемый ход: helper-tab для этого же sticky `peer_id`. Это уже подтвердило `306536305 -> @alxkat` и `1127139638 -> @Mitiacaramba`.
+
+## В выгрузке появился `@123456789` или другой чисто числовой `@username`
+- На состоянии от 2026-04-23 это считается ложным peer-id артефактом, а не валидным username.
+- Exporter, history-loader и safe/batch слой теперь отбрасывают такие значения автоматически.
+- Если такой `@username` виден в старом историческом артефакте, повторный `collect_new_telegram_contacts.sh` перепишет `identity_history.json`, `latest_full.*` и `latest_safe.*` уже без него.
+- Старые numbered batches, выпущенные до фикса, могут требовать разовой ручной очистки, если в них уже успел попасть такой артефакт.
 
 ## Нужны просто `@username` из истории чата, без привязки к peer-card
 - Используйте `python3 scripts/export_telegram_chat_mentions.py --target-count 40`.

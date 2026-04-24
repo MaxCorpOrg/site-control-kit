@@ -37,6 +37,9 @@ class TelegramContactBatchesTests(unittest.TestCase):
 
         self.assertEqual(usernames, ["@alice_123", "@bob_456"])
 
+    def test_normalize_username_rejects_numeric_peer_id_shape(self) -> None:
+        self.assertEqual(self.mod.normalize_username("@1291639730"), "")
+
     def test_next_batch_number_ignores_non_numbered_files(self) -> None:
         batch_dir = self.root / "chat"
         batch_dir.mkdir()
@@ -66,6 +69,47 @@ class TelegramContactBatchesTests(unittest.TestCase):
         self.assertIsNone(safe_txt)
         self.assertEqual(safe_count, 0)
         self.assertEqual(path.read_text(encoding="utf-8"), "@new_222\n@new_333\n")
+
+    def test_save_new_batch_ignores_numeric_username_artifacts_from_history_and_snapshot(self) -> None:
+        batch_dir = self.root / "chat"
+        batch_dir.mkdir()
+        (batch_dir / "identity_history.json").write_text(
+            '{\n'
+            '  "username_to_peer": {"@1291639730": "5137994780"},\n'
+            '  "peer_to_username": {"5137994780": "@1291639730"}\n'
+            '}\n',
+            encoding="utf-8",
+        )
+
+        source = self.root / "source.txt"
+        source.write_text("@1291639730\n@alice_111\n", encoding="utf-8")
+
+        full_md = self.root / "latest_full.md"
+        full_md.write_text(
+            "# Report\n\n"
+            "| # | Имя | Username | Статус | Роль | Peer ID |\n"
+            "|---|---|---|---|---|---|\n"
+            "| 1 | Iris | @1291639730 | — | Admin | 5137994780 |\n"
+            "| 2 | Alice | @alice_111 | — | — | 111 |\n",
+            encoding="utf-8",
+        )
+
+        count, path, review_count, review_path, safe_md, safe_txt, safe_count = self.mod.save_new_batch(
+            source,
+            batch_dir,
+            full_md=full_md,
+        )
+
+        self.assertEqual(count, 1)
+        self.assertEqual(path, batch_dir / "1.txt")
+        self.assertEqual(path.read_text(encoding="utf-8"), "@alice_111\n")
+        self.assertEqual(review_count, 0)
+        self.assertIsNone(review_path)
+        self.assertIsNotNone(safe_txt)
+        self.assertEqual(safe_txt.read_text(encoding="utf-8"), "@alice_111\n")
+        history_payload = (batch_dir / "identity_history.json").read_text(encoding="utf-8")
+        self.assertNotIn("@1291639730", history_payload)
+        self.assertEqual(safe_count, 1)
 
     def test_save_new_batch_skips_empty_delta(self) -> None:
         batch_dir = self.root / "chat"

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import importlib.util
+import json
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -80,6 +82,26 @@ class TelegramExportParserTests(unittest.TestCase):
         self.assertEqual(members[0]["peer_id"], "891274018")
         self.assertEqual(members[0]["name"], "Bulka")
         self.assertEqual(members[0]["role"], "Модератор")
+
+    def test_parse_chat_members_ignores_message_mentions_for_author_username(self) -> None:
+        html = (
+            '<div id="message-group-208227" class="sender-group-container Tk8btfOT">'
+            '<div class="Avatar jdvqXfYh size-small interactive" data-peer-id="1663660771">'
+            '<div class="inner"><img class="Avatar__media avatar-media" alt="Ларионов Никита"></div>'
+            "</div>"
+            '<div id="message-208227" class="Message message-list-item shown open">'
+            '<div class="message-content-wrapper can-select-text"><div class="message-content text has-subheader">'
+            '<div class="message-title"><span class="message-title-name"><span class="sender-title">Ларионов Никита</span></span></div>'
+            '<div class="text-content">привет @super_pavlik</div>'
+            "</div></div></div>"
+            "</div>"
+        )
+
+        members = self.mod._parse_chat_members(html)
+
+        self.assertEqual(len(members), 1)
+        self.assertEqual(members[0]["peer_id"], "1663660771")
+        self.assertEqual(members[0]["username"], "—")
 
     def test_parse_members_current_right_column_members_list(self) -> None:
         html = (
@@ -183,12 +205,102 @@ class TelegramExportParserTests(unittest.TestCase):
         username = self.mod._extract_username_from_profile_html(html)
         self.assertEqual(username, "—")
 
+    def test_normalize_username_rejects_numeric_peer_id_shape(self) -> None:
+        self.assertEqual(self.mod._normalize_username("Bychkov_AA"), "@Bychkov_AA")
+        self.assertEqual(self.mod._normalize_username("@1291639730"), "—")
+        self.assertEqual(self.mod._normalize_username("https://t.me/1291639730"), "—")
+
     def test_chat_peer_anchor_selectors_include_current_tg_web_avatar(self) -> None:
         selectors = self.mod._chat_peer_anchor_selectors("1291639730")
         self.assertIn('.sender-group-container .Avatar.interactive[data-peer-id="1291639730"]', selectors)
         self.assertIn('.sender-group-container .Avatar[data-peer-id="1291639730"]', selectors)
         self.assertIn('.MessageList .Avatar[data-peer-id="1291639730"]', selectors)
         self.assertIn('.bubbles .bubbles-group-avatar.user-avatar[data-peer-id="1291639730"]', selectors)
+
+    def test_member_from_sticky_author_payload_normalizes_username(self) -> None:
+        member = self.mod._member_from_sticky_author_payload(
+            {
+                "found": True,
+                "peer_id": "8055002493",
+                "name": "Sticky User",
+                "role": "Модератор",
+                "username": "t.me/sticky_user",
+            }
+        )
+
+        self.assertEqual(member["peer_id"], "8055002493")
+        self.assertEqual(member["name"], "Sticky User")
+        self.assertEqual(member["role"], "Модератор")
+        self.assertEqual(member["username"], "@sticky_user")
+
+    def test_member_from_sticky_author_payload_rejects_negative_peer_id(self) -> None:
+        member = self.mod._member_from_sticky_author_payload(
+            {
+                "found": True,
+                "peer_id": "-1002465948544",
+                "name": "Group",
+            }
+        )
+
+        self.assertIsNone(member)
+
+    def test_load_identity_history_prefers_newer_archive_state_over_stale_explicit_history(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            archive_dir = root / "archive"
+            state_dir = archive_dir / "state"
+            state_dir.mkdir(parents=True, exist_ok=True)
+            history_path = root / "chat" / "identity_history.json"
+            history_path.parent.mkdir(parents=True, exist_ok=True)
+
+            history_path.write_text(
+                json.dumps(
+                    {
+                        "updated_at": "2026-04-23T17:35:14+00:00",
+                        "username_to_peer": {
+                            "@super_pavlik": "1663660771",
+                            "@legacy_user": "999",
+                        },
+                        "peer_to_username": {
+                            "1663660771": "@super_pavlik",
+                            "999": "@legacy_user",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            archive_history_path = state_dir / "1002465948544_identity_history.json"
+            archive_history_path.write_text(
+                json.dumps(
+                    {
+                        "updated_at": "2026-04-24T12:31:37+00:00",
+                        "username_to_peer": {
+                            "@super_pavlik": "1621138520",
+                            "@alxkat": "306536305",
+                        },
+                        "peer_to_username": {
+                            "1621138520": "@super_pavlik",
+                            "306536305": "@alxkat",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            username_to_peer, peer_to_username = self.mod._load_identity_history(
+                history_path,
+                archive_dir=archive_dir,
+                group_url="https://web.telegram.org/a/#-1002465948544",
+            )
+
+        self.assertEqual(username_to_peer["@super_pavlik"], "1621138520")
+        self.assertEqual(peer_to_username["1621138520"], "@super_pavlik")
+        self.assertEqual(username_to_peer["@alxkat"], "306536305")
+        self.assertEqual(peer_to_username["306536305"], "@alxkat")
+        self.assertEqual(username_to_peer["@legacy_user"], "999")
+        self.assertEqual(peer_to_username["999"], "@legacy_user")
+        self.assertNotIn("1663660771", peer_to_username)
 
     def test_build_parser_defaults_to_both(self) -> None:
         parser = self.mod.build_parser()

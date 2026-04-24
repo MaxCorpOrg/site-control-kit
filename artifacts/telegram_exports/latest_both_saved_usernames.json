@@ -1,0 +1,17 @@
+{
+  "source_markdown": "/home/max/site-control-kit/artifacts/telegram_exports/latest_both_saved.md",
+  "generated_at": "2026-04-23T14:28:11",
+  "count": 1,
+  "usernames": [
+    "@Tri87true"
+  ],
+  "rows": [
+    {
+      "username": "@Tri87true",
+      "name": "Evgeniy",
+      "status": "из чата",
+      "role": "—",
+      "peer_id": "6964266260"
+    }
+  ]
+}

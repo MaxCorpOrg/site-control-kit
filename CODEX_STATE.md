@@ -1,0 +1,88 @@
+# CODEX_STATE
+
+## 2026-04-24
+
+- Проверен репозиторий `site-control-kit`: отдельного Telegram Bot API framework/handler (`aiogram`, `telebot`, `callback_query`) не было; входящие POST обрабатываются в `webcontrol/server.py`.
+- Добавлен authenticated handler `POST /api/telegram/webhook`.
+- Handler читает Telegram identity из `message.from` или `callback_query.from`:
+  - `telegram_id = from.id`
+  - `username = from.username ? "@<username>" : null`
+- `ControlStore.upsert_telegram_user()` сохраняет данные в `state.json` под `telegram_users` и обновляет `username` при изменении.
+- Добавлен `LOGGER.info` для каждого Telegram upsert и unit/API-проверки в `tests/test_store.py`, `tests/test_server_api.py`.
+
+## 2026-04-24 Telegram Username Export
+
+- Рабочая папка: `/home/max/site-control-kit`.
+- Живой Telegram-чат: `https://web.telegram.org/a/#-1002465948544`.
+- Локальный каталог batch/state: `/home/max/telegram_contact_batches/chat_-1002465948544`.
+- Добавлен и live-проверен sticky-author path:
+  - `extension/content.js` получил команду `telegram_sticky_author`;
+  - команда ищет нижнюю прилипшую иконку автора через `elementsFromPoint` и для `context_click=true` кликает правой кнопкой только по большой 34px avatar, а не по тексту сообщения/reply-avatar;
+  - `scripts/export_telegram_members_non_pii.py` сначала пробует sticky-author mention для текущего прилипшего автора и не тратит deep-step на остальных видимых peer, если sticky-author есть;
+  - stats получили `sticky_authors_seen`, `sticky_mention_attempted`, `sticky_mention_updated`.
+- Live probe после перезапуска Chrome с extension `0.1.5`:
+  - client: `client-601f3396-50aa-4989-ae5d-9c450e28f65e`;
+  - tab: `997919826`;
+  - `telegram_sticky_author` вернул `peer_id=8055002493`, `source=point`, `point={x:512,y:539}`, `rect=506,535,540,569`, `width=34`, `height=34`;
+  - `context_click=true` по тому же `expected_peer_id=8055002493` вернул `context_clicked=true`;
+  - `_try_username_via_mention_action(..., use_sticky_anchor=True)` дошёл до menu-path, но Telegram Web не показал `Mention`: результат `('—', 'menu_missing')`.
+  - нюанс: heartbeat `meta.capabilities.content_commands` после reload всё ещё не рекламирует `telegram_sticky_author`, хотя direct command выполняется; exporter не зависит от этого capability-флага.
+- Live wrapper smoke после sticky-icon фикса:
+  - команда: `CHAT_PROFILE=fast CHAT_MAX_RUNTIME=60 CHAT_SCROLL_STEPS=2 CHAT_DEEP_LIMIT=4 ./scripts/auto_collect_usernames.sh 'https://web.telegram.org/a/#-1002465948544' '/tmp/telegram_live_sticky_icon.md'`;
+  - sticky path: `sticky chat author 6964266260 (Evgeniy)`, затем `sticky mention unresolved ... (menu_missing)`;
+  - результат: `18` members, `10` usernames, `pre-deep history backfill restored 10 username(s)`;
+  - archive: `/home/max/site-control-kit/artifacts/telegram_exports/20260424_143524_chat_1002465948544_18.md`.
+- Продолжение после `погнали дальше`:
+  - исправлен sticky fallback: если правый клик по нижней sticky avatar дошёл до menu-path, но Telegram вернул `menu_missing`/`delivery_failure`/`unresolved`, exporter сразу пробует helper-tab для того же `peer_id`;
+  - добавлены stats `sticky_helper_attempted` и `sticky_helper_updated`;
+  - сокращён missing-result grace для best-effort команд `raise_on_fail=False`: вместо ожидания до 90s selector/fallback miss теперь ждёт короткий grace 0.4..1.2s, чтобы helper не сжигал runtime на пустых terminal deliveries;
+  - regression test: `test_collect_members_from_chat_uses_sticky_helper_after_menu_missing`.
+- Live smoke sticky helper:
+  - `/tmp/telegram_live_sticky_helper.md`: `306536305 -> @alxkat`;
+  - `/tmp/telegram_live_sticky_helper_fastgrace.md`: `1127139638 -> @Mitiacaramba`;
+  - archives:
+    - `/home/max/site-control-kit/artifacts/telegram_exports/20260424_162705_chat_1002465948544_18.md`
+    - `/home/max/site-control-kit/artifacts/telegram_exports/20260424_163137_chat_1002465948544_20.md`
+- Chat-mentions auxiliary runs:
+  - `/tmp/telegram_chat_mentions_50.txt` -> `29` usernames;
+  - `/tmp/telegram_chat_mentions_50_b.txt` -> `19` usernames;
+  - `/tmp/telegram_chat_mentions_50_c.txt` -> `5` usernames;
+  - это mention-in-history режим, не peer-bound member parsing.
+- Combined current username artifact:
+  - `/tmp/telegram_combined_54_usernames.txt`
+  - `/tmp/telegram_combined_54_usernames.json`
+  - `/home/max/site-control-kit/artifacts/telegram_exports/20260424_164916_combined-usernames_1002465948544_54.txt`
+  - `/home/max/site-control-kit/artifacts/telegram_exports/20260424_164916_combined-usernames_1002465948544_54.json`
+  - count: `54` уникальных `@username` из member sidecars, sticky/helper live runs, chat-mentions и numbered batches.
+- Закрыты ещё три реальных Telegram-дефекта:
+  - `_load_identity_history()` теперь сравнивает `updated_at` и предпочитает более свежий archive state перед устаревшим явным `CHAT_IDENTITY_HISTORY`, а из более старого файла добирает только отсутствующие non-conflicting записи;
+  - `_parse_chat_members()` больше не берёт `@username` из текста сообщения и ищет username только в author/header block;
+  - helper-tab перед чтением username теперь ждёт подтверждение ожидаемого `peer_id` или имени, чтобы не возвращать stale username чужого профиля.
+- Live verify с явным stale history path `/home/max/telegram_contact_batches/chat_-1002465948544/identity_history.json`:
+  - `/tmp/telegram_live_verify.md` -> `14` members, `8` usernames;
+  - старый duplicate-конфликт по `@super_pavlik` больше не появился;
+  - chat-dir `identity_history.json` обновлён до `2026-04-24T13:09:55+00:00` и теперь снова содержит `@super_pavlik -> 1621138520`, `@alxkat -> 306536305`, `@mitiacaramba -> 1127139638`.
+- Live verify helper-identity gate:
+  - прежний ложный helper-resolve вида `6964266260 (Evgeniy) -> @Tri87true` больше не воспроизводится;
+  - `/tmp/telegram_live_verify_2.md` -> `20` members, `8` usernames;
+  - `output_usernames_cleared_total = 0`;
+  - archive: `/home/max/site-control-kit/artifacts/telegram_exports/20260424_171947_chat_1002465948544_20.md`.
+- В `scripts/export_telegram_members_non_pii.py` добавлен pre-deep history backfill:
+  - `_collect_members_from_chat()` восстанавливает известные username из `historical_peer_to_username` до выбора `deep_targets`;
+  - уже известные `peer_id` больше не съедают `CHAT_DEEP_LIMIT` и runtime helper/deep;
+  - stats получили `history_prefilled` и `history_prefill_conflicts`.
+- Сохранено правило `ё-моё` для агентов:
+  - если есть sticky-author, не кликать по чату/тексту/профилю: правой кнопкой работать по нижней прилипшей иконке автора через `telegram_sticky_author`;
+  - если `Mention` отсутствует или `No visible menu item found by text`, переходить в helper fallback;
+  - не принимать чисто числовые значения вида `@1291639730` как username;
+  - перед deep использовать history, а после run сверять `identity_history.json`, `latest_safe.txt`, `latest_full.*` и numbered batches.
+- Проверки:
+  - `node --check extension/content.js && node --check extension/background.js` -> OK;
+  - `python3 -m unittest tests.test_telegram_export_parser tests.test_telegram_export_runtime` -> `43 tests OK`;
+  - Telegram-related расширенный набор -> `82 tests OK`;
+  - `python3 -m unittest discover -s tests -p 'test_*.py'` -> `117 tests OK`.
+- Live smoke:
+  - команда: `CHAT_PROFILE=fast CHAT_MAX_RUNTIME=90 CHAT_SCROLL_STEPS=4 CHAT_DEEP_LIMIT=12 ./scripts/auto_collect_usernames.sh 'https://web.telegram.org/a/#-1002465948544' '/tmp/telegram_live_after_prefill.md'`;
+  - результат: `22` members, `9` usernames, `pre-deep history backfill restored 9 username(s)`;
+  - archive: `/home/max/site-control-kit/artifacts/telegram_exports/20260424_132543_chat_1002465948544_22.md`;
+  - остаточный limit: новый unknown peer `8055002493` за `90s` username не отдал, поэтому следующий шаг всё ещё helper/discovery throughput.

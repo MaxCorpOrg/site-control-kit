@@ -18,11 +18,13 @@ collect_new_telegram_contacts_chain.sh
 3. Загружает `discovery_state.json`.
 4. Читает текущий видимый слой сообщений.
 5. Собирает известных участников из visible DOM.
-6. При необходимости запускает deep-path.
-7. Если `Mention` не сработал, уходит в URL fallback.
-8. Пишет raw markdown.
-9. Применяет sanitize/history restore.
-10. Пишет telemetry в `export_stats.json`.
+6. Читает нижнего sticky author через `telegram_sticky_author`.
+7. Если sticky author найден, сначала пробует правый клик по его прилипшей 34px иконке.
+8. При необходимости запускает deep-path.
+9. Если `Mention` не сработал, уходит в URL/helper fallback.
+10. Пишет raw markdown.
+11. Применяет sanitize/history restore.
+12. Пишет telemetry в `export_stats.json`.
 
 ## Discovery
 Discovery отвечает за:
@@ -51,6 +53,14 @@ Deep отвечает за извлечение `@username`.
 3. кликнуть `Mention`;
 4. прочитать composer;
 5. извлечь `@username`.
+
+### Sticky Author Path
+Работает так:
+1. `telegram_sticky_author` сканирует нижнюю часть диалога через `elementsFromPoint`;
+2. выбирает только большую 34px avatar автора, которая реально лежит под point-пробой;
+3. открывает context menu правой кнопкой на этой иконке;
+4. не кликает по тексту сообщения, reply-avatar и не открывает профиль левой кнопкой;
+5. если `Mention` отсутствует, отдаёт `menu_missing` и дальше применяется helper fallback.
 
 ### URL Fallback
 Если mention не дал username:

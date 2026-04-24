@@ -1,6 +1,6 @@
 # Project Status RU
 
-Последнее обновление: 2026-04-23
+Последнее обновление: 2026-04-24
 
 Этот файл нужен как точка входа для любого нового чата и любого нового агента.
 Перед новой задачей его нужно прочитать целиком.
@@ -9,6 +9,113 @@
 Читать его нужно по номерам файлов, начиная с `00_START_HERE.md`.
 
 ## Сделано
+
+### Обновление 2026-04-24
+- Продолжен sticky/helper path после фикса попадания по иконке:
+  - если sticky context menu открылось, но `Mention` отсутствует (`menu_missing`), exporter теперь сразу пробует helper-tab для того же sticky `peer_id`;
+  - добавлены stats `sticky_helper_attempted` и `sticky_helper_updated`;
+  - для best-effort команд `raise_on_fail=False` сокращён missing-result grace до 0.4..1.2s, чтобы selector miss не ждал до 90s и не съедал helper runtime.
+- Live-подтверждения нового sticky helper fallback:
+  - `/tmp/telegram_live_sticky_helper.md`: `306536305 -> @alxkat`;
+  - `/tmp/telegram_live_sticky_helper_fastgrace.md`: `1127139638 -> @Mitiacaramba`;
+  - archives:
+    - `/home/max/site-control-kit/artifacts/telegram_exports/20260424_162705_chat_1002465948544_18.md`
+    - `/home/max/site-control-kit/artifacts/telegram_exports/20260424_163137_chat_1002465948544_20.md`
+- По сумме текущих источников уже собран deliverable на `54` уникальных `@username`:
+  - `/tmp/telegram_combined_54_usernames.txt`
+  - `/tmp/telegram_combined_54_usernames.json`
+  - `/home/max/site-control-kit/artifacts/telegram_exports/20260424_164916_combined-usernames_1002465948544_54.txt`
+  - `/home/max/site-control-kit/artifacts/telegram_exports/20260424_164916_combined-usernames_1002465948544_54.json`
+- Важно: combined `54` смешивает peer-bound member sidecars и chat-mentions; строго peer-bound sticky/helper path пока даёт новые username медленнее.
+- Закрыт stale-history conflict:
+  - `_load_identity_history()` теперь сравнивает `updated_at` и предпочитает более свежий archive state перед устаревшим explicit `CHAT_IDENTITY_HISTORY`;
+  - более старый history-файл используется только как secondary source для отсутствующих non-conflicting записей;
+  - live verify с явным `/home/max/telegram_contact_batches/chat_-1002465948544/identity_history.json` больше не воспроизводит конфликт `@super_pavlik`;
+  - chat-dir `identity_history.json` обновлён и теперь снова содержит:
+    - `@super_pavlik -> 1621138520`
+    - `@alxkat -> 306536305`
+    - `@mitiacaramba -> 1127139638`
+- Закрыт parser false-positive по message text:
+  - `_parse_chat_members()` больше не берёт `@username` из текста сообщения;
+  - username ищется только в author/header block;
+  - это убрало ложный захват `@super_pavlik` у peer `1663660771`.
+- Закрыт stale helper misbind:
+  - helper-tab теперь ждёт подтверждение ожидаемого `peer_id` или имени перед чтением username;
+  - прежний ложный кейс `6964266260 (Evgeniy) -> @Tri87true` больше не воспроизводится;
+  - live verify `/tmp/telegram_live_verify_2.md` дал `20` members, `8` usernames и `output_usernames_cleared_total = 0`;
+  - archive: `/home/max/site-control-kit/artifacts/telegram_exports/20260424_171947_chat_1002465948544_20.md`.
+- Добавлен sticky-author path для Telegram username export:
+  - `extension/content.js` теперь поддерживает `telegram_sticky_author`;
+  - правый клик делается по нижней прилипшей 34px иконке автора через `elementsFromPoint`, без клика по тексту сообщения и без ухода в профиль;
+  - `scripts/export_telegram_members_non_pii.py` использует sticky-author mention первым и ограничивает deep текущим sticky peer, если он найден.
+- Live-проверка на `https://web.telegram.org/a/#-1002465948544` после перезапуска Chrome с extension `0.1.5`:
+  - `peer_id=8055002493`;
+  - `source=point`;
+  - `point={x:512,y:539}`;
+  - `rect=506,535,540,569`, `34x34`;
+  - `context_click=true` вернул `context_clicked=true`;
+  - menu-path отработал, но `Mention` в текущем Telegram menu отсутствует: результат `menu_missing`.
+  - heartbeat capabilities пока не рекламируют `telegram_sticky_author`, но direct command выполняется; exporter использует direct command и не блокируется этим флагом.
+- Live wrapper smoke после фикса sticky icon:
+  - output: `/tmp/telegram_live_sticky_icon.md`;
+  - archive: `/home/max/site-control-kit/artifacts/telegram_exports/20260424_143524_chat_1002465948544_18.md`;
+  - результат: `18` members, `10` usernames;
+  - log-факт: `sticky chat author 6964266260 (Evgeniy)` -> `sticky mention unresolved ... (menu_missing)`.
+- Добавлены stats sticky-path:
+  - `sticky_authors_seen`
+  - `sticky_mention_attempted`
+  - `sticky_mention_updated`
+- Добавлен pre-deep history backfill для Telegram chat export:
+  - `scripts/export_telegram_members_non_pii.py` теперь восстанавливает username из `historical_peer_to_username` сразу после dedupe visible members и до выбора `deep_targets`;
+  - уже известные peer больше не тратят `CHAT_DEEP_LIMIT` и helper/deep runtime;
+  - stats получили `history_prefilled` и `history_prefill_conflicts`.
+- Закрыт регрессионный тестом новый важный сценарий:
+  - если `peer_id` уже есть в history, `_collect_members_from_chat()` проставляет username до deep;
+  - `_enrich_usernames_deep_chat()` в этом случае не вызывается.
+- Verify:
+  - `node --check extension/content.js && node --check extension/background.js` -> OK;
+  - `tests.test_telegram_export_parser tests.test_telegram_export_runtime` -> `43 tests OK`;
+  - расширенный Telegram-related набор -> `82 tests OK`;
+  - полный `unittest discover` -> `117 tests OK`.
+- Live smoke на текущем чате `https://web.telegram.org/a/#-1002465948544`:
+  - output: `/tmp/telegram_live_after_prefill.md`;
+  - archive: `/home/max/site-control-kit/artifacts/telegram_exports/20260424_132543_chat_1002465948544_22.md`;
+  - sidecars:
+    - `/home/max/site-control-kit/artifacts/telegram_exports/20260424_132543_chat_1002465948544_22_usernames_txt.txt`
+    - `/home/max/site-control-kit/artifacts/telegram_exports/20260424_132543_chat_1002465948544_22_usernames_json.json`
+  - результат:
+    - `unique_members = 22`
+    - `usernames = 9`
+    - `pre-deep history backfill restored 9 username(s)`
+    - `deep processed = 1`
+    - `deep filled = 0`
+- Практический вывод:
+  - known peer вроде `1291639730 -> @Bychkov_AA` больше не становится первым deep-кандидатом;
+  - следующий bottleneck уже в скорости helper/discovery для реально неизвестных peer, например live peer `8055002493`, который не отдал username за `90s`.
+
+### Обновление 2026-04-23
+- Зафиксировано новое live-state после полного verify на активном bridge-клиенте:
+  - run: `/home/max/telegram_contact_batches/chat_-1002465948544/runs/20260423T173223Z/run.json`
+  - log: `/home/max/telegram_contact_batches/chat_-1002465948544/runs/20260423T173223Z/export.log`
+  - stats: `/home/max/telegram_contact_batches/chat_-1002465948544/runs/20260423T173223Z/export_stats.json`
+  - результат:
+    - `unique_members = 27`
+    - `members_with_username = 10`
+    - `safe_count = 10`
+    - `deep_attempted_total = 2`
+    - `deep_updated_total = 2`
+    - `new_usernames = 2`
+  - новые numbered batch данные:
+    - `/home/max/telegram_contact_batches/chat_-1002465948544/7.txt`
+    - `@oleg_klsnkv`
+    - `@andreu_bogatchenko`
+  - `latest_full.*` и `latest_safe.*` теперь уже promoted именно на этот run, а не на более старый baseline.
+- Подтверждён live-поведенчески и scheduler-cap:
+  - `TELEGRAM_CHAT_DEEP_STEP_MAX_SEC` не только покрыт тестом, но и реально даёт переход к следующему scroll-step вместо монопольного зависания в первом deep-layer.
+- Зафиксирован и закрыт новый downstream дефект:
+  - exporter раньше мог принять чисто числовой peer-id за `@username` и протащить это значение в history/safe/batch слой;
+  - теперь numeric артефакты вида `@1291639730` фильтруются в exporter, history-loader и `scripts/telegram_contact_batches.py`;
+  - текущие active outputs (`latest_full.*`, `latest_safe.*`, `identity_history.json`, numbered batches) очищены от этого ложного класса данных.
 
 ### Обновление 2026-04-23
 - В chat deep scheduler добавлен cap на runtime одного visible-layer:
@@ -20,10 +127,8 @@
   - это нужно, чтобы первый deep-step не съедал весь runtime run’а и exporter чаще доходил до следующих scroll layers.
 - Регрессия закрыта тестом:
   - `tests/test_telegram_export_runtime.py` проверяет, что budget deep-step реально режется по cap.
-- Важный operational note:
-  - live verification именно этого scheduler-cap шага в конце текущей итерации сорвалась не кодом, а контуром;
-  - после очередного автостарта хаба browser bridge ушёл в `is_online=false`, и новый run завис ещё до meaningful telemetry;
-  - значит следующий live verify этого шага надо начинать только после восстановления heartbeat-клиента.
+- Live verification этого scheduler-cap шага теперь уже подтверждена:
+  - после восстановления online heartbeat run `20260423T173223Z` реально дошёл до второго scroll-step и сохранил новый best-known snapshot.
 
 ### Обновление 2026-04-23
 - Ускорен deep helper path в текущем Telegram Web:

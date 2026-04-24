@@ -1,0 +1,74 @@
+{
+  "group_url": "https://web.telegram.org/a/#-1002465948544",
+  "source_mode": "chat",
+  "generated_at": "2026-04-23T21:28:43",
+  "count": 8,
+  "usernames": [
+    "@Max31Bel",
+    "@fuckeeva",
+    "@bulan04",
+    "@abuzayd06",
+    "@kamaz_master1",
+    "@bychkov_aa",
+    "@1291639730",
+    "@super_pavlik"
+  ],
+  "rows": [
+    {
+      "username": "@Max31Bel",
+      "peer_id": "5209499393",
+      "name": "Max Bel",
+      "status": "из чата",
+      "role": "—"
+    },
+    {
+      "username": "@fuckeeva",
+      "peer_id": "858739581",
+      "name": "Анна Fuckeeva",
+      "status": "из чата",
+      "role": "—"
+    },
+    {
+      "username": "@bulan04",
+      "peer_id": "891274018",
+      "name": "Bulka",
+      "status": "из чата",
+      "role": "Модератор"
+    },
+    {
+      "username": "@abuzayd06",
+      "peer_id": "555101371",
+      "name": "Тэймур Гусейнов",
+      "status": "из чата",
+      "role": "—"
+    },
+    {
+      "username": "@kamaz_master1",
+      "peer_id": "1404471788",
+      "name": "Камаз",
+      "status": "из чата",
+      "role": "—"
+    },
+    {
+      "username": "@bychkov_aa",
+      "peer_id": "1291639730",
+      "name": "Запрещенный фармаколог 2.0",
+      "status": "из чата",
+      "role": "—"
+    },
+    {
+      "username": "@1291639730",
+      "peer_id": "5137994780",
+      "name": "Iris | Bright Sophie",
+      "status": "из чата",
+      "role": "Admin"
+    },
+    {
+      "username": "@super_pavlik",
+      "peer_id": "1663660771",
+      "name": "Ларионов Никита",
+      "status": "из чата",
+      "role": "—"
+    }
+  ]
+}

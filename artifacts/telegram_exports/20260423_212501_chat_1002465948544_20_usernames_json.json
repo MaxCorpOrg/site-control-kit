@@ -1,0 +1,82 @@
+{
+  "group_url": "https://web.telegram.org/a/#-1002465948544",
+  "source_mode": "chat",
+  "generated_at": "2026-04-23T21:25:01",
+  "count": 9,
+  "usernames": [
+    "@osipoly",
+    "@HolaAloe",
+    "@abuzayd06",
+    "@Bychkov_AA",
+    "@kamaz_master1",
+    "@super_pavlik",
+    "@bulan04",
+    "@wanderlinde_baza",
+    "@fuckeeva"
+  ],
+  "rows": [
+    {
+      "username": "@osipoly",
+      "peer_id": "1238534353",
+      "name": "Ольга",
+      "status": "из чата",
+      "role": "—"
+    },
+    {
+      "username": "@HolaAloe",
+      "peer_id": "351524223",
+      "name": "Дмитрий Ежов",
+      "status": "из чата",
+      "role": "—"
+    },
+    {
+      "username": "@abuzayd06",
+      "peer_id": "555101371",
+      "name": "Тэймур Гусейнов",
+      "status": "из чата",
+      "role": "—"
+    },
+    {
+      "username": "@Bychkov_AA",
+      "peer_id": "1291639730",
+      "name": "ДОКМЕД от Алексея Андреевича",
+      "status": "из чата",
+      "role": "—"
+    },
+    {
+      "username": "@kamaz_master1",
+      "peer_id": "1404471788",
+      "name": "Камаз",
+      "status": "из чата",
+      "role": "—"
+    },
+    {
+      "username": "@super_pavlik",
+      "peer_id": "1621138520",
+      "name": "Павел Сухомлинов",
+      "status": "из чата",
+      "role": "—"
+    },
+    {
+      "username": "@bulan04",
+      "peer_id": "891274018",
+      "name": "Bulka",
+      "status": "из чата",
+      "role": "Модератор"
+    },
+    {
+      "username": "@wanderlinde_baza",
+      "peer_id": "7730689749",
+      "name": "Летаргический сон",
+      "status": "из чата",
+      "role": "модератор"
+    },
+    {
+      "username": "@fuckeeva",
+      "peer_id": "858739581",
+      "name": "Анна Fuckeeva",
+      "status": "из чата",
+      "role": "—"
+    }
+  ]
+}

@@ -69,6 +69,11 @@ chat_<id>/runs/<timestamp>/
 - `unique_members`
 - `members_with_username`
 - `deep_updated_total`
+- `sticky_authors_seen`
+- `sticky_mention_attempted`
+- `sticky_mention_updated`
+- `sticky_helper_attempted`
+- `sticky_helper_updated`
 - `history_backfilled_total`
 - `chat_scroll_steps_done`
 - `chat_runtime_limited`
@@ -78,6 +83,7 @@ chat_<id>/runs/<timestamp>/
 Именно лог показывает реальный ход exporter:
 - какой peer взят;
 - сработал ли `Mention`;
+- был ли sticky-author right-click по нижней avatar;
 - был ли `click_menu_text miss`;
 - был ли `expired no delivery`;
 - ушёл ли exporter в URL fallback;
@@ -90,6 +96,11 @@ chat_<id>/runs/<timestamp>/
 - `members_with_username`
 - `deep_attempted_total`
 - `deep_updated_total`
+- `sticky_authors_seen`
+- `sticky_mention_attempted`
+- `sticky_mention_updated`
+- `sticky_helper_attempted`
+- `sticky_helper_updated`
 - `history_backfilled_total`
 - `chat_stats`
 

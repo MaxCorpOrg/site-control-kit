@@ -1,0 +1,74 @@
+{
+  "group_url": "https://web.telegram.org/a/#-1002465948544",
+  "source_mode": "chat",
+  "generated_at": "2026-04-24T16:31:37",
+  "count": 8,
+  "usernames": [
+    "@wanderlinde_baza",
+    "@kamaz_master1",
+    "@Mitiacaramba",
+    "@bulan04",
+    "@andreu_bogatchenko",
+    "@Tri87true",
+    "@osipoly",
+    "@alxkat"
+  ],
+  "rows": [
+    {
+      "username": "@wanderlinde_baza",
+      "peer_id": "7730689749",
+      "name": "Летаргический сон",
+      "status": "из чата",
+      "role": "модератор"
+    },
+    {
+      "username": "@kamaz_master1",
+      "peer_id": "1404471788",
+      "name": "Камаз",
+      "status": "из чата",
+      "role": "—"
+    },
+    {
+      "username": "@Mitiacaramba",
+      "peer_id": "1127139638",
+      "name": "Дмитрий",
+      "status": "из чата",
+      "role": "—"
+    },
+    {
+      "username": "@bulan04",
+      "peer_id": "891274018",
+      "name": "Bulka",
+      "status": "из чата",
+      "role": "Модератор"
+    },
+    {
+      "username": "@andreu_bogatchenko",
+      "peer_id": "8055002493",
+      "name": "🤹🏻‍♂️",
+      "status": "из чата",
+      "role": "—"
+    },
+    {
+      "username": "@Tri87true",
+      "peer_id": "555101371",
+      "name": "Тэймур Гусейнов",
+      "status": "из чата",
+      "role": "—"
+    },
+    {
+      "username": "@osipoly",
+      "peer_id": "1238534353",
+      "name": "Ольга",
+      "status": "из чата",
+      "role": "—"
+    },
+    {
+      "username": "@alxkat",
+      "peer_id": "306536305",
+      "name": "Alexander",
+      "status": "из чата",
+      "role": "—"
+    }
+  ]
+}

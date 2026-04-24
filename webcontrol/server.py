@@ -76,6 +76,20 @@ class HubRequestHandler(BaseHTTPRequestHandler):
         self._send_json(HTTPStatus.UNAUTHORIZED, {"ok": False, "error": "unauthorized"})
         return False
 
+    def _extract_telegram_from_user(self, payload: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
+        for source_key in ("message", "callback_query"):
+            source = payload.get(source_key)
+            if not isinstance(source, dict):
+                continue
+            from_user = source.get("from")
+            if isinstance(from_user, dict):
+                return from_user, f"{source_key}.from"
+
+        from_user = payload.get("from")
+        if isinstance(from_user, dict):
+            return from_user, "from"
+        return None, None
+
     def do_OPTIONS(self) -> None:  # noqa: N802
         self.send_response(HTTPStatus.NO_CONTENT)
         self.send_header("Access-Control-Allow-Origin", "*")
@@ -160,6 +174,28 @@ class HubRequestHandler(BaseHTTPRequestHandler):
                 extension_version=payload.get("extension_version"),
             )
             self._send_json(HTTPStatus.OK, {"ok": True, "client": client})
+            return
+
+        if path == "/api/telegram/webhook":
+            from_user, source = self._extract_telegram_from_user(payload)
+            if not from_user or from_user.get("id") is None:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": "telegram from.id is required"})
+                return
+
+            username_raw = str(from_user.get("username", "")).strip()
+            username = f"@{username_raw}" if username_raw else None
+            user = self.hub.store.upsert_telegram_user(
+                telegram_id=from_user.get("id"),
+                username=username,
+            )
+            LOGGER.info(
+                "telegram user upsert source=%s telegram_id=%s username=%s changed=%s",
+                source,
+                user.get("telegram_id"),
+                user.get("username"),
+                user.get("changed"),
+            )
+            self._send_json(HTTPStatus.OK, {"ok": True, "telegram_user": user, "source": source})
             return
 
         if path == "/api/commands":

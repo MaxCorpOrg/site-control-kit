@@ -33,7 +33,12 @@ class MarkdownMemberRow(NamedTuple):
 
 def normalize_username(value: str) -> str:
     match = USERNAME_RE.search(str(value or "").strip())
-    return match.group(0).lower() if match else ""
+    if not match:
+        return ""
+    candidate = match.group(0)
+    if not re.search(r"[A-Za-z]", candidate):
+        return ""
+    return candidate.lower()
 
 
 def load_usernames(path: Path) -> list[str]:
@@ -324,14 +329,16 @@ def evaluate_identity_records(
     history: dict[str, Any],
 ) -> tuple[list[str], list[dict[str, str]], dict[str, Any]]:
     username_to_peer = {
-        str(key): str(value)
+        normalized_key: str(value).strip()
         for key, value in (history.get("username_to_peer") or {}).items()
-        if key and value
+        for normalized_key in [normalize_username(str(key))]
+        if normalized_key and str(value).strip()
     }
     peer_to_username = {
-        str(key): str(value)
+        str(key).strip(): normalized_username
         for key, value in (history.get("peer_to_username") or {}).items()
-        if key and value
+        for normalized_username in [normalize_username(str(value))]
+        if str(key).strip() and normalized_username
     }
     current_username_to_peer: dict[str, str] = {}
     current_peer_to_username: dict[str, str] = {}

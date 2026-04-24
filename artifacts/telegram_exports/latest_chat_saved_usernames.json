@@ -1,0 +1,25 @@
+{
+  "source_markdown": "/home/max/site-control-kit/artifacts/telegram_exports/latest_chat_saved.md",
+  "generated_at": "2026-04-23T14:28:11",
+  "count": 2,
+  "usernames": [
+    "@gregdolgushin",
+    "@super_pavlik"
+  ],
+  "rows": [
+    {
+      "username": "@gregdolgushin",
+      "name": "Алексей Андреевич",
+      "status": "из чата",
+      "role": "модератор",
+      "peer_id": "1291639730"
+    },
+    {
+      "username": "@super_pavlik",
+      "name": "Виктория",
+      "status": "из чата",
+      "role": "—",
+      "peer_id": "6610191747"
+    }
+  ]
+}

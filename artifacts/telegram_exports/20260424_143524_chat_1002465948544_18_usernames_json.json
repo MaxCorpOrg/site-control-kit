@@ -1,0 +1,90 @@
+{
+  "group_url": "https://web.telegram.org/a/#-1002465948544",
+  "source_mode": "chat",
+  "generated_at": "2026-04-24T14:35:24",
+  "count": 10,
+  "usernames": [
+    "@andreu_bogatchenko",
+    "@kamaz_master1",
+    "@abuzayd06",
+    "@osipoly",
+    "@iris_bs_bot",
+    "@fuckeeva",
+    "@bulan04",
+    "@Bychkov_AA",
+    "@GadkiyGri",
+    "@super_pavlik"
+  ],
+  "rows": [
+    {
+      "username": "@andreu_bogatchenko",
+      "peer_id": "8055002493",
+      "name": "🤹🏻‍♂️",
+      "status": "из чата",
+      "role": "—"
+    },
+    {
+      "username": "@kamaz_master1",
+      "peer_id": "1404471788",
+      "name": "Камаз",
+      "status": "из чата",
+      "role": "—"
+    },
+    {
+      "username": "@abuzayd06",
+      "peer_id": "555101371",
+      "name": "Тэймур Гусейнов",
+      "status": "из чата",
+      "role": "—"
+    },
+    {
+      "username": "@osipoly",
+      "peer_id": "1238534353",
+      "name": "Ольга",
+      "status": "из чата",
+      "role": "—"
+    },
+    {
+      "username": "@iris_bs_bot",
+      "peer_id": "5137994780",
+      "name": "Iris | Bright Sophie",
+      "status": "из чата",
+      "role": "Admin"
+    },
+    {
+      "username": "@fuckeeva",
+      "peer_id": "858739581",
+      "name": "Анна Fuckeeva",
+      "status": "из чата",
+      "role": "—"
+    },
+    {
+      "username": "@bulan04",
+      "peer_id": "891274018",
+      "name": "Bulka",
+      "status": "из чата",
+      "role": "Модератор"
+    },
+    {
+      "username": "@Bychkov_AA",
+      "peer_id": "1291639730",
+      "name": "ДОКМЕД от Алексея Андреевича",
+      "status": "из чата",
+      "role": "—"
+    },
+    {
+      "username": "@GadkiyGri",
+      "peer_id": "736607998",
+      "name": "Григорий Спиридонов",
+      "status": "из чата",
+      "role": "—"
+    },
+    {
+      "username": "@super_pavlik",
+      "peer_id": "1621138520",
+      "name": "Павел Сухомлинов",
+      "status": "из чата",
+      "role": "—"
+    }
+  ]
+}

@@ -1,0 +1,66 @@
+{
+  "group_url": "https://web.telegram.org/a/#-1002465948544",
+  "source_mode": "chat",
+  "generated_at": "2026-04-23T17:48:23",
+  "count": 7,
+  "usernames": [
+    "@Teimur_92",
+    "@wanderlinde_baza",
+    "@super_pavlik",
+    "@osipoly",
+    "@bulan04",
+    "@kamaz_master1",
+    "@bychkov_aa"
+  ],
+  "rows": [
+    {
+      "username": "@Teimur_92",
+      "peer_id": "555101371",
+      "name": "Тэймур Гусейнов",
+      "status": "из чата",
+      "role": "—"
+    },
+    {
+      "username": "@wanderlinde_baza",
+      "peer_id": "7730689749",
+      "name": "Летаргический сон",
+      "status": "из чата",
+      "role": "модератор"
+    },
+    {
+      "username": "@super_pavlik",
+      "peer_id": "1663660771",
+      "name": "Анна Fuckeeva",
+      "status": "из чата",
+      "role": "—"
+    },
+    {
+      "username": "@osipoly",
+      "peer_id": "1238534353",
+      "name": "Ольга",
+      "status": "из чата",
+      "role": "—"
+    },
+    {
+      "username": "@bulan04",
+      "peer_id": "891274018",
+      "name": "Bulka",
+      "status": "из чата",
+      "role": "Модератор"
+    },
+    {
+      "username": "@kamaz_master1",
+      "peer_id": "1404471788",
+      "name": "Камаз",
+      "status": "из чата",
+      "role": "—"
+    },
+    {
+      "username": "@bychkov_aa",
+      "peer_id": "1291639730",
+      "name": "Алексей Андреевич",
+      "status": "из чата",
+      "role": "—"
+    }
+  ]
+}

@@ -1,0 +1,58 @@
+{
+  "group_url": "https://web.telegram.org/a/#-1002465948544",
+  "source_mode": "chat",
+  "generated_at": "2026-04-24T14:17:37",
+  "count": 6,
+  "usernames": [
+    "@GadkiyGri",
+    "@Bychkov_AA",
+    "@abuzayd06",
+    "@wanderlinde_baza",
+    "@bulan04",
+    "@super_pavlik"
+  ],
+  "rows": [
+    {
+      "username": "@GadkiyGri",
+      "peer_id": "736607998",
+      "name": "Григорий Спиридонов",
+      "status": "из чата",
+      "role": "—"
+    },
+    {
+      "username": "@Bychkov_AA",
+      "peer_id": "1291639730",
+      "name": "Алексей Андреевич",
+      "status": "из чата",
+      "role": "модератор"
+    },
+    {
+      "username": "@abuzayd06",
+      "peer_id": "555101371",
+      "name": "Тэймур Гусейнов",
+      "status": "из чата",
+      "role": "—"
+    },
+    {
+      "username": "@wanderlinde_baza",
+      "peer_id": "7730689749",
+      "name": "БАЗА",
+      "status": "из чата",
+      "role": "—"
+    },
+    {
+      "username": "@bulan04",
+      "peer_id": "891274018",
+      "name": "Bulka",
+      "status": "из чата",
+      "role": "Модератор"
+    },
+    {
+      "username": "@super_pavlik",
+      "peer_id": "1621138520",
+      "name": "Павел Сухомлинов",
+      "status": "из чата",
+      "role": "—"
+    }
+  ]
+}

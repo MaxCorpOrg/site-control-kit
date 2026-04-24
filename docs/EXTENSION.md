@@ -37,6 +37,7 @@
 - `extract_text`, `get_html`, `get_attribute`, `get_page_url`
 - `wait_selector`, `scroll`, `scroll_by`
 - `back`, `forward`, `press_key`, `run_script`
+- `telegram_sticky_author` — Telegram-specific команда: читает нижнюю прилипшую 34px иконку автора через `elementsFromPoint`, может сделать точный правый `context_click` без CSP-зависимого `run_script`.
 
 ## Логика выбора вкладки
 1. `target.tab_id`
@@ -60,6 +61,8 @@
 - Service worker непостоянный.
 - На страницах `chrome://*` и ряде служебных URL content script не работает.
 - Некоторые сайты блокируют `run_script` через CSP (`unsafe-eval` запрещён).
+- Для Telegram Web такие случаи нужно закрывать нативными content-командами вроде `telegram_sticky_author`, а не произвольным JS.
+- Для username export нельзя заменять sticky-author click обычным `context_click` по сообщению: текущий рабочий path правой кнопкой попадает в avatar под нижней point-пробой и не открывает профиль левой кнопкой.
 
 ## Как добавить новую команду
 1. Обновить схему/описание в `docs/API.md`.

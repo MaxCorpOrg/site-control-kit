@@ -82,6 +82,19 @@
 - Архивный каталог по умолчанию: `artifacts/telegram_exports`.
 - Индекс путей хранится в `artifacts/telegram_exports/INDEX.md`; если агент сделал новый живой прогон, в ответе нужно назвать эти пути явно.
 
+## Правило `ё-моё`
+Для Telegram-контура используйте короткое operational mnemonic:
+
+`ё-моё` = если `Mention` "ёкнулся", моё правило такое: правой кнопкой бей по нижней прилипшей иконке автора, потом helper fallback, не верь чисто числовому `@username`, сверяй `identity_history.json`, `latest_safe.txt` и numbered batches.
+
+Практически это означает:
+- для Telegram sticky-author path нельзя кликать по тексту сообщения, reply-avatar или уходить в профиль; сначала использовать `telegram_sticky_author` с `context_click=true`, который выбирает 34px avatar под нижней point-пробой;
+- `No visible menu item found by text` в Telegram export теперь почти всегда значит не "сломался runtime", а "в этом menu-path нет `Mention`";
+- `@123456789` считать peer-id артефактом, а не полезным username;
+- перед deep-обходом применять history backfill, чтобы уже известные `peer_id` не тратили helper/runtime лимит;
+- после живого run проверять не только raw markdown, но и `latest_full.*`, `latest_safe.*`, `identity_history.json` и новый numbered batch;
+- если описываете состояние пользователю, называйте конкретный `run.json`/`export.log`/`export_stats.json`, а не только общие слова.
+
 ## Куда Вносить Изменения
 - `webcontrol/cli.py` — CLI, `sitectl browser`, удобные команды и разбор аргументов.
 - `webcontrol/server.py` — HTTP API, auth, маршрутизация и выдача команд.

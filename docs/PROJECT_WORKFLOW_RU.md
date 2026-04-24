@@ -55,6 +55,7 @@ git log --oneline -n 15
 
 Нельзя делать вывод по одному `latest_full.txt`. Нужно понять, на каком уровне проблема:
 - discovery/scroll;
+- sticky-author right-click по нижней прилипшей 34px иконке автора через `telegram_sticky_author`;
 - deep (`mention` / `url` / `profile`);
 - history backfill;
 - safe/quarantine layer;

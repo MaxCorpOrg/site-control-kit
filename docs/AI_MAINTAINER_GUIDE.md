@@ -86,6 +86,18 @@
 4. Выполнить нужные действия через `browser.cmd` или `sitectl browser`.
 5. Если возможностей не хватает, расширить инструмент, а не плодить временные костыли.
 
+## Telegram Правило `ё-моё`
+Для Telegram export держите в голове одну короткую фразу:
+
+`ё-моё` = если `Mention` ёкнулся, моё первое действие: правой кнопкой по нижней прилипшей иконке автора, потом helper fallback и проверка safe/history слоя.
+
+Минимальная расшифровка:
+- sticky-author path должен использовать `telegram_sticky_author` с `context_click=true`; не кликать по тексту сообщения, reply-avatar и не открывать профиль левой кнопкой;
+- `No visible menu item found by text` в текущем Telegram Web обычно означает отсутствие `Mention`, а не поломку хаба;
+- чисто числовой `@username` считать ложным peer-id артефактом;
+- history-known `peer_id` должны получать username до deep-обхода, иначе helper/runtime снова тратятся впустую;
+- после run сверять `latest_safe.txt`, `latest_full.txt`, `identity_history.json` и numbered batches, а не только `snapshot.md`.
+
 ## Базовый Smoke-Тест
 Минимальный живой сценарий:
 

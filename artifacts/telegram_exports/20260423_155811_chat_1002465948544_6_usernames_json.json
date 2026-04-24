@@ -1,0 +1,34 @@
+{
+  "group_url": "https://web.telegram.org/a/#-1002465948544",
+  "source_mode": "chat",
+  "generated_at": "2026-04-23T15:58:11",
+  "count": 3,
+  "usernames": [
+    "@Bychkov_AA",
+    "@abuzayd06",
+    "@GadkiyGri"
+  ],
+  "rows": [
+    {
+      "username": "@Bychkov_AA",
+      "peer_id": "1291639730",
+      "name": "Алексей Андреевич",
+      "status": "из чата",
+      "role": "модератор"
+    },
+    {
+      "username": "@abuzayd06",
+      "peer_id": "555101371",
+      "name": "Тэймур Гусейнов",
+      "status": "из чата",
+      "role": "—"
+    },
+    {
+      "username": "@GadkiyGri",
+      "peer_id": "736607998",
+      "name": "Григорий Спиридонов",
+      "status": "из чата",
+      "role": "—"
+    }
+  ]
+}

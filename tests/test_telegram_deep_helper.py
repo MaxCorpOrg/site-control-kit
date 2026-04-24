@@ -81,6 +81,7 @@ class TelegramDeepHelperTests(unittest.TestCase):
             patch.object(self.mod, "_open_helper_tab", return_value=777) as mock_open,
             patch.object(self.mod, "_activate_tab_best_effort", return_value=None),
             patch.object(self.mod, "_send_command_result", side_effect=fake_send_command_result),
+            patch.object(self.mod, "_wait_for_helper_target_identity", return_value=True),
             patch.object(self.mod, "_poll_username_from_tab_url", side_effect=[("—", False), ("—", False)]),
             patch.object(self.mod, "_poll_username_from_page_location", side_effect=[("@alpha_fit", False), ("@beta_fit", False)]),
         ):
@@ -125,6 +126,7 @@ class TelegramDeepHelperTests(unittest.TestCase):
             patch.object(self.mod, "_open_helper_tab", return_value=777),
             patch.object(self.mod, "_activate_tab_best_effort", return_value=None) as mock_activate,
             patch.object(self.mod, "_send_command_result", side_effect=fake_send_command_result),
+            patch.object(self.mod, "_wait_for_helper_target_identity", return_value=True),
             patch.object(self.mod, "_poll_username_from_tab_url", return_value=("—", False)),
             patch.object(self.mod, "_poll_username_from_page_location", return_value=("@alpha_fit", False)),
         ):
@@ -177,6 +179,7 @@ class TelegramDeepHelperTests(unittest.TestCase):
             patch.object(self.mod, "_open_helper_tab", return_value=888),
             patch.object(self.mod, "_activate_tab_best_effort", return_value=None),
             patch.object(self.mod, "_send_command_result", side_effect=fake_send_command_result),
+            patch.object(self.mod, "_wait_for_helper_target_identity", return_value=True),
             patch.object(self.mod, "_poll_username_from_tab_url", return_value=("—", False)),
             patch.object(self.mod, "_poll_username_from_page_location", return_value=("—", False)),
             patch.object(self.mod, "_send_get_html", side_effect=RuntimeError("missing header")),
@@ -195,6 +198,42 @@ class TelegramDeepHelperTests(unittest.TestCase):
 
         self.assertEqual(username, "@gamma_fit")
         self.assertTrue(opened)
+
+    def test_open_current_chat_user_info_prefers_current_telegram_header_selector(self) -> None:
+        click_selectors: list[str] = []
+
+        def fake_send_command_result(**kwargs):
+            command = kwargs["command"]
+            command_type = command["type"]
+            if command_type == "click":
+                click_selectors.append(command["selector"])
+                return {"ok": command["selector"] == ".chat-info"}
+            if command_type == "wait_selector":
+                return {"ok": True}
+            raise AssertionError(f"Unexpected command type: {command_type}")
+
+        profile_html = (
+            '<div id="RightColumn">'
+            '<div class="multiline-item"><span class="title">@alpha_fit</span>'
+            '<span class="subtitle">Username</span></div>'
+            "</div>"
+        )
+
+        with (
+            patch.object(self.mod, "_send_command_result", side_effect=fake_send_command_result),
+            patch.object(self.mod, "_send_get_html", return_value=profile_html),
+            patch.object(self.mod, "_close_profile_card", return_value=None),
+        ):
+            username = self.mod._open_current_chat_user_info_and_read_username(
+                server="http://127.0.0.1:8765",
+                token="token",
+                client_id="client-1",
+                tab_id=777,
+                timeout_sec=5,
+            )
+
+        self.assertEqual(username, "@alpha_fit")
+        self.assertEqual(click_selectors, [".chat-info"])
 
 
 if __name__ == "__main__":

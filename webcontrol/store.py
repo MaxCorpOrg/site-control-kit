@@ -49,6 +49,7 @@ class ControlStore:
         state.setdefault("clients", {})
         state.setdefault("commands", {})
         state.setdefault("queues", {})
+        state.setdefault("telegram_users", {})
         return state
 
     def _save(self) -> None:
@@ -362,9 +363,48 @@ class ControlStore:
                 "created_at": self._state.get("created_at"),
                 "now": now_utc_iso(),
                 "clients": clients,
+                "telegram_users": dict(sorted(self._state.get("telegram_users", {}).items())),
                 "queue_sizes": queues,
                 "commands": summary_commands,
             }
             if changed:
                 self._save()
             return payload
+
+    def upsert_telegram_user(self, *, telegram_id: Any, username: str | None) -> dict[str, Any]:
+        telegram_id_text = str(telegram_id).strip()
+        if not telegram_id_text:
+            raise ValueError("telegram_id is required")
+
+        normalized_username = None
+        if username is not None:
+            username_text = str(username).strip()
+            if username_text:
+                normalized_username = username_text if username_text.startswith("@") else f"@{username_text}"
+
+        with self._lock:
+            users = self._state.setdefault("telegram_users", {})
+            now = now_utc_iso()
+            existing = users.get(telegram_id_text)
+            if not existing:
+                record = {
+                    "telegram_id": telegram_id,
+                    "username": normalized_username,
+                    "created_at": now,
+                    "updated_at": now,
+                }
+                users[telegram_id_text] = record
+                self._save()
+                return {**record, "changed": True}
+
+            changed = False
+            if existing.get("telegram_id") != telegram_id:
+                existing["telegram_id"] = telegram_id
+                changed = True
+            if existing.get("username") != normalized_username:
+                existing["username"] = normalized_username
+                changed = True
+            if changed:
+                existing["updated_at"] = now
+                self._save()
+            return {**existing, "changed": changed}

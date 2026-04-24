@@ -20,6 +20,7 @@ DEFAULT_TOKEN = "local-bridge-quickstart-2026"
 TOKEN_ENV = "SITECTL_TOKEN"
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_ARCHIVE_DIR = REPO_ROOT / "artifacts" / "telegram_exports"
+ARCHIVE_STATE_DIRNAME = "state"
 TERMINAL_STATUSES = {
     "completed",
     "failed",
@@ -131,6 +132,11 @@ def _compact(value: str) -> str:
     return " ".join(value.split()).strip()
 
 
+def _is_valid_username_candidate(value: str) -> bool:
+    candidate = str(value or "").strip()
+    return bool(USERNAME_VALUE_RE.fullmatch(candidate) and re.search(r"[A-Za-z]", candidate))
+
+
 def _path_slug(value: str, fallback: str = "export") -> str:
     text = _compact(value).lower()
     text = text.replace("@", "at-")
@@ -162,6 +168,20 @@ def _dialog_fragment_from_url(url: str) -> str:
     if "#" not in value:
         return ""
     return value.split("#", 1)[1].strip()
+
+
+def _archive_identity_slug(group_url: str) -> str:
+    fragment = _dialog_fragment_from_url(group_url)
+    if fragment:
+        return _path_slug(fragment, fallback="telegram-dialog")
+    return _path_slug(group_url, fallback="telegram-dialog")
+
+
+def _default_identity_history_path(archive_dir: Path | None, group_url: str) -> Path | None:
+    if archive_dir is None:
+        return None
+    state_dir = archive_dir / ARCHIVE_STATE_DIRNAME
+    return state_dir / f"{_archive_identity_slug(group_url)}_identity_history.json"
 
 
 def _dialog_row_fragment(fragment: str) -> str:
@@ -375,14 +395,15 @@ def _normalize_username(value: str) -> str:
         r"https?://t\.me/([A-Za-z0-9_]{5,32})",
         r"t\.me/([A-Za-z0-9_]{5,32})",
         r"@([A-Za-z0-9_]{5,32})",
-        r"\b([A-Za-z0-9_]{5,32})\b",
     )
     for pattern in patterns:
         match = re.search(pattern, text, flags=re.I)
         if match:
             username = match.group(1)
-            if USERNAME_VALUE_RE.fullmatch(username):
+            if _is_valid_username_candidate(username):
                 return f"@{username}"
+    if _is_valid_username_candidate(text):
+        return f"@{text}"
     return "—"
 
 
@@ -400,7 +421,7 @@ def _normalize_username_from_mention_input(value: str) -> str:
         if not match:
             continue
         candidate = match.group(1)
-        if USERNAME_VALUE_RE.fullmatch(candidate):
+        if _is_valid_username_candidate(candidate):
             return f"@{candidate}"
     return "—"
 
@@ -582,24 +603,42 @@ def _try_username_via_mention_action(
     peer_id: str,
     *,
     supports_click_menu_text: bool = True,
+    use_sticky_anchor: bool = False,
 ) -> tuple[str, str]:
     # Prevent stale @username from previous attempts.
     _clear_composer_text(server, token, client_id, tab_id)
 
     clicked_context = False
-    for selector in _chat_peer_anchor_selectors(peer_id):
-        opened = _send_command_result(
+    if use_sticky_anchor:
+        opened = _telegram_sticky_author_command(
             server=server,
             token=token,
             client_id=client_id,
             tab_id=tab_id,
             timeout_sec=2,
-            command={"type": "context_click", "selector": selector, "timeout_ms": 900},
-            raise_on_fail=False,
+            context_click=True,
+            expected_peer_id=peer_id,
         )
-        if opened.get("ok"):
+        if (
+            opened
+            and opened.get("context_clicked")
+            and str(opened.get("peer_id") or "").strip() == str(peer_id or "").strip()
+        ):
             clicked_context = True
-            break
+    else:
+        for selector in _chat_peer_anchor_selectors(peer_id):
+            opened = _send_command_result(
+                server=server,
+                token=token,
+                client_id=client_id,
+                tab_id=tab_id,
+                timeout_sec=2,
+                command={"type": "context_click", "selector": selector, "timeout_ms": 900},
+                raise_on_fail=False,
+            )
+            if opened.get("ok"):
+                clicked_context = True
+                break
     if not clicked_context:
         print(f"WARN: mention context menu not opened for peer {peer_id}")
         return "—", "context_missing"
@@ -666,6 +705,7 @@ def _try_username_via_mention_action(
 
     no_visible_menu_item_misses = 0
     delivery_failure = False
+    menu_missing_detected = False
     if not mention_click_ok:
         for attempt_index in range(3):
             click_menu_error_text = ""
@@ -695,6 +735,14 @@ def _try_username_via_mention_action(
                     if _is_delivery_failure_error(click_menu_error_text):
                         delivery_failure = True
                         break
+                    if _is_no_visible_menu_item_error(click_menu_error_text):
+                        menu_missing_detected = True
+                        print(
+                            f"INFO: mention menu item is not visible for peer {peer_id}, "
+                            "switch to helper fallback"
+                        )
+                        break
+            click_text_error = ""
             for root_selector in (
                 "#bubble-contextmenu.active",
                 "#bubble-contextmenu",
@@ -723,9 +771,14 @@ def _try_username_via_mention_action(
                 if _is_delivery_failure_error(click_text_error):
                     delivery_failure = True
                     break
+                if _is_no_visible_menu_item_error(click_text_error):
+                    menu_missing_detected = True
+                    break
             if mention_click_ok:
                 break
             if delivery_failure:
+                break
+            if menu_missing_detected:
                 break
             if _is_no_visible_menu_item_error(click_menu_error_text):
                 no_visible_menu_item_misses += 1
@@ -742,6 +795,8 @@ def _try_username_via_mention_action(
         print(f"WARN: mention item not clicked for peer {peer_id}")
         if delivery_failure:
             return "—", "delivery_failure"
+        if menu_missing_detected:
+            return "—", "menu_missing"
         if no_visible_menu_item_misses >= 2:
             return "—", "menu_missing"
         return "—", "menu_click_failed"
@@ -796,31 +851,33 @@ def _open_current_chat_user_info_and_read_username(
 ) -> str:
     clicked_any = False
     for selector in (
+        ".chat-info",
+        ".chat-info .person",
+        ".chat-info .peer-title",
+        ".sidebar-header .chat-info",
+        ".sidebar-header .peer-title",
+        ".MiddleHeader .ChatInfo",
+        ".MiddleHeader .chat-info-wrapper .ChatInfo",
         ".MiddleHeader .ChatInfo .fullName",
         ".MiddleHeader .ChatInfo [role=\"button\"]",
         ".MiddleHeader .ChatInfo .group-status",
         ".MiddleHeader .ChatInfo .info",
         ".MiddleHeader .ChatInfo .title",
         ".MiddleHeader .ChatInfo .Avatar[data-peer-id]",
-        ".MiddleHeader .chat-info-wrapper .ChatInfo",
-        ".MiddleHeader .ChatInfo",
-        ".chat-info",
-        ".chat-info .person",
         ".chat-info .person-avatar",
         ".chat-info-container .chat-info",
         "#column-center .chat-info",
-        ".sidebar-header .chat-info",
     ):
         click_result = _send_command_result(
             server=server,
             token=token,
             client_id=client_id,
             tab_id=tab_id,
-            timeout_sec=min(max(timeout_sec, 2), 6),
+            timeout_sec=min(max(timeout_sec, 2), 3),
             command={
                 "type": "click",
                 "selector": selector,
-                "timeout_ms": 2200,
+                "timeout_ms": 900,
             },
             raise_on_fail=False,
         )
@@ -831,11 +888,11 @@ def _open_current_chat_user_info_and_read_username(
             token=token,
             client_id=client_id,
             tab_id=tab_id,
-            timeout_sec=min(max(timeout_sec, 2), 7),
+            timeout_sec=min(max(timeout_sec, 2), 4),
             command={
                 "type": "wait_selector",
                 "selector": RIGHT_PANEL_READY_SELECTOR,
-                "timeout_ms": 4500,
+                "timeout_ms": 1800,
                 "visible_only": False,
             },
             raise_on_fail=False,
@@ -853,7 +910,7 @@ def _open_current_chat_user_info_and_read_username(
             token=token,
             client_id=client_id,
             tab_id=tab_id,
-            timeout_sec=min(max(timeout_sec, 2), 7),
+            timeout_sec=min(max(timeout_sec, 2), 4),
             selector=RIGHT_COLUMN_SELECTOR,
         )
         username = _extract_username_from_profile_html(profile_html)
@@ -986,6 +1043,89 @@ def _name_match(expected: str, actual: str) -> bool:
     return False
 
 
+def _extract_peer_id_from_helper_header_html(header_html: str) -> str:
+    match = re.search(r'data-peer-id="(\d+)"', header_html or "", flags=re.I)
+    return str(match.group(1) or "").strip() if match else ""
+
+
+def _extract_title_from_helper_header_html(header_html: str) -> str:
+    for pattern in (
+        r'<h3[^>]*class="[^"]*fullName[^"]*"[^>]*>(.*?)</h3>',
+        r'<span[^>]*class="[^"]*peer-title-inner[^"]*"[^>]*>(.*?)</span>',
+        r'<span[^>]*class="[^"]*sender-title[^"]*"[^>]*>(.*?)</span>',
+        r'<span[^>]*class="[^"]*peer-title[^"]*"[^>]*>(.*?)</span>',
+        r'<img[^>]*class="[^"]*Avatar__media[^"]*"[^>]*alt="([^"]+)"',
+        r'<div class="Avatar[^"]*"[^>]*title="([^"]+)"',
+        r'<div class="Avatar[^"]*"[^>]*aria-label="([^"]+)"',
+    ):
+        match = re.search(pattern, header_html or "", flags=re.I | re.S)
+        if not match:
+            continue
+        title = _compact(re.sub(r"<[^>]+>", " ", html_lib.unescape(match.group(1) or "")))
+        if title:
+            return title
+    return ""
+
+
+def _read_helper_header_identity(
+    server: str,
+    token: str,
+    client_id: str,
+    tab_id: int,
+    timeout_sec: int,
+) -> tuple[str, str]:
+    result = _send_command_result(
+        server=server,
+        token=token,
+        client_id=client_id,
+        tab_id=tab_id,
+        timeout_sec=max(2, timeout_sec),
+        command={
+            "type": "get_html",
+            "selector": ".MiddleHeader, .chat-info, .sidebar-header",
+            "timeout_ms": 1200,
+        },
+        raise_on_fail=False,
+    )
+    data = result.get("data") or {}
+    header_html = str(data.get("html") or "") if isinstance(data, dict) else ""
+    if not header_html:
+        return "", ""
+    return _extract_peer_id_from_helper_header_html(header_html), _extract_title_from_helper_header_html(header_html)
+
+
+def _wait_for_helper_target_identity(
+    server: str,
+    token: str,
+    client_id: str,
+    tab_id: int,
+    expected_peer_id: str,
+    expected_name: str,
+    timeout_sec: float,
+) -> bool:
+    normalized_peer_id = str(expected_peer_id or "").strip()
+    normalized_name = _compact(expected_name)
+    if not normalized_peer_id and not normalized_name:
+        return True
+
+    deadline = time.time() + max(timeout_sec, 0.6)
+    while True:
+        current_peer_id, current_title = _read_helper_header_identity(
+            server=server,
+            token=token,
+            client_id=client_id,
+            tab_id=tab_id,
+            timeout_sec=2,
+        )
+        if normalized_peer_id and current_peer_id == normalized_peer_id:
+            return True
+        if normalized_name and current_title and _name_match(normalized_name, current_title):
+            return True
+        if time.time() >= deadline:
+            return False
+        time.sleep(0.2)
+
+
 def _extract_chat_mention_usernames(html_payload: str) -> list[str]:
     found: set[str] = set()
     for pattern in (
@@ -1015,6 +1155,26 @@ def _extract_username(row_html: str) -> str:
             username = _normalize_username(match.group(1))
             if username != "—":
                 return username
+    return "—"
+
+
+def _extract_username_from_chat_author_block(block_html: str) -> str:
+    author_fragments: list[str] = []
+    for pattern in (
+        r'<span class="sender-title">(.*?)</span>',
+        r'<span class="message-title-name">(.*?)</span>',
+        r'<span class="peer-title-inner"[^>]*>(.*?)</span>',
+        r'<span class="peer-title(?: bubble-name-first)?[^"]*"[^>]*>(.*?)</span>',
+        r'<img[^>]*class="[^"]*Avatar__media[^"]*"[^>]*alt="([^"]+)"',
+        r'<div class="Avatar[^"]*"[^>]*title="([^"]+)"',
+        r'<div class="Avatar[^"]*"[^>]*aria-label="([^"]+)"',
+    ):
+        author_fragments.extend(re.findall(pattern, block_html, flags=re.I | re.S))
+
+    for fragment in author_fragments:
+        username = _extract_username(fragment)
+        if username != "—":
+            return username
     return "—"
 
 
@@ -1123,28 +1283,275 @@ def _seed_username_to_peer(members: list[dict[str, str]]) -> dict[str, str]:
     return username_to_peer
 
 
-def _load_identity_history(history_path: Path | None) -> tuple[dict[str, str], dict[str, str]]:
-    if history_path is None or not history_path.exists():
-        return {}, {}
-    try:
-        payload = json.loads(history_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}, {}
-    if not isinstance(payload, dict):
-        return {}, {}
-    username_to_peer_raw = payload.get("username_to_peer")
-    peer_to_username_raw = payload.get("peer_to_username")
+def _merge_identity_username(
+    *,
+    username_to_peer: dict[str, str],
+    peer_to_username: dict[str, str],
+    peer_id: str,
+    username: str,
+) -> None:
+    normalized_peer_id = str(peer_id or "").strip()
+    normalized_username = _normalize_username(username)
+    if not normalized_peer_id or normalized_username == "—":
+        return
+
+    previous_username = _normalize_username(str(peer_to_username.get(normalized_peer_id) or ""))
+    if (
+        previous_username != "—"
+        and previous_username.lower() != normalized_username.lower()
+        and username_to_peer.get(previous_username.lower()) == normalized_peer_id
+    ):
+        username_to_peer.pop(previous_username.lower(), None)
+
+    existing_peer = username_to_peer.get(normalized_username.lower())
+    if existing_peer and existing_peer != normalized_peer_id:
+        return
+
+    username_to_peer[normalized_username.lower()] = normalized_peer_id
+    peer_to_username[normalized_peer_id] = normalized_username
+
+
+def _normalize_identity_history_maps(
+    username_to_peer_raw: dict[str, Any] | None,
+    peer_to_username_raw: dict[str, Any] | None,
+) -> tuple[dict[str, str], dict[str, str]]:
     username_to_peer = {
-        str(key).strip().lower(): str(value).strip()
-        for key, value in (username_to_peer_raw.items() if isinstance(username_to_peer_raw, dict) else [])
-        if str(key).strip() and str(value).strip()
+        normalized_username.lower(): str(value).strip()
+        for key, value in ((username_to_peer_raw or {}).items() if isinstance(username_to_peer_raw, dict) else [])
+        for normalized_username in [_normalize_username(str(key))]
+        if normalized_username != "—" and str(value).strip()
     }
     peer_to_username = {
         str(key).strip(): _normalize_username(str(value))
-        for key, value in (peer_to_username_raw.items() if isinstance(peer_to_username_raw, dict) else [])
+        for key, value in ((peer_to_username_raw or {}).items() if isinstance(peer_to_username_raw, dict) else [])
         if str(key).strip() and _normalize_username(str(value)) != "—"
     }
     return username_to_peer, peer_to_username
+
+
+def _identity_history_updated_at(value: str) -> dt.datetime:
+    text = str(value or "").strip()
+    if not text:
+        return dt.datetime.min.replace(tzinfo=dt.timezone.utc)
+    try:
+        parsed = dt.datetime.fromisoformat(text)
+    except ValueError:
+        return dt.datetime.min.replace(tzinfo=dt.timezone.utc)
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=dt.timezone.utc)
+    return parsed.astimezone(dt.timezone.utc)
+
+
+def _load_identity_history_source(path: Path | None) -> tuple[dt.datetime, dict[str, str], dict[str, str]]:
+    if path is None or not path.exists():
+        return dt.datetime.min.replace(tzinfo=dt.timezone.utc), {}, {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return dt.datetime.min.replace(tzinfo=dt.timezone.utc), {}, {}
+    if not isinstance(payload, dict):
+        return dt.datetime.min.replace(tzinfo=dt.timezone.utc), {}, {}
+    username_to_peer, peer_to_username = _normalize_identity_history_maps(
+        payload.get("username_to_peer"),
+        payload.get("peer_to_username"),
+    )
+    return _identity_history_updated_at(str(payload.get("updated_at") or "")), username_to_peer, peer_to_username
+
+
+def _iter_identity_history_records(
+    username_to_peer: dict[str, str],
+    peer_to_username: dict[str, str],
+) -> list[tuple[str, str]]:
+    records: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for peer_id, username in peer_to_username.items():
+        normalized_peer_id = str(peer_id or "").strip()
+        normalized_username = _normalize_username(str(username))
+        if not normalized_peer_id or normalized_username == "—":
+            continue
+        key = (normalized_peer_id, normalized_username.lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        records.append((normalized_peer_id, normalized_username))
+    for username, peer_id in username_to_peer.items():
+        normalized_peer_id = str(peer_id or "").strip()
+        normalized_username = _normalize_username(str(username))
+        if not normalized_peer_id or normalized_username == "—":
+            continue
+        key = (normalized_peer_id, normalized_username.lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        records.append((normalized_peer_id, normalized_username))
+    return records
+
+
+def _merge_identity_history_fill_missing(
+    *,
+    primary_username_to_peer: dict[str, str],
+    primary_peer_to_username: dict[str, str],
+    secondary_username_to_peer: dict[str, str],
+    secondary_peer_to_username: dict[str, str],
+) -> tuple[dict[str, str], dict[str, str]]:
+    merged_username_to_peer = dict(primary_username_to_peer)
+    merged_peer_to_username = dict(primary_peer_to_username)
+    for peer_id, username in _iter_identity_history_records(secondary_username_to_peer, secondary_peer_to_username):
+        if peer_id in merged_peer_to_username:
+            continue
+        key = username.lower()
+        if key in merged_username_to_peer:
+            continue
+        merged_peer_to_username[peer_id] = username
+        merged_username_to_peer[key] = peer_id
+    return merged_username_to_peer, merged_peer_to_username
+
+
+def _identity_history_from_archive_source(
+    archive_dir: Path | None,
+    group_url: str,
+) -> tuple[dt.datetime, dict[str, str], dict[str, str]]:
+    if archive_dir is None or not archive_dir.exists():
+        return dt.datetime.min.replace(tzinfo=dt.timezone.utc), {}, {}
+
+    archive_state_path = _default_identity_history_path(archive_dir, group_url)
+    if archive_state_path is not None and archive_state_path.exists():
+        updated_at, username_to_peer, peer_to_username = _load_identity_history_source(archive_state_path)
+        if username_to_peer or peer_to_username:
+            return updated_at, username_to_peer, peer_to_username
+
+    target_fragment = _dialog_fragment_from_url(group_url)
+    if not target_fragment:
+        return dt.datetime.min.replace(tzinfo=dt.timezone.utc), {}, {}
+
+    username_to_peer: dict[str, str] = {}
+    peer_to_username: dict[str, str] = {}
+    for sidecar_path in sorted(archive_dir.glob("*_usernames_json.json")):
+        try:
+            payload = json.loads(sidecar_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        payload_group_url = str(payload.get("group_url") or "").strip()
+        if _dialog_fragment_from_url(payload_group_url) != target_fragment:
+            continue
+        rows = payload.get("rows") or []
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            _merge_identity_username(
+                username_to_peer=username_to_peer,
+                peer_to_username=peer_to_username,
+                peer_id=str(row.get("peer_id") or "").strip(),
+                username=str(row.get("username") or ""),
+            )
+    return dt.datetime.min.replace(tzinfo=dt.timezone.utc), username_to_peer, peer_to_username
+
+
+def _identity_history_from_archive(
+    archive_dir: Path | None,
+    group_url: str,
+) -> tuple[dict[str, str], dict[str, str]]:
+    _updated_at, username_to_peer, peer_to_username = _identity_history_from_archive_source(archive_dir, group_url)
+    return username_to_peer, peer_to_username
+
+
+def _build_identity_history_payload(
+    *,
+    members: list[dict[str, str]],
+    historical_username_to_peer: dict[str, str] | None = None,
+    historical_peer_to_username: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    username_to_peer = {
+        normalized_username.lower(): str(value).strip()
+        for key, value in (historical_username_to_peer or {}).items()
+        for normalized_username in [_normalize_username(str(key))]
+        if normalized_username != "—" and str(value).strip()
+    }
+    peer_to_username = {
+        str(key).strip(): _normalize_username(str(value))
+        for key, value in (historical_peer_to_username or {}).items()
+        if str(key).strip() and _normalize_username(str(value)) != "—"
+    }
+
+    for item in members:
+        _merge_identity_username(
+            username_to_peer=username_to_peer,
+            peer_to_username=peer_to_username,
+            peer_id=str(item.get("peer_id") or "").strip(),
+            username=str(item.get("username") or ""),
+        )
+
+    return {
+        "version": 1,
+        "updated_at": dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat(),
+        "username_to_peer": dict(sorted(username_to_peer.items())),
+        "peer_to_username": dict(sorted(peer_to_username.items())),
+    }
+
+
+def _load_identity_history(
+    history_path: Path | None,
+    *,
+    archive_dir: Path | None = None,
+    group_url: str = "",
+) -> tuple[dict[str, str], dict[str, str]]:
+    archive_updated_at, archive_username_to_peer, archive_peer_to_username = _identity_history_from_archive_source(
+        archive_dir,
+        group_url,
+    )
+    if history_path is None:
+        return archive_username_to_peer, archive_peer_to_username
+    if not history_path.exists():
+        return archive_username_to_peer, archive_peer_to_username
+
+    file_updated_at, file_username_to_peer, file_peer_to_username = _load_identity_history_source(history_path)
+    if not archive_username_to_peer and not archive_peer_to_username:
+        return file_username_to_peer, file_peer_to_username
+    if not file_username_to_peer and not file_peer_to_username:
+        return archive_username_to_peer, archive_peer_to_username
+
+    archive_state_path = _default_identity_history_path(archive_dir, group_url)
+    if archive_state_path is not None and history_path == archive_state_path:
+        return file_username_to_peer, file_peer_to_username
+
+    if archive_updated_at >= file_updated_at:
+        return _merge_identity_history_fill_missing(
+            primary_username_to_peer=archive_username_to_peer,
+            primary_peer_to_username=archive_peer_to_username,
+            secondary_username_to_peer=file_username_to_peer,
+            secondary_peer_to_username=file_peer_to_username,
+        )
+    return _merge_identity_history_fill_missing(
+        primary_username_to_peer=file_username_to_peer,
+        primary_peer_to_username=file_peer_to_username,
+        secondary_username_to_peer=archive_username_to_peer,
+        secondary_peer_to_username=archive_peer_to_username,
+    )
+
+
+def _save_identity_history(
+    history_path: Path | None,
+    *,
+    members: list[dict[str, str]],
+    historical_username_to_peer: dict[str, str] | None = None,
+    historical_peer_to_username: dict[str, str] | None = None,
+) -> None:
+    if history_path is None:
+        return
+    payload = _build_identity_history_payload(
+        members=members,
+        historical_username_to_peer=historical_username_to_peer,
+        historical_peer_to_username=historical_peer_to_username,
+    )
+    try:
+        history_path.parent.mkdir(parents=True, exist_ok=True)
+        history_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    except OSError as exc:
+        print(f"WARN: cannot write identity history: {exc}", file=sys.stderr)
 
 
 def _load_discovery_state(discovery_state_path: Path | None) -> dict[str, Any]:
@@ -1471,7 +1878,7 @@ def _parse_chat_members(html_payload: str) -> list[dict[str, str]]:
                 "name": name,
                 "status": "из чата",
                 "role": role,
-                "username": _extract_username(block_html),
+                "username": _extract_username_from_chat_author_block(block_html),
             }
         )
         seen_peer_ids.add(peer_id)
@@ -1530,12 +1937,87 @@ def _parse_chat_members(html_payload: str) -> list[dict[str, str]]:
                 "name": name,
                 "status": "из чата",
                 "role": role,
-                "username": _extract_username(block_html),
+                "username": _extract_username_from_chat_author_block(block_html),
             }
         )
         seen_peer_ids.add(peer_id)
 
     return members
+
+
+def _member_from_sticky_author_payload(value: dict[str, Any] | None) -> dict[str, str] | None:
+    if not isinstance(value, dict) or not value.get("found"):
+        return None
+    peer_id = str(value.get("peer_id") or "").strip()
+    if not peer_id or peer_id.startswith("-"):
+        return None
+    name = _compact(str(value.get("name") or ""))
+    if not name:
+        name = "—"
+    role = _compact(str(value.get("role") or "")) or "—"
+    username = _normalize_username(str(value.get("username") or ""))
+    return {
+        "peer_id": peer_id,
+        "name": name,
+        "status": "из чата",
+        "role": role,
+        "username": username,
+    }
+
+
+def _telegram_sticky_author_command(
+    *,
+    server: str,
+    token: str,
+    client_id: str,
+    tab_id: int,
+    timeout_sec: int,
+    click: bool = False,
+    context_click: bool = False,
+    expected_peer_id: str = "",
+) -> dict[str, Any] | None:
+    command: dict[str, Any] = {
+        "type": "telegram_sticky_author",
+        "click": bool(click),
+        "context_click": bool(context_click),
+    }
+    expected_peer_id = str(expected_peer_id or "").strip()
+    if expected_peer_id:
+        command["expected_peer_id"] = expected_peer_id
+    result = _send_command_result(
+        server=server,
+        token=token,
+        client_id=client_id,
+        tab_id=tab_id,
+        timeout_sec=min(max(timeout_sec, 2), 4),
+        command=command,
+        raise_on_fail=False,
+    )
+    if not result.get("ok"):
+        return None
+    data = result.get("data") or {}
+    if isinstance(data, dict) and isinstance(data.get("value"), dict):
+        data = data["value"]
+    return data if isinstance(data, dict) else None
+
+
+def _read_sticky_chat_author_member(
+    *,
+    server: str,
+    token: str,
+    client_id: str,
+    tab_id: int,
+    timeout_sec: int,
+) -> dict[str, str] | None:
+    return _member_from_sticky_author_payload(
+        _telegram_sticky_author_command(
+            server=server,
+            token=token,
+            client_id=client_id,
+            tab_id=tab_id,
+            timeout_sec=timeout_sec,
+        )
+    )
 
 
 def _scroll_chat_up(server: str, token: str, client_id: str, tab_id: int, timeout_sec: int) -> bool:
@@ -1905,6 +2387,8 @@ def _collect_members_from_chat(
     chat_target_peer_id: str = "",
     chat_target_name: str = "",
     supports_click_menu_text: bool = False,
+    historical_username_to_peer: dict[str, str] | None = None,
+    historical_peer_to_username: dict[str, str] | None = None,
 ) -> tuple[list[dict[str, str]], dict[str, int]]:
     members: list[dict[str, str]] = []
     chat_html_timeout = max(5, min(timeout_sec, 8))
@@ -1920,6 +2404,23 @@ def _collect_members_from_chat(
     no_growth_steps = 0
     minimum_steps = max(0, scroll_steps)
     maximum_steps = minimum_steps + max(0, auto_extra_steps)
+    deep_runtime_hints: dict[str, Any] = {}
+    history_prefilled_total = 0
+    history_prefill_conflicts_total = 0
+    sticky_seen_peer_ids: set[str] = set()
+    sticky_mention_attempted_total = 0
+    sticky_mention_updated_total = 0
+    sticky_helper_attempted_total = 0
+    sticky_helper_updated_total = 0
+
+    def matches_chat_target(item: dict[str, str]) -> bool:
+        if chat_target_peer_id and str(item.get("peer_id") or "").strip() != chat_target_peer_id:
+            return False
+        if chat_target_name:
+            target_key = _name_key(chat_target_name)
+            if target_key and target_key not in _name_key(str(item.get("name") or "")):
+                return False
+        return True
 
     for step in range(maximum_steps + 1):
         if time.time() - started_at > max(max_runtime_sec, 5):
@@ -1936,11 +2437,32 @@ def _collect_members_from_chat(
         )
 
         chat_members = _parse_chat_members(html_payload)
+        sticky_member = _read_sticky_chat_author_member(
+            server=server,
+            token=token,
+            client_id=client_id,
+            tab_id=tab_id,
+            timeout_sec=min(timeout_sec, 4),
+        )
+        if sticky_member:
+            sticky_peer_id = str(sticky_member.get("peer_id") or "").strip()
+            if sticky_peer_id and sticky_peer_id not in sticky_seen_peer_ids:
+                sticky_seen_peer_ids.add(sticky_peer_id)
+                print(f"INFO: sticky chat author {sticky_peer_id} ({sticky_member.get('name', '—')})")
+            if sticky_peer_id and not any(str(item.get("peer_id") or "").strip() == sticky_peer_id for item in chat_members):
+                chat_members.append(sticky_member)
         before_count = len(members)
 
         if chat_members:
             members.extend(chat_members)
             members = _dedupe_members(members)
+            history_prefilled, history_prefill_conflicts = _backfill_usernames_from_history(
+                members=members,
+                historical_username_to_peer=historical_username_to_peer,
+                historical_peer_to_username=historical_peer_to_username,
+            )
+            history_prefilled_total += history_prefilled
+            history_prefill_conflicts_total += history_prefill_conflicts
             empty_steps = 0
         else:
             empty_steps += 1
@@ -1951,6 +2473,9 @@ def _collect_members_from_chat(
                 print(f"WARN: skip deep (runtime limit {max_runtime_sec}s reached)")
             else:
                 visible_peer_ids = {item["peer_id"] for item in chat_members if item.get("peer_id")}
+                sticky_peer_id_for_step = str((sticky_member or {}).get("peer_id") or "").strip()
+                if sticky_peer_id_for_step:
+                    visible_peer_ids = {sticky_peer_id_for_step}
                 deep_targets = [
                     item
                     for item in members
@@ -1969,6 +2494,103 @@ def _collect_members_from_chat(
                     deep_targets = []
                 else:
                     deep_targets = deep_targets[:limit]
+                sticky_attempted_this_step = 0
+                if sticky_member and limit > 0:
+                    sticky_peer_id = str(sticky_member.get("peer_id") or "").strip()
+                    members_by_peer = {
+                        str(item.get("peer_id") or "").strip(): item
+                        for item in members
+                        if str(item.get("peer_id") or "").strip()
+                    }
+                    sticky_target = members_by_peer.get(sticky_peer_id)
+                    if (
+                        sticky_target
+                        and sticky_target.get("username") == "—"
+                        and sticky_peer_id not in deep_seen_peer_ids
+                        and matches_chat_target(sticky_target)
+                    ):
+                        sticky_username, sticky_outcome = _try_username_via_mention_action(
+                            server=server,
+                            token=token,
+                            client_id=client_id,
+                            tab_id=tab_id,
+                            peer_id=sticky_peer_id,
+                            supports_click_menu_text=supports_click_menu_text,
+                            use_sticky_anchor=True,
+                        )
+                        if sticky_outcome != "context_missing":
+                            sticky_attempted_this_step = 1
+                            sticky_mention_attempted_total += 1
+                            deep_attempted_total += 1
+                            deep_seen_peer_ids.add(sticky_peer_id)
+                            deep_targets = [
+                                item
+                                for item in deep_targets
+                                if str(item.get("peer_id") or "").strip() != sticky_peer_id
+                            ]
+                            if sticky_username != "—":
+                                assigned, conflict_value, reason = _assign_username_if_unique(
+                                    members_by_peer=members_by_peer,
+                                    username_to_peer=_seed_username_to_peer(members),
+                                    peer_id=sticky_peer_id,
+                                    username=sticky_username,
+                                    historical_username_to_peer=historical_username_to_peer,
+                                    historical_peer_to_username=historical_peer_to_username,
+                                )
+                                if assigned:
+                                    sticky_mention_updated_total += 1
+                                    deep_updated_total += 1
+                                    print(f"INFO: sticky mention {sticky_peer_id} -> {sticky_username}")
+                                else:
+                                    _log_username_assignment_conflict(
+                                        sticky_username,
+                                        sticky_peer_id,
+                                        conflict_value,
+                                        reason,
+                                    )
+                            else:
+                                if sticky_outcome == "menu_missing":
+                                    deep_runtime_hints["mention_unavailable"] = True
+                                print(f"INFO: sticky mention unresolved for peer {sticky_peer_id} ({sticky_outcome})")
+                                if sticky_outcome in {"menu_missing", "delivery_failure", "unresolved"}:
+                                    remaining_runtime = float(max_runtime_sec) - (time.time() - started_at)
+                                    if remaining_runtime > 4.0:
+                                        sticky_helper_username, sticky_helper_opened = _read_username_via_helper_tab(
+                                            server=server,
+                                            token=token,
+                                            client_id=client_id,
+                                            base_tab_id=tab_id,
+                                            peer_id=sticky_peer_id,
+                                            expected_name=str(sticky_target.get("name") or ""),
+                                            timeout_sec=max(5, min(timeout_sec, 8)),
+                                            tg_mode=_tg_web_mode_from_url(group_url),
+                                            restore_base_tab=True,
+                                        )
+                                        if sticky_helper_opened:
+                                            sticky_helper_attempted_total += 1
+                                            deep_attempted_total += 1
+                                        if sticky_helper_username != "—":
+                                            assigned, conflict_value, reason = _assign_username_if_unique(
+                                                members_by_peer=members_by_peer,
+                                                username_to_peer=_seed_username_to_peer(members),
+                                                peer_id=sticky_peer_id,
+                                                username=sticky_helper_username,
+                                                historical_username_to_peer=historical_username_to_peer,
+                                                historical_peer_to_username=historical_peer_to_username,
+                                            )
+                                            if assigned:
+                                                sticky_helper_updated_total += 1
+                                                deep_updated_total += 1
+                                                print(f"INFO: sticky helper {sticky_peer_id} -> {sticky_helper_username}")
+                                            else:
+                                                _log_username_assignment_conflict(
+                                                    sticky_helper_username,
+                                                    sticky_peer_id,
+                                                    conflict_value,
+                                                    reason,
+                                                )
+                if sticky_attempted_this_step and limit > 0:
+                    deep_targets = deep_targets[: max(limit - sticky_attempted_this_step, 0)]
                 if deep_targets:
                     elapsed = time.time() - started_at
                     remaining_runtime = max(2.0, float(max_runtime_sec) - elapsed - 2.0)
@@ -1986,6 +2608,8 @@ def _collect_members_from_chat(
                         max_runtime_sec=deep_runtime_budget,
                         mode=chat_deep_mode,
                         supports_click_menu_text=supports_click_menu_text,
+                        helper_only_initial=bool(deep_runtime_hints.get("mention_unavailable")),
+                        runtime_hints=deep_runtime_hints,
                     )
                     deep_attempted_total += attempted
                     deep_updated_total += updated
@@ -2035,6 +2659,13 @@ def _collect_members_from_chat(
         "deep_updated": deep_updated_total,
         "runtime_limited": int(runtime_limited),
         "auto_extra_steps": max(0, scroll_steps_done - minimum_steps),
+        "history_prefilled": history_prefilled_total,
+        "history_prefill_conflicts": history_prefill_conflicts_total,
+        "sticky_authors_seen": len(sticky_seen_peer_ids),
+        "sticky_mention_attempted": sticky_mention_attempted_total,
+        "sticky_mention_updated": sticky_mention_updated_total,
+        "sticky_helper_attempted": sticky_helper_attempted_total,
+        "sticky_helper_updated": sticky_helper_updated_total,
     }
     return members, stats
 
@@ -2050,6 +2681,8 @@ def _enrich_usernames_deep_chat(
     max_runtime_sec: float = 12.0,
     mode: str = "url",
     supports_click_menu_text: bool = False,
+    helper_only_initial: bool = False,
+    runtime_hints: dict[str, Any] | None = None,
 ) -> tuple[int, int, int, list[str]]:
     members_by_peer = {item["peer_id"]: item for item in members}
     pending_peer_ids = [item["peer_id"] for item in members if item.get("username") == "—"]
@@ -2068,7 +2701,7 @@ def _enrich_usernames_deep_chat(
     opened_peer_ids: list[str] = []
     started_at = time.time()
     helper_session: dict[str, Any] = {"tab_id": None}
-    helper_only_for_rest = False
+    helper_only_for_rest = helper_only_initial
 
     try:
         for peer_id in pending_peer_ids:
@@ -2135,6 +2768,8 @@ def _enrich_usernames_deep_chat(
                     continue
                 if mention_outcome == "menu_missing":
                     helper_only_for_rest = True
+                    if isinstance(runtime_hints, dict):
+                        runtime_hints["mention_unavailable"] = True
                     print("INFO: current menu lacks Mention; switching remaining peers in this step to helper-only")
                 if mode == "mention":
                     if mention_outcome == "delivery_failure":
@@ -2148,6 +2783,7 @@ def _enrich_usernames_deep_chat(
                 client_id=client_id,
                 base_tab_id=tab_id,
                 peer_id=peer_id,
+                expected_name=str(members_by_peer[peer_id].get("name") or ""),
                 timeout_sec=min(timeout_sec, 5),
                 tg_mode=tg_mode,
                 helper_session=helper_session,
@@ -2531,7 +3167,14 @@ def _send_command_result(
                 if missing_result_grace_deadline is None:
                     # Telegram Web + large hub state writes can yield a terminal delivery status
                     # noticeably earlier than the actual browser result becomes readable.
-                    missing_result_grace_deadline = time.time() + max(15.0, min(90.0, float(timeout_sec) * 18.0))
+                    if raise_on_fail:
+                        grace_sec = max(15.0, min(90.0, float(timeout_sec) * 18.0))
+                    else:
+                        # Best-effort selectors are used heavily in Telegram fallback paths.
+                        # A missing result here is normally a selector miss/expired delivery;
+                        # waiting tens of seconds per miss destroys helper throughput.
+                        grace_sec = max(0.4, min(1.2, float(timeout_sec) * 0.25))
+                    missing_result_grace_deadline = time.time() + grace_sec
                 if time.time() < missing_result_grace_deadline:
                     time.sleep(0.2)
                     continue
@@ -2703,6 +3346,8 @@ def _read_username_via_helper_tab(
     tg_mode: str,
     helper_session: dict[str, Any] | None = None,
     restore_base_tab: bool = True,
+    *,
+    expected_name: str = "",
 ) -> tuple[str, bool]:
     mode = tg_mode if tg_mode in {"a", "k"} else "a"
     helper_url = f"https://web.telegram.org/{mode}/#{peer_id}"
@@ -2767,6 +3412,17 @@ def _read_username_via_helper_tab(
             raise_on_fail=False,
         )
         time.sleep(0.06)
+
+        if not _wait_for_helper_target_identity(
+            server=server,
+            token=token,
+            client_id=client_id,
+            tab_id=helper_tab_id,
+            expected_peer_id=peer_id,
+            expected_name=expected_name,
+            timeout_sec=min(max(float(timeout_sec) * 0.4, 0.8), 2.5),
+        ):
+            return "—", True
 
         quick_username, _ = _poll_username_from_tab_url(
             server=server,
@@ -2905,6 +3561,7 @@ def _enrich_usernames_deep(
                 client_id=client_id,
                 base_tab_id=tab_id,
                 peer_id=peer_id,
+                expected_name=str(members_by_peer[peer_id].get("name") or ""),
                 timeout_sec=min(timeout_sec, 8),
                 tg_mode=tg_mode,
                 helper_session=helper_session,
@@ -3286,7 +3943,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--identity-history",
         default="",
-        help="JSON-файл с историей peer_id <-> username для защиты от ложных переназначений.",
+        help=(
+            "JSON-файл с историей peer_id <-> username для защиты от ложных переназначений. "
+            "Если не задан, используется per-chat history в <archive-dir>/state/."
+        ),
     )
     parser.add_argument(
         "--discovery-state",
@@ -3314,10 +3974,13 @@ def main() -> int:
     server = _norm_server(args.server)
     group_url = args.group_url
     out_path = Path(args.output).expanduser()
+    archive_dir_value = str(args.archive_dir or "").strip()
+    archive_dir_path = Path(archive_dir_value).expanduser() if archive_dir_value else None
     stats_output_path = Path(args.stats_output).expanduser() if args.stats_output else None
-    identity_history_path = Path(args.identity_history).expanduser() if args.identity_history else None
     discovery_state_path = Path(args.discovery_state).expanduser() if args.discovery_state else None
-    historical_username_to_peer, historical_peer_to_username = _load_identity_history(identity_history_path)
+    identity_history_path: Path | None = None
+    historical_username_to_peer: dict[str, str] = {}
+    historical_peer_to_username: dict[str, str] = {}
     discovery_state = _load_discovery_state(discovery_state_path)
     source_label = args.source
     chat_stats: dict[str, Any] = {}
@@ -3379,6 +4042,17 @@ def main() -> int:
                 group_url=group_url,
                 timeout_sec=max(args.timeout, 5),
             )
+
+        identity_history_path = (
+            Path(args.identity_history).expanduser()
+            if args.identity_history
+            else _default_identity_history_path(archive_dir_path, group_url)
+        )
+        historical_username_to_peer, historical_peer_to_username = _load_identity_history(
+            identity_history_path,
+            archive_dir=archive_dir_path,
+            group_url=group_url,
+        )
 
         info_members: list[dict[str, str]] = []
         chat_members: list[dict[str, str]] = []
@@ -3476,6 +4150,8 @@ def main() -> int:
                 chat_target_peer_id=str(args.chat_target_peer_id or "").strip(),
                 chat_target_name=str(args.chat_target_name or "").strip(),
                 supports_click_menu_text=supports_click_menu_text,
+                historical_username_to_peer=historical_username_to_peer,
+                historical_peer_to_username=historical_peer_to_username,
             )
             if not chat_members:
                 raise RuntimeError(
@@ -3511,6 +4187,14 @@ def main() -> int:
             historical_username_to_peer=historical_username_to_peer,
             historical_peer_to_username=historical_peer_to_username,
         )
+        history_prefilled = int(chat_stats.get("history_prefilled", 0))
+        history_prefill_conflicts = int(chat_stats.get("history_prefill_conflicts", 0))
+        if history_prefilled:
+            print(f"INFO: pre-deep history backfill restored {history_prefilled} username(s)")
+        if history_prefill_conflicts:
+            print(f"WARN: pre-deep history backfill detected {history_prefill_conflicts} conflict(s)")
+        history_backfilled += history_prefilled
+        history_conflicts += history_prefill_conflicts
         if history_backfilled:
             print(f"INFO: history backfill restored {history_backfilled} username(s)")
         if history_conflicts:
@@ -3595,11 +4279,16 @@ def main() -> int:
             group_url,
             source_label,
         )
+        _save_identity_history(
+            identity_history_path,
+            members=members,
+            historical_username_to_peer=historical_username_to_peer,
+            historical_peer_to_username=historical_peer_to_username,
+        )
         archive_paths: dict[str, Path] | None = None
-        archive_dir_value = str(args.archive_dir or "").strip()
         if archive_dir_value:
             archive_paths = _archive_export_copy(
-                archive_dir=Path(archive_dir_value).expanduser(),
+                archive_dir=archive_dir_path or Path(archive_dir_value).expanduser(),
                 output_path=out_path,
                 group_url=group_url,
                 source_mode=source_label,

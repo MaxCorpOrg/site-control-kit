@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import time
 import unittest
@@ -186,6 +187,25 @@ class ControlStoreTests(unittest.TestCase):
         clients = self.store.list_clients()
         self.assertEqual(len(clients), 1)
         self.assertFalse(clients[0]["is_online"])
+
+    def test_upsert_telegram_user_updates_username(self) -> None:
+        created = self.store.upsert_telegram_user(telegram_id=123456, username="@old_name")
+        updated = self.store.upsert_telegram_user(telegram_id=123456, username="@new_name")
+
+        self.assertTrue(created["changed"])
+        self.assertTrue(updated["changed"])
+        self.assertEqual(updated["telegram_id"], 123456)
+        self.assertEqual(updated["username"], "@new_name")
+
+        payload = json.loads(self.state_file.read_text(encoding="utf-8"))
+        self.assertEqual(payload["telegram_users"]["123456"]["username"], "@new_name")
+
+    def test_upsert_telegram_user_clears_missing_username(self) -> None:
+        self.store.upsert_telegram_user(telegram_id=123456, username="@old_name")
+        updated = self.store.upsert_telegram_user(telegram_id=123456, username=None)
+
+        self.assertTrue(updated["changed"])
+        self.assertIsNone(updated["username"])
 
     def test_get_command_does_not_save_when_status_is_unchanged(self) -> None:
         self.store.register_client(

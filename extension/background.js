@@ -14,6 +14,7 @@ const BRIDGE_CAPABILITIES = {
     "get_page_url",
     "context_click",
     "click_menu_text",
+    "telegram_sticky_author",
     "click_text",
     "clear_editable",
     "click",

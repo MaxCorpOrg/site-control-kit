@@ -105,7 +105,9 @@ function dispatchMouseClickSequence(element, options = {}) {
     isPrimary: true
   };
 
-  focusElement(element);
+  if (!options.skipFocus) {
+    focusElement(element);
+  }
 
   for (const type of ["pointerover", "pointerenter", "mouseover", "mouseenter", "pointermove", "mousemove"]) {
     dispatchPointerEvent(element, type, common);
@@ -407,6 +409,212 @@ function findMenuItemByText(terms, nearLastContext = false) {
   return candidates[0].node;
 }
 
+function compactText(value) {
+  return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function normalizeTelegramUsername(value) {
+  const text = compactText(value);
+  if (!text) {
+    return "";
+  }
+  const patterns = [
+    /https?:\/\/t\.me\/([A-Za-z0-9_]{5,32})/i,
+    /t\.me\/([A-Za-z0-9_]{5,32})/i,
+    /@([A-Za-z0-9_]{5,32})/i
+  ];
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (!match) {
+      continue;
+    }
+    const username = match[1];
+    if (/[A-Za-z]/.test(username)) {
+      return `@${username}`;
+    }
+  }
+  return "";
+}
+
+function firstText(root, selector) {
+  const node = root && typeof root.querySelector === "function" ? root.querySelector(selector) : null;
+  return compactText(node ? node.innerText || node.textContent || "" : "");
+}
+
+function telegramAuthorFromElement(element, point = null) {
+  if (!element || typeof element.closest !== "function") {
+    return null;
+  }
+
+  let avatar = element.closest(".Avatar[data-peer-id], .bubbles-group-avatar[data-peer-id]");
+  let group =
+    element.closest(".sender-group-container, [id^='message-group-'], .Message, .message-list-item") ||
+    (avatar && avatar.closest(".sender-group-container, [id^='message-group-'], .Message, .message-list-item"));
+
+  if (!avatar && !point && group && typeof group.querySelector === "function") {
+    avatar = group.querySelector(".Avatar[data-peer-id], .bubbles-group-avatar[data-peer-id]");
+  }
+  if (!avatar) {
+    return null;
+  }
+
+  const peerId = compactText(avatar.getAttribute("data-peer-id"));
+  if (!peerId || peerId.startsWith("-")) {
+    return null;
+  }
+  const senderGroup = avatar.closest(".sender-group-container, [id^='message-group-']");
+  const messageAncestor = avatar.closest(".Message, .message-list-item");
+  if (senderGroup && messageAncestor && senderGroup.contains(messageAncestor)) {
+    return null;
+  }
+  if (!group) {
+    group = senderGroup || avatar.closest(".Message, .message-list-item") || avatar.parentElement;
+  }
+
+  const visible = interactableRect(avatar);
+  if (!visible) {
+    return null;
+  }
+
+  const imageAltNode = avatar.querySelector("img[alt]");
+  const imageAlt = compactText(imageAltNode ? imageAltNode.getAttribute("alt") : "");
+  const name =
+    firstText(group, ".sender-title") ||
+    firstText(group, ".message-title-name") ||
+    firstText(group, ".peer-title-inner") ||
+    firstText(group, ".peer-title") ||
+    imageAlt ||
+    compactText(avatar.getAttribute("aria-label") || avatar.getAttribute("title"));
+  const role =
+    firstText(group, ".admin-title-badge") ||
+    firstText(group, ".bubble-name-rank") ||
+    firstText(group, ".message-title-meta") ||
+    "";
+  const authorText = [
+    firstText(group, ".sender-title"),
+    firstText(group, ".message-title-name"),
+    firstText(group, ".peer-title-inner"),
+    firstText(group, ".peer-title"),
+    imageAlt,
+    compactText(avatar.getAttribute("aria-label") || avatar.getAttribute("title"))
+  ].join(" ");
+  const username = normalizeTelegramUsername(authorText);
+  const { rect } = visible;
+
+  return {
+    node: avatar,
+    peer_id: peerId,
+    name,
+    role,
+    username,
+    point,
+    rect: {
+      left: Math.round(rect.left),
+      top: Math.round(rect.top),
+      right: Math.round(rect.right),
+      bottom: Math.round(rect.bottom),
+      width: Math.round(rect.width),
+      height: Math.round(rect.height)
+    }
+  };
+}
+
+function telegramStickyAuthorCandidates() {
+  const root =
+    document.querySelector("#column-center, .chat.tabs-tab.active, #column-center .MessageList, .MessageList, .chat.tabs-tab.active .bubbles, #column-center .bubbles") ||
+    document.body ||
+    document.documentElement;
+  const rootRect = root.getBoundingClientRect();
+  const left = Math.max(0, rootRect.left);
+  const right = Math.min(window.innerWidth, rootRect.right || window.innerWidth);
+  const bottom = Math.min(window.innerHeight, rootRect.bottom || window.innerHeight);
+  const width = Math.max(1, right - left);
+  const xOffsets = [
+    28,
+    34,
+    42,
+    50,
+    58,
+    70,
+    86,
+    108,
+    136,
+    174,
+    186,
+    198,
+    210,
+    Math.round(width * 0.18),
+    Math.round(width * 0.20),
+    Math.round(width * 0.22),
+    Math.round(width * 0.28)
+  ];
+  const yOffsets = [34, 46, 58, 70, 82, 96, 112, 136, 168, 210, 280];
+  const candidates = [];
+  const seen = new Set();
+
+  function push(candidate, source, sampleIndex) {
+    if (!candidate || seen.has(candidate.peer_id)) {
+      return;
+    }
+    seen.add(candidate.peer_id);
+    candidates.push({ ...candidate, source, sample_index: sampleIndex });
+  }
+
+  let sampleIndex = 0;
+  for (const yOffset of yOffsets) {
+    const y = Math.round(bottom - yOffset);
+    if (y <= 0 || y >= window.innerHeight) {
+      continue;
+    }
+    for (const xOffset of xOffsets) {
+      const x = Math.round(left + xOffset);
+      if (x <= 0 || x >= window.innerWidth) {
+        continue;
+      }
+      const stack = typeof document.elementsFromPoint === "function" ? document.elementsFromPoint(x, y) : [];
+      for (const element of stack) {
+        push(telegramAuthorFromElement(element, { x, y }), "point", sampleIndex);
+      }
+      sampleIndex += 1;
+    }
+  }
+
+  const visibleAvatars = Array.from(
+    root.querySelectorAll(
+      ".sender-group-container .Avatar[data-peer-id], .MessageList .Avatar[data-peer-id], .bubbles-group-avatar[data-peer-id]"
+    )
+  );
+  visibleAvatars
+    .map((node) => telegramAuthorFromElement(node))
+    .filter(Boolean)
+    .sort((a, b) => (b.rect.bottom - a.rect.bottom) || (a.rect.left - b.rect.left))
+    .forEach((candidate, index) => push(candidate, "visible_fallback", sampleIndex + index));
+
+  candidates.sort((a, b) => {
+    const aSmall = a.rect.width < 30 || a.rect.height < 30 ? 1 : 0;
+    const bSmall = b.rect.width < 30 || b.rect.height < 30 ? 1 : 0;
+    return (aSmall - bSmall) || (a.sample_index - b.sample_index) || (b.rect.bottom - a.rect.bottom) || (a.rect.left - b.rect.left);
+  });
+  return candidates;
+}
+
+function publicTelegramAuthor(candidate, clicked = false) {
+  if (!candidate) {
+    return null;
+  }
+  return {
+    found: true,
+    clicked,
+    peer_id: candidate.peer_id,
+    name: candidate.name,
+    role: candidate.role,
+    username: candidate.username,
+    source: candidate.source,
+    point: candidate.point,
+    rect: candidate.rect
+  };
+}
+
 async function waitForSelector(selector, timeoutMs = 10000, visibleOnly = false) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -469,6 +677,42 @@ async function runCommand(command) {
       }
       dispatchMouseClickSequence(node);
       return { clicked: true, text: String(node.textContent || "").trim(), menu: true };
+    }
+
+    case "telegram_sticky_author": {
+      const expectedPeerId = compactText(command.expected_peer_id || "");
+      const candidates = telegramStickyAuthorCandidates();
+      const shouldInteract = Boolean(command.click) || Boolean(command.context_click);
+      const pointIconCandidates = candidates.filter((candidate) => (
+        candidate.source === "point" && candidate.rect.width >= 30 && candidate.rect.height >= 30
+      ));
+      const candidatePool = shouldInteract ? pointIconCandidates : (pointIconCandidates.length ? pointIconCandidates : candidates);
+      const selected = expectedPeerId
+        ? candidatePool.find((candidate) => candidate.peer_id === expectedPeerId) || null
+        : candidatePool[0] || null;
+      if (!selected) {
+        return {
+          found: false,
+          clicked: false,
+          context_clicked: false,
+          candidates: candidates.slice(0, 5).map((candidate) => publicTelegramAuthor(candidate, false))
+        };
+      }
+      const click = Boolean(command.click);
+      const contextClick = Boolean(command.context_click);
+      if (click) {
+        const { x, y } = dispatchMouseClickSequence(selected.node, { skipFocus: true });
+        lastContextPoint = { x, y };
+      }
+      if (contextClick) {
+        const { x, y } = dispatchMouseClickSequence(selected.node, { button: 2, buttons: 2, skipFocus: true });
+        lastContextPoint = { x, y };
+      }
+      return {
+        ...publicTelegramAuthor(selected, click || contextClick),
+        context_clicked: contextClick,
+        candidates: candidates.slice(0, 5).map((candidate) => publicTelegramAuthor(candidate, false))
+      };
     }
 
     case "clear_editable": {

@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "updated_at": "2026-04-24T12:31:37+00:00",
+  "username_to_peer": {
+    "@alxkat": "306536305",
+    "@andreu_bogatchenko": "8055002493",
+    "@bulan04": "891274018",
+    "@bychkov_aa": "1291639730",
+    "@fuckeeva": "858739581",
+    "@gadkiygri": "736607998",
+    "@holaaloe": "351524223",
+    "@iris_bs_bot": "5137994780",
+    "@kamaz_master1": "1404471788",
+    "@mitiacaramba": "1127139638",
+    "@osipoly": "1238534353",
+    "@super_pavlik": "1621138520",
+    "@tri87true": "555101371",
+    "@wanderlinde_baza": "7730689749"
+  },
+  "peer_to_username": {
+    "1127139638": "@Mitiacaramba",
+    "1238534353": "@osipoly",
+    "1291639730": "@Bychkov_AA",
+    "1404471788": "@kamaz_master1",
+    "1621138520": "@super_pavlik",
+    "306536305": "@alxkat",
+    "351524223": "@HolaAloe",
+    "5137994780": "@iris_bs_bot",
+    "555101371": "@Tri87true",
+    "736607998": "@GadkiyGri",
+    "7730689749": "@wanderlinde_baza",
+    "8055002493": "@andreu_bogatchenko",
+    "858739581": "@fuckeeva",
+    "891274018": "@bulan04"
+  }
+}

@@ -1,0 +1,74 @@
+{
+  "group_url": "https://web.telegram.org/a/#-1002465948544",
+  "source_mode": "chat",
+  "generated_at": "2026-04-24T16:27:05",
+  "count": 8,
+  "usernames": [
+    "@bulan04",
+    "@super_pavlik",
+    "@Tri87true",
+    "@kamaz_master1",
+    "@andreu_bogatchenko",
+    "@alxkat",
+    "@Bychkov_AA",
+    "@osipoly"
+  ],
+  "rows": [
+    {
+      "username": "@bulan04",
+      "peer_id": "891274018",
+      "name": "Bulka",
+      "status": "из чата",
+      "role": "Модератор"
+    },
+    {
+      "username": "@super_pavlik",
+      "peer_id": "1621138520",
+      "name": "Павел Сухомлинов",
+      "status": "из чата",
+      "role": "—"
+    },
+    {
+      "username": "@Tri87true",
+      "peer_id": "555101371",
+      "name": "Тэймур Гусейнов",
+      "status": "из чата",
+      "role": "—"
+    },
+    {
+      "username": "@kamaz_master1",
+      "peer_id": "1404471788",
+      "name": "Камаз",
+      "status": "из чата",
+      "role": "—"
+    },
+    {
+      "username": "@andreu_bogatchenko",
+      "peer_id": "8055002493",
+      "name": "🤹🏻‍♂️",
+      "status": "из чата",
+      "role": "—"
+    },
+    {
+      "username": "@alxkat",
+      "peer_id": "306536305",
+      "name": "Alexander",
+      "status": "из чата",
+      "role": "—"
+    },
+    {
+      "username": "@Bychkov_AA",
+      "peer_id": "1291639730",
+      "name": "Алексей Андреевич",
+      "status": "из чата",
+      "role": "—"
+    },
+    {
+      "username": "@osipoly",
+      "peer_id": "1238534353",
+      "name": "Ольга",
+      "status": "из чата",
+      "role": "—"
+    }
+  ]
+}

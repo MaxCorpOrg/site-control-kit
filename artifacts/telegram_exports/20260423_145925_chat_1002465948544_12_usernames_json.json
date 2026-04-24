@@ -1,0 +1,26 @@
+{
+  "group_url": "https://web.telegram.org/a/#-1002465948544",
+  "source_mode": "chat",
+  "generated_at": "2026-04-23T14:59:25",
+  "count": 2,
+  "usernames": [
+    "@Bychkov_AA",
+    "@super_pavlik"
+  ],
+  "rows": [
+    {
+      "username": "@Bychkov_AA",
+      "peer_id": "891274018",
+      "name": "Bulka",
+      "status": "из чата",
+      "role": "Модератор"
+    },
+    {
+      "username": "@super_pavlik",
+      "peer_id": "1621138520",
+      "name": "Павел Сухомлинов",
+      "status": "из чата",
+      "role": "—"
+    }
+  ]
+}
