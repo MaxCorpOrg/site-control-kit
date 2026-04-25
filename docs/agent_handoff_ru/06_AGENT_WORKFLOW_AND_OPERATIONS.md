@@ -34,6 +34,20 @@ PYTHONPATH="$PWD" python3 -m webcontrol clients
 PYTHONPATH="$PWD" python3 -m webcontrol browser tabs
 ```
 
+## Telegram Invite Старт
+Перед invite-правками прочитать:
+
+```bash
+sed -n '1,260p' tools/telegram_invite_manager/AGENT_GUIDE_RU.md
+sed -n '1,260p' tools/telegram_invite_manager/ONE_USER_FLOW_RU.md
+sed -n '1,260p' docs/TELEGRAM_INVITE_EXECUTOR_RU.md
+```
+
+Safe rule:
+- `add-contact` использовать только для одного пользователя из `invite_state.json` с `consent=yes`;
+- финальный Telegram `Add` выполнять только с явным `--confirm-add`;
+- если нет отдельного подтверждения `joined/added`, писать статус `requested`, а не `joined`.
+
 ## Базовые Полезные Команды
 ### Один batch-run
 ```bash

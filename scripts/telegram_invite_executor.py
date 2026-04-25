@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 import argparse
+import html
 import json
 import os
+import re
 import subprocess
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -39,6 +42,15 @@ except ImportError:
 
 DEFAULT_MESSAGE_TEMPLATE = "Привет! Вот ссылка для вступления в чат: {invite_link}"
 DEFAULT_EXECUTION_STATUSES = ("checked",)
+ADD_MEMBERS_OPEN_SELECTORS = (
+    "#column-right .profile-container.can-add-members button.btn-circle.btn-corner",
+    "#column-right .profile-container.can-add-members button.btn-circle",
+    ".profile-container.can-add-members button.btn-circle.btn-corner",
+)
+ADD_MEMBERS_SEARCH_SELECTOR = ".add-members-container .selector-search-input"
+ADD_MEMBERS_CONFIRM_SELECTOR = ".add-members-container > .sidebar-content > button.btn-circle.btn-corner"
+ADD_MEMBERS_POPUP_ADD_SELECTOR = ".popup-add-members .popup-buttons button:nth-child(1)"
+ADD_MEMBERS_CLOSE_SELECTOR = ".add-members-container .sidebar-close-button"
 
 
 def _execution_runs_dir(job_dir: Path) -> Path:
@@ -250,6 +262,134 @@ def _run_browser_command(repo_root: Path, command: list[str]) -> subprocess.Comp
     )
 
 
+def _browser_target_args(browser_target: dict[str, Any]) -> list[str]:
+    args: list[str] = []
+    client_id = _nonempty(browser_target.get("client_id"))
+    if client_id:
+        args.extend(["--client-id", client_id])
+
+    tab_id = int(browser_target.get("tab_id", 0) or 0)
+    if tab_id > 0:
+        args.extend(["--tab-id", str(tab_id)])
+        return args
+
+    url_pattern = _nonempty(browser_target.get("url_pattern"))
+    if url_pattern:
+        args.extend(["--url-pattern", url_pattern])
+    return args
+
+
+def _browser_action_command(browser_target: dict[str, Any], action: str, *action_args: str) -> list[str]:
+    return ["python3", "-m", "webcontrol", "browser", *_browser_target_args(browser_target), action, *action_args]
+
+
+def _run_browser_json(repo_root: Path, command: list[str]) -> dict[str, Any]:
+    proc = _run_browser_command(repo_root, command)
+    payload: dict[str, Any] = {
+        "command": command,
+        "returncode": int(proc.returncode),
+        "stdout": proc.stdout,
+        "stderr": proc.stderr,
+        "stdout_json": {},
+    }
+    try:
+        payload["stdout_json"] = json.loads(proc.stdout) if proc.stdout.strip() else {}
+    except json.JSONDecodeError:
+        payload["stdout_json"] = {}
+    return payload
+
+
+def _browser_payload_text(payload: dict[str, Any], key: str) -> str:
+    stdout_json = payload.get("stdout_json")
+    if not isinstance(stdout_json, dict):
+        return ""
+    data = stdout_json.get("data")
+    if not isinstance(data, dict):
+        return ""
+    return str(data.get(key) or "")
+
+
+def _extract_tab_id(stdout_json: dict[str, Any]) -> int:
+    data = stdout_json.get("data") if isinstance(stdout_json, dict) else None
+    if not isinstance(data, dict):
+        return 0
+    for key in ("tabId", "tab_id"):
+        try:
+            value = int(data.get(key, 0) or 0)
+        except (TypeError, ValueError):
+            value = 0
+        if value > 0:
+            return value
+    tab = data.get("tab")
+    if isinstance(tab, dict):
+        try:
+            value = int(tab.get("id", 0) or 0)
+        except (TypeError, ValueError):
+            value = 0
+        if value > 0:
+            return value
+    try:
+        value = int(data.get("id", 0) or 0)
+    except (TypeError, ValueError):
+        value = 0
+    return value if value > 0 else 0
+
+
+def _strip_tags(value: str) -> str:
+    return html.unescape(re.sub(r"<[^>]+>", "", value)).strip()
+
+
+def _parse_add_members_candidates(html_payload: str) -> list[dict[str, str]]:
+    marker = "add-members-container active"
+    start = html_payload.find(marker)
+    scoped = html_payload[start:] if start >= 0 else html_payload
+    candidates: list[dict[str, str]] = []
+    seen: set[str] = set()
+    row_pattern = re.compile(
+        r'<a\b(?=[^>]*\bdata-peer-id="(?P<peer_id>\d+)")[^>]*\bclass="(?P<class>[^"]*\bchatlist-chat[^"]*)"[^>]*>(?P<body>.*?)</a>',
+        re.DOTALL,
+    )
+    title_pattern = re.compile(r'<span\b(?=[^>]*\bclass="[^"]*\bpeer-title\b[^"]*")[^>]*>(?P<title>.*?)</span>', re.DOTALL)
+    for match in row_pattern.finditer(scoped):
+        peer_id = match.group("peer_id")
+        if peer_id in seen:
+            continue
+        title_match = title_pattern.search(match.group("body"))
+        title = _strip_tags(title_match.group("title")) if title_match else ""
+        if not title:
+            continue
+        seen.add(peer_id)
+        candidates.append({"peer_id": peer_id, "title": title})
+    return candidates
+
+
+def _find_state_user(payload: dict[str, Any], username: str) -> dict[str, Any] | None:
+    normalized = normalize_username(username)
+    for row in payload.get("users") or []:
+        if isinstance(row, dict) and str(row.get("username") or "") == normalized:
+            return row
+    return None
+
+
+def _record_user_status(
+    job_dir: Path,
+    payload: dict[str, Any],
+    user: dict[str, Any],
+    *,
+    status: str,
+    reason: str,
+) -> dict[str, str]:
+    target_status = ensure_valid_status(status)
+    at = now_utc()
+    from_status = str(user.get("status") or "")
+    user["status"] = target_status
+    user["last_attempt_at"] = at
+    user["attempts"] = int(user.get("attempts", 0) or 0) + 1
+    append_history(user, from_status, target_status, reason, at)
+    save_state(job_dir, payload)
+    return {"username": str(user.get("username") or ""), "from_status": from_status, "to_status": target_status}
+
+
 def command_configure(args: argparse.Namespace) -> int:
     job_dir = Path(args.job_dir).expanduser()
     payload = load_state(job_dir)
@@ -376,6 +516,174 @@ def command_open_chat(args: argparse.Namespace) -> int:
         response["stdout_json"] = {}
     print(json.dumps(response, ensure_ascii=False, indent=2))
     return 0 if proc.returncode == 0 else int(proc.returncode)
+
+
+def command_add_contact(args: argparse.Namespace) -> int:
+    job_dir = Path(args.job_dir).expanduser()
+    payload = load_state(job_dir)
+    repo_root = Path(__file__).resolve().parents[1]
+    username = normalize_username(args.username)
+    if not username:
+        raise ValueError("add-contact requires a valid Telegram username")
+
+    user = _find_state_user(payload, username)
+    if user is None:
+        raise ValueError(f"user is not present in invite_state.json: {username}")
+    if not bool(user.get("consent")):
+        raise ValueError(f"user has no consent=yes in invite_state.json: {username}")
+
+    execution = _resolved_execution_config(
+        payload,
+        client_id=args.client_id,
+        tab_id=args.tab_id,
+        url_pattern=args.url_pattern,
+        active=args.active,
+    )
+    browser_target = execution.get("browser_target") or {}
+    search_query = _nonempty(args.search_query) or username.lstrip("@")
+    execution_id = args.execution_id or _execution_id_now()
+    log_lines = [
+        f"INFO: add-contact started execution_id={execution_id}",
+        f"INFO: username={username} search_query={search_query}",
+        f"INFO: confirm_add={int(bool(args.confirm_add))} record_result={int(bool(args.record_result))}",
+    ]
+    steps: list[dict[str, Any]] = []
+    selected_candidate: dict[str, str] | None = None
+    outcome = "dry_run" if args.dry_run else "started"
+    record_update: dict[str, str] | None = None
+
+    def run_step(label: str, command: list[str], *, required: bool = True) -> dict[str, Any]:
+        if args.dry_run:
+            result = {"label": label, "command": command, "dry_run": True, "returncode": 0, "stdout_json": {}}
+        else:
+            result = {"label": label, **_run_browser_json(repo_root, command)}
+        steps.append(result)
+        if required and int(result.get("returncode", 1) or 0) != 0:
+            raise RuntimeError(f"{label} failed: {result.get('stderr') or result.get('stdout')}")
+        return result
+
+    try:
+        if not args.skip_open:
+            open_result = run_step(
+                "open_or_activate_chat",
+                _browser_command(
+                    repo_root,
+                    chat_url=str(payload.get("chat_url") or ""),
+                    browser_target=browser_target,
+                ),
+            )
+            opened_tab_id = _extract_tab_id(open_result.get("stdout_json") or {})
+            if opened_tab_id > 0:
+                browser_target["tab_id"] = opened_tab_id
+                log_lines.append(f"INFO: using opened tab_id={opened_tab_id}")
+
+        opened_add_members = False
+        for selector in ADD_MEMBERS_OPEN_SELECTORS:
+            result = run_step(
+                f"open_add_members:{selector}",
+                _browser_action_command(browser_target, "click", selector),
+                required=False,
+            )
+            if int(result.get("returncode", 1) or 0) == 0:
+                opened_add_members = True
+                break
+        if not args.dry_run and not opened_add_members:
+            raise RuntimeError("cannot open Add Members panel; profile sidebar with can-add-members is not available")
+
+        run_step("wait_add_members_search", _browser_action_command(browser_target, "wait", ADD_MEMBERS_SEARCH_SELECTOR))
+        run_step("fill_add_members_search", _browser_action_command(browser_target, "fill", ADD_MEMBERS_SEARCH_SELECTOR, search_query))
+        if not args.dry_run:
+            time.sleep(max(float(args.search_wait), 0.0))
+
+        html_result = run_step("read_add_members_html", _browser_action_command(browser_target, "html", "body"))
+        html_payload = _browser_payload_text(html_result, "html")
+        candidates = _parse_add_members_candidates(html_payload)
+        log_lines.append(f"INFO: add-members candidates={json.dumps(candidates, ensure_ascii=False)}")
+        if args.dry_run:
+            outcome = "dry_run"
+        else:
+            if not candidates:
+                outcome = "not_found"
+                raise RuntimeError(f"Telegram Add Members search returned no candidates for {username}")
+            if len(candidates) > 1 and not args.allow_first_result:
+                outcome = "ambiguous"
+                raise RuntimeError(
+                    "Telegram Add Members search returned multiple candidates; rerun with --allow-first-result after manual check"
+                )
+            selected_candidate = candidates[0]
+            run_step(
+                "select_candidate",
+                _browser_action_command(
+                    browser_target,
+                    "click",
+                    f'.add-members-container .chatlist a.row[data-peer-id="{selected_candidate["peer_id"]}"]',
+                ),
+            )
+            if not args.confirm_add:
+                outcome = "confirmation_not_requested"
+            else:
+                run_step("open_add_confirmation", _browser_action_command(browser_target, "click", ADD_MEMBERS_CONFIRM_SELECTOR))
+                if not args.dry_run:
+                    time.sleep(max(float(args.confirm_wait), 0.0))
+                run_step("confirm_add", _browser_action_command(browser_target, "click", ADD_MEMBERS_POPUP_ADD_SELECTOR))
+                if not args.dry_run:
+                    time.sleep(max(float(args.result_wait), 0.0))
+                text_result = run_step("read_result_text", _browser_action_command(browser_target, "text", "body"), required=False)
+                html_after_result = run_step("read_result_html", _browser_action_command(browser_target, "html", "body"), required=False)
+                text_payload = _browser_payload_text(text_result, "text").lower()
+                html_after = _browser_payload_text(html_after_result, "html")
+                error_terms = ("privacy", "cannot", "too many", "sorry", "error", "ошибка", "нельзя", "limit")
+                if any(term in text_payload for term in error_terms):
+                    outcome = "telegram_error_visible"
+                elif "popup-add-members active" in html_after:
+                    outcome = "confirmation_still_open"
+                else:
+                    outcome = "confirmed_unverified"
+                    if args.record_result:
+                        record_update = _record_user_status(
+                            job_dir,
+                            payload,
+                            user,
+                            status="requested",
+                            reason="live_add_members_confirmed_unverified",
+                        )
+    except Exception as exc:  # noqa: BLE001
+        if outcome in {"started", "dry_run"}:
+            outcome = "failed"
+        log_lines.append(f"ERROR: {exc}")
+        response = {
+            "status": "failed",
+            "outcome": outcome,
+            "job_dir": str(job_dir),
+            "execution_id": execution_id,
+            "username": username,
+            "search_query": search_query,
+            "selected_candidate": selected_candidate,
+            "record_update": record_update,
+            "error": str(exc),
+            "steps": steps,
+        }
+        run_dir = _write_execution_record(job_dir, execution_id, response, log_lines)
+        response["run_dir"] = str(run_dir)
+        print(json.dumps(response, ensure_ascii=False, indent=2))
+        return 0 if args.dry_run else 1
+
+    status = "completed" if outcome not in {"failed", "telegram_error_visible", "confirmation_still_open"} else "failed"
+    response = {
+        "status": status,
+        "outcome": outcome,
+        "job_dir": str(job_dir),
+        "execution_id": execution_id,
+        "username": username,
+        "search_query": search_query,
+        "selected_candidate": selected_candidate,
+        "record_update": record_update,
+        "steps": steps,
+    }
+    run_dir = _write_execution_record(job_dir, execution_id, response, log_lines)
+    response["run_dir"] = str(run_dir)
+    print(json.dumps(response, ensure_ascii=False, indent=2))
+    return 0 if status == "completed" else 1
 
 
 def command_record(args: argparse.Namespace) -> int:
@@ -528,6 +836,46 @@ def build_parser() -> argparse.ArgumentParser:
     )
     open_parser.add_argument("--dry-run", action="store_true")
     open_parser.set_defaults(func=command_open_chat)
+
+    add_contact_parser = subparsers.add_parser(
+        "add-contact",
+        help="Try to add exactly one consented contact through Telegram Web Add Members UI.",
+    )
+    add_contact_parser.add_argument("--job-dir", required=True)
+    add_contact_parser.add_argument("--username", required=True)
+    add_contact_parser.add_argument("--search-query", help="Override Add Members search query; default is username without @.")
+    add_contact_parser.add_argument("--client-id")
+    add_contact_parser.add_argument("--tab-id", type=int)
+    add_contact_parser.add_argument("--url-pattern")
+    add_contact_parser.add_argument("--execution-id")
+    add_contact_parser.add_argument("--search-wait", type=float, default=3.0)
+    add_contact_parser.add_argument("--confirm-wait", type=float, default=1.0)
+    add_contact_parser.add_argument("--result-wait", type=float, default=5.0)
+    add_contact_parser.add_argument("--skip-open", action="store_true", help="Assume target chat is already open on the selected tab.")
+    add_contact_parser.add_argument(
+        "--allow-first-result",
+        action="store_true",
+        help="Allow selecting the first search result when Telegram returns multiple candidates.",
+    )
+    add_contact_parser.add_argument(
+        "--confirm-add",
+        action="store_true",
+        help="Click the final Telegram Add confirmation. Without this flag the command stops before the external add action.",
+    )
+    add_contact_parser.add_argument(
+        "--record-result",
+        action="store_true",
+        help="When final Add was clicked and no visible error was detected, move user to requested.",
+    )
+    _add_bool_choice(
+        add_contact_parser,
+        "--active",
+        dest="active",
+        help_true="Prefer active tab when browser target is implicit.",
+        help_false="Do not force active tab preference in browser target.",
+    )
+    add_contact_parser.add_argument("--dry-run", action="store_true")
+    add_contact_parser.set_defaults(func=command_add_contact)
 
     record_parser = subparsers.add_parser("record", help="Record execution result and update user statuses.")
     record_parser.add_argument("--job-dir", required=True)

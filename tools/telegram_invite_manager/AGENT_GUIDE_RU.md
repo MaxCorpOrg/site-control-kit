@@ -32,6 +32,7 @@ cd /home/max/site-control-kit
 - `configure`;
 - `plan`;
 - `open-chat`;
+- `add-contact` для одного consented контакта через Telegram Web `Add Members`;
 - `record`;
 - `report`;
 - `executions/<timestamp>/execution_plan.json`;
@@ -51,7 +52,8 @@ tools/telegram_invite_manager/
 3. Настроить invite-link.
 4. Создать execution-plan на `limit 1`.
 5. Открыть чат через `site-control`.
-6. После ручного действия записать результат через `record`.
+6. Если нужен direct add через Telegram Web, использовать только `add-contact` на одного пользователя.
+7. После ручного действия или live add записать результат через `record` либо `add-contact --record-result`.
 
 Полная команда лежит в `ONE_USER_FLOW_RU.md`.
 
@@ -96,6 +98,7 @@ bash -n scripts/telegram_invite_manager_gui.sh scripts/telegram_invite_executor_
 - Не делать multi-account обход лимитов.
 - Не использовать список usernames без подтверждённого согласия.
 - Не затирать state без бэкапа или явного запроса пользователя.
+- Не ставить `joined`, если Telegram не дал проверяемого сигнала вступления. Для подтверждённого клика `ADD` без видимого `joined/added` использовать `requested`.
 
 ## Текущий Следующий Шаг
 
@@ -173,6 +176,49 @@ https://t.me/Zhirotop_shop
 - `/tmp/tg_invite_zhiritop_report.json`
 
 Важно:
-- фактическая отправка сообщения пользователю не выполнялась;
-- текущий статус пользователя в job: `invite_link_created`;
-- после ручной отправки ссылки нужно вызвать `telegram-invite-executor record --status sent`.
+- на `2026-04-24` фактическая отправка сообщения пользователю не выполнялась;
+- статус пользователя был `invite_link_created`;
+- после ручной отправки ссылки нужно было вызвать `telegram-invite-executor record --status sent`.
+
+## Live Add Test: `@Kamaz_master1` -> `Zhirotop_shop`
+
+Дата: `2026-04-25`
+
+Цель:
+
+```text
+@Kamaz_master1 -> https://t.me/Zhirotop_shop
+```
+
+Что проверено в Telegram Web через bridge:
+- открыт tab `614280764`;
+- URL подтверждён как `https://web.telegram.org/k/#@Zhirotop_shop`;
+- в правой панели найден `Add Members`;
+- поле поиска `.add-members-container .selector-search-input` принимает `Kamaz_master1`;
+- Telegram вернул контакт `Камаз` с `data-peer-id="1404471788"`;
+- строка выбрана, появился selected chip `Камаз`;
+- Telegram показал popup `Are you sure you want to add Камаз ...`;
+- финальная кнопка нажата через `.popup-add-members .popup-buttons button:nth-child(1)`;
+- popup закрылся, видимых ошибок `privacy/cannot/too many/error` не было;
+- сервисного `joined/added` в чате не появилось, счётчик остался `2 440 members`.
+
+Финальная запись в state:
+
+```bash
+./tools/telegram_invite_manager/bin/telegram-invite-executor record \
+  --job-dir /home/max/telegram_invite_jobs/chat_Zhirotop_shop \
+  --username @Kamaz_master1 \
+  --status requested \
+  --reason live_add_members_confirmed_unverified_20260425
+```
+
+Артефакт записи:
+
+```text
+/home/max/telegram_invite_jobs/chat_Zhirotop_shop/executions/20260425T052501Z/execution_record.json
+```
+
+Вывод для следующего агента:
+- live UI-path до финального `ADD` работает;
+- итог Telegram Web неоднозначный, поэтому не писать `joined` без отдельной проверки в списке участников;
+- для повторения использовать новую команду `telegram-invite-executor add-contact`, но только по одному consented пользователю.

@@ -1,6 +1,6 @@
 # Project Status RU
 
-Последнее обновление: 2026-04-23
+Последнее обновление: 2026-04-25
 
 Этот файл нужен как точка входа для любого нового чата и любого нового агента.
 Перед новой задачей его нужно прочитать целиком.
@@ -46,6 +46,7 @@
   - хранить invite-link и browser-target в `invite_state.json`;
   - строить `execution_plan.json`;
   - открывать/активировать Telegram chat через `site-control`;
+  - выполнять осторожный `add-contact` для одного consented пользователя через Telegram Web `Add Members`;
   - писать `execution_record.json` после ручных действий оператора.
 
 ### Безопасность данных Telegram
@@ -117,12 +118,13 @@
 - После добавления Invite Manager полный unit-набор был зелёный: `117/117`.
 - После добавления Invite Executor полный unit-набор был зелёный: `123/123`.
 - После добавления one-user режима полный unit-набор зелёный: `127/127`.
+- После добавления `add-contact` для одного consented пользователя полный unit-набор зелёный: `130/130`.
 - Новый `Invite Manager` покрыт unit-тестами:
   - `tests/test_telegram_invite_manager.py`
   - `7/7 OK`
 - Новый `Invite Executor` покрыт unit-тестами:
   - `tests/test_telegram_invite_executor.py`
-  - `6/6 OK`
+  - `9/9 OK`
 - Для Invite Manager / Invite Executor пока нет живого Telegram invite smoke: hub в момент работы не был поднят, поэтому проверен только dry-run/CLI слой.
 - Dry-run smoke нового execution-слоя подтверждён:
   - job dir:
@@ -177,7 +179,26 @@
     - открыт Telegram tab `614280505`;
     - URL подтверждён как `https://web.telegram.org/k/#@Zhirotop_shop`;
     - body text подтверждает открытый чат `Жиротоп Shop`.
-  - фактическая отправка сообщения пользователю не выполнялась; текущий статус `@kamaz_master1`: `invite_link_created`.
+  - на `2026-04-24` фактическая отправка сообщения пользователю не выполнялась; статус `@kamaz_master1` был `invite_link_created`.
+- Live add test для `@Kamaz_master1 -> https://t.me/Zhirotop_shop` выполнен `2026-04-25`:
+  - Telegram Web tab:
+    - `614280764`
+  - live URL:
+    - `https://web.telegram.org/k/#@Zhirotop_shop`
+  - UI-path:
+    - `Add Members` открыт через `#column-right .profile-container.can-add-members button.btn-circle.btn-corner`;
+    - поиск `.add-members-container .selector-search-input` по `Kamaz_master1`;
+    - найден контакт `Камаз`, `data-peer-id="1404471788"`;
+    - открыт popup `Are you sure you want to add Камаз ...`;
+    - финальный `Add` нажат через `.popup-add-members .popup-buttons button:nth-child(1)`.
+  - результат:
+    - popup закрылся;
+    - видимых ошибок `privacy/cannot/too many/error` не было;
+    - сервисного `joined/added` не найдено;
+    - счётчик остался `2 440 members`;
+    - state записан как `requested`, не `joined`.
+  - execution record:
+    - `/home/max/telegram_invite_jobs/chat_Zhirotop_shop/executions/20260425T052501Z/execution_record.json`
 - Shell syntax и `py_compile` для последних изменений проходили зелёными.
 - Точечный прогон экспортёрных тестов после capability-preflight:
   - `tests.test_telegram_export_parser`

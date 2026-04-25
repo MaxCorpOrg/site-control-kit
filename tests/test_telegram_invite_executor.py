@@ -4,10 +4,12 @@ import contextlib
 import importlib.util
 import io
 import json
+import subprocess
 import tempfile
 import unittest
 from argparse import Namespace
 from pathlib import Path
+from unittest import mock
 
 
 def _load_module(module_name: str, relative_path: str):
@@ -188,6 +190,107 @@ class TelegramInviteExecutorTests(unittest.TestCase):
             self.assertEqual(payload["command"][:4], ["python3", "-m", "webcontrol", "browser"])
             self.assertIn("--client-id", payload["command"])
             self.assertIn("activate", payload["command"])
+
+    def test_parse_add_members_candidates(self) -> None:
+        html_payload = """
+        <div class="tabs-tab sidebar-slider-item add-members-container active">
+          <a class="row chatlist-chat row-clickable" data-peer-id="1404471788">
+            <span class="peer-title" dir="auto">Камаз</span>
+          </a>
+          <a class="row chatlist-chat row-clickable" data-peer-id="1281184986">
+            <span class="peer-title" dir="auto">25 GPoint</span>
+          </a>
+        </div>
+        """
+        candidates = self.executor._parse_add_members_candidates(html_payload)
+        self.assertEqual(
+            candidates,
+            [
+                {"peer_id": "1404471788", "title": "Камаз"},
+                {"peer_id": "1281184986", "title": "25 GPoint"},
+            ],
+        )
+
+    def test_add_contact_dry_run_builds_safe_steps(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            job_dir = Path(tmpdir) / "job"
+            self._seed_state(job_dir)
+            rc, payload = self._call_json(
+                self.executor.command_add_contact,
+                Namespace(
+                    job_dir=str(job_dir),
+                    username="@alice_123",
+                    search_query=None,
+                    client_id=None,
+                    tab_id=123,
+                    url_pattern=None,
+                    execution_id="20260425T080000Z",
+                    search_wait=0,
+                    confirm_wait=0,
+                    result_wait=0,
+                    skip_open=True,
+                    allow_first_result=False,
+                    confirm_add=False,
+                    record_result=False,
+                    active=None,
+                    dry_run=True,
+                ),
+            )
+            self.assertEqual(rc, 0)
+            self.assertEqual(payload["outcome"], "dry_run")
+            self.assertEqual(payload["username"], "@alice_123")
+            self.assertFalse(any(step.get("label") == "confirm_add" for step in payload["steps"]))
+            self.assertTrue((Path(payload["run_dir"]) / "execution_record.json").exists())
+
+    def test_add_contact_confirm_records_requested_when_no_visible_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            job_dir = Path(tmpdir) / "job"
+            self._seed_state(job_dir)
+            html_payload = """
+            <div class="tabs-tab sidebar-slider-item add-members-container active">
+              <a class="row chatlist-chat row-clickable" data-peer-id="1404471788">
+                <span class="peer-title" dir="auto">Alice</span>
+              </a>
+            </div>
+            """
+
+            def fake_run(_repo_root, command):
+                action = command[-2] if command[-1] == "body" else command[-1]
+                if action == "html":
+                    payload = {"ok": True, "data": {"html": html_payload}}
+                elif action == "text":
+                    payload = {"ok": True, "data": {"text": "2 440 members"}}
+                else:
+                    payload = {"ok": True, "data": {"clicked": True}}
+                return subprocess.CompletedProcess(command, 0, stdout=json.dumps(payload), stderr="")
+
+            with mock.patch.object(self.executor, "_run_browser_command", side_effect=fake_run):
+                rc, payload = self._call_json(
+                    self.executor.command_add_contact,
+                    Namespace(
+                        job_dir=str(job_dir),
+                        username="@alice_123",
+                        search_query=None,
+                        client_id=None,
+                        tab_id=123,
+                        url_pattern=None,
+                        execution_id="20260425T080100Z",
+                        search_wait=0,
+                        confirm_wait=0,
+                        result_wait=0,
+                        skip_open=True,
+                        allow_first_result=False,
+                        confirm_add=True,
+                        record_result=True,
+                        active=None,
+                        dry_run=False,
+                    ),
+                )
+            self.assertEqual(rc, 0)
+            self.assertEqual(payload["outcome"], "confirmed_unverified")
+            self.assertEqual(payload["selected_candidate"]["peer_id"], "1404471788")
+            state = self.manager.load_state(job_dir)
+            self.assertEqual(state["users"][0]["status"], "requested")
 
     def test_record_updates_state_and_writes_execution_record(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

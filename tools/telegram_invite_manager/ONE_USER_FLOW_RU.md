@@ -114,6 +114,50 @@ $JOB_DIR/executions/<timestamp>/execution_plan.json
   --reason joined_confirmed
 ```
 
+## 6A. Live Add Через `Add Members`
+
+Этот путь использовать только для одного consented пользователя из `invite_state.json`.
+Он нужен для проверки реального UI Telegram Web, а не для массового инвайтинга.
+
+Сначала открыть нужный чат и убедиться, что видна правая панель с кнопкой `Add Members`.
+Если известен tab id:
+
+```bash
+./bin/telegram-invite-executor add-contact \
+  --job-dir "$JOB_DIR" \
+  --username "$USERNAME" \
+  --tab-id "<TELEGRAM_TAB_ID>" \
+  --skip-open \
+  --dry-run
+```
+
+Проверочный режим без финального внешнего действия:
+
+```bash
+./bin/telegram-invite-executor add-contact \
+  --job-dir "$JOB_DIR" \
+  --username "$USERNAME" \
+  --tab-id "<TELEGRAM_TAB_ID>" \
+  --skip-open
+```
+
+Реальный клик `ADD`:
+
+```bash
+./bin/telegram-invite-executor add-contact \
+  --job-dir "$JOB_DIR" \
+  --username "$USERNAME" \
+  --tab-id "<TELEGRAM_TAB_ID>" \
+  --skip-open \
+  --confirm-add \
+  --record-result
+```
+
+Важно:
+- без `--confirm-add` команда не нажимает финальную кнопку Telegram `Add`;
+- `--record-result` после успешного клика без видимой ошибки ставит `requested`, не `joined`;
+- `joined` ставить только если Telegram Web или список участников отдельно подтвердил вступление.
+
 ## Проверить Состояние
 
 ```bash
@@ -186,8 +230,8 @@ Job:
 - `plan --limit 1 --reserve`
 - `open-chat`
 
-Результат:
-- `@Kamaz_master1` находится в статусе `invite_link_created`;
+Результат на `2026-04-24`:
+- `@Kamaz_master1` находился в статусе `invite_link_created`;
 - открыт Telegram Web tab `614280505`;
 - URL вкладки: `https://web.telegram.org/k/#@Zhirotop_shop`;
 - фактическая отправка сообщения пользователю не выполнялась.
@@ -213,4 +257,36 @@ cd /home/max/site-control-kit/tools/telegram_invite_manager
   --username "@Kamaz_master1" \
   --status sent \
   --reason manual_link_sent
+```
+
+## Live Add Test: `@Kamaz_master1`
+
+Дата: `2026-04-25`
+
+Живой тест был продолжен через Telegram Web tab:
+
+```text
+614280764
+```
+
+Ручной проверенный UI-path:
+- открыть `https://web.telegram.org/k/#@Zhirotop_shop`;
+- нажать `#column-right .profile-container.can-add-members button.btn-circle.btn-corner`;
+- дождаться `.add-members-container .selector-search-input`;
+- ввести `Kamaz_master1`;
+- выбрать строку `.add-members-container .chatlist a.row[data-peer-id="1404471788"]`;
+- нажать `.add-members-container > .sidebar-content > button.btn-circle.btn-corner`;
+- подтвердить `.popup-add-members .popup-buttons button:nth-child(1)`.
+
+Факт:
+- popup подтверждения закрылся;
+- явной ошибки Telegram не показал;
+- сервисного сообщения `joined/added` не найдено;
+- счётчик остался `2 440 members`;
+- статус записан как `requested`.
+
+Артефакт:
+
+```text
+/home/max/telegram_invite_jobs/chat_Zhirotop_shop/executions/20260425T052501Z/execution_record.json
 ```

@@ -25,6 +25,7 @@
 - `configure`
 - `plan`
 - `open-chat`
+- `add-contact`
 - `record`
 - `report`
 
@@ -112,6 +113,57 @@ python3 scripts/telegram_invite_executor.py open-chat \
   --dry-run
 ```
 
+### `add-contact`
+Пробует добавить ровно одного consented пользователя через Telegram Web `Add Members`.
+
+Ограничения:
+- пользователь должен уже быть в `invite_state.json`;
+- у пользователя должен быть `consent: true`;
+- команда работает по одному `--username`;
+- финальный клик Telegram `Add` выполняется только с `--confirm-add`;
+- без проверяемого `joined/added` результат нужно считать `requested`, не `joined`.
+
+Dry-run:
+
+```bash
+cd /home/max/site-control-kit
+python3 scripts/telegram_invite_executor.py add-contact \
+  --job-dir "/home/max/telegram_invite_jobs/chat_Zhirotop_shop" \
+  --username "@alice_123" \
+  --tab-id 614280764 \
+  --skip-open \
+  --dry-run
+```
+
+Остановиться перед финальным внешним действием:
+
+```bash
+python3 scripts/telegram_invite_executor.py add-contact \
+  --job-dir "/home/max/telegram_invite_jobs/chat_Zhirotop_shop" \
+  --username "@alice_123" \
+  --tab-id 614280764 \
+  --skip-open
+```
+
+Реально нажать `Add` и записать результат как `requested`, если нет видимой ошибки:
+
+```bash
+python3 scripts/telegram_invite_executor.py add-contact \
+  --job-dir "/home/max/telegram_invite_jobs/chat_Zhirotop_shop" \
+  --username "@alice_123" \
+  --tab-id 614280764 \
+  --skip-open \
+  --confirm-add \
+  --record-result
+```
+
+Проверенные селекторы Telegram Web:
+- открыть панель: `#column-right .profile-container.can-add-members button.btn-circle.btn-corner`
+- поиск: `.add-members-container .selector-search-input`
+- строка кандидата: `.add-members-container .chatlist a.row[data-peer-id="<peer_id>"]`
+- открыть подтверждение: `.add-members-container > .sidebar-content > button.btn-circle.btn-corner`
+- финальная кнопка: `.popup-add-members .popup-buttons button:nth-child(1)`
+
 ### `record`
 После ручного действия оператор записывает результат обратно в state.
 
@@ -152,7 +204,7 @@ bash scripts/telegram_invite_executor_gui.sh
 1. менеджерит consented users;
 2. готовит execution-plan;
 3. открывает нужный чат через `site-control`;
-4. оператор выполняет безопасный invite workflow;
+4. оператор выполняет безопасный invite workflow или запускает `add-contact` на одного пользователя;
 5. результат записывается через `record`.
 
 ## Следующий Шаг
@@ -182,3 +234,30 @@ bash scripts/telegram_invite_executor_gui.sh
 - статус пользователя: `invite_link_created`.
 
 Фактическая отправка сообщения пользователю не выполнялась.
+
+### Live Add `@Kamaz_master1` -> `Zhirotop_shop`
+
+Дата: `2026-04-25`
+
+Проверен реальный UI-path `Add Members`:
+- активная вкладка: `614280764`;
+- live URL: `https://web.telegram.org/k/#@Zhirotop_shop`;
+- поиск `Kamaz_master1` вернул контакт `Камаз`, `data-peer-id="1404471788"`;
+- выбран контакт и открыт popup подтверждения;
+- финальная кнопка `Add` нажата точным селектором `.popup-add-members .popup-buttons button:nth-child(1)`;
+- popup закрылся;
+- видимых ошибок не было;
+- `joined/added` не найдено, счётчик остался `2 440 members`.
+
+State записан осторожно:
+
+```text
+@kamaz_master1: invite_link_created -> requested
+reason: live_add_members_confirmed_unverified_20260425
+```
+
+Артефакт:
+
+```text
+/home/max/telegram_invite_jobs/chat_Zhirotop_shop/executions/20260425T052501Z/execution_record.json
+```

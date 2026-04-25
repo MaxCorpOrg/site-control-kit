@@ -41,6 +41,26 @@ cd /home/max/site-control-kit/tools/telegram_invite_manager
   --consent yes
 ```
 
+## Live Add Одного Контакта
+
+Executor теперь умеет отдельный однопользовательский UI-path через Telegram Web `Add Members`.
+Финальное действие защищено флагом `--confirm-add`.
+
+```bash
+cd /home/max/site-control-kit/tools/telegram_invite_manager
+
+./bin/telegram-invite-executor add-contact \
+  --job-dir "/home/max/telegram_invite_jobs/chat_Zhirotop_shop" \
+  --username "@USERNAME" \
+  --tab-id "<TELEGRAM_TAB_ID>" \
+  --skip-open \
+  --confirm-add \
+  --record-result
+```
+
+Без `--confirm-add` команда выбирает пользователя и останавливается до внешнего действия добавления.
+Если Telegram не показывает явный `joined/added`, результат записывается как `requested`, а не как `joined`.
+
 ## Агентский Документ
 
 Для нового агента сначала читать:
@@ -80,3 +100,4 @@ AGENT_GUIDE_RU.md
 
 Инструмент предназначен для consent-based workflow.
 Он не должен превращаться в массовую автодобавлялку, переключатель аккаунтов или обход лимитов Telegram.
+Команда `add-contact` принимает одного пользователя и требует, чтобы он уже был в `invite_state.json` с `consent=yes`.
