@@ -146,10 +146,23 @@ while true; do
           ;;
         "add-contact live")
           allow_first_result="$(invite_gui_choose_yes_no "Multiple results" "Если Telegram покажет несколько кандидатов, брать первый результат?" "yes" "no" "no")" || continue
-          record_result="$(invite_gui_choose_yes_no "Record result" "После клика Add записать статус requested при отсутствии видимой ошибки?" "yes" "no" "yes")" || continue
+          verify_membership="$(invite_gui_choose_yes_no "Verify joined" "Автоматически снять inspect-chat до/после и подтверждать joined только по сильному сигналу?" "yes" "no" "yes")" || continue
+          verify_wait=""
+          if [[ "${verify_membership}" == "yes" ]]; then
+            verify_wait="$(zenity --entry --title="Verify wait" --text="Сколько секунд ждать перед повторной after-проверкой member count?" --entry-text="10")" || continue
+          fi
+          record_result="$(invite_gui_choose_yes_no "Record result" "После клика Add записать итог в state: joined только при подтверждении, иначе requested?" "yes" "no" "yes")" || continue
           cmd+=( --confirm-add )
           if [[ "${allow_first_result}" == "yes" ]]; then
             cmd+=( --allow-first-result )
+          fi
+          if [[ "${verify_membership}" == "yes" ]]; then
+            cmd+=( --verify-membership )
+            if [[ -n "${verify_wait}" ]]; then
+              cmd+=( --verify-wait "${verify_wait}" )
+            fi
+          else
+            cmd+=( --no-verify-membership )
           fi
           if [[ "${record_result}" == "yes" ]]; then
             cmd+=( --record-result )

@@ -141,7 +141,8 @@ python3 scripts/telegram_invite_executor.py inspect-chat \
 - у пользователя должен быть `consent: true`;
 - команда работает по одному `--username`;
 - финальный клик Telegram `Add` выполняется только с `--confirm-add`;
-- без проверяемого `joined/added` результат нужно считать `requested`, не `joined`.
+- live-режим теперь может сам снимать `inspect-chat`-снимки до и после клика `Add`;
+- без проверяемого сигнала вступления результат нужно считать `requested`, не `joined`.
 
 Dry-run:
 
@@ -165,7 +166,7 @@ python3 scripts/telegram_invite_executor.py add-contact \
   --skip-open
 ```
 
-Реально нажать `Add` и записать результат как `requested`, если нет видимой ошибки:
+Реально нажать `Add`, автоматически снять before/after проверку и записать результат:
 
 ```bash
 python3 scripts/telegram_invite_executor.py add-contact \
@@ -174,8 +175,15 @@ python3 scripts/telegram_invite_executor.py add-contact \
   --tab-id 614280764 \
   --skip-open \
   --confirm-add \
+  --verify-membership \
+  --verify-wait 10 \
   --record-result
 ```
+
+Семантика результата:
+- если `member_count` вырос на before/after проверке, `--record-result` может записать `joined`;
+- если рост не подтверждён, даже после реального клика `Add` записывается `requested`;
+- `execution_record.json` хранит не только steps, но и блок `verification` с before/after snapshot summary.
 
 Проверенные селекторы Telegram Web:
 - открыть панель: `#column-right .profile-container.can-add-members button.btn-circle.btn-corner`
@@ -203,6 +211,7 @@ python3 scripts/telegram_invite_executor.py record \
 - текущее агрегированное состояние job;
 - execution-config;
 - последние execution-plan;
+- последние execution-record;
 - preview следующей execution-пачки.
 
 ## GUI Wrapper
@@ -224,6 +233,10 @@ bash scripts/telegram_invite_executor_gui.sh
 - `report`
 
 GUI не заменяет CLI, но теперь закрывает обычный one-user operator loop без ручной сборки команд.
+В live-режиме GUI теперь умеет спросить:
+- нужно ли автоматическое before/after `inspect-chat` подтверждение;
+- сколько ждать перед повторной after-проверкой;
+- записывать ли итог обратно в state.
 
 ## Безопасная Семантика
 Этот слой не должен:
@@ -235,7 +248,7 @@ GUI не заменяет CLI, но теперь закрывает обычны
 1. менеджерит consented users;
 2. готовит execution-plan;
 3. открывает нужный чат через `site-control`;
-4. оператор выполняет безопасный invite workflow или запускает `add-contact` на одного пользователя;
+4. оператор выполняет безопасный invite workflow или запускает `add-contact` на одного пользователя с auto-verification before/after;
 5. результат записывается через `record`.
 
 ## Следующий Шаг

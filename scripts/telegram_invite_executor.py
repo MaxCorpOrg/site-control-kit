@@ -321,6 +321,109 @@ def _extract_member_count(text: str) -> tuple[int | None, str]:
     return int(digits), f"{count_text} members"
 
 
+def _chat_snapshot_summary(
+    *,
+    page_url: str = "",
+    member_count: int | None = None,
+    member_count_text: str = "",
+    add_members_visible: bool = False,
+    error: str = "",
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "page_url": page_url,
+        "member_count": member_count,
+        "member_count_text": member_count_text,
+        "add_members_visible": bool(add_members_visible),
+    }
+    if error:
+        payload["error"] = error
+    return payload
+
+
+def _snapshot_log_line(label: str, snapshot: dict[str, Any] | None) -> str:
+    if not isinstance(snapshot, dict):
+        return f"INFO: {label} snapshot missing"
+    error = _nonempty(snapshot.get("error"))
+    if error:
+        return f"WARN: {label} snapshot failed error={error}"
+    member_count = snapshot.get("member_count")
+    member_count_text = _nonempty(snapshot.get("member_count_text"))
+    page_url = _nonempty(snapshot.get("page_url"))
+    add_members_visible = int(bool(snapshot.get("add_members_visible")))
+    return (
+        f"INFO: {label} member_count={member_count!r} "
+        f"member_count_text={member_count_text!r} "
+        f"add_members_visible={add_members_visible} "
+        f"page_url={page_url!r}"
+    )
+
+
+def _read_chat_snapshot(run_step, browser_target: dict[str, Any], *, label_prefix: str = "") -> dict[str, Any]:
+    page_url_result = run_step(f"{label_prefix}page_url", _browser_action_command(browser_target, "page-url"))
+    text_result = run_step(f"{label_prefix}read_text", _browser_action_command(browser_target, "text", "body"))
+    html_result = run_step(f"{label_prefix}read_html", _browser_action_command(browser_target, "html", "body"), required=False)
+
+    page_url = _browser_payload_text(page_url_result, "url")
+    body_text = _browser_payload_text(text_result, "text")
+    body_html = _browser_payload_text(html_result, "html")
+    member_count, member_count_text = _extract_member_count(body_text)
+    return _chat_snapshot_summary(
+        page_url=page_url,
+        member_count=member_count,
+        member_count_text=member_count_text,
+        add_members_visible=("Add Members" in body_text) or ("can-add-members" in body_html),
+    )
+
+
+def _build_membership_verification(
+    before: dict[str, Any] | None,
+    after: dict[str, Any] | None,
+    after_wait: dict[str, Any] | None,
+) -> dict[str, Any]:
+    verification = {
+        "signals_checked": ["member_count_delta"],
+        "joined_confirmed": False,
+        "target_status": "requested",
+        "reason": "member_count_not_checked",
+        "confirmed_phase": "",
+        "confirmed_delta": 0,
+        "before": before,
+        "after": after,
+        "after_wait": after_wait,
+    }
+
+    baseline = before.get("member_count") if isinstance(before, dict) else None
+    if baseline is None:
+        verification["reason"] = "member_count_before_missing"
+        return verification
+
+    observed: list[tuple[str, dict[str, Any]]] = []
+    for phase, snapshot in (("after", after), ("after_wait", after_wait)):
+        if isinstance(snapshot, dict):
+            observed.append((phase, snapshot))
+
+    if not observed:
+        verification["reason"] = "member_count_after_missing"
+        return verification
+
+    saw_unreadable = False
+    for phase, snapshot in observed:
+        current = snapshot.get("member_count")
+        if current is None:
+            saw_unreadable = True
+            continue
+        if int(current) > int(baseline):
+            verification["joined_confirmed"] = True
+            verification["target_status"] = "joined"
+            verification["reason"] = "member_count_increased"
+            verification["confirmed_phase"] = phase
+            verification["confirmed_delta"] = int(current) - int(baseline)
+            return verification
+
+    verification["reason"] = "member_count_after_unreadable" if saw_unreadable else "member_count_unchanged"
+    return verification
+
+
 def _extract_tab_id(stdout_json: dict[str, Any]) -> int:
     data = stdout_json.get("data") if isinstance(stdout_json, dict) else None
     if not isinstance(data, dict):
@@ -483,6 +586,8 @@ def command_plan(args: argparse.Namespace) -> int:
         "operator_checklist": [
             "Проверьте, что invite link актуален и ведёт в нужный чат.",
             "Не отправляйте ссылку пользователям без consent=yes в invite_state.json.",
+            "Перед live add снимите inspect-chat или используйте add-contact с автопроверкой before/after.",
+            "Не ставьте joined без подтверждения роста счётчика или другого отдельного сигнала вступления.",
             "После фактической отправки обновите статус через telegram_invite_executor.py record.",
         ],
     }
@@ -567,22 +672,15 @@ def command_inspect_chat(args: argparse.Namespace) -> int:
         if opened_tab_id > 0:
             browser_target["tab_id"] = opened_tab_id
 
-    page_url_result = run_step("page_url", _browser_action_command(browser_target, "page-url"))
-    text_result = run_step("read_text", _browser_action_command(browser_target, "text", "body"))
-    html_result = run_step("read_html", _browser_action_command(browser_target, "html", "body"), required=False)
-
-    page_url = _browser_payload_text(page_url_result, "url")
-    body_text = _browser_payload_text(text_result, "text")
-    body_html = _browser_payload_text(html_result, "html")
-    member_count, member_count_text = _extract_member_count(body_text)
+    snapshot = _read_chat_snapshot(run_step, browser_target)
     response = {
         "status": "completed",
         "job_dir": str(job_dir),
         "chat_url": str(payload.get("chat_url") or ""),
-        "page_url": page_url,
-        "member_count": member_count,
-        "member_count_text": member_count_text,
-        "add_members_visible": ("Add Members" in body_text) or ("can-add-members" in body_html),
+        "page_url": snapshot["page_url"],
+        "member_count": snapshot["member_count"],
+        "member_count_text": snapshot["member_count_text"],
+        "add_members_visible": snapshot["add_members_visible"],
         "dry_run": bool(args.dry_run),
         "steps": steps,
     }
@@ -614,15 +712,22 @@ def command_add_contact(args: argparse.Namespace) -> int:
     browser_target = execution.get("browser_target") or {}
     search_query = _nonempty(args.search_query) or username.lstrip("@")
     execution_id = args.execution_id or _execution_id_now()
+    verify_membership = _bool_flag(
+        getattr(args, "verify_membership", None),
+        default=bool(args.confirm_add and not args.dry_run),
+    )
+    verify_wait = max(float(getattr(args, "verify_wait", 10.0) or 0.0), 0.0)
     log_lines = [
         f"INFO: add-contact started execution_id={execution_id}",
         f"INFO: username={username} search_query={search_query}",
         f"INFO: confirm_add={int(bool(args.confirm_add))} record_result={int(bool(args.record_result))}",
+        f"INFO: verify_membership={int(bool(verify_membership))} verify_wait={verify_wait}",
     ]
     steps: list[dict[str, Any]] = []
     selected_candidate: dict[str, str] | None = None
     outcome = "dry_run" if args.dry_run else "started"
     record_update: dict[str, str] | None = None
+    verification: dict[str, Any] | None = None
 
     def run_step(label: str, command: list[str], *, required: bool = True) -> dict[str, Any]:
         if args.dry_run:
@@ -633,6 +738,16 @@ def command_add_contact(args: argparse.Namespace) -> int:
         if required and int(result.get("returncode", 1) or 0) != 0:
             raise RuntimeError(f"{label} failed: {result.get('stderr') or result.get('stdout')}")
         return result
+
+    def capture_snapshot(label: str, *, required: bool) -> dict[str, Any]:
+        try:
+            snapshot = _read_chat_snapshot(run_step, browser_target, label_prefix=f"{label}:")
+        except Exception as exc:  # noqa: BLE001
+            if required:
+                raise
+            snapshot = _chat_snapshot_summary(error=str(exc))
+        log_lines.append(_snapshot_log_line(label, snapshot))
+        return snapshot
 
     try:
         if not args.skip_open:
@@ -648,6 +763,12 @@ def command_add_contact(args: argparse.Namespace) -> int:
             if opened_tab_id > 0:
                 browser_target["tab_id"] = opened_tab_id
                 log_lines.append(f"INFO: using opened tab_id={opened_tab_id}")
+
+        before_snapshot: dict[str, Any] | None = None
+        after_snapshot: dict[str, Any] | None = None
+        after_wait_snapshot: dict[str, Any] | None = None
+        if verify_membership and args.confirm_add and not args.dry_run:
+            before_snapshot = capture_snapshot("inspect_before", required=True)
 
         opened_add_members = False
         for selector in ADD_MEMBERS_OPEN_SELECTORS:
@@ -710,14 +831,26 @@ def command_add_contact(args: argparse.Namespace) -> int:
                 elif "popup-add-members active" in html_after:
                     outcome = "confirmation_still_open"
                 else:
-                    outcome = "confirmed_unverified"
+                    if verify_membership and not args.dry_run:
+                        after_snapshot = capture_snapshot("inspect_after", required=False)
+                        verification = _build_membership_verification(before_snapshot, after_snapshot, None)
+                        if not verification.get("joined_confirmed") and verify_wait > 0:
+                            time.sleep(verify_wait)
+                            after_wait_snapshot = capture_snapshot("inspect_after_wait", required=False)
+                            verification = _build_membership_verification(before_snapshot, after_snapshot, after_wait_snapshot)
+                    outcome = "joined_confirmed" if verification and verification.get("joined_confirmed") else "confirmed_unverified"
                     if args.record_result:
+                        target_status = "requested"
+                        reason = "live_add_members_confirmed_unverified"
+                        if verification and verification.get("joined_confirmed"):
+                            target_status = "joined"
+                            reason = "live_add_members_member_count_confirmed"
                         record_update = _record_user_status(
                             job_dir,
                             payload,
                             user,
-                            status="requested",
-                            reason="live_add_members_confirmed_unverified",
+                            status=target_status,
+                            reason=reason,
                         )
     except Exception as exc:  # noqa: BLE001
         if outcome in {"started", "dry_run"}:
@@ -732,6 +865,7 @@ def command_add_contact(args: argparse.Namespace) -> int:
             "search_query": search_query,
             "selected_candidate": selected_candidate,
             "record_update": record_update,
+            "verification": verification,
             "error": str(exc),
             "steps": steps,
         }
@@ -750,6 +884,7 @@ def command_add_contact(args: argparse.Namespace) -> int:
         "search_query": search_query,
         "selected_candidate": selected_candidate,
         "record_update": record_update,
+        "verification": verification,
         "steps": steps,
     }
     run_dir = _write_execution_record(job_dir, execution_id, response, log_lines)
@@ -812,6 +947,7 @@ def command_report(args: argparse.Namespace) -> int:
     payload = load_state(job_dir)
     summary = summarize_state(payload)
     executions = []
+    execution_records = []
     execution_root = _execution_runs_dir(job_dir)
     if execution_root.exists():
         for path in sorted(execution_root.glob("*/execution_plan.json"))[-5:]:
@@ -827,9 +963,27 @@ def command_report(args: argparse.Namespace) -> int:
                     "path": str(path),
                 }
             )
+        for path in sorted(execution_root.glob("*/execution_record.json"))[-5:]:
+            try:
+                record_payload = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            verification = record_payload.get("verification")
+            execution_records.append(
+                {
+                    "execution_id": str(record_payload.get("execution_id") or ""),
+                    "status": str(record_payload.get("status") or ""),
+                    "outcome": str(record_payload.get("outcome") or ""),
+                    "target_status": str(record_payload.get("target_status") or ""),
+                    "verification_reason": str(verification.get("reason") or "") if isinstance(verification, dict) else "",
+                    "joined_confirmed": bool(verification.get("joined_confirmed")) if isinstance(verification, dict) else False,
+                    "path": str(path),
+                }
+            )
     summary["job_dir"] = str(job_dir)
     summary["execution"] = _resolved_execution_config(payload)
     summary["latest_execution_plans"] = executions
+    summary["latest_execution_records"] = execution_records
     summary["next_execution_batch"] = _plan_users(
         payload,
         limit=args.limit,
@@ -956,7 +1110,20 @@ def build_parser() -> argparse.ArgumentParser:
     add_contact_parser.add_argument(
         "--record-result",
         action="store_true",
-        help="When final Add was clicked and no visible error was detected, move user to requested.",
+        help="When final Add was clicked and no visible error was detected, move user to requested or joined if verification confirms member-count growth.",
+    )
+    _add_bool_choice(
+        add_contact_parser,
+        "--verify-membership",
+        dest="verify_membership",
+        help_true="Capture inspect-chat style snapshots before/after live add and confirm joined only on a strong signal.",
+        help_false="Skip automatic before/after membership verification and keep the older requested-only confirmation path.",
+    )
+    add_contact_parser.add_argument(
+        "--verify-wait",
+        type=float,
+        default=10.0,
+        help="Seconds to wait before a delayed after-check when member count did not grow immediately.",
     )
     _add_bool_choice(
         add_contact_parser,

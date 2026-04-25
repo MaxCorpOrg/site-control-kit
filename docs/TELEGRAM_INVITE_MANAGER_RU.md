@@ -173,6 +173,7 @@ bash scripts/telegram_invite_manager_gui.sh
 - execution-plan через отдельный `Telegram Invite Executor`
 - browser-assisted `open-chat` через `site-control`
 - execution-record артефакты и update статусов после ручных действий
+- auto-verification before/after для live `add-contact`, чтобы `joined` фиксировался только по подтверждаемому сигналу
 
 ## Что Пока Не Реализовано
 На текущем этапе есть только безопасный operator-assisted execution path.

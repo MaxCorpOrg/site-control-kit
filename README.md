@@ -145,7 +145,8 @@ cd /home/max/site-control-kit
 - хранение execution-config внутри `invite_state.json`;
 - `execution_plan.json` и execution-логи;
 - `open-chat` через `python3 -m webcontrol browser ...`;
-- запись операторских результатов обратно в state через `record`.
+- запись операторских результатов обратно в state через `record`;
+- live `add-contact` с auto before/after `inspect-chat` verification, чтобы `joined` фиксировался только по росту `member_count` или другому отдельному подтверждению.
 
 Пример:
 

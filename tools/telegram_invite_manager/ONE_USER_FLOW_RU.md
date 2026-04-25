@@ -167,13 +167,16 @@ $JOB_DIR/executions/<timestamp>/execution_plan.json
   --tab-id "<TELEGRAM_TAB_ID>" \
   --skip-open \
   --confirm-add \
+  --verify-membership \
+  --verify-wait 10 \
   --record-result
 ```
 
 Важно:
 - без `--confirm-add` команда не нажимает финальную кнопку Telegram `Add`;
-- `--record-result` после успешного клика без видимой ошибки ставит `requested`, не `joined`;
-- `joined` ставить только если Telegram Web или список участников отдельно подтвердил вступление.
+- `--verify-membership` привязывает before/after `inspect-chat` к этому же execution record;
+- `--record-result` ставит `joined` только если before/after проверка подтвердила рост `member_count`, иначе ставит `requested`;
+- вручную писать `joined` только если Telegram Web, список участников или другой отдельный сигнал действительно подтвердил вступление.
 
 ## Проверить Состояние
 

@@ -61,11 +61,14 @@ cd /home/max/site-control-kit/tools/telegram_invite_manager
   --tab-id "<TELEGRAM_TAB_ID>" \
   --skip-open \
   --confirm-add \
+  --verify-membership \
+  --verify-wait 10 \
   --record-result
 ```
 
 Без `--confirm-add` команда выбирает пользователя и останавливается до внешнего действия добавления.
-Если Telegram не показывает явный `joined/added`, результат записывается как `requested`, а не как `joined`.
+Если before/after проверка не подтверждает рост `member_count`, результат записывается как `requested`, а не как `joined`.
+Сводка before/after теперь живёт прямо в `execution_record.json` в блоке `verification`.
 
 Перед и после live add можно штатно снять счётчик чата:
 

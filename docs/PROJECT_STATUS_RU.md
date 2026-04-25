@@ -49,11 +49,14 @@
   - снимать видимый `member_count` через `inspect-chat`;
   - открывать/активировать Telegram chat через `site-control`;
   - выполнять осторожный `add-contact` для одного consented пользователя через Telegram Web `Add Members`;
+  - автоматически привязывать before/after `inspect-chat` к live `add-contact`;
+  - писать `joined` только при подтверждённом росте `member_count`, иначе оставлять `requested`;
   - писать `execution_record.json` после ручных действий оператора.
 - GUI-обёртки invite-слоя выровнены с CLI:
   - добавлен общий GUI helper;
   - ошибки Python-команд теперь показываются через `zenity`, а не роняют wrapper молча;
-  - executor GUI теперь покрывает `inspect-chat`, `open-chat`, `add-contact dry/prepare/live`.
+  - executor GUI теперь покрывает `inspect-chat`, `open-chat`, `add-contact dry/prepare/live`;
+  - live-режим GUI умеет спросить auto-verification before/after и delay перед повторной after-проверкой.
 - Для следующего чата зафиксирован отдельный copy-paste prompt:
   - `tools/telegram_invite_manager/NEXT_CHAT_AGENT_PROMPT_RU.md`
   - он задаёт новому агенту стартовую точку, границы редактирования и обязательный порядок чтения.
@@ -123,7 +126,7 @@
   - при открытии такой страницы расширение вызывает `chrome.runtime.reload()` само.
 
 ## Проверено
-- Полный unit-набор сейчас зелёный: `110/110`.
+- Полный unit-набор сейчас зелёный: `134/134`.
 - После добавления Invite Manager полный unit-набор был зелёный: `117/117`.
 - После добавления Invite Executor полный unit-набор был зелёный: `123/123`.
 - После добавления one-user режима полный unit-набор зелёный: `127/127`.
@@ -133,8 +136,7 @@
   - `7/7 OK`
 - Новый `Invite Executor` покрыт unit-тестами:
   - `tests/test_telegram_invite_executor.py`
-  - `12/12 OK`
-- Для Invite Manager / Invite Executor пока нет живого Telegram invite smoke: hub в момент работы не был поднят, поэтому проверен только dry-run/CLI слой.
+  - `13/13 OK`
 - Dry-run smoke нового execution-слоя подтверждён:
   - job dir:
     - `/tmp/tg_invite_executor_smoke.GKdXBN/job`
@@ -223,6 +225,17 @@
     - live `Add` path работает;
     - рост количества участников по member count не подтверждён;
     - проверка `inspect-chat` до и после live add теперь обязательна.
+- После hardening auto-verification выполнен безопасный live smoke invite execution `2026-04-25`:
+  - inspect artifact:
+    - `/tmp/tg_invite_executor_inspect_20260425.json`
+  - report artifact:
+    - `/tmp/tg_invite_executor_report_20260425.json`
+  - факты:
+    - `inspect-chat` на живом bridge сработал через новый общий snapshot-helper;
+    - `open_or_activate_chat` открыл tab `614281030`;
+    - видимый счётчик прочитан как `2 667 members`;
+    - `report` теперь показывает `latest_execution_records` и их verification summary;
+    - live `Add` заново не выполнялся, чтобы не превращать smoke в реальное действие над пользователем.
 - Shell syntax и `py_compile` для последних изменений проходили зелёными.
 - Точечный прогон экспортёрных тестов после capability-preflight:
   - `tests.test_telegram_export_parser`
@@ -384,8 +397,9 @@
 
 ### 0. Invite execution пока operator-assisted
 Теперь кроме manager/state слоя есть и execution-слой, но он пока безопасно ограничен:
-- configure/plan/open-chat/record/report;
+- configure/plan/open-chat/inspect-chat/add-contact/record/report;
 - `open-chat` уже использует `site-control`;
+- `add-contact` теперь сам пишет verification evidence before/after;
 - actual Telegram invite action по-прежнему остаётся за оператором.
 
 Это осознанно:
@@ -413,8 +427,8 @@
 - повторный live smoke `fast` vs `deep`.
 
 ### Для Invite Manager
-- поднять hub и сделать первый живой smoke для `telegram_invite_executor.py open-chat`;
-- добавить безопасный orchestration path через invite links / join requests;
+- добавить более сильное подтверждение вступления через список участников или другой Telegram-visible signal поверх уже существующего `member_count` delta;
+- довести безопасный orchestration path через invite links / join requests;
 - не делать принудительное массовое добавление пользователей;
 - при первом live-шаге обязательно сохранять `run.json`/`log` аналогично существующим Telegram артефактам.
 

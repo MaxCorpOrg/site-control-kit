@@ -60,8 +60,8 @@ tools/telegram_invite_manager/NEXT_CHAT_AGENT_PROMPT_RU.md
 3. Настроить invite-link.
 4. Создать execution-plan на `limit 1`.
 5. Открыть чат через `site-control`.
-6. Если нужен контроль по счётчику, снять его через `inspect-chat`.
-7. Если нужен direct add через Telegram Web, использовать только `add-contact` на одного пользователя.
+6. Если нужен direct add через Telegram Web, использовать только `add-contact` на одного пользователя.
+7. Для live add предпочитать `add-contact --confirm-add --verify-membership --record-result`: он сам свяжет before/after `inspect-chat` с execution record.
 8. После ручного действия или live add записать результат через `record` либо `add-contact --record-result`.
 
 Полная команда лежит в `ONE_USER_FLOW_RU.md`.
@@ -107,7 +107,7 @@ bash -n scripts/telegram_invite_manager_gui.sh scripts/telegram_invite_executor_
 - Не делать multi-account обход лимитов.
 - Не использовать список usernames без подтверждённого согласия.
 - Не затирать state без бэкапа или явного запроса пользователя.
-- Не ставить `joined`, если Telegram не дал проверяемого сигнала вступления. Для подтверждённого клика `ADD` без видимого `joined/added` использовать `requested`.
+- Не ставить `joined`, если Telegram не дал проверяемого сигнала вступления. Сейчас безопасный автоматический сигнал в `add-contact` — рост `member_count` на before/after проверке; иначе использовать `requested`.
 
 ## Текущий Следующий Шаг
 

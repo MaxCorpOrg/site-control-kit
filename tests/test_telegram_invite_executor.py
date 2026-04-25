@@ -294,6 +294,8 @@ class TelegramInviteExecutorTests(unittest.TestCase):
                     allow_first_result=False,
                     confirm_add=False,
                     record_result=False,
+                    verify_membership=None,
+                    verify_wait=0,
                     active=None,
                     dry_run=True,
                 ),
@@ -329,11 +331,11 @@ class TelegramInviteExecutorTests(unittest.TestCase):
             with mock.patch.object(self.executor, "_run_browser_command", side_effect=fake_run):
                 rc, payload = self._call_json(
                     self.executor.command_add_contact,
-                    Namespace(
-                        job_dir=str(job_dir),
-                        username="@alice_123",
-                        search_query=None,
-                        client_id=None,
+                Namespace(
+                    job_dir=str(job_dir),
+                    username="@alice_123",
+                    search_query=None,
+                    client_id=None,
                         tab_id=123,
                         url_pattern=None,
                         execution_id="20260425T080100Z",
@@ -341,18 +343,93 @@ class TelegramInviteExecutorTests(unittest.TestCase):
                         confirm_wait=0,
                         result_wait=0,
                         skip_open=True,
+                    allow_first_result=False,
+                    confirm_add=True,
+                    record_result=True,
+                    verify_membership=True,
+                    verify_wait=0,
+                    active=None,
+                    dry_run=False,
+                ),
+            )
+            self.assertEqual(rc, 0)
+            self.assertEqual(payload["outcome"], "confirmed_unverified")
+            self.assertEqual(payload["selected_candidate"]["peer_id"], "1404471788")
+            self.assertEqual(payload["verification"]["reason"], "member_count_unchanged")
+            state = self.manager.load_state(job_dir)
+            self.assertEqual(state["users"][0]["status"], "requested")
+
+    def test_add_contact_confirm_records_joined_when_member_count_grows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            job_dir = Path(tmpdir) / "job"
+            self._seed_state(job_dir)
+            html_calls = 0
+            text_calls = 0
+
+            def fake_run(_repo_root, command):
+                nonlocal html_calls, text_calls
+                action = command[-2] if command[-1] == "body" else command[-1]
+                if action == "html":
+                    html_calls += 1
+                    if html_calls == 1:
+                        payload = {"ok": True, "data": {"html": '<div class="profile-container can-add-members"></div>'}}
+                    elif html_calls == 2:
+                        payload = {
+                            "ok": True,
+                            "data": {
+                                "html": """
+                                <div class="tabs-tab sidebar-slider-item add-members-container active">
+                                  <a class="row chatlist-chat row-clickable" data-peer-id="1404471788">
+                                    <span class="peer-title" dir="auto">Alice</span>
+                                  </a>
+                                </div>
+                                """,
+                            },
+                        }
+                    elif html_calls == 3:
+                        payload = {"ok": True, "data": {"html": '<div class="chat-body"></div>'}}
+                    else:
+                        payload = {"ok": True, "data": {"html": '<div class="profile-container can-add-members"></div>'}}
+                elif action == "text":
+                    text_calls += 1
+                    count_text = "2 440 members" if text_calls == 1 else "2 441 members"
+                    payload = {"ok": True, "data": {"text": count_text}}
+                elif action == "page-url":
+                    payload = {"ok": True, "data": {"url": "https://web.telegram.org/k/#@Zhirotop_shop"}}
+                else:
+                    payload = {"ok": True, "data": {"clicked": True}}
+                return subprocess.CompletedProcess(command, 0, stdout=json.dumps(payload), stderr="")
+
+            with mock.patch.object(self.executor, "_run_browser_command", side_effect=fake_run):
+                rc, payload = self._call_json(
+                    self.executor.command_add_contact,
+                    Namespace(
+                        job_dir=str(job_dir),
+                        username="@alice_123",
+                        search_query=None,
+                        client_id=None,
+                        tab_id=123,
+                        url_pattern=None,
+                        execution_id="20260425T080200Z",
+                        search_wait=0,
+                        confirm_wait=0,
+                        result_wait=0,
+                        skip_open=True,
                         allow_first_result=False,
                         confirm_add=True,
                         record_result=True,
+                        verify_membership=True,
+                        verify_wait=0,
                         active=None,
                         dry_run=False,
                     ),
                 )
             self.assertEqual(rc, 0)
-            self.assertEqual(payload["outcome"], "confirmed_unverified")
-            self.assertEqual(payload["selected_candidate"]["peer_id"], "1404471788")
+            self.assertEqual(payload["outcome"], "joined_confirmed")
+            self.assertTrue(payload["verification"]["joined_confirmed"])
+            self.assertEqual(payload["verification"]["reason"], "member_count_increased")
             state = self.manager.load_state(job_dir)
-            self.assertEqual(state["users"][0]["status"], "requested")
+            self.assertEqual(state["users"][0]["status"], "joined")
 
     def test_record_updates_state_and_writes_execution_record(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -400,6 +477,7 @@ class TelegramInviteExecutorTests(unittest.TestCase):
             )
             self.assertEqual(rc, 0)
             self.assertTrue(payload["latest_execution_plans"])
+            self.assertEqual(payload["latest_execution_records"], [])
             self.assertEqual(payload["next_execution_batch"][0]["action"], "prepare_invite_link")
 
 
