@@ -31,6 +31,7 @@ cd /home/max/site-control-kit
 Есть execution-слой:
 - `configure`;
 - `plan`;
+- `inspect-chat`;
 - `open-chat`;
 - `add-contact` для одного consented контакта через Telegram Web `Add Members`;
 - `record`;
@@ -52,8 +53,9 @@ tools/telegram_invite_manager/
 3. Настроить invite-link.
 4. Создать execution-plan на `limit 1`.
 5. Открыть чат через `site-control`.
-6. Если нужен direct add через Telegram Web, использовать только `add-contact` на одного пользователя.
-7. После ручного действия или live add записать результат через `record` либо `add-contact --record-result`.
+6. Если нужен контроль по счётчику, снять его через `inspect-chat`.
+7. Если нужен direct add через Telegram Web, использовать только `add-contact` на одного пользователя.
+8. После ручного действия или live add записать результат через `record` либо `add-contact --record-result`.
 
 Полная команда лежит в `ONE_USER_FLOW_RU.md`.
 
@@ -222,3 +224,32 @@ https://t.me/Zhirotop_shop
 - live UI-path до финального `ADD` работает;
 - итог Telegram Web неоднозначный, поэтому не писать `joined` без отдельной проверки в списке участников;
 - для повторения использовать новую команду `telegram-invite-executor add-contact`, но только по одному consented пользователю.
+
+## Live Add Test: `@olegoleg48` -> `Zhirotop_shop`
+
+Дата: `2026-04-25`
+
+Что проверено:
+- до live add `inspect-chat` показал `2 440 members`;
+- `@olegoleg48` добавлен в `invite_state.json` и переведён в `checked`;
+- `add-contact --confirm-add --record-result` нашёл контакт как `Oleg S`, `data-peer-id="1410391920"`;
+- popup подтверждения закрылся, видимой ошибки Telegram не было;
+- после live add `inspect-chat` сразу и после ожидания показал те же `2 440 members`.
+
+Финальная запись в state:
+
+```text
+@olegoleg48: checked -> requested
+reason: live_add_members_confirmed_unverified
+```
+
+Артефакт:
+
+```text
+/home/max/telegram_invite_jobs/chat_Zhirotop_shop/executions/20260425T061336Z/execution_record.json
+```
+
+Практический вывод:
+- кнопка `Add` реально нажимается;
+- рост member count не подтверждён;
+- `inspect-chat` теперь нужен как обязательная проверка до и после live add.

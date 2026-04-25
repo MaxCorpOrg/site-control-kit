@@ -191,6 +191,68 @@ class TelegramInviteExecutorTests(unittest.TestCase):
             self.assertIn("--client-id", payload["command"])
             self.assertIn("activate", payload["command"])
 
+    def test_extract_member_count(self) -> None:
+        count, count_text = self.executor._extract_member_count("Жиротоп Shop\n2 440 members, 153 online")
+        self.assertEqual(count, 2440)
+        self.assertEqual(count_text, "2 440 members")
+
+    def test_inspect_chat_dry_run_builds_read_steps(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            job_dir = Path(tmpdir) / "job"
+            self._seed_state(job_dir)
+            rc, payload = self._call_json(
+                self.executor.command_inspect_chat,
+                Namespace(
+                    job_dir=str(job_dir),
+                    client_id=None,
+                    tab_id=123,
+                    url_pattern=None,
+                    skip_open=True,
+                    active=None,
+                    dry_run=True,
+                ),
+            )
+            self.assertEqual(rc, 0)
+            self.assertIsNone(payload["member_count"])
+            self.assertEqual(
+                [step["label"] for step in payload["steps"]],
+                ["page_url", "read_text", "read_html"],
+            )
+
+    def test_inspect_chat_parses_visible_member_count(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            job_dir = Path(tmpdir) / "job"
+            self._seed_state(job_dir)
+
+            def fake_run(_repo_root, command):
+                action = command[-2] if command[-1] == "body" else command[-1]
+                if action == "page-url":
+                    payload = {"ok": True, "data": {"url": "https://web.telegram.org/k/#@Zhirotop_shop"}}
+                elif action == "text":
+                    payload = {"ok": True, "data": {"text": "Жиротоп Shop\n2 440 members, 153 online\nAdd Members"}}
+                else:
+                    payload = {"ok": True, "data": {"html": '<div class="profile-container can-add-members"></div>'}}
+                return subprocess.CompletedProcess(command, 0, stdout=json.dumps(payload), stderr="")
+
+            with mock.patch.object(self.executor, "_run_browser_command", side_effect=fake_run):
+                rc, payload = self._call_json(
+                    self.executor.command_inspect_chat,
+                    Namespace(
+                        job_dir=str(job_dir),
+                        client_id=None,
+                        tab_id=123,
+                        url_pattern=None,
+                        skip_open=True,
+                        active=None,
+                        dry_run=False,
+                    ),
+                )
+            self.assertEqual(rc, 0)
+            self.assertEqual(payload["member_count"], 2440)
+            self.assertEqual(payload["member_count_text"], "2 440 members")
+            self.assertTrue(payload["add_members_visible"])
+            self.assertEqual(payload["page_url"], "https://web.telegram.org/k/#@Zhirotop_shop")
+
     def test_parse_add_members_candidates(self) -> None:
         html_payload = """
         <div class="tabs-tab sidebar-slider-item add-members-container active">

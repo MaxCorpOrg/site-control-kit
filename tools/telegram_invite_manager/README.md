@@ -19,7 +19,13 @@ cd /home/max/site-control-kit/tools/telegram_invite_manager
 
 ./bin/telegram-invite-manager --help
 ./bin/telegram-invite-executor --help
+./bin/gui-manager
+./bin/gui-executor
 ```
+
+GUI-обёртки теперь покрывают основной операторский поток:
+- manager GUI: `init`, `status`, `next`, `add user`, `run`, `mark`, `report`;
+- executor GUI: `configure`, `plan`, `inspect-chat`, `open-chat`, `add-contact dry/prepare/live`, `record`, `report`.
 
 ## Один Пользователь
 
@@ -60,6 +66,15 @@ cd /home/max/site-control-kit/tools/telegram_invite_manager
 
 Без `--confirm-add` команда выбирает пользователя и останавливается до внешнего действия добавления.
 Если Telegram не показывает явный `joined/added`, результат записывается как `requested`, а не как `joined`.
+
+Перед и после live add можно штатно снять счётчик чата:
+
+```bash
+./bin/telegram-invite-executor inspect-chat \
+  --job-dir "/home/max/telegram_invite_jobs/chat_Zhirotop_shop" \
+  --tab-id "<TELEGRAM_TAB_ID>" \
+  --skip-open
+```
 
 ## Агентский Документ
 

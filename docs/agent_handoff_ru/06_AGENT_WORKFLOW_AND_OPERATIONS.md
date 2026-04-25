@@ -45,6 +45,7 @@ sed -n '1,260p' docs/TELEGRAM_INVITE_EXECUTOR_RU.md
 
 Safe rule:
 - `add-contact` использовать только для одного пользователя из `invite_state.json` с `consent=yes`;
+- `inspect-chat` использовать до и после live add, чтобы сверять member count;
 - финальный Telegram `Add` выполнять только с явным `--confirm-add`;
 - если нет отдельного подтверждения `joined/added`, писать статус `requested`, а не `joined`.
 

@@ -45,9 +45,14 @@
 - Новый execution-слой умеет:
   - хранить invite-link и browser-target в `invite_state.json`;
   - строить `execution_plan.json`;
+  - снимать видимый `member_count` через `inspect-chat`;
   - открывать/активировать Telegram chat через `site-control`;
   - выполнять осторожный `add-contact` для одного consented пользователя через Telegram Web `Add Members`;
   - писать `execution_record.json` после ручных действий оператора.
+- GUI-обёртки invite-слоя выровнены с CLI:
+  - добавлен общий GUI helper;
+  - ошибки Python-команд теперь показываются через `zenity`, а не роняют wrapper молча;
+  - executor GUI теперь покрывает `inspect-chat`, `open-chat`, `add-contact dry/prepare/live`.
 
 ### Безопасность данных Telegram
 - Введены `identity_history.json`, `review.txt`, `conflicts.json` и quarantine-логика.
@@ -118,13 +123,13 @@
 - После добавления Invite Manager полный unit-набор был зелёный: `117/117`.
 - После добавления Invite Executor полный unit-набор был зелёный: `123/123`.
 - После добавления one-user режима полный unit-набор зелёный: `127/127`.
-- После добавления `add-contact` для одного consented пользователя полный unit-набор зелёный: `130/130`.
+- После добавления `add-contact` и `inspect-chat` для одного consented пользователя полный unit-набор зелёный: `133/133`.
 - Новый `Invite Manager` покрыт unit-тестами:
   - `tests/test_telegram_invite_manager.py`
   - `7/7 OK`
 - Новый `Invite Executor` покрыт unit-тестами:
   - `tests/test_telegram_invite_executor.py`
-  - `9/9 OK`
+  - `12/12 OK`
 - Для Invite Manager / Invite Executor пока нет живого Telegram invite smoke: hub в момент работы не был поднят, поэтому проверен только dry-run/CLI слой.
 - Dry-run smoke нового execution-слоя подтверждён:
   - job dir:
@@ -199,6 +204,21 @@
     - state записан как `requested`, не `joined`.
   - execution record:
     - `/home/max/telegram_invite_jobs/chat_Zhirotop_shop/executions/20260425T052501Z/execution_record.json`
+- Live add test для `@olegoleg48 -> https://t.me/Zhirotop_shop` выполнен `2026-04-25`:
+  - before/after verification:
+    - `inspect-chat` до действия показал `2 440 members`;
+    - `inspect-chat` после действия и после ожидания также показал `2 440 members`.
+  - live add result:
+    - `add-contact` нашёл пользователя как `Oleg S`, `data-peer-id="1410391920"`;
+    - финальный `Add` был нажат;
+    - видимых ошибок Telegram не показал;
+    - state записан как `requested`, не `joined`.
+  - execution record:
+    - `/home/max/telegram_invite_jobs/chat_Zhirotop_shop/executions/20260425T061336Z/execution_record.json`
+  - практический вывод:
+    - live `Add` path работает;
+    - рост количества участников по member count не подтверждён;
+    - проверка `inspect-chat` до и после live add теперь обязательна.
 - Shell syntax и `py_compile` для последних изменений проходили зелёными.
 - Точечный прогон экспортёрных тестов после capability-preflight:
   - `tests.test_telegram_export_parser`

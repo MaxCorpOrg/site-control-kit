@@ -42,6 +42,7 @@ except ImportError:
 
 DEFAULT_MESSAGE_TEMPLATE = "Привет! Вот ссылка для вступления в чат: {invite_link}"
 DEFAULT_EXECUTION_STATUSES = ("checked",)
+MEMBER_COUNT_RE = re.compile(r"(?P<count>\d[\d\s,.]*)\s+members?\b", re.IGNORECASE)
 ADD_MEMBERS_OPEN_SELECTORS = (
     "#column-right .profile-container.can-add-members button.btn-circle.btn-corner",
     "#column-right .profile-container.can-add-members button.btn-circle",
@@ -309,6 +310,17 @@ def _browser_payload_text(payload: dict[str, Any], key: str) -> str:
     return str(data.get(key) or "")
 
 
+def _extract_member_count(text: str) -> tuple[int | None, str]:
+    match = MEMBER_COUNT_RE.search(str(text or ""))
+    if not match:
+        return None, ""
+    count_text = " ".join(str(match.group("count") or "").split())
+    digits = re.sub(r"\D", "", count_text)
+    if not digits:
+        return None, ""
+    return int(digits), f"{count_text} members"
+
+
 def _extract_tab_id(stdout_json: dict[str, Any]) -> int:
     data = stdout_json.get("data") if isinstance(stdout_json, dict) else None
     if not isinstance(data, dict):
@@ -516,6 +528,66 @@ def command_open_chat(args: argparse.Namespace) -> int:
         response["stdout_json"] = {}
     print(json.dumps(response, ensure_ascii=False, indent=2))
     return 0 if proc.returncode == 0 else int(proc.returncode)
+
+
+def command_inspect_chat(args: argparse.Namespace) -> int:
+    job_dir = Path(args.job_dir).expanduser()
+    payload = load_state(job_dir)
+    repo_root = Path(__file__).resolve().parents[1]
+    execution = _resolved_execution_config(
+        payload,
+        client_id=args.client_id,
+        tab_id=args.tab_id,
+        url_pattern=args.url_pattern,
+        active=args.active,
+    )
+    browser_target = execution.get("browser_target") or {}
+    steps: list[dict[str, Any]] = []
+
+    def run_step(label: str, command: list[str], *, required: bool = True) -> dict[str, Any]:
+        if args.dry_run:
+            result = {"label": label, "command": command, "dry_run": True, "returncode": 0, "stdout_json": {}}
+        else:
+            result = {"label": label, **_run_browser_json(repo_root, command)}
+        steps.append(result)
+        if required and int(result.get("returncode", 1) or 0) != 0:
+            raise RuntimeError(f"{label} failed: {result.get('stderr') or result.get('stdout')}")
+        return result
+
+    if not args.skip_open:
+        open_result = run_step(
+            "open_or_activate_chat",
+            _browser_command(
+                repo_root,
+                chat_url=str(payload.get("chat_url") or ""),
+                browser_target=browser_target,
+            ),
+        )
+        opened_tab_id = _extract_tab_id(open_result.get("stdout_json") or {})
+        if opened_tab_id > 0:
+            browser_target["tab_id"] = opened_tab_id
+
+    page_url_result = run_step("page_url", _browser_action_command(browser_target, "page-url"))
+    text_result = run_step("read_text", _browser_action_command(browser_target, "text", "body"))
+    html_result = run_step("read_html", _browser_action_command(browser_target, "html", "body"), required=False)
+
+    page_url = _browser_payload_text(page_url_result, "url")
+    body_text = _browser_payload_text(text_result, "text")
+    body_html = _browser_payload_text(html_result, "html")
+    member_count, member_count_text = _extract_member_count(body_text)
+    response = {
+        "status": "completed",
+        "job_dir": str(job_dir),
+        "chat_url": str(payload.get("chat_url") or ""),
+        "page_url": page_url,
+        "member_count": member_count,
+        "member_count_text": member_count_text,
+        "add_members_visible": ("Add Members" in body_text) or ("can-add-members" in body_html),
+        "dry_run": bool(args.dry_run),
+        "steps": steps,
+    }
+    print(json.dumps(response, ensure_ascii=False, indent=2))
+    return 0
 
 
 def command_add_contact(args: argparse.Namespace) -> int:
@@ -836,6 +908,25 @@ def build_parser() -> argparse.ArgumentParser:
     )
     open_parser.add_argument("--dry-run", action="store_true")
     open_parser.set_defaults(func=command_open_chat)
+
+    inspect_parser = subparsers.add_parser(
+        "inspect-chat",
+        help="Read current Telegram chat view and extract visible member count from Telegram Web text.",
+    )
+    inspect_parser.add_argument("--job-dir", required=True)
+    inspect_parser.add_argument("--client-id")
+    inspect_parser.add_argument("--tab-id", type=int)
+    inspect_parser.add_argument("--url-pattern")
+    inspect_parser.add_argument("--skip-open", action="store_true", help="Assume target chat is already open on the selected tab.")
+    _add_bool_choice(
+        inspect_parser,
+        "--active",
+        dest="active",
+        help_true="Prefer active tab when browser target is implicit.",
+        help_false="Do not force active tab preference in browser target.",
+    )
+    inspect_parser.add_argument("--dry-run", action="store_true")
+    inspect_parser.set_defaults(func=command_inspect_chat)
 
     add_contact_parser = subparsers.add_parser(
         "add-contact",

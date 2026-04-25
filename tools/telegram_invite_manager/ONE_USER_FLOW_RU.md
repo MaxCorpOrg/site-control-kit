@@ -82,6 +82,23 @@ $JOB_DIR/executions/<timestamp>/execution_plan.json
   --job-dir "$JOB_DIR"
 ```
 
+## 5A. Снять Текущий Счётчик Чата
+
+Если чат уже открыт в известной вкладке Telegram Web, можно штатно снять видимый счётчик участников:
+
+```bash
+./bin/telegram-invite-executor inspect-chat \
+  --job-dir "$JOB_DIR" \
+  --tab-id "<TELEGRAM_TAB_ID>" \
+  --skip-open
+```
+
+Команда вернёт:
+- `page_url`;
+- `member_count`;
+- `member_count_text`;
+- признак `add_members_visible`.
+
 ## 6. Записать Результат
 
 Если ссылка отправлена:
@@ -289,4 +306,40 @@ cd /home/max/site-control-kit/tools/telegram_invite_manager
 
 ```text
 /home/max/telegram_invite_jobs/chat_Zhirotop_shop/executions/20260425T052501Z/execution_record.json
+```
+
+## Live Add Test: `@olegoleg48`
+
+Дата: `2026-04-25`
+
+Пользователь был добавлен в тот же job:
+
+```text
+/home/max/telegram_invite_jobs/chat_Zhirotop_shop/
+```
+
+Проверка перед live add:
+- `inspect-chat` показал `2 440 members`.
+
+Live add:
+- `add-user` создал запись `@olegoleg48`;
+- `mark --status checked` перевёл её в `checked`;
+- `add-contact --confirm-add --record-result` нашёл пользователя как `Oleg S`, `data-peer-id="1410391920"`;
+- финальная кнопка `Add` была нажата;
+- статус в state записан как `requested`.
+
+Проверка после live add:
+- повторный `inspect-chat` сразу после действия показал `2 440 members`;
+- повторная проверка через ожидание тоже показала `2 440 members`;
+- явных ошибок `privacy/cannot/too many/error` не было.
+
+Вывод:
+- UI-path до реального `Add` работает;
+- рост счётчика участников не подтверждён;
+- для таких кейсов не писать `joined`, пока Telegram не даст отдельного подтверждения.
+
+Артефакт:
+
+```text
+/home/max/telegram_invite_jobs/chat_Zhirotop_shop/executions/20260425T061336Z/execution_record.json
 ```

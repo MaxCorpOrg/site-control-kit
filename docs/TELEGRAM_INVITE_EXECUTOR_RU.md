@@ -24,6 +24,7 @@
 `Invite Executor` использует тот же `invite_state.json`, но работает уже на слое исполнения:
 - `configure`
 - `plan`
+- `inspect-chat`
 - `open-chat`
 - `add-contact`
 - `record`
@@ -113,6 +114,25 @@ python3 scripts/telegram_invite_executor.py open-chat \
   --dry-run
 ```
 
+### `inspect-chat`
+Считывает текущий Telegram Web view и возвращает:
+- `page_url`;
+- видимый `member_count`;
+- исходный `member_count_text`;
+- признак `add_members_visible`.
+
+Это штатная команда для проверки счётчика до и после `add-contact`.
+
+Пример:
+
+```bash
+cd /home/max/site-control-kit
+python3 scripts/telegram_invite_executor.py inspect-chat \
+  --job-dir "/home/max/telegram_invite_jobs/chat_Zhirotop_shop" \
+  --tab-id 614280764 \
+  --skip-open
+```
+
 ### `add-contact`
 Пробует добавить ровно одного consented пользователя через Telegram Web `Add Members`.
 
@@ -192,7 +212,18 @@ python3 scripts/telegram_invite_executor.py record \
 bash scripts/telegram_invite_executor_gui.sh
 ```
 
-Он не заменяет CLI, а только упрощает операторский слой.
+Теперь GUI покрывает основные operator actions:
+- `configure`
+- `plan`
+- `inspect-chat`
+- `open-chat`
+- `add-contact dry`
+- `add-contact prepare`
+- `add-contact live`
+- `record`
+- `report`
+
+GUI не заменяет CLI, но теперь закрывает обычный one-user operator loop без ручной сборки команд.
 
 ## Безопасная Семантика
 Этот слой не должен:
@@ -260,4 +291,33 @@ reason: live_add_members_confirmed_unverified_20260425
 
 ```text
 /home/max/telegram_invite_jobs/chat_Zhirotop_shop/executions/20260425T052501Z/execution_record.json
+```
+
+### Live Add `@olegoleg48` -> `Zhirotop_shop`
+
+Дата: `2026-04-25`
+
+Проверен тот же live path, но уже с отдельной проверкой счётчика до и после:
+- `inspect-chat` до действия показал `2 440 members`;
+- `add-contact --confirm-add --record-result` нашёл пользователя как `Oleg S`, `data-peer-id="1410391920"`;
+- финальная кнопка `Add` была нажата;
+- видимой ошибки Telegram не было;
+- `inspect-chat` сразу после действия и после ожидания показал те же `2 440 members`.
+
+State записан осторожно:
+
+```text
+@olegoleg48: checked -> requested
+reason: live_add_members_confirmed_unverified
+```
+
+Практический вывод:
+- `add-contact` доходит до реального `Add`;
+- Telegram Web не подтверждает рост количества участников;
+- для live add теперь нужно фиксировать не только popup/result state, но и `inspect-chat` before/after.
+
+Артефакт:
+
+```text
+/home/max/telegram_invite_jobs/chat_Zhirotop_shop/executions/20260425T061336Z/execution_record.json
 ```
