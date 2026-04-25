@@ -26,6 +26,7 @@
   - `tools/telegram_invite_manager/`
   - `tools/telegram_invite_manager/AGENT_GUIDE_RU.md`
   - `tools/telegram_invite_manager/ONE_USER_FLOW_RU.md`
+  - `tools/telegram_invite_manager/NEXT_CHAT_AGENT_PROMPT_RU.md`
   - `tools/telegram_invite_manager/bin/*`
 - Добавлен новый безопасный инструмент `scripts/telegram_invite_manager.py`.
 - Он не делает массовый инвайт и не обходит лимиты Telegram.
@@ -53,6 +54,9 @@
   - добавлен общий GUI helper;
   - ошибки Python-команд теперь показываются через `zenity`, а не роняют wrapper молча;
   - executor GUI теперь покрывает `inspect-chat`, `open-chat`, `add-contact dry/prepare/live`.
+- Для следующего чата зафиксирован отдельный copy-paste prompt:
+  - `tools/telegram_invite_manager/NEXT_CHAT_AGENT_PROMPT_RU.md`
+  - он задаёт новому агенту стартовую точку, границы редактирования и обязательный порядок чтения.
 
 ### Безопасность данных Telegram
 - Введены `identity_history.json`, `review.txt`, `conflicts.json` и quarantine-логика.

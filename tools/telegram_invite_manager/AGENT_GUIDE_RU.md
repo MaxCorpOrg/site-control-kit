@@ -16,6 +16,7 @@ cd /home/max/site-control-kit
 - `docs/TELEGRAM_INVITE_MANAGER_RU.md`
 - `docs/TELEGRAM_INVITE_EXECUTOR_RU.md`
 - `tools/telegram_invite_manager/README.md`
+- `tools/telegram_invite_manager/NEXT_CHAT_AGENT_PROMPT_RU.md`
 - `tools/telegram_invite_manager/ONE_USER_FLOW_RU.md`
 
 ## Что Уже Сделано
@@ -44,6 +45,12 @@ cd /home/max/site-control-kit
 
 ```text
 tools/telegram_invite_manager/
+```
+
+Есть отдельный copy-paste prompt для нового чата:
+
+```text
+tools/telegram_invite_manager/NEXT_CHAT_AGENT_PROMPT_RU.md
 ```
 
 ## Как Работать С Одним Пользователем

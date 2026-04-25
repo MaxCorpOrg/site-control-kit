@@ -84,6 +84,12 @@ cd /home/max/site-control-kit/tools/telegram_invite_manager
 AGENT_GUIDE_RU.md
 ```
 
+Готовый prompt для нового чата лежит здесь:
+
+```text
+NEXT_CHAT_AGENT_PROMPT_RU.md
+```
+
 Потом смотреть:
 - `ONE_USER_FLOW_RU.md`
 - `../../docs/TELEGRAM_INVITE_MANAGER_RU.md`
