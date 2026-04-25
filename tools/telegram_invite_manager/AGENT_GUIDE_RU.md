@@ -61,7 +61,7 @@ tools/telegram_invite_manager/NEXT_CHAT_AGENT_PROMPT_RU.md
 4. Создать execution-plan на `limit 1`.
 5. Открыть чат через `site-control`.
 6. Если нужен direct add через Telegram Web, использовать только `add-contact` на одного пользователя.
-7. Для live add предпочитать `add-contact --confirm-add --verify-membership --record-result`: он сам свяжет before/after `inspect-chat` с execution record.
+7. Для live add предпочитать `add-contact --confirm-add --verify-membership --record-result`: он сам свяжет before/after `inspect-chat` с execution record и поставит `joined` только по сильному сигналу.
 8. После ручного действия или live add записать результат через `record` либо `add-contact --record-result`.
 
 Полная команда лежит в `ONE_USER_FLOW_RU.md`.
@@ -107,7 +107,7 @@ bash -n scripts/telegram_invite_manager_gui.sh scripts/telegram_invite_executor_
 - Не делать multi-account обход лимитов.
 - Не использовать список usernames без подтверждённого согласия.
 - Не затирать state без бэкапа или явного запроса пользователя.
-- Не ставить `joined`, если Telegram не дал проверяемого сигнала вступления. Сейчас безопасный автоматический сигнал в `add-contact` — рост `member_count` на before/after проверке; иначе использовать `requested`.
+- Не ставить `joined`, если Telegram не дал проверяемого сигнала вступления. Сейчас безопасные автоматические сигналы в `add-contact` — появление выбранного `peer_id` в видимом member list или рост `member_count` на before/after проверке; иначе использовать `requested`.
 
 ## Текущий Следующий Шаг
 
@@ -260,3 +260,22 @@ reason: live_add_members_confirmed_unverified
 - кнопка `Add` реально нажимается;
 - рост member count не подтверждён;
 - `inspect-chat` теперь нужен как обязательная проверка до и после live add.
+
+## Safe Smoke: `inspect-chat` после `t.me -> web.telegram`
+
+Дата: `2026-04-25`
+
+Что подтверждено:
+- job `/home/max/telegram_invite_jobs/chat_Zhirotop_shop/` всё ещё хранит `chat_url = https://t.me/Zhirotop_shop`;
+- `inspect-chat` без явного `tab_id` теперь сам открывает `https://web.telegram.org/k/#@Zhirotop_shop`;
+- живой snapshot вернул `2 667 members`;
+- в `visible_member_peers` попал видимый участник `1960795556 / @joinhide9_bot`.
+
+Артефакт:
+
+```text
+/tmp/tg_invite_executor_inspect_members_20260425_v3.json
+```
+
+Следующий практический шаг:
+- подтвердить `joined` ещё и за пределами текущего видимого списка участников, если нужный peer не попадает в правую панель сразу.

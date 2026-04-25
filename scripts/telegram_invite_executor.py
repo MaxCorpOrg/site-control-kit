@@ -11,6 +11,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 try:
     from scripts.telegram_invite_manager import (
@@ -52,6 +53,22 @@ ADD_MEMBERS_SEARCH_SELECTOR = ".add-members-container .selector-search-input"
 ADD_MEMBERS_CONFIRM_SELECTOR = ".add-members-container > .sidebar-content > button.btn-circle.btn-corner"
 ADD_MEMBERS_POPUP_ADD_SELECTOR = ".popup-add-members .popup-buttons button:nth-child(1)"
 ADD_MEMBERS_CLOSE_SELECTOR = ".add-members-container .sidebar-close-button"
+MEMBERS_TAB_MARKERS = (
+    'search-super-tab-container search-super-container-members tabs-tab active',
+    'search-super-tab-container search-super-container-members tabs-tab',
+)
+MEMBERS_TAB_STOP_MARKERS = (
+    'search-super-tab-container search-super-container-media',
+    'search-super-tab-container search-super-container-gifts',
+    'search-super-tab-container search-super-container-saved',
+    'search-super-tab-container search-super-container-files',
+    'search-super-tab-container search-super-container-links',
+    'search-super-tab-container search-super-container-music',
+    'search-super-tab-container search-super-container-voice',
+    'search-super-tab-container search-super-container-groups',
+    'search-super-tab-container search-super-container-similar',
+)
+PUBLIC_TELEGRAM_HANDLE_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{4,31}$")
 
 
 def _execution_runs_dir(job_dir: Path) -> Path:
@@ -246,8 +263,25 @@ def _browser_command(
     if url_pattern:
         command.extend(["--url-pattern", url_pattern, "activate"])
         return command
-    command.extend(["new-tab", chat_url])
+    command.extend(["new-tab", _preferred_chat_url(chat_url)])
     return command
+
+
+def _preferred_chat_url(chat_url: str) -> str:
+    value = _nonempty(chat_url)
+    if not value:
+        return ""
+    parsed = urlparse(value)
+    host = (parsed.netloc or "").lower()
+    if host not in {"t.me", "telegram.me", "www.t.me", "www.telegram.me"}:
+        return value
+    path = str(parsed.path or "").strip("/")
+    if not path or "/" in path:
+        return value
+    handle = path.lstrip("@")
+    if not PUBLIC_TELEGRAM_HANDLE_RE.fullmatch(handle):
+        return value
+    return f"https://web.telegram.org/k/#@{handle}"
 
 
 def _run_browser_command(repo_root: Path, command: list[str]) -> subprocess.CompletedProcess[str]:
@@ -327,6 +361,7 @@ def _chat_snapshot_summary(
     member_count: int | None = None,
     member_count_text: str = "",
     add_members_visible: bool = False,
+    visible_member_peers: list[dict[str, str]] | None = None,
     error: str = "",
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
@@ -334,6 +369,8 @@ def _chat_snapshot_summary(
         "member_count": member_count,
         "member_count_text": member_count_text,
         "add_members_visible": bool(add_members_visible),
+        "visible_member_peers": list(visible_member_peers or []),
+        "visible_member_count": len(visible_member_peers or []),
     }
     if error:
         payload["error"] = error
@@ -350,12 +387,72 @@ def _snapshot_log_line(label: str, snapshot: dict[str, Any] | None) -> str:
     member_count_text = _nonempty(snapshot.get("member_count_text"))
     page_url = _nonempty(snapshot.get("page_url"))
     add_members_visible = int(bool(snapshot.get("add_members_visible")))
+    visible_member_count = int(snapshot.get("visible_member_count", 0) or 0)
     return (
         f"INFO: {label} member_count={member_count!r} "
         f"member_count_text={member_count_text!r} "
         f"add_members_visible={add_members_visible} "
+        f"visible_member_count={visible_member_count} "
         f"page_url={page_url!r}"
     )
+
+
+def _member_section_html(html_payload: str) -> str:
+    scope = str(html_payload or "")
+    column_right = scope.find('id="column-right"')
+    if column_right >= 0:
+        scope = scope[column_right:]
+    for marker in MEMBERS_TAB_MARKERS:
+        start = scope.find(marker)
+        if start < 0:
+            continue
+        section = scope[start:]
+        end_candidates = [section.find(stop_marker) for stop_marker in MEMBERS_TAB_STOP_MARKERS]
+        end_candidates = [value for value in end_candidates if value > 0]
+        if end_candidates:
+            return section[: min(end_candidates)]
+        return section
+    return ""
+
+
+def _parse_visible_member_peers(html_payload: str) -> list[dict[str, str]]:
+    section = _member_section_html(html_payload)
+    if not section:
+        return []
+    peers: list[dict[str, str]] = []
+    seen: set[str] = set()
+    row_pattern = re.compile(
+        r'<a\b(?=[^>]*\bdata-peer-id="(?P<peer_id>\d+)")[^>]*\bclass="(?P<class>[^"]*\bchatlist-chat[^"]*)"[^>]*>(?P<body>.*?)</a>',
+        re.DOTALL,
+    )
+    title_pattern = re.compile(r'<span\b(?=[^>]*\bclass="[^"]*\bpeer-title\b[^"]*")[^>]*>(?P<title>.*?)</span>', re.DOTALL)
+    for match in row_pattern.finditer(section):
+        peer_id = match.group("peer_id")
+        if peer_id in seen:
+            continue
+        title_match = title_pattern.search(match.group("body"))
+        title = _strip_tags(title_match.group("title")) if title_match else ""
+        if not title:
+            continue
+        seen.add(peer_id)
+        peers.append({"peer_id": peer_id, "title": title})
+    return peers
+
+
+def _snapshot_member_peer_ids(snapshot: dict[str, Any] | None) -> set[str]:
+    if not isinstance(snapshot, dict):
+        return set()
+    peers = snapshot.get("visible_member_peers")
+    if not isinstance(peers, list):
+        return set()
+    result: set[str] = set()
+    for row in peers:
+        if not isinstance(row, dict):
+            continue
+        peer_id = _nonempty(row.get("peer_id"))
+        if peer_id:
+            result.add(peer_id)
+    return result
 
 
 def _read_chat_snapshot(run_step, browser_target: dict[str, Any], *, label_prefix: str = "") -> dict[str, Any]:
@@ -367,35 +464,43 @@ def _read_chat_snapshot(run_step, browser_target: dict[str, Any], *, label_prefi
     body_text = _browser_payload_text(text_result, "text")
     body_html = _browser_payload_text(html_result, "html")
     member_count, member_count_text = _extract_member_count(body_text)
+    visible_member_peers = _parse_visible_member_peers(body_html)
     return _chat_snapshot_summary(
         page_url=page_url,
         member_count=member_count,
         member_count_text=member_count_text,
         add_members_visible=("Add Members" in body_text) or ("can-add-members" in body_html),
+        visible_member_peers=visible_member_peers,
     )
 
 
 def _build_membership_verification(
+    selected_candidate: dict[str, str] | None,
     before: dict[str, Any] | None,
     after: dict[str, Any] | None,
     after_wait: dict[str, Any] | None,
 ) -> dict[str, Any]:
+    selected_peer_id = _nonempty(selected_candidate.get("peer_id")) if isinstance(selected_candidate, dict) else ""
     verification = {
-        "signals_checked": ["member_count_delta"],
+        "signals_checked": ["member_list_visible_peer", "member_count_delta"],
         "joined_confirmed": False,
         "target_status": "requested",
         "reason": "member_count_not_checked",
         "confirmed_phase": "",
+        "confirmed_signal": "",
         "confirmed_delta": 0,
+        "selected_peer_id": selected_peer_id,
+        "before_member_list_has_peer": False,
+        "after_member_list_has_peer": False,
+        "after_wait_member_list_has_peer": False,
         "before": before,
         "after": after,
         "after_wait": after_wait,
     }
 
-    baseline = before.get("member_count") if isinstance(before, dict) else None
-    if baseline is None:
-        verification["reason"] = "member_count_before_missing"
-        return verification
+    before_member_ids = _snapshot_member_peer_ids(before)
+    if selected_peer_id:
+        verification["before_member_list_has_peer"] = selected_peer_id in before_member_ids
 
     observed: list[tuple[str, dict[str, Any]]] = []
     for phase, snapshot in (("after", after), ("after_wait", after_wait)):
@@ -404,6 +509,25 @@ def _build_membership_verification(
 
     if not observed:
         verification["reason"] = "member_count_after_missing"
+        return verification
+
+    for phase, snapshot in observed:
+        current_member_ids = _snapshot_member_peer_ids(snapshot)
+        if phase == "after":
+            verification["after_member_list_has_peer"] = selected_peer_id in current_member_ids if selected_peer_id else False
+        elif phase == "after_wait":
+            verification["after_wait_member_list_has_peer"] = selected_peer_id in current_member_ids if selected_peer_id else False
+        if selected_peer_id and selected_peer_id in current_member_ids and selected_peer_id not in before_member_ids:
+            verification["joined_confirmed"] = True
+            verification["target_status"] = "joined"
+            verification["reason"] = "member_list_peer_visible"
+            verification["confirmed_phase"] = phase
+            verification["confirmed_signal"] = "member_list_visible_peer"
+            return verification
+
+    baseline = before.get("member_count") if isinstance(before, dict) else None
+    if baseline is None:
+        verification["reason"] = "member_count_before_missing"
         return verification
 
     saw_unreadable = False
@@ -417,6 +541,7 @@ def _build_membership_verification(
             verification["target_status"] = "joined"
             verification["reason"] = "member_count_increased"
             verification["confirmed_phase"] = phase
+            verification["confirmed_signal"] = "member_count_delta"
             verification["confirmed_delta"] = int(current) - int(baseline)
             return verification
 
@@ -681,6 +806,8 @@ def command_inspect_chat(args: argparse.Namespace) -> int:
         "member_count": snapshot["member_count"],
         "member_count_text": snapshot["member_count_text"],
         "add_members_visible": snapshot["add_members_visible"],
+        "visible_member_count": snapshot["visible_member_count"],
+        "visible_member_peers": snapshot["visible_member_peers"],
         "dry_run": bool(args.dry_run),
         "steps": steps,
     }
@@ -833,18 +960,26 @@ def command_add_contact(args: argparse.Namespace) -> int:
                 else:
                     if verify_membership and not args.dry_run:
                         after_snapshot = capture_snapshot("inspect_after", required=False)
-                        verification = _build_membership_verification(before_snapshot, after_snapshot, None)
+                        verification = _build_membership_verification(selected_candidate, before_snapshot, after_snapshot, None)
                         if not verification.get("joined_confirmed") and verify_wait > 0:
                             time.sleep(verify_wait)
                             after_wait_snapshot = capture_snapshot("inspect_after_wait", required=False)
-                            verification = _build_membership_verification(before_snapshot, after_snapshot, after_wait_snapshot)
+                            verification = _build_membership_verification(
+                                selected_candidate,
+                                before_snapshot,
+                                after_snapshot,
+                                after_wait_snapshot,
+                            )
                     outcome = "joined_confirmed" if verification and verification.get("joined_confirmed") else "confirmed_unverified"
                     if args.record_result:
                         target_status = "requested"
                         reason = "live_add_members_confirmed_unverified"
                         if verification and verification.get("joined_confirmed"):
                             target_status = "joined"
-                            reason = "live_add_members_member_count_confirmed"
+                            if verification.get("confirmed_signal") == "member_list_visible_peer":
+                                reason = "live_add_members_member_list_confirmed"
+                            else:
+                                reason = "live_add_members_member_count_confirmed"
                         record_update = _record_user_status(
                             job_dir,
                             payload,
@@ -865,6 +1000,7 @@ def command_add_contact(args: argparse.Namespace) -> int:
             "search_query": search_query,
             "selected_candidate": selected_candidate,
             "record_update": record_update,
+            "target_status": record_update["to_status"] if isinstance(record_update, dict) else "",
             "verification": verification,
             "error": str(exc),
             "steps": steps,
@@ -884,6 +1020,7 @@ def command_add_contact(args: argparse.Namespace) -> int:
         "search_query": search_query,
         "selected_candidate": selected_candidate,
         "record_update": record_update,
+        "target_status": record_update["to_status"] if isinstance(record_update, dict) else "",
         "verification": verification,
         "steps": steps,
     }

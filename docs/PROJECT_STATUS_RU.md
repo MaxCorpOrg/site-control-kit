@@ -47,10 +47,12 @@
   - хранить invite-link и browser-target в `invite_state.json`;
   - строить `execution_plan.json`;
   - снимать видимый `member_count` через `inspect-chat`;
+  - читать видимый список участников через `visible_member_count` и `visible_member_peers`;
   - открывать/активировать Telegram chat через `site-control`;
+  - нормализовать публичный `https://t.me/<handle>` в `https://web.telegram.org/k/#@<handle>`, если browser-target не задан явно;
   - выполнять осторожный `add-contact` для одного consented пользователя через Telegram Web `Add Members`;
   - автоматически привязывать before/after `inspect-chat` к live `add-contact`;
-  - писать `joined` только при подтверждённом росте `member_count`, иначе оставлять `requested`;
+  - писать `joined` только при подтверждённом появлении выбранного `peer_id` в видимом member list или росте `member_count`, иначе оставлять `requested`;
   - писать `execution_record.json` после ручных действий оператора.
 - GUI-обёртки invite-слоя выровнены с CLI:
   - добавлен общий GUI helper;
@@ -126,7 +128,7 @@
   - при открытии такой страницы расширение вызывает `chrome.runtime.reload()` само.
 
 ## Проверено
-- Полный unit-набор сейчас зелёный: `134/134`.
+- Полный unit-набор сейчас зелёный: `138/138`.
 - После добавления Invite Manager полный unit-набор был зелёный: `117/117`.
 - После добавления Invite Executor полный unit-набор был зелёный: `123/123`.
 - После добавления one-user режима полный unit-набор зелёный: `127/127`.
@@ -136,7 +138,7 @@
   - `7/7 OK`
 - Новый `Invite Executor` покрыт unit-тестами:
   - `tests/test_telegram_invite_executor.py`
-  - `13/13 OK`
+  - `17/17 OK`
 - Dry-run smoke нового execution-слоя подтверждён:
   - job dir:
     - `/tmp/tg_invite_executor_smoke.GKdXBN/job`
@@ -236,6 +238,15 @@
     - видимый счётчик прочитан как `2 667 members`;
     - `report` теперь показывает `latest_execution_records` и их verification summary;
     - live `Add` заново не выполнялся, чтобы не превращать smoke в реальное действие над пользователем.
+- После hardening member-list verification и нормализации `t.me -> web.telegram` выполнен ещё один безопасный live smoke `2026-04-25`:
+  - inspect artifact:
+    - `/tmp/tg_invite_executor_inspect_members_20260425_v3.json`
+  - факты:
+    - job `/home/max/telegram_invite_jobs/chat_Zhirotop_shop` по-прежнему хранит `chat_url = https://t.me/Zhirotop_shop`;
+    - `inspect-chat` без явного `tab_id` открыл `browser new-tab https://web.telegram.org/k/#@Zhirotop_shop`;
+    - live URL подтверждён как `https://web.telegram.org/k/#@Zhirotop_shop`;
+    - видимый счётчик прочитан как `2 667 members`;
+    - `visible_member_peers` вернул видимого участника `1960795556 / @joinhide9_bot`.
 - Shell syntax и `py_compile` для последних изменений проходили зелёными.
 - Точечный прогон экспортёрных тестов после capability-preflight:
   - `tests.test_telegram_export_parser`
@@ -399,7 +410,7 @@
 Теперь кроме manager/state слоя есть и execution-слой, но он пока безопасно ограничен:
 - configure/plan/open-chat/inspect-chat/add-contact/record/report;
 - `open-chat` уже использует `site-control`;
-- `add-contact` теперь сам пишет verification evidence before/after;
+- `add-contact` теперь сам пишет verification evidence before/after и умеет подтверждать `joined` по видимому member list;
 - actual Telegram invite action по-прежнему остаётся за оператором.
 
 Это осознанно:
@@ -427,7 +438,8 @@
 - повторный live smoke `fast` vs `deep`.
 
 ### Для Invite Manager
-- добавить более сильное подтверждение вступления через список участников или другой Telegram-visible signal поверх уже существующего `member_count` delta;
+- вынести подтверждение вступления за пределы текущего видимого member list, если нужный peer не попал в правую панель сразу;
+- по возможности привязать это подтверждение к отдельному Telegram-visible signal, а не только к общему `member_count`;
 - довести безопасный orchestration path через invite links / join requests;
 - не делать принудительное массовое добавление пользователей;
 - при первом live-шаге обязательно сохранять `run.json`/`log` аналогично существующим Telegram артефактам.

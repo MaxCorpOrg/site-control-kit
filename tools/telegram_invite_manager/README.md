@@ -67,7 +67,8 @@ cd /home/max/site-control-kit/tools/telegram_invite_manager
 ```
 
 Без `--confirm-add` команда выбирает пользователя и останавливается до внешнего действия добавления.
-Если before/after проверка не подтверждает рост `member_count`, результат записывается как `requested`, а не как `joined`.
+Если job хранит публичный `https://t.me/<handle>`, `open-chat` и `inspect-chat` без явного browser-target автоматически откроют `https://web.telegram.org/k/#@<handle>`.
+Если before/after проверка не подтверждает появление выбранного `peer_id` в видимом member list или рост `member_count`, результат записывается как `requested`, а не как `joined`.
 Сводка before/after теперь живёт прямо в `execution_record.json` в блоке `verification`.
 
 Перед и после live add можно штатно снять счётчик чата:

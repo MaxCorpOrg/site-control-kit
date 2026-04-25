@@ -97,7 +97,9 @@ $JOB_DIR/executions/<timestamp>/execution_plan.json
 - `page_url`;
 - `member_count`;
 - `member_count_text`;
-- признак `add_members_visible`.
+- признак `add_members_visible`;
+- `visible_member_count`;
+- `visible_member_peers`.
 
 ## 6. Записать Результат
 
@@ -175,7 +177,7 @@ $JOB_DIR/executions/<timestamp>/execution_plan.json
 Важно:
 - без `--confirm-add` команда не нажимает финальную кнопку Telegram `Add`;
 - `--verify-membership` привязывает before/after `inspect-chat` к этому же execution record;
-- `--record-result` ставит `joined` только если before/after проверка подтвердила рост `member_count`, иначе ставит `requested`;
+- `--record-result` ставит `joined` только если before/after проверка показала выбранный `peer_id` в видимом member list или подтвердила рост `member_count`, иначе ставит `requested`;
 - вручную писать `joined` только если Telegram Web, список участников или другой отдельный сигнал действительно подтвердил вступление.
 
 ## Проверить Состояние
@@ -255,6 +257,7 @@ Job:
 - открыт Telegram Web tab `614280505`;
 - URL вкладки: `https://web.telegram.org/k/#@Zhirotop_shop`;
 - фактическая отправка сообщения пользователю не выполнялась.
+- публичный `https://t.me/Zhirotop_shop` теперь можно безопасно хранить в job: `open-chat` и `inspect-chat` сами нормализуют его в `web.telegram`.
 
 Артефакты:
 
@@ -340,6 +343,21 @@ Live add:
 - UI-path до реального `Add` работает;
 - рост счётчика участников не подтверждён;
 - для таких кейсов не писать `joined`, пока Telegram не даст отдельного подтверждения.
+
+## Safe Smoke: `inspect-chat` после `t.me -> web.telegram`
+
+Дата: `2026-04-25`
+
+Факты:
+- `inspect-chat` без явного browser-target открыл `https://web.telegram.org/k/#@Zhirotop_shop`;
+- snapshot вернул `2 667 members`;
+- `visible_member_peers` уже умеет читать видимые строки участников из правой панели.
+
+Артефакт:
+
+```text
+/tmp/tg_invite_executor_inspect_members_20260425_v3.json
+```
 
 Артефакт:
 

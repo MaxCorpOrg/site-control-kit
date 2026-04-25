@@ -172,8 +172,10 @@ bash scripts/telegram_invite_manager_gui.sh
 - execution-config внутри `invite_state.json`
 - execution-plan через отдельный `Telegram Invite Executor`
 - browser-assisted `open-chat` через `site-control`
+- автонормализация публичного `https://t.me/<handle>` в `https://web.telegram.org/k/#@<handle>` при открытии чата без явного browser-target
 - execution-record артефакты и update статусов после ручных действий
 - auto-verification before/after для live `add-contact`, чтобы `joined` фиксировался только по подтверждаемому сигналу
+- подтверждение `joined` теперь опирается не только на `member_count`, но и на появление выбранного `peer_id` в видимом списке участников
 
 ## Что Пока Не Реализовано
 На текущем этапе есть только безопасный operator-assisted execution path.
@@ -182,6 +184,7 @@ bash scripts/telegram_invite_manager_gui.sh
 Следующий шаг можно делать отдельно:
 - invite link workflow
 - join request workflow
+- более сильное подтверждение вступления за пределами текущего видимого member list
 - живой smoke на поднятом browser bridge
 
 ## Следующий Логичный Шаг

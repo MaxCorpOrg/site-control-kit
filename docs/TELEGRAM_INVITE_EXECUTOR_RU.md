@@ -104,6 +104,7 @@ python3 scripts/telegram_invite_executor.py plan \
 - если в execution-config есть `tab_id`, будет `browser --tab-id ... activate`
 - если есть `url_pattern`, будет `browser --url-pattern ... activate`
 - иначе будет `browser new-tab <chat_url>`
+- если `chat_url` хранится как публичный `https://t.me/<handle>`, executor перед `new-tab` автоматически нормализует его в `https://web.telegram.org/k/#@<handle>`, чтобы открыть именно Telegram Web, а не preview-страницу `t.me`
 
 Сначала можно проверить dry-run:
 
@@ -119,7 +120,9 @@ python3 scripts/telegram_invite_executor.py open-chat \
 - `page_url`;
 - видимый `member_count`;
 - исходный `member_count_text`;
-- признак `add_members_visible`.
+- признак `add_members_visible`;
+- `visible_member_count`;
+- `visible_member_peers` с `peer_id/title` для уже видимых строк в секции участников справа.
 
 Это штатная команда для проверки счётчика до и после `add-contact`.
 
@@ -181,9 +184,11 @@ python3 scripts/telegram_invite_executor.py add-contact \
 ```
 
 Семантика результата:
-- если `member_count` вырос на before/after проверке, `--record-result` может записать `joined`;
+- если выбранный `peer_id` появился в видимом списке участников после live add, `--record-result` может записать `joined`;
+- если `member_count` вырос на before/after проверке, `--record-result` тоже может записать `joined`;
 - если рост не подтверждён, даже после реального клика `Add` записывается `requested`;
-- `execution_record.json` хранит не только steps, но и блок `verification` с before/after snapshot summary.
+- `execution_record.json` хранит не только steps, но и блок `verification` с before/after snapshot summary;
+- в `verification.confirmed_signal` теперь различаются как минимум `member_list_visible_peer` и `member_count_delta`.
 
 Проверенные селекторы Telegram Web:
 - открыть панель: `#column-right .profile-container.can-add-members button.btn-circle.btn-corner`
@@ -254,6 +259,7 @@ GUI не заменяет CLI, но теперь закрывает обычны
 ## Следующий Шаг
 Следующий логичный шаг — не forced-add path, а:
 - безопасный invite link / join request orchestration;
+- более сильная проверка вступления за пределами текущего видимого member list, если нужный пользователь не попал в правую панель сразу;
 - optional operator checklist для реального Telegram UI;
 - затем живой smoke на поднятом browser bridge.
 
@@ -333,4 +339,21 @@ reason: live_add_members_confirmed_unverified
 
 ```text
 /home/max/telegram_invite_jobs/chat_Zhirotop_shop/executions/20260425T061336Z/execution_record.json
+```
+
+### Safe Smoke: `inspect-chat` после нормализации `t.me -> web.telegram`
+
+Дата: `2026-04-25`
+
+Проверено на том же job:
+- `chat_url` в `invite_state.json` оставался `https://t.me/Zhirotop_shop`;
+- `inspect-chat` без явного `tab_id` открыл новый tab через `browser new-tab https://web.telegram.org/k/#@Zhirotop_shop`;
+- live URL вернулся как `https://web.telegram.org/k/#@Zhirotop_shop`;
+- видимый счётчик прочитан как `2 667 members`;
+- в правой панели разобран один видимый участник: `peer_id="1960795556"`, title `@joinhide9_bot`.
+
+Артефакт:
+
+```text
+/tmp/tg_invite_executor_inspect_members_20260425_v3.json
 ```

@@ -26,9 +26,16 @@
 
 Новый `Telegram Invite Manager` уже существует как manager/state слой.
 Поверх него теперь есть и `Telegram Invite Executor` как execution-слой.
+Что уже подтверждено в этом треке:
+1. `add-contact` умеет привязывать before/after `inspect-chat` к одному live add;
+2. `joined` теперь ставится только по сильному сигналу:
+   - выбранный `peer_id` появился в видимом member list;
+   - или вырос `member_count`;
+3. public `https://t.me/<handle>` без явного browser-target теперь открывается как `https://web.telegram.org/k/#@<handle>`.
+
 Следующий шаг для этого трека:
 1. не добавлять опасный массовый path;
-2. поднять hub и сделать первый live smoke для `open-chat`;
+2. вынести подтверждение вступления за пределы текущего видимого member list, если нужный peer не попадает в правую панель сразу;
 3. добить безопасный orchestration через invite links или join requests;
 4. после выбора реального consented username прогнать one-user flow уже не на `/tmp`, а на рабочем `~/telegram_invite_jobs/...`;
 5. сохранить тот же уровень артефактов и state discipline, что уже есть у export pipeline.

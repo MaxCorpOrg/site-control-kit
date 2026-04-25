@@ -191,10 +191,45 @@ class TelegramInviteExecutorTests(unittest.TestCase):
             self.assertIn("--client-id", payload["command"])
             self.assertIn("activate", payload["command"])
 
+    def test_open_chat_dry_run_normalizes_public_t_me_chat_url(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            job_dir = Path(tmpdir) / "job"
+            self._seed_state(job_dir)
+            state = self.manager.load_state(job_dir)
+            state["chat_url"] = "https://t.me/Zhirotop_shop"
+            state["chat_slug"] = "Zhirotop_shop"
+            self.manager.save_state(job_dir, state)
+            rc, payload = self._call_json(
+                self.executor.command_open_chat,
+                Namespace(
+                    job_dir=str(job_dir),
+                    client_id=None,
+                    tab_id=None,
+                    url_pattern=None,
+                    active=None,
+                    dry_run=True,
+                ),
+            )
+            self.assertEqual(rc, 0)
+            self.assertEqual(
+                payload["command"],
+                ["python3", "-m", "webcontrol", "browser", "new-tab", "https://web.telegram.org/k/#@Zhirotop_shop"],
+            )
+
     def test_extract_member_count(self) -> None:
         count, count_text = self.executor._extract_member_count("Жиротоп Shop\n2 440 members, 153 online")
         self.assertEqual(count, 2440)
         self.assertEqual(count_text, "2 440 members")
+
+    def test_preferred_chat_url_normalizes_public_t_me_handle(self) -> None:
+        self.assertEqual(
+            self.executor._preferred_chat_url("https://t.me/Zhirotop_shop"),
+            "https://web.telegram.org/k/#@Zhirotop_shop",
+        )
+        self.assertEqual(
+            self.executor._preferred_chat_url("https://t.me/+privateInvite"),
+            "https://t.me/+privateInvite",
+        )
 
     def test_inspect_chat_dry_run_builds_read_steps(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -231,7 +266,26 @@ class TelegramInviteExecutorTests(unittest.TestCase):
                 elif action == "text":
                     payload = {"ok": True, "data": {"text": "Жиротоп Shop\n2 440 members, 153 online\nAdd Members"}}
                 else:
-                    payload = {"ok": True, "data": {"html": '<div class="profile-container can-add-members"></div>'}}
+                    payload = {
+                        "ok": True,
+                        "data": {
+                            "html": """
+                            <div class="profile-container can-add-members"></div>
+                            <div id="column-right">
+                              <div class="search-super-tabs-container tabs-container">
+                                <div class="search-super-tab-container search-super-container-members tabs-tab active">
+                                  <div class="search-super-content-container search-super-content-members">
+                                    <a class="row no-wrap row-with-padding row-clickable hover-effect rp chatlist-chat chatlist-chat-abitbigger" data-peer-id="1410391920">
+                                      <span class="peer-title" dir="auto">Oleg S</span>
+                                    </a>
+                                  </div>
+                                </div>
+                                <div class="search-super-tab-container search-super-container-media tabs-tab"></div>
+                              </div>
+                            </div>
+                            """,
+                        },
+                    }
                 return subprocess.CompletedProcess(command, 0, stdout=json.dumps(payload), stderr="")
 
             with mock.patch.object(self.executor, "_run_browser_command", side_effect=fake_run):
@@ -251,6 +305,8 @@ class TelegramInviteExecutorTests(unittest.TestCase):
             self.assertEqual(payload["member_count"], 2440)
             self.assertEqual(payload["member_count_text"], "2 440 members")
             self.assertTrue(payload["add_members_visible"])
+            self.assertEqual(payload["visible_member_count"], 1)
+            self.assertEqual(payload["visible_member_peers"], [{"peer_id": "1410391920", "title": "Oleg S"}])
             self.assertEqual(payload["page_url"], "https://web.telegram.org/k/#@Zhirotop_shop")
 
     def test_parse_add_members_candidates(self) -> None:
@@ -270,6 +326,33 @@ class TelegramInviteExecutorTests(unittest.TestCase):
             [
                 {"peer_id": "1404471788", "title": "Камаз"},
                 {"peer_id": "1281184986", "title": "25 GPoint"},
+            ],
+        )
+
+    def test_parse_visible_member_peers(self) -> None:
+        html_payload = """
+        <div id="column-right">
+          <div class="search-super-tabs-container tabs-container" data-animation="tabs">
+            <div class="search-super-tab-container search-super-container-members tabs-tab active">
+              <div class="search-super-content-container search-super-content-members">
+                <a class="row no-wrap row-with-padding row-clickable hover-effect rp chatlist-chat chatlist-chat-abitbigger" data-peer-id="1410391920">
+                  <span class="peer-title" dir="auto">Oleg S</span>
+                </a>
+                <a class="row no-wrap row-with-padding row-clickable hover-effect rp chatlist-chat chatlist-chat-abitbigger" data-peer-id="1404471788">
+                  <span class="peer-title" dir="auto">Камаз</span>
+                </a>
+              </div>
+            </div>
+            <div class="search-super-tab-container search-super-container-media tabs-tab"></div>
+          </div>
+        </div>
+        """
+        peers = self.executor._parse_visible_member_peers(html_payload)
+        self.assertEqual(
+            peers,
+            [
+                {"peer_id": "1410391920", "title": "Oleg S"},
+                {"peer_id": "1404471788", "title": "Камаз"},
             ],
         )
 
@@ -359,6 +442,115 @@ class TelegramInviteExecutorTests(unittest.TestCase):
             state = self.manager.load_state(job_dir)
             self.assertEqual(state["users"][0]["status"], "requested")
 
+    def test_add_contact_confirm_records_joined_when_member_list_shows_selected_peer(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            job_dir = Path(tmpdir) / "job"
+            self._seed_state(job_dir)
+            html_calls = 0
+            text_calls = 0
+
+            def fake_run(_repo_root, command):
+                nonlocal html_calls, text_calls
+                action = command[-2] if command[-1] == "body" else command[-1]
+                if action == "html":
+                    html_calls += 1
+                    if html_calls == 1:
+                        payload = {
+                            "ok": True,
+                            "data": {
+                                "html": """
+                                <div id="column-right">
+                                  <div class="search-super-tabs-container tabs-container">
+                                    <div class="search-super-tab-container search-super-container-members tabs-tab active">
+                                      <div class="search-super-content-container search-super-content-members">
+                                        <a class="row no-wrap row-with-padding row-clickable hover-effect rp chatlist-chat chatlist-chat-abitbigger" data-peer-id="500">
+                                          <span class="peer-title" dir="auto">Existing Member</span>
+                                        </a>
+                                      </div>
+                                    </div>
+                                    <div class="search-super-tab-container search-super-container-media tabs-tab"></div>
+                                  </div>
+                                </div>
+                                """,
+                            },
+                        }
+                    elif html_calls == 2:
+                        payload = {
+                            "ok": True,
+                            "data": {
+                                "html": """
+                                <div class="tabs-tab sidebar-slider-item add-members-container active">
+                                  <a class="row chatlist-chat row-clickable" data-peer-id="1404471788">
+                                    <span class="peer-title" dir="auto">Alice</span>
+                                  </a>
+                                </div>
+                                """,
+                            },
+                        }
+                    else:
+                        payload = {
+                            "ok": True,
+                            "data": {
+                                "html": """
+                                <div id="column-right">
+                                  <div class="search-super-tabs-container tabs-container">
+                                    <div class="search-super-tab-container search-super-container-members tabs-tab active">
+                                      <div class="search-super-content-container search-super-content-members">
+                                        <a class="row no-wrap row-with-padding row-clickable hover-effect rp chatlist-chat chatlist-chat-abitbigger" data-peer-id="500">
+                                          <span class="peer-title" dir="auto">Existing Member</span>
+                                        </a>
+                                        <a class="row no-wrap row-with-padding row-clickable hover-effect rp chatlist-chat chatlist-chat-abitbigger" data-peer-id="1404471788">
+                                          <span class="peer-title" dir="auto">Alice</span>
+                                        </a>
+                                      </div>
+                                    </div>
+                                    <div class="search-super-tab-container search-super-container-media tabs-tab"></div>
+                                  </div>
+                                </div>
+                                """,
+                            },
+                        }
+                elif action == "text":
+                    text_calls += 1
+                    payload = {"ok": True, "data": {"text": "2 440 members"}}
+                elif action == "page-url":
+                    payload = {"ok": True, "data": {"url": "https://web.telegram.org/k/#@Zhirotop_shop"}}
+                else:
+                    payload = {"ok": True, "data": {"clicked": True}}
+                return subprocess.CompletedProcess(command, 0, stdout=json.dumps(payload), stderr="")
+
+            with mock.patch.object(self.executor, "_run_browser_command", side_effect=fake_run):
+                rc, payload = self._call_json(
+                    self.executor.command_add_contact,
+                    Namespace(
+                        job_dir=str(job_dir),
+                        username="@alice_123",
+                        search_query=None,
+                        client_id=None,
+                        tab_id=123,
+                        url_pattern=None,
+                        execution_id="20260425T080150Z",
+                        search_wait=0,
+                        confirm_wait=0,
+                        result_wait=0,
+                        skip_open=True,
+                        allow_first_result=False,
+                        confirm_add=True,
+                        record_result=True,
+                        verify_membership=True,
+                        verify_wait=0,
+                        active=None,
+                        dry_run=False,
+                    ),
+                )
+            self.assertEqual(rc, 0)
+            self.assertEqual(payload["outcome"], "joined_confirmed")
+            self.assertEqual(payload["target_status"], "joined")
+            self.assertEqual(payload["verification"]["reason"], "member_list_peer_visible")
+            self.assertEqual(payload["verification"]["confirmed_signal"], "member_list_visible_peer")
+            state = self.manager.load_state(job_dir)
+            self.assertEqual(state["users"][0]["status"], "joined")
+
     def test_add_contact_confirm_records_joined_when_member_count_grows(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             job_dir = Path(tmpdir) / "job"
@@ -428,6 +620,7 @@ class TelegramInviteExecutorTests(unittest.TestCase):
             self.assertEqual(payload["outcome"], "joined_confirmed")
             self.assertTrue(payload["verification"]["joined_confirmed"])
             self.assertEqual(payload["verification"]["reason"], "member_count_increased")
+            self.assertEqual(payload["verification"]["confirmed_signal"], "member_count_delta")
             state = self.manager.load_state(job_dir)
             self.assertEqual(state["users"][0]["status"], "joined")
 
