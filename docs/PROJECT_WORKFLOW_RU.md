@@ -13,17 +13,23 @@
 ## Обязательный Порядок Чтения Перед Работой
 Прочитать в таком порядке:
 1. `AGENTS.md`
-2. `docs/agent_handoff_ru/00_START_HERE.md`
-3. весь пакет `docs/agent_handoff_ru/` по порядку
-4. `docs/PROJECT_WORKFLOW_RU.md`
-5. `docs/PROJECT_STATUS_RU.md`
-6. `README.md`
-7. `BROWSER_QUICKSTART.md`
-8. `docs/AI_MAINTAINER_GUIDE.md`
-9. Для Telegram-задач: `docs/TELEGRAM_CLIENT_ROADMAP_RU.md`
-10. Для задач про Linux Telegram Desktop portable-профили и `tdata.zip`: `docs/TELEGRAM_PORTABLE_RU.md`
+2. `START_HERE_AGENT_RU.md`
+3. `docs/agent_handoff_ru/00_START_HERE.md`
+4. весь пакет `docs/agent_handoff_ru/` по порядку
+5. `docs/PROJECT_WORKFLOW_RU.md`
+6. `docs/PROJECT_STATUS_RU.md`
+7. `README.md`
+8. `BROWSER_QUICKSTART.md`
+9. `docs/AI_MAINTAINER_GUIDE.md`
+10. Для Telegram-задач: `docs/TELEGRAM_CLIENT_ROADMAP_RU.md`
+11. Для задач про Linux Telegram Desktop portable-профили и `tdata.zip`: `docs/TELEGRAM_PORTABLE_RU.md`
 
 Если задача затрагивает browser bridge, после чтения документации обязательно посмотреть последние изменения и текущее дерево.
+
+Ключевая идея этого порядка:
+- новый агент не должен начинать "просто исследование проекта";
+- сначала он обязан понять, где проект уже остановился;
+- только потом он может продолжать работу.
 
 ## Старт Любой Задачи
 Перед правками выполнить:
