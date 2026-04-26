@@ -76,6 +76,7 @@
 - `docs/API.md` — типы команд, поля payload, контракт результата.
 - `docs/ARCHITECTURE.md` — поток команд и распределение ролей.
 - `docs/EXTENSION.md` — где реализованы browser-level и DOM-level действия.
+- `docs/TELEGRAM_PORTABLE_RU.md` — отдельный helper для Linux Telegram Desktop portable-профилей из `tdata.zip`.
 - `AGENTS.md` — политика поведения агентов внутри репозитория.
 - `BROWSER_QUICKSTART.md` — кратчайший практический маршрут.
 
@@ -90,6 +91,9 @@
    - `browser.cmd tabs`
 7. Выполнить нужные действия через `browser.cmd` или `sitectl browser`.
 8. Если возможностей не хватает, расширить инструмент, а не плодить временные костыли.
+
+Для desktop-задач Telegram на Linux действует отдельное правило:
+- если у пользователя уже есть `tdata.zip` и задача состоит в подъёме desktop-сессии, сначала использовать `scripts/telegram_portable.py`, а не собирать portable-папку вручную.
 
 ## Базовый Smoke-Тест
 Минимальный живой сценарий:

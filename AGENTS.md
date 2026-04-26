@@ -25,6 +25,7 @@
 9. `docs/ARCHITECTURE.md` — поток команд, роли компонентов, маршрутизация.
 10. `docs/EXTENSION.md` — где реализованы background- и DOM-команды.
 11. Для Telegram-задач дополнительно: `docs/TELEGRAM_CLIENT_ROADMAP_RU.md`.
+12. Для задач про Linux Telegram Desktop portable-профили и `tdata.zip` дополнительно: `docs/TELEGRAM_PORTABLE_RU.md`.
 
 Запрещено начинать изменения в коде, не просмотрев `docs/PROJECT_STATUS_RU.md`. Этот файл нужен, чтобы новый чат или новый агент не дублировал уже закрытые задачи и видел текущие дыры.
 
@@ -40,6 +41,7 @@
 - В Python-окружениях предпочитать `sitectl browser`.
 - Перед обходными путями сначала проверять живой контур через `browser status`, `browser clients` или `browser tabs`.
 - Если инструмент можно улучшить ради текущей задачи, это допустимо и желательно.
+- Для задач вида "есть `tdata.zip`, нужно открыть Telegram Desktop этого пользователя на Linux" предпочитать `scripts/telegram_portable.py` и `scripts/telegram_portable_gui.sh`, а не ручную раскладку файлов.
 
 ## Неприкосновенные Правила
 1. По возможности сохранять обратную совместимость API.

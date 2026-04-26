@@ -1,6 +1,6 @@
 # Project Status RU
 
-Последнее обновление: 2026-04-25
+Последнее обновление: 2026-04-26
 
 Этот файл нужен как точка входа для любого нового чата и любого нового агента.
 Перед новой задачей его нужно прочитать целиком.
@@ -62,6 +62,18 @@
 - Для следующего чата зафиксирован отдельный copy-paste prompt:
   - `tools/telegram_invite_manager/NEXT_CHAT_AGENT_PROMPT_RU.md`
   - он задаёт новому агенту стартовую точку, границы редактирования и обязательный порядок чтения.
+
+### Telegram Desktop portable helper
+- Добавлен новый helper для Linux portable-профилей Telegram Desktop:
+  - `scripts/telegram_portable.py`
+  - `scripts/telegram_portable_gui.sh`
+- Новый helper умеет:
+  - скачать официальный Linux runtime Telegram Desktop в локальный cache при первом запуске;
+  - развернуть отдельную папку `~/TelegramPortable-<profile>`;
+  - распаковать zip в `TelegramForcePortable/tdata`;
+  - безопасно переимпортировать тот же профиль только если его процесс не запущен;
+  - сразу запустить профиль и вернуть `pid/log_path`;
+  - писать `portable-profile.json` с metadata по профилю.
 
 ### Безопасность данных Telegram
 - Введены `identity_history.json`, `review.txt`, `conflicts.json` и quarantine-логика.
@@ -128,7 +140,7 @@
   - при открытии такой страницы расширение вызывает `chrome.runtime.reload()` само.
 
 ## Проверено
-- Полный unit-набор сейчас зелёный: `138/138`.
+- Полный unit-набор сейчас зелёный: `143/143`.
 - После добавления Invite Manager полный unit-набор был зелёный: `117/117`.
 - После добавления Invite Executor полный unit-набор был зелёный: `123/123`.
 - После добавления one-user режима полный unit-набор зелёный: `127/127`.
@@ -248,6 +260,25 @@
     - видимый счётчик прочитан как `2 667 members`;
     - `visible_member_peers` вернул видимого участника `1960795556 / @joinhide9_bot`.
 - Shell syntax и `py_compile` для последних изменений проходили зелёными.
+- Новый `telegram_portable.py` покрыт unit-тестами:
+  - `tests/test_telegram_portable.py`
+  - `5/5 OK`
+- Для helper'а пройдены:
+  - `python3 -m py_compile scripts/telegram_portable.py`
+  - `bash -n scripts/telegram_portable_gui.sh`
+- Live smoke нового Telegram portable helper подтверждён:
+  - import artifact:
+    - `/tmp/tg_portable_smoke_import.json`
+  - profile dir:
+    - `/tmp/tg_portable_smoke/TelegramPortable-smoke-ak`
+  - metadata:
+    - `/tmp/tg_portable_smoke/TelegramPortable-smoke-ak/portable-profile.json`
+  - launch log:
+    - `/tmp/tg_portable_smoke/TelegramPortable-smoke-ak/portable-launch.log`
+  - факты:
+    - helper сам собрал portable-папку из zip `telegram_ak/tdata-20260425T113735Z-3-001.zip`;
+    - внутри создан `TelegramForcePortable/tdata/key_datas`;
+    - Telegram стартовал именно из portable-папки и затем был остановлен после smoke-проверки.
 - Точечный прогон экспортёрных тестов после capability-preflight:
   - `tests.test_telegram_export_parser`
   - `44/44 OK`

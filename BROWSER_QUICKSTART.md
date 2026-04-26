@@ -146,3 +146,19 @@ SCB_RELOAD_X_RATIO=0.93 SCB_RELOAD_Y_RATIO=0.17 ./scripts/reload_bridge_extensio
 - `docs/ARCHITECTURE.md` — если меняется поток команд или маршрутизация.
 - `examples/` — если добавляются новые команды.
 - `AGENTS.md` и `docs/AI_MAINTAINER_GUIDE.md` — если меняется агентный workflow.
+
+## Связанный Telegram Helper
+
+Для Linux-профилей Telegram Desktop с `tdata.zip` есть отдельный helper:
+
+```bash
+cd /home/max/site-control-kit
+python3 scripts/telegram_portable.py import-zip --zip "/path/to/tdata.zip" --profile-name "ak" --launch
+```
+
+Есть и GUI-обёртка:
+
+```bash
+cd /home/max/site-control-kit
+./scripts/telegram_portable_gui.sh
+```

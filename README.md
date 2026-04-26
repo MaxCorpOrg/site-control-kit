@@ -194,6 +194,45 @@ cd /home/max/site-control-kit/tools/telegram_invite_manager
 `run.json` теперь дублирует ключевую телеметрию экспортёра: `unique_members`, `members_with_username`, `chat_scroll_steps_done`, `chat_jump_scrolls_done`, `deep_updated_total`, `history_backfilled_total`, `output_usernames_cleared_total`, `chat_deep_priority_rounds`, `chat_deep_yield_stop`, а полный сырой payload лежит в `export_stats.json`.
 Также в `run.json` есть признаки продвижения/сохранения latest-снимков: `latest_full_promoted`, `latest_safe_promoted`, `latest_full_best_source`, `latest_safe_best_source`.
 
+## Telegram Desktop Portable на Linux
+
+Отдельная подробная документация для агента и проекта:
+- `docs/TELEGRAM_PORTABLE_RU.md`
+
+Для сценария "есть zip с `tdata`, хочу автоматически развернуть отдельный Linux portable-профиль и сразу открыть его" теперь есть отдельный helper:
+
+```bash
+cd /home/max/site-control-kit
+python3 scripts/telegram_portable.py import-zip \
+  --zip "/path/to/tdata.zip" \
+  --profile-name "ak" \
+  --launch
+```
+
+Что он делает:
+- при первом запуске скачивает официальный Linux Telegram Desktop в локальный cache runtime;
+- создаёт отдельную папку `~/TelegramPortable-<profile>`;
+- распаковывает zip в `TelegramForcePortable/tdata`;
+- может сразу запустить этот профиль;
+- пишет metadata в `portable-profile.json`.
+
+Если нужен простой GUI-режим с выбором zip через диалог:
+
+```bash
+cd /home/max/site-control-kit
+./scripts/telegram_portable_gui.sh
+```
+
+Для офлайн-установки можно передать заранее скачанный архив Telegram Desktop:
+
+```bash
+python3 scripts/telegram_portable.py import-zip \
+  --zip "/path/to/tdata.zip" \
+  --profile-name "ak" \
+  --runtime-archive "/path/to/tsetup.tar.xz" \
+  --launch
+```
+
 Если Telegram Web перестал реально прокручиваться, chat-экспорт теперь завершится предупреждением `chat scroll stuck after 3 attempts`, вместо длинного пустого прогона.
 Если burst всё ещё упирается в тот же DOM-слой, экспортёр включает более агрессивный `jump-scroll` и пытается перепрыгнуть дальше по истории.
 

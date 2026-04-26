@@ -21,6 +21,7 @@
 7. `BROWSER_QUICKSTART.md`
 8. `docs/AI_MAINTAINER_GUIDE.md`
 9. Для Telegram-задач: `docs/TELEGRAM_CLIENT_ROADMAP_RU.md`
+10. Для задач про Linux Telegram Desktop portable-профили и `tdata.zip`: `docs/TELEGRAM_PORTABLE_RU.md`
 
 Если задача затрагивает browser bridge, после чтения документации обязательно посмотреть последние изменения и текущее дерево.
 
