@@ -148,7 +148,7 @@ class TelegramDeepHelperTests(unittest.TestCase):
         mock_activate.assert_not_called()
 
     def test_close_helper_session_best_effort_closes_reused_tab(self) -> None:
-        helper_session = {"tab_id": 777}
+        helper_session = {"tab_id": 777, "needs_base_restore": True}
         with (
             patch.object(self.mod, "_close_tab_best_effort", return_value=None) as mock_close,
             patch.object(self.mod, "_activate_tab_best_effort", return_value=None) as mock_activate,
@@ -165,6 +165,7 @@ class TelegramDeepHelperTests(unittest.TestCase):
         mock_close.assert_called_once()
         mock_activate.assert_called_once()
         self.assertIsNone(helper_session["tab_id"])
+        self.assertFalse(helper_session["needs_base_restore"])
 
     def test_read_username_via_helper_tab_tolerates_missing_header_shell(self) -> None:
         helper_session = {"tab_id": None}
@@ -207,7 +208,7 @@ class TelegramDeepHelperTests(unittest.TestCase):
             command_type = command["type"]
             if command_type == "click":
                 click_selectors.append(command["selector"])
-                return {"ok": command["selector"] == ".chat-info"}
+                return {"ok": command["selector"] == ".MiddleHeader .ChatInfo .fullName"}
             if command_type == "wait_selector":
                 return {"ok": True}
             raise AssertionError(f"Unexpected command type: {command_type}")
@@ -233,7 +234,54 @@ class TelegramDeepHelperTests(unittest.TestCase):
             )
 
         self.assertEqual(username, "@alpha_fit")
-        self.assertEqual(click_selectors, [".chat-info"])
+        self.assertEqual(click_selectors, [".MiddleHeader .ChatInfo .fullName"])
+
+    def test_open_current_chat_user_info_skips_empty_right_column_shell(self) -> None:
+        click_selectors: list[str] = []
+        html_payloads = iter(
+            [
+                '<div id="RightColumn"><div class="RightHeader"></div><div class="Transition"></div></div>',
+                (
+                    '<div id="RightColumn"><div class="Profile custom-scroll">'
+                    '<div class="multiline-item"><span class="title">@alpha_fit</span>'
+                    '<span class="subtitle">Username</span></div>'
+                    "</div></div>"
+                ),
+            ]
+        )
+
+        def fake_send_command_result(**kwargs):
+            command = kwargs["command"]
+            command_type = command["type"]
+            if command_type == "click":
+                click_selectors.append(command["selector"])
+                return {
+                    "ok": command["selector"] in {
+                        ".MiddleHeader .ChatInfo .fullName",
+                        ".MiddleHeader .ChatInfo",
+                    }
+                }
+            if command_type == "wait_selector":
+                return {"ok": True}
+            raise AssertionError(f"Unexpected command type: {command_type}")
+
+        with (
+            patch.object(self.mod, "_send_command_result", side_effect=fake_send_command_result),
+            patch.object(self.mod, "_send_get_html", side_effect=lambda **kwargs: next(html_payloads)),
+            patch.object(self.mod, "_close_profile_card", return_value=None) as mock_close,
+            patch.object(self.mod.time, "sleep", return_value=None),
+        ):
+            username = self.mod._open_current_chat_user_info_and_read_username(
+                server="http://127.0.0.1:8765",
+                token="token",
+                client_id="client-1",
+                tab_id=777,
+                timeout_sec=5,
+            )
+
+        self.assertEqual(username, "@alpha_fit")
+        self.assertEqual(click_selectors[:2], [".MiddleHeader .ChatInfo .fullName", ".MiddleHeader .ChatInfo"])
+        self.assertGreaterEqual(mock_close.call_count, 2)
 
 
 if __name__ == "__main__":

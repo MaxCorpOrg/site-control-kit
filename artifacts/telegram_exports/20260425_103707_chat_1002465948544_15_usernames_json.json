@@ -1,0 +1,50 @@
+{
+  "group_url": "https://web.telegram.org/a/#-1002465948544",
+  "source_mode": "chat",
+  "generated_at": "2026-04-25T10:37:07",
+  "count": 5,
+  "usernames": [
+    "@bychkov_aa",
+    "@oleg_klsnkv",
+    "@wanderlinde_baza",
+    "@bulan04",
+    "@holaaloe"
+  ],
+  "rows": [
+    {
+      "username": "@bychkov_aa",
+      "peer_id": "1291639730",
+      "name": "ДОКМЕД от Алексея Андреевича",
+      "status": "из чата",
+      "role": "—"
+    },
+    {
+      "username": "@oleg_klsnkv",
+      "peer_id": "547163094",
+      "name": "Олег Колесников",
+      "status": "из чата",
+      "role": "—"
+    },
+    {
+      "username": "@wanderlinde_baza",
+      "peer_id": "7730689749",
+      "name": "Летаргический сон",
+      "status": "из чата",
+      "role": "модератор"
+    },
+    {
+      "username": "@bulan04",
+      "peer_id": "891274018",
+      "name": "Bulka",
+      "status": "из чата",
+      "role": "Модератор"
+    },
+    {
+      "username": "@holaaloe",
+      "peer_id": "351524223",
+      "name": "Дмитрий Ежов",
+      "status": "из чата",
+      "role": "—"
+    }
+  ]
+}

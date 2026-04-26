@@ -1,0 +1,74 @@
+{
+  "group_url": "https://web.telegram.org/a/#-1002465948544",
+  "source_mode": "chat",
+  "generated_at": "2026-04-26T10:30:30",
+  "count": 8,
+  "usernames": [
+    "@bulan04",
+    "@osipoly",
+    "@tri87true",
+    "@iris_bs_bot",
+    "@fuckeeva",
+    "@bychkov_aa",
+    "@wanderlinde_baza",
+    "@kamaz_master1"
+  ],
+  "rows": [
+    {
+      "username": "@bulan04",
+      "peer_id": "891274018",
+      "name": "Bulka",
+      "status": "из чата",
+      "role": "Модератор"
+    },
+    {
+      "username": "@osipoly",
+      "peer_id": "1238534353",
+      "name": "Ольга",
+      "status": "из чата",
+      "role": "—"
+    },
+    {
+      "username": "@tri87true",
+      "peer_id": "555101371",
+      "name": "Тэймур Гусейнов",
+      "status": "из чата",
+      "role": "—"
+    },
+    {
+      "username": "@iris_bs_bot",
+      "peer_id": "5137994780",
+      "name": "Iris | Bright Sophie",
+      "status": "из чата",
+      "role": "Admin"
+    },
+    {
+      "username": "@fuckeeva",
+      "peer_id": "858739581",
+      "name": "Анна Fuckeeva",
+      "status": "из чата",
+      "role": "—"
+    },
+    {
+      "username": "@bychkov_aa",
+      "peer_id": "1291639730",
+      "name": "Алексей Андреевич",
+      "status": "из чата",
+      "role": "модератор"
+    },
+    {
+      "username": "@wanderlinde_baza",
+      "peer_id": "7730689749",
+      "name": "БАЗА",
+      "status": "из чата",
+      "role": "—"
+    },
+    {
+      "username": "@kamaz_master1",
+      "peer_id": "1404471788",
+      "name": "Камаз",
+      "status": "из чата",
+      "role": "—"
+    }
+  ]
+}

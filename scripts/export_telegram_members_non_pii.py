@@ -7,6 +7,7 @@ import html as html_lib
 import json
 import os
 import re
+import socket
 import shutil
 import sys
 import time
@@ -61,6 +62,20 @@ try:
     CHAT_DEEP_STEP_MAX_SEC = max(float(os.getenv("TELEGRAM_CHAT_DEEP_STEP_MAX_SEC", "0") or "0"), 0.0)
 except ValueError:
     CHAT_DEEP_STEP_MAX_SEC = 0.0
+try:
+    CHAT_JUMP_SCROLL_TRIGGER_STALL = max(int(os.getenv("TELEGRAM_CHAT_JUMP_SCROLL_TRIGGER_STALL", "0") or "0"), 0)
+except ValueError:
+    CHAT_JUMP_SCROLL_TRIGGER_STALL = 0
+try:
+    CHAT_MENTION_DEEP_MAX_PER_STEP = max(int(os.getenv("TELEGRAM_CHAT_MENTION_DEEP_MAX_PER_STEP", "0") or "0"), 0)
+except ValueError:
+    CHAT_MENTION_DEEP_MAX_PER_STEP = 0
+CHAT_MENTION_TRACE = str(os.getenv("TELEGRAM_CHAT_MENTION_TRACE", "") or "").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 SPECIFIC_TG_DIALOG_URL_RE = re.compile(r"^https?://web\.telegram\.org/(k|a)/#[^#\s]+$", flags=re.I)
 RIGHT_COLUMN_SELECTOR = "#RightColumn, #column-right"
 RIGHT_PANEL_READY_SELECTOR = (
@@ -75,12 +90,47 @@ def _norm_server(url: str) -> str:
     return url.rstrip("/")
 
 
+def _effective_timeout_sec(value: float, *, minimum: float = 0.8) -> float:
+    try:
+        timeout = float(value)
+    except (TypeError, ValueError):
+        timeout = minimum
+    return max(minimum, timeout)
+
+
+def _remaining_timeout_sec(deadline: float, *, minimum: float = 0.4) -> float:
+    return max(minimum, deadline - time.time())
+
+
+def _deadline_timeout(deadline: float, requested: float, *, minimum: float = 0.4) -> float:
+    try:
+        requested_timeout = float(requested)
+    except (TypeError, ValueError):
+        requested_timeout = minimum
+    return min(max(minimum, requested_timeout), _remaining_timeout_sec(deadline, minimum=minimum))
+
+
+def _mention_trace_step(username: str, step: str, started_at: float, **fields: Any) -> None:
+    if not CHAT_MENTION_TRACE:
+        return
+    extras: list[str] = []
+    for key, value in fields.items():
+        if value in ("", None):
+            continue
+        extras.append(f"{key}={value}")
+    suffix = f" {' '.join(extras)}" if extras else ""
+    elapsed = max(time.time() - started_at, 0.0)
+    print(f"INFO: chat mention trace {username} {step} {elapsed:.2f}s{suffix}")
+
+
 def _http_json(
     server: str,
     token: str,
     method: str,
     path: str,
     payload: dict[str, Any] | None = None,
+    *,
+    request_timeout_sec: float | None = None,
 ) -> dict[str, Any]:
     endpoint = f"{_norm_server(server)}{path}"
     body = None
@@ -93,8 +143,14 @@ def _http_json(
         headers["Content-Type"] = "application/json"
 
     request = Request(endpoint, data=body, method=method, headers=headers)
+    timeout_sec = 30.0
+    if request_timeout_sec is not None:
+        try:
+            timeout_sec = max(0.5, float(request_timeout_sec))
+        except (TypeError, ValueError):
+            timeout_sec = 30.0
     try:
-        with urlopen(request, timeout=30) as response:
+        with urlopen(request, timeout=timeout_sec) as response:
             raw = response.read().decode("utf-8")
             if not raw:
                 return {"ok": True}
@@ -102,8 +158,9 @@ def _http_json(
     except HTTPError as exc:
         raw = exc.read().decode("utf-8", errors="replace") if hasattr(exc, "read") else ""
         raise RuntimeError(f"HTTP {exc.code}: {raw or exc.reason}") from exc
-    except URLError as exc:
-        raise RuntimeError(f"Network error: {exc.reason}") from exc
+    except (URLError, TimeoutError, socket.timeout) as exc:
+        reason = getattr(exc, "reason", None) or str(exc) or exc.__class__.__name__
+        raise RuntimeError(f"Network error: {reason}") from exc
 
 
 def _http_json_retry(
@@ -113,11 +170,20 @@ def _http_json_retry(
     path: str,
     payload: dict[str, Any] | None = None,
     retries: int = 3,
+    *,
+    request_timeout_sec: float | None = None,
 ) -> dict[str, Any]:
     last_error: RuntimeError | None = None
     for attempt in range(retries):
         try:
-            return _http_json(server, token, method, path, payload)
+            return _http_json(
+                server,
+                token,
+                method,
+                path,
+                payload,
+                request_timeout_sec=request_timeout_sec,
+            )
         except RuntimeError as exc:
             last_error = exc
             if attempt >= retries - 1:
@@ -208,6 +274,47 @@ def _get_tab_url(server: str, token: str, client_id: str, tab_id: int) -> str:
     return ""
 
 
+def _get_page_url_best_effort(
+    server: str,
+    token: str,
+    client_id: str,
+    tab_id: int,
+    timeout_sec: int = 2,
+) -> str:
+    result = _send_command_result(
+        server=server,
+        token=token,
+        client_id=client_id,
+        tab_id=tab_id,
+        timeout_sec=min(max(timeout_sec, 0.3), 4),
+        command={"type": "get_page_url"},
+        raise_on_fail=False,
+    )
+    data = result.get("data") or {}
+    value = data.get("url") if isinstance(data, dict) else ""
+    return str(value or "").strip()
+
+
+def _read_dialog_fragment_best_effort(
+    server: str,
+    token: str,
+    client_id: str,
+    tab_id: int,
+    timeout_sec: float,
+) -> str:
+    page_url = _get_page_url_best_effort(
+        server=server,
+        token=token,
+        client_id=client_id,
+        tab_id=tab_id,
+        timeout_sec=min(max(timeout_sec, 0.3), 0.8),
+    )
+    fragment = _dialog_fragment_from_url(page_url)
+    if fragment:
+        return fragment
+    return _dialog_fragment_from_url(_get_tab_url(server, token, client_id, tab_id))
+
+
 def _detect_current_dialog_url(
     server: str,
     token: str,
@@ -215,6 +322,9 @@ def _detect_current_dialog_url(
     tab_id: int,
     timeout_sec: int,
 ) -> str:
+    page_url = _get_page_url_best_effort(server, token, client_id, tab_id, timeout_sec=min(timeout_sec, 2))
+    if _is_specific_tg_dialog_url(page_url):
+        return page_url
     url = _get_tab_url(server, token, client_id, tab_id)
     return url if _is_specific_tg_dialog_url(url) else ""
 
@@ -304,7 +414,7 @@ def _ensure_group_dialog_url(
     if not _is_specific_tg_dialog_url(group_url):
         return True
 
-    current_url = _get_tab_url(server, token, client_id, tab_id)
+    current_url = _detect_current_dialog_url(server, token, client_id, tab_id, timeout_sec=min(timeout_sec, 2))
     target_fragment = group_url.split("#", 1)[1] if "#" in group_url else ""
     current_fragment = current_url.split("#", 1)[1] if "#" in current_url else ""
     if current_url and current_fragment and (not target_fragment or target_fragment in current_fragment):
@@ -360,7 +470,7 @@ def _ensure_group_dialog_url(
         raise_on_fail=False,
     )
     time.sleep(0.8)
-    fixed_url = _get_tab_url(server, token, client_id, tab_id)
+    fixed_url = _detect_current_dialog_url(server, token, client_id, tab_id, timeout_sec=min(timeout_sec, 2))
     fixed_fragment = fixed_url.split("#", 1)[1] if "#" in fixed_url else ""
     if fixed_url and fixed_fragment and (not target_fragment or target_fragment in fixed_fragment):
         if _is_dialog_surface_open(server, token, client_id, tab_id, timeout_sec):
@@ -423,6 +533,8 @@ def _normalize_username_from_mention_input(value: str) -> str:
         candidate = match.group(1)
         if _is_valid_username_candidate(candidate):
             return f"@{candidate}"
+    if _is_valid_username_candidate(text):
+        return f"@{text}"
     return "—"
 
 
@@ -465,12 +577,15 @@ def _poll_username_from_page_location(
     deadline = time.time() + max(timeout_sec, 0.2)
     last_url = ""
     while True:
+        remaining = deadline - time.time()
+        if remaining <= 0:
+            return "—", last_url
         result = _send_command_result(
             server=server,
             token=token,
             client_id=client_id,
             tab_id=tab_id,
-            timeout_sec=2,
+            timeout_sec=min(max(remaining, 0.4), 1.0),
             command={"type": "get_page_url"},
             raise_on_fail=False,
         )
@@ -848,32 +963,47 @@ def _open_current_chat_user_info_and_read_username(
     client_id: str,
     tab_id: int,
     timeout_sec: int,
+    *,
+    deadline: float | None = None,
 ) -> str:
-    clicked_any = False
+    read_deadline = deadline if deadline is not None else time.time() + _effective_timeout_sec(timeout_sec, minimum=0.8)
+    profile_html = ""
+
+    def _profile_panel_has_content(html_payload: str) -> bool:
+        html = str(html_payload or "")
+        return (
+            'class="Profile' in html
+            or 'class="profile-info"' in html
+            or 'class="multiline-item"' in html
+            or '<h3 class="title">User Info</h3>' in html
+        )
+
     for selector in (
-        ".chat-info",
-        ".chat-info .person",
-        ".chat-info .peer-title",
-        ".sidebar-header .chat-info",
-        ".sidebar-header .peer-title",
+        ".MiddleHeader .ChatInfo .fullName",
         ".MiddleHeader .ChatInfo",
         ".MiddleHeader .chat-info-wrapper .ChatInfo",
-        ".MiddleHeader .ChatInfo .fullName",
+        ".MiddleHeader .ChatInfo .Avatar[data-peer-id]",
         ".MiddleHeader .ChatInfo [role=\"button\"]",
         ".MiddleHeader .ChatInfo .group-status",
         ".MiddleHeader .ChatInfo .info",
         ".MiddleHeader .ChatInfo .title",
-        ".MiddleHeader .ChatInfo .Avatar[data-peer-id]",
+        ".chat-info .peer-title",
+        ".sidebar-header .peer-title",
+        ".chat-info",
+        ".chat-info .person",
         ".chat-info .person-avatar",
+        ".sidebar-header .chat-info",
         ".chat-info-container .chat-info",
         "#column-center .chat-info",
     ):
+        if time.time() >= read_deadline:
+            break
         click_result = _send_command_result(
             server=server,
             token=token,
             client_id=client_id,
             tab_id=tab_id,
-            timeout_sec=min(max(timeout_sec, 2), 3),
+            timeout_sec=_deadline_timeout(read_deadline, min(max(timeout_sec, 2), 3)),
             command={
                 "type": "click",
                 "selector": selector,
@@ -883,12 +1013,14 @@ def _open_current_chat_user_info_and_read_username(
         )
         if not click_result.get("ok"):
             continue
+        if time.time() >= read_deadline:
+            break
         ready = _send_command_result(
             server=server,
             token=token,
             client_id=client_id,
             tab_id=tab_id,
-            timeout_sec=min(max(timeout_sec, 2), 4),
+            timeout_sec=_deadline_timeout(read_deadline, min(max(timeout_sec, 2), 4)),
             command={
                 "type": "wait_selector",
                 "selector": RIGHT_PANEL_READY_SELECTOR,
@@ -897,22 +1029,34 @@ def _open_current_chat_user_info_and_read_username(
             },
             raise_on_fail=False,
         )
-        if ready.get("ok"):
-            clicked_any = True
+        if not ready.get("ok"):
+            continue
+        if time.time() >= read_deadline:
             break
-    if not clicked_any:
+        try:
+            candidate_html = _send_get_html(
+                server=server,
+                token=token,
+                client_id=client_id,
+                tab_id=tab_id,
+                timeout_sec=_deadline_timeout(read_deadline, min(max(timeout_sec, 2), 4)),
+                selector=RIGHT_COLUMN_SELECTOR,
+            )
+        except RuntimeError:
+            candidate_html = ""
+        if _profile_panel_has_content(candidate_html):
+            profile_html = candidate_html
+            break
+        _close_profile_card(server, token, client_id, tab_id)
+        time.sleep(0.05)
+    if not profile_html:
+        return "—"
+
+    if time.time() >= read_deadline:
         return "—"
 
     username = "—"
     try:
-        profile_html = _send_get_html(
-            server=server,
-            token=token,
-            client_id=client_id,
-            tab_id=tab_id,
-            timeout_sec=min(max(timeout_sec, 2), 4),
-            selector=RIGHT_COLUMN_SELECTOR,
-        )
         username = _extract_username_from_profile_html(profile_html)
     finally:
         _close_profile_card(server, token, client_id, tab_id)
@@ -961,8 +1105,11 @@ def _get_current_opened_peer_id(
     token: str,
     client_id: str,
     tab_id: int,
-    timeout_sec: int,
+    timeout_sec: float,
+    *,
+    deadline: float | None = None,
 ) -> str:
+    read_deadline = deadline if deadline is not None else time.time() + _effective_timeout_sec(timeout_sec)
     for selector in (
         "#RightColumn .Profile .Avatar[data-peer-id]",
         "#RightColumn .Avatar[data-peer-id]",
@@ -973,12 +1120,14 @@ def _get_current_opened_peer_id(
         "#RightColumn .profile-name .peer-title[data-peer-id]",
         "#column-right .profile-name .peer-title[data-peer-id]",
     ):
+        if time.time() >= read_deadline:
+            break
         result = _send_command_result(
             server=server,
             token=token,
             client_id=client_id,
             tab_id=tab_id,
-            timeout_sec=max(3, timeout_sec),
+            timeout_sec=_remaining_timeout_sec(read_deadline),
             command={"type": "get_attribute", "selector": selector, "attribute": "data-peer-id", "timeout_ms": 1200},
             raise_on_fail=False,
         )
@@ -995,8 +1144,11 @@ def _get_current_opened_title(
     token: str,
     client_id: str,
     tab_id: int,
-    timeout_sec: int,
+    timeout_sec: float,
+    *,
+    deadline: float | None = None,
 ) -> str:
+    read_deadline = deadline if deadline is not None else time.time() + _effective_timeout_sec(timeout_sec)
     for selector in (
         "#RightColumn .Profile .fullName",
         ".MiddleHeader .ChatInfo .fullName",
@@ -1006,12 +1158,14 @@ def _get_current_opened_title(
         "#RightColumn .profile-name .peer-title",
         "#column-right .profile-name .peer-title",
     ):
+        if time.time() >= read_deadline:
+            break
         result = _send_command_result(
             server=server,
             token=token,
             client_id=client_id,
             tab_id=tab_id,
-            timeout_sec=max(3, timeout_sec),
+            timeout_sec=_remaining_timeout_sec(read_deadline),
             command={"type": "extract_text", "selector": selector, "timeout_ms": 1200},
             raise_on_fail=False,
         )
@@ -1021,6 +1175,73 @@ def _get_current_opened_title(
         if text:
             return text
     return ""
+
+
+def _read_current_opened_identity(
+    server: str,
+    token: str,
+    client_id: str,
+    tab_id: int,
+    timeout_sec: float,
+    *,
+    deadline: float | None = None,
+) -> tuple[str, str]:
+    read_deadline = deadline if deadline is not None else time.time() + _effective_timeout_sec(timeout_sec)
+    peer_id, title = _read_helper_header_identity(
+        server=server,
+        token=token,
+        client_id=client_id,
+        tab_id=tab_id,
+        timeout_sec=timeout_sec,
+        deadline=read_deadline,
+    )
+    if not peer_id:
+        peer_id = _get_current_opened_peer_id(
+            server=server,
+            token=token,
+            client_id=client_id,
+            tab_id=tab_id,
+            timeout_sec=timeout_sec,
+            deadline=read_deadline,
+        )
+    if not title:
+        title = _get_current_opened_title(
+            server=server,
+            token=token,
+            client_id=client_id,
+            tab_id=tab_id,
+            timeout_sec=timeout_sec,
+            deadline=read_deadline,
+        )
+    return peer_id, title
+
+
+def _wait_for_current_opened_identity(
+    server: str,
+    token: str,
+    client_id: str,
+    tab_id: int,
+    timeout_sec: float,
+) -> tuple[str, str]:
+    deadline = time.time() + _effective_timeout_sec(timeout_sec, minimum=0.6)
+    while True:
+        remaining = deadline - time.time()
+        if remaining <= 0:
+            return "", ""
+        read_budget = max(min(remaining, 1.2), 0.4)
+        peer_id, title = _read_current_opened_identity(
+            server=server,
+            token=token,
+            client_id=client_id,
+            tab_id=tab_id,
+            timeout_sec=read_budget,
+            deadline=time.time() + read_budget,
+        )
+        if peer_id or title:
+            return peer_id, title
+        if time.time() >= deadline:
+            return "", ""
+        time.sleep(0.2)
 
 
 def _name_key(value: str) -> str:
@@ -1072,14 +1293,19 @@ def _read_helper_header_identity(
     token: str,
     client_id: str,
     tab_id: int,
-    timeout_sec: int,
+    timeout_sec: float,
+    *,
+    deadline: float | None = None,
 ) -> tuple[str, str]:
+    read_deadline = deadline if deadline is not None else time.time() + _effective_timeout_sec(timeout_sec)
+    if time.time() >= read_deadline:
+        return "", ""
     result = _send_command_result(
         server=server,
         token=token,
         client_id=client_id,
         tab_id=tab_id,
-        timeout_sec=max(2, timeout_sec),
+        timeout_sec=_remaining_timeout_sec(read_deadline),
         command={
             "type": "get_html",
             "selector": ".MiddleHeader, .chat-info, .sidebar-header",
@@ -1108,22 +1334,124 @@ def _wait_for_helper_target_identity(
     if not normalized_peer_id and not normalized_name:
         return True
 
-    deadline = time.time() + max(timeout_sec, 0.6)
+    deadline = time.time() + _effective_timeout_sec(timeout_sec, minimum=0.6)
+    matching_route_streak = 0
+    mismatching_route_streak = 0
+    last_mismatching_route = ""
     while True:
+        remaining = deadline - time.time()
+        if remaining <= 0:
+            return False
+
+        route_fragment = ""
+        if normalized_peer_id:
+            route_fragment = _read_dialog_fragment_best_effort(
+                server=server,
+                token=token,
+                client_id=client_id,
+                tab_id=tab_id,
+                timeout_sec=min(max(remaining * 0.2, 0.25), 0.6),
+            )
+            if route_fragment == normalized_peer_id:
+                matching_route_streak += 1
+                mismatching_route_streak = 0
+                last_mismatching_route = ""
+            elif route_fragment:
+                matching_route_streak = 0
+                if route_fragment == last_mismatching_route:
+                    mismatching_route_streak += 1
+                else:
+                    last_mismatching_route = route_fragment
+                    mismatching_route_streak = 1
+            else:
+                matching_route_streak = 0
+                mismatching_route_streak = 0
+                last_mismatching_route = ""
+
+        remaining = deadline - time.time()
+        if remaining <= 0:
+            return False
+        read_budget = max(min(remaining, 0.55 if route_fragment else 0.85), 0.3)
         current_peer_id, current_title = _read_helper_header_identity(
             server=server,
             token=token,
             client_id=client_id,
             tab_id=tab_id,
-            timeout_sec=2,
+            timeout_sec=read_budget,
+            deadline=time.time() + read_budget,
         )
         if normalized_peer_id and current_peer_id == normalized_peer_id:
             return True
         if normalized_name and current_title and _name_match(normalized_name, current_title):
             return True
+        has_peer_conflict = bool(normalized_peer_id and current_peer_id and current_peer_id != normalized_peer_id)
+        has_name_conflict = bool(normalized_name and current_title and not _name_match(normalized_name, current_title))
+        if has_peer_conflict or has_name_conflict:
+            matching_route_streak = 0
+            mismatching_route_streak = 0
+            last_mismatching_route = ""
+        elif normalized_peer_id and matching_route_streak >= 2:
+            return True
+        elif normalized_peer_id and route_fragment and mismatching_route_streak >= 2:
+            return False
         if time.time() >= deadline:
             return False
-        time.sleep(0.2)
+        time.sleep(0.08 if route_fragment else 0.12)
+
+
+def _soft_confirm_helper_target_route(
+    server: str,
+    token: str,
+    client_id: str,
+    tab_id: int,
+    expected_peer_id: str,
+    expected_name: str,
+    timeout_sec: float,
+) -> bool:
+    normalized_peer_id = str(expected_peer_id or "").strip()
+    normalized_name = _compact(expected_name)
+    if not normalized_peer_id:
+        return False
+
+    route_fragment = _read_dialog_fragment_best_effort(
+        server=server,
+        token=token,
+        client_id=client_id,
+        tab_id=tab_id,
+        timeout_sec=min(max(timeout_sec, 0.3), 0.8),
+    )
+    if route_fragment != normalized_peer_id:
+        return False
+
+    current_peer_id, current_title = _read_helper_header_identity(
+        server=server,
+        token=token,
+        client_id=client_id,
+        tab_id=tab_id,
+        timeout_sec=min(max(timeout_sec, 0.3), 0.8),
+    )
+    if current_peer_id and current_peer_id != normalized_peer_id:
+        return False
+    if normalized_name and current_title and not _name_match(normalized_name, current_title):
+        return False
+    return True
+
+
+def _match_unique_member_peer_id_by_title(
+    members: list[dict[str, str]],
+    title: str,
+) -> str:
+    title_key = _name_key(title)
+    if len(title_key) < 5:
+        return ""
+    matched_peer_ids = [
+        str(item.get("peer_id") or "").strip()
+        for item in members
+        if str(item.get("peer_id") or "").strip()
+        and _name_key(str(item.get("name") or "")) == title_key
+    ]
+    unique_peer_ids = sorted({peer_id for peer_id in matched_peer_ids if peer_id})
+    return unique_peer_ids[0] if len(unique_peer_ids) == 1 else ""
 
 
 def _extract_chat_mention_usernames(html_payload: str) -> list[str]:
@@ -1329,7 +1657,7 @@ def _normalize_identity_history_maps(
     return username_to_peer, peer_to_username
 
 
-def _identity_history_updated_at(value: str) -> dt.datetime:
+def _parse_iso_datetime_utc(value: str) -> dt.datetime:
     text = str(value or "").strip()
     if not text:
         return dt.datetime.min.replace(tzinfo=dt.timezone.utc)
@@ -1340,6 +1668,10 @@ def _identity_history_updated_at(value: str) -> dt.datetime:
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=dt.timezone.utc)
     return parsed.astimezone(dt.timezone.utc)
+
+
+def _identity_history_updated_at(value: str) -> dt.datetime:
+    return _parse_iso_datetime_utc(value)
 
 
 def _load_identity_history_source(path: Path | None) -> tuple[dt.datetime, dict[str, str], dict[str, str]]:
@@ -1557,36 +1889,274 @@ def _save_identity_history(
 def _load_discovery_state(discovery_state_path: Path | None) -> dict[str, Any]:
     if discovery_state_path is None or not discovery_state_path.exists():
         return {
-            "version": 1,
+            "version": 2,
             "updated_at": "",
             "seen_view_signatures": [],
             "seen_peer_ids": [],
+            "peer_states": {},
+            "mention_candidate_states": {},
         }
     try:
         payload = json.loads(discovery_state_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {
-            "version": 1,
+            "version": 2,
             "updated_at": "",
             "seen_view_signatures": [],
             "seen_peer_ids": [],
+            "peer_states": {},
+            "mention_candidate_states": {},
         }
     if not isinstance(payload, dict):
         payload = {}
     seen_view_signatures_raw = payload.get("seen_view_signatures")
     seen_peer_ids_raw = payload.get("seen_peer_ids")
+    peer_states_raw = payload.get("peer_states")
+    mention_candidate_states_raw = payload.get("mention_candidate_states")
     seen_view_signatures = []
     if isinstance(seen_view_signatures_raw, list):
         seen_view_signatures = [str(value).strip() for value in seen_view_signatures_raw if str(value).strip()]
     seen_peer_ids = []
     if isinstance(seen_peer_ids_raw, list):
         seen_peer_ids = [str(value).strip() for value in seen_peer_ids_raw if str(value).strip()]
+    peer_states: dict[str, dict[str, Any]] = {}
+    if isinstance(peer_states_raw, dict):
+        for peer_id, state in peer_states_raw.items():
+            normalized_peer_id = str(peer_id or "").strip()
+            if not normalized_peer_id or not isinstance(state, dict):
+                continue
+            peer_states[normalized_peer_id] = {
+                "attempt_count": max(int(state.get("attempt_count") or 0), 0),
+                "success_count": max(int(state.get("success_count") or 0), 0),
+                "failure_count": max(int(state.get("failure_count") or 0), 0),
+                "last_outcome": str(state.get("last_outcome") or "").strip(),
+                "last_attempted_at": str(state.get("last_attempted_at") or "").strip(),
+                "last_username": _normalize_username(str(state.get("last_username") or "")),
+                "cooldown_until": str(state.get("cooldown_until") or "").strip(),
+            }
+    mention_candidate_states: dict[str, dict[str, Any]] = {}
+    if isinstance(mention_candidate_states_raw, dict):
+        for username, state in mention_candidate_states_raw.items():
+            mention_key = _normalize_username_from_mention_input(str(username or "")).lower()
+            if mention_key == "—" or not isinstance(state, dict):
+                continue
+            mention_candidate_states[mention_key] = {
+                "attempt_count": max(int(state.get("attempt_count") or 0), 0),
+                "success_count": max(int(state.get("success_count") or 0), 0),
+                "failure_count": max(int(state.get("failure_count") or 0), 0),
+                "last_outcome": str(state.get("last_outcome") or "").strip(),
+                "last_attempted_at": str(state.get("last_attempted_at") or "").strip(),
+                "last_peer_id": str(state.get("last_peer_id") or "").strip(),
+                "cooldown_until": str(state.get("cooldown_until") or "").strip(),
+            }
     return {
-        "version": 1,
+        "version": 2,
         "updated_at": str(payload.get("updated_at") or ""),
         "seen_view_signatures": seen_view_signatures[-400:],
         "seen_peer_ids": seen_peer_ids[-5000:],
+        "peer_states": peer_states,
+        "mention_candidate_states": mention_candidate_states,
     }
+
+
+def _discovery_peer_states(discovery_state: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
+    if not isinstance(discovery_state, dict):
+        return {}
+    value = discovery_state.get("peer_states")
+    return value if isinstance(value, dict) else {}
+
+
+def _discovery_mention_states(discovery_state: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
+    if not isinstance(discovery_state, dict):
+        return {}
+    value = discovery_state.get("mention_candidate_states")
+    return value if isinstance(value, dict) else {}
+
+
+def _discovery_mention_key(username: str) -> str:
+    normalized_username = _normalize_username_from_mention_input(username)
+    return normalized_username.lower() if normalized_username != "—" else ""
+
+
+def _discovery_mention_state(discovery_state: dict[str, Any] | None, username: str) -> dict[str, Any]:
+    mention_key = _discovery_mention_key(username)
+    if not mention_key:
+        return {}
+    return dict(_discovery_mention_states(discovery_state).get(mention_key) or {})
+
+
+def _discovery_mention_cooldown_until(discovery_state: dict[str, Any] | None, username: str) -> dt.datetime:
+    state = _discovery_mention_state(discovery_state, username)
+    return _parse_iso_datetime_utc(str(state.get("cooldown_until") or ""))
+
+
+def _discovery_mention_in_cooldown(
+    discovery_state: dict[str, Any] | None,
+    username: str,
+    *,
+    now: dt.datetime | None = None,
+) -> bool:
+    reference = now or dt.datetime.now(dt.timezone.utc)
+    return _discovery_mention_cooldown_until(discovery_state, username) > reference
+
+
+def _discovery_seen_peer_ids(discovery_state: dict[str, Any] | None) -> set[str]:
+    if not isinstance(discovery_state, dict):
+        return set()
+    values = discovery_state.get("seen_peer_ids") or []
+    if not isinstance(values, list):
+        return set()
+    return {str(value).strip() for value in values if str(value).strip()}
+
+
+def _discovery_note_visible_peers(discovery_state: dict[str, Any] | None, peer_ids: set[str]) -> None:
+    if not isinstance(discovery_state, dict) or not peer_ids:
+        return
+    current = list(discovery_state.get("seen_peer_ids") or [])
+    seen = {str(value).strip() for value in current if str(value).strip()}
+    for peer_id in sorted(peer_ids):
+        normalized_peer_id = str(peer_id or "").strip()
+        if not normalized_peer_id or normalized_peer_id in seen:
+            continue
+        seen.add(normalized_peer_id)
+        current.append(normalized_peer_id)
+    discovery_state["seen_peer_ids"] = current[-5000:]
+
+
+def _discovery_note_view_signature(discovery_state: dict[str, Any] | None, peer_ids: set[str]) -> str:
+    if not isinstance(discovery_state, dict) or not peer_ids:
+        return ""
+    signature = ",".join(sorted(str(peer_id).strip() for peer_id in peer_ids if str(peer_id).strip()))
+    if not signature:
+        return ""
+    current = list(discovery_state.get("seen_view_signatures") or [])
+    if signature not in current:
+        current.append(signature)
+    discovery_state["seen_view_signatures"] = current[-400:]
+    return signature
+
+
+def _discovery_peer_state(discovery_state: dict[str, Any] | None, peer_id: str) -> dict[str, Any]:
+    normalized_peer_id = str(peer_id or "").strip()
+    if not normalized_peer_id:
+        return {}
+    return dict(_discovery_peer_states(discovery_state).get(normalized_peer_id) or {})
+
+
+def _discovery_peer_cooldown_until(discovery_state: dict[str, Any] | None, peer_id: str) -> dt.datetime:
+    state = _discovery_peer_state(discovery_state, peer_id)
+    return _parse_iso_datetime_utc(str(state.get("cooldown_until") or ""))
+
+
+def _discovery_peer_in_cooldown(
+    discovery_state: dict[str, Any] | None,
+    peer_id: str,
+    *,
+    now: dt.datetime | None = None,
+) -> bool:
+    reference = now or dt.datetime.now(dt.timezone.utc)
+    return _discovery_peer_cooldown_until(discovery_state, peer_id) > reference
+
+
+def _discovery_failure_cooldown(
+    outcome: str,
+    failure_count: int,
+) -> dt.timedelta:
+    normalized = str(outcome or "").strip().lower()
+    failures = max(int(failure_count), 1)
+    if normalized in {"group_restore_failed", "context_missing"}:
+        hours = 1
+    elif "menu_missing" in normalized or "delivery_failure" in normalized:
+        hours = min(12, 2 * failures)
+    else:
+        hours = min(24, 3 * failures)
+    return dt.timedelta(hours=max(hours, 1))
+
+
+def _discovery_note_peer_attempt(
+    discovery_state: dict[str, Any] | None,
+    *,
+    peer_id: str,
+    outcome: str,
+    username: str = "—",
+) -> None:
+    if not isinstance(discovery_state, dict):
+        return
+    normalized_peer_id = str(peer_id or "").strip()
+    if not normalized_peer_id:
+        return
+    peer_states = _discovery_peer_states(discovery_state)
+    state = dict(peer_states.get(normalized_peer_id) or {})
+    now = dt.datetime.now(dt.timezone.utc).replace(microsecond=0)
+    normalized_username = _normalize_username(username)
+    normalized_outcome = str(outcome or "").strip()
+
+    state["attempt_count"] = max(int(state.get("attempt_count") or 0), 0) + 1
+    state["last_attempted_at"] = now.isoformat()
+    state["last_outcome"] = normalized_outcome
+
+    if normalized_username != "—":
+        state["success_count"] = max(int(state.get("success_count") or 0), 0) + 1
+        state["last_username"] = normalized_username
+        state["cooldown_until"] = ""
+    else:
+        failure_count = max(int(state.get("failure_count") or 0), 0) + 1
+        state["failure_count"] = failure_count
+        state["cooldown_until"] = (now + _discovery_failure_cooldown(normalized_outcome, failure_count)).isoformat()
+
+    peer_states[normalized_peer_id] = state
+    discovery_state["peer_states"] = peer_states
+
+
+def _discovery_note_mention_attempt(
+    discovery_state: dict[str, Any] | None,
+    *,
+    username: str,
+    outcome: str,
+    peer_id: str = "",
+) -> None:
+    if not isinstance(discovery_state, dict):
+        return
+    mention_key = _discovery_mention_key(username)
+    if not mention_key:
+        return
+    mention_states = _discovery_mention_states(discovery_state)
+    state = dict(mention_states.get(mention_key) or {})
+    now = dt.datetime.now(dt.timezone.utc).replace(microsecond=0)
+    normalized_outcome = str(outcome or "").strip()
+    normalized_peer_id = str(peer_id or "").strip()
+
+    state["attempt_count"] = max(int(state.get("attempt_count") or 0), 0) + 1
+    state["last_attempted_at"] = now.isoformat()
+    state["last_outcome"] = normalized_outcome
+    state["last_peer_id"] = normalized_peer_id
+
+    if "success" in normalized_outcome:
+        state["success_count"] = max(int(state.get("success_count") or 0), 0) + 1
+        state["cooldown_until"] = ""
+    else:
+        failure_count = max(int(state.get("failure_count") or 0), 0) + 1
+        state["failure_count"] = failure_count
+        state["cooldown_until"] = (now + _discovery_failure_cooldown(normalized_outcome, failure_count)).isoformat()
+
+    mention_states[mention_key] = state
+    discovery_state["mention_candidate_states"] = mention_states
+
+
+def _discovery_target_priority(
+    item: dict[str, str],
+    *,
+    discovery_state: dict[str, Any] | None,
+    seen_peer_ids_before_step: set[str],
+    now: dt.datetime,
+) -> tuple[int, int, int, str]:
+    peer_id = str(item.get("peer_id") or "").strip()
+    state = _discovery_peer_state(discovery_state, peer_id)
+    unseen_priority = 0 if peer_id and peer_id not in seen_peer_ids_before_step else 1
+    cooldown_priority = 1 if _discovery_peer_in_cooldown(discovery_state, peer_id, now=now) else 0
+    attempt_priority = max(int(state.get("attempt_count") or 0), 0)
+    failure_priority = max(int(state.get("failure_count") or 0), 0)
+    return (cooldown_priority, unseen_priority, attempt_priority + failure_priority, peer_id)
 
 
 def _write_stats_output(stats_output_path: Path | None, payload: dict[str, Any]) -> None:
@@ -1656,11 +2226,41 @@ def _save_discovery_state(discovery_state_path: Path | None, discovery_state: di
     if discovery_state_path is None or discovery_state is None:
         return
     discovery_state_path.parent.mkdir(parents=True, exist_ok=True)
+    peer_states = _discovery_peer_states(discovery_state)
+    serialized_peer_states = {
+        peer_id: {
+            "attempt_count": max(int(state.get("attempt_count") or 0), 0),
+            "success_count": max(int(state.get("success_count") or 0), 0),
+            "failure_count": max(int(state.get("failure_count") or 0), 0),
+            "last_outcome": str(state.get("last_outcome") or "").strip(),
+            "last_attempted_at": str(state.get("last_attempted_at") or "").strip(),
+            "last_username": _normalize_username(str(state.get("last_username") or "")),
+            "cooldown_until": str(state.get("cooldown_until") or "").strip(),
+        }
+        for peer_id, state in peer_states.items()
+        if str(peer_id or "").strip()
+    }
+    mention_candidate_states = _discovery_mention_states(discovery_state)
+    serialized_mention_candidate_states = {
+        mention_key: {
+            "attempt_count": max(int(state.get("attempt_count") or 0), 0),
+            "success_count": max(int(state.get("success_count") or 0), 0),
+            "failure_count": max(int(state.get("failure_count") or 0), 0),
+            "last_outcome": str(state.get("last_outcome") or "").strip(),
+            "last_attempted_at": str(state.get("last_attempted_at") or "").strip(),
+            "last_peer_id": str(state.get("last_peer_id") or "").strip(),
+            "cooldown_until": str(state.get("cooldown_until") or "").strip(),
+        }
+        for mention_key, state in mention_candidate_states.items()
+        if _discovery_mention_key(str(mention_key or ""))
+    }
     payload = {
-        "version": 1,
+        "version": 2,
         "updated_at": dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat(),
         "seen_view_signatures": list((discovery_state.get("seen_view_signatures") or []))[-400:],
         "seen_peer_ids": list((discovery_state.get("seen_peer_ids") or []))[-5000:],
+        "peer_states": serialized_peer_states,
+        "mention_candidate_states": serialized_mention_candidate_states,
     }
     discovery_state_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
@@ -2064,6 +2664,10 @@ def _scroll_chat_up(server: str, token: str, client_id: str, tab_id: int, timeou
     return False
 
 
+def _repeated_view_signature_stop_streak() -> int:
+    return max(CHAT_JUMP_SCROLL_TRIGGER_STALL + 1, 3)
+
+
 def _scroll_info_members_down(server: str, token: str, client_id: str, tab_id: int, timeout_sec: int) -> bool:
     # New Telegram Web renders Members inside the right Profile scroller.
     for selector in (
@@ -2281,18 +2885,38 @@ def _enrich_chat_usernames_via_mentions(
     group_url: str,
     members: list[dict[str, str]],
     deep_limit: int,
+    discovery_state: dict[str, Any] | None = None,
+    max_runtime_sec: float = 30.0,
 ) -> tuple[int, int]:
     if deep_limit <= 0 or not members:
         return 0, 0
 
-    body_html = _send_get_html(
+    body_started_at = time.time()
+    body_html = _send_get_html_best_effort(
         server=server,
         token=token,
         client_id=client_id,
         tab_id=tab_id,
-        timeout_sec=max(timeout_sec, 5),
+        timeout_sec=min(max(timeout_sec, 2), 4),
     )
-    candidates = _extract_chat_mention_usernames(body_html)[:deep_limit]
+    _mention_trace_step("*", "initial-body", body_started_at, html=int(bool(body_html)))
+    if not body_html:
+        return 0, 0
+    candidates: list[str] = []
+    candidate_limit = max(int(deep_limit), 0)
+    if CHAT_MENTION_DEEP_MAX_PER_STEP > 0:
+        candidate_limit = min(candidate_limit, CHAT_MENTION_DEEP_MAX_PER_STEP)
+    for username_raw in _extract_chat_mention_usernames(body_html):
+        normalized_mention = _normalize_username_from_mention_input(username_raw)
+        if normalized_mention == "—":
+            continue
+        if _discovery_mention_in_cooldown(discovery_state, normalized_mention):
+            continue
+        candidates.append(username_raw)
+        if len(candidates) >= candidate_limit:
+            break
+    if CHAT_MENTION_TRACE:
+        print(f"INFO: chat mention trace candidates found={len(candidates)} limit={candidate_limit}")
     if not candidates:
         return 0, 0
 
@@ -2300,57 +2924,130 @@ def _enrich_chat_usernames_via_mentions(
     tg_mode = _tg_web_mode_from_url(group_url)
     attempted = 0
     updated = 0
+    started_at = time.time()
     for username_raw in candidates:
+        if time.time() - started_at > max(max_runtime_sec, 1.0):
+            print("WARN: mention deep budget exhausted, stop extra mention pass")
+            break
+        normalized_mention = _normalize_username_from_mention_input(username_raw)
         attempted += 1
         username = _normalize_username(username_raw)
         if username == "—":
             continue
         user_url = f"https://web.telegram.org/{tg_mode}/#{username}"
-        _send_command_result(
+        navigate_started_at = time.time()
+        navigate_result = _send_command_result(
             server=server,
             token=token,
             client_id=client_id,
             tab_id=tab_id,
-            timeout_sec=min(timeout_sec, 8),
+            timeout_sec=min(timeout_sec, 4),
             command={"type": "navigate", "url": user_url},
             raise_on_fail=False,
         )
-        time.sleep(0.35)
-        user_html = _send_get_html(
+        _mention_trace_step(
+            username,
+            "navigate-user",
+            navigate_started_at,
+            ok=int(bool(navigate_result.get("ok"))),
+        )
+        wait_started_at = time.time()
+        peer_id, opened_title = _wait_for_current_opened_identity(
             server=server,
             token=token,
             client_id=client_id,
             tab_id=tab_id,
-            timeout_sec=min(timeout_sec, 6),
-            selector="body",
+            timeout_sec=min(float(timeout_sec), 1.2),
         )
-        peer_match = re.search(
-            r'<div class="chat-info[^"]*".*?<span class="peer-title"[^>]*data-peer-id="([^"]+)"',
-            user_html,
-            flags=re.S,
+        _mention_trace_step(
+            username,
+            "wait-identity",
+            wait_started_at,
+            peer_id=peer_id or "—",
+            title=opened_title or "—",
         )
-        peer_id = peer_match.group(1) if peer_match else ""
+        if not peer_id or not opened_title:
+            fallback_started_at = time.time()
+            user_html = _send_get_html_best_effort(
+                server=server,
+                token=token,
+                client_id=client_id,
+                tab_id=tab_id,
+                timeout_sec=min(timeout_sec, 3),
+                selector="body",
+            )
+            if not peer_id:
+                peer_id = _extract_peer_id_from_helper_header_html(user_html)
+            if not opened_title:
+                opened_title = _extract_title_from_helper_header_html(user_html)
+            _mention_trace_step(
+                username,
+                "fallback-body",
+                fallback_started_at,
+                html=int(bool(user_html)),
+                peer_id=peer_id or "—",
+                title=opened_title or "—",
+            )
+        matched_by_title = False
+        if not peer_id and opened_title:
+            peer_id = _match_unique_member_peer_id_by_title(members, opened_title)
+            matched_by_title = bool(peer_id)
         if peer_id and peer_id in members_by_peer and members_by_peer[peer_id].get("username") == "—":
             members_by_peer[peer_id]["username"] = username
             updated += 1
-            print(f"INFO: chat mention deep mapped {username} -> peer {peer_id}")
+            _discovery_note_peer_attempt(
+                discovery_state,
+                peer_id=peer_id,
+                outcome="mention_deep_success",
+                username=username,
+            )
+            _discovery_note_mention_attempt(
+                discovery_state,
+                username=normalized_mention,
+                outcome="mention_deep_success",
+                peer_id=peer_id,
+            )
+            if matched_by_title:
+                print(f"INFO: chat mention deep title-mapped {username} -> peer {peer_id}")
+            else:
+                print(f"INFO: chat mention deep mapped {username} -> peer {peer_id}")
+        else:
+            mention_outcome = "mention_peer_unknown"
+            if peer_id and peer_id in members_by_peer:
+                mention_outcome = "mention_already_known"
+            elif peer_id:
+                mention_outcome = "mention_non_target"
+            _discovery_note_mention_attempt(
+                discovery_state,
+                username=normalized_mention,
+                outcome=mention_outcome,
+                peer_id=peer_id,
+            )
 
         if _is_specific_tg_dialog_url(group_url):
-            _send_command_result(
+            return_started_at = time.time()
+            return_result = _send_command_result(
                 server=server,
                 token=token,
                 client_id=client_id,
                 tab_id=tab_id,
-                timeout_sec=min(timeout_sec, 8),
+                timeout_sec=min(timeout_sec, 4),
                 command={"type": "navigate", "url": group_url},
                 raise_on_fail=False,
             )
-            _send_command_result(
+            _mention_trace_step(
+                username,
+                "return-group-navigate",
+                return_started_at,
+                ok=int(bool(return_result.get("ok"))),
+            )
+            wait_return_started_at = time.time()
+            wait_return_result = _send_command_result(
                 server=server,
                 token=token,
                 client_id=client_id,
                 tab_id=tab_id,
-                timeout_sec=min(timeout_sec, 7),
+                timeout_sec=min(timeout_sec, 3),
                 command={
                     "type": "wait_selector",
                     "selector": (
@@ -2362,10 +3059,16 @@ def _enrich_chat_usernames_via_mentions(
                         ".bubbles [data-mid], "
                         ".bubbles .bubbles-group-avatar"
                     ),
-                    "timeout_ms": 5000,
+                    "timeout_ms": 2500,
                     "visible_only": False,
                 },
                 raise_on_fail=False,
+            )
+            _mention_trace_step(
+                username,
+                "return-group-wait",
+                wait_return_started_at,
+                ok=int(bool(wait_return_result.get("ok"))),
             )
             time.sleep(0.25)
     return attempted, updated
@@ -2389,6 +3092,7 @@ def _collect_members_from_chat(
     supports_click_menu_text: bool = False,
     historical_username_to_peer: dict[str, str] | None = None,
     historical_peer_to_username: dict[str, str] | None = None,
+    discovery_state: dict[str, Any] | None = None,
 ) -> tuple[list[dict[str, str]], dict[str, int]]:
     members: list[dict[str, str]] = []
     chat_html_timeout = max(5, min(timeout_sec, 8))
@@ -2412,6 +3116,13 @@ def _collect_members_from_chat(
     sticky_mention_updated_total = 0
     sticky_helper_attempted_total = 0
     sticky_helper_updated_total = 0
+    discovery_new_visible_total = 0
+    discovery_cooldown_skips_total = 0
+    discovery_revisit_steps_total = 0
+    revisited_view_steps_total = 0
+    repeated_view_signature_streak = 0
+    previous_view_signature = ""
+    chat_helper_session: dict[str, Any] = {"tab_id": None}
 
     def matches_chat_target(item: dict[str, str]) -> bool:
         if chat_target_peer_id and str(item.get("peer_id") or "").strip() != chat_target_peer_id:
@@ -2422,235 +3133,332 @@ def _collect_members_from_chat(
                 return False
         return True
 
-    for step in range(maximum_steps + 1):
-        if time.time() - started_at > max(max_runtime_sec, 5):
-            print(f"WARN: chat runtime limit reached ({max_runtime_sec}s), stopping")
-            runtime_limited = True
-            break
-
-        html_payload = _send_get_html(
-            server=server,
-            token=token,
-            client_id=client_id,
-            tab_id=tab_id,
-            timeout_sec=chat_html_timeout,
-        )
-
-        chat_members = _parse_chat_members(html_payload)
-        sticky_member = _read_sticky_chat_author_member(
-            server=server,
-            token=token,
-            client_id=client_id,
-            tab_id=tab_id,
-            timeout_sec=min(timeout_sec, 4),
-        )
-        if sticky_member:
-            sticky_peer_id = str(sticky_member.get("peer_id") or "").strip()
-            if sticky_peer_id and sticky_peer_id not in sticky_seen_peer_ids:
-                sticky_seen_peer_ids.add(sticky_peer_id)
-                print(f"INFO: sticky chat author {sticky_peer_id} ({sticky_member.get('name', '—')})")
-            if sticky_peer_id and not any(str(item.get("peer_id") or "").strip() == sticky_peer_id for item in chat_members):
-                chat_members.append(sticky_member)
-        before_count = len(members)
-
-        if chat_members:
-            members.extend(chat_members)
-            members = _dedupe_members(members)
-            history_prefilled, history_prefill_conflicts = _backfill_usernames_from_history(
-                members=members,
-                historical_username_to_peer=historical_username_to_peer,
-                historical_peer_to_username=historical_peer_to_username,
-            )
-            history_prefilled_total += history_prefilled
-            history_prefill_conflicts_total += history_prefill_conflicts
-            empty_steps = 0
-        else:
-            empty_steps += 1
-        added = len(members) - before_count
-
-        if deep_usernames and members and chat_members:
+    try:
+        for step in range(maximum_steps + 1):
             if time.time() - started_at > max(max_runtime_sec, 5):
-                print(f"WARN: skip deep (runtime limit {max_runtime_sec}s reached)")
+                print(f"WARN: chat runtime limit reached ({max_runtime_sec}s), stopping")
+                runtime_limited = True
+                break
+
+            html_payload = _send_get_html(
+                server=server,
+                token=token,
+                client_id=client_id,
+                tab_id=tab_id,
+                timeout_sec=chat_html_timeout,
+            )
+
+            chat_members = _parse_chat_members(html_payload)
+            sticky_member = _read_sticky_chat_author_member(
+                server=server,
+                token=token,
+                client_id=client_id,
+                tab_id=tab_id,
+                timeout_sec=min(timeout_sec, 4),
+            )
+            if sticky_member:
+                sticky_peer_id = str(sticky_member.get("peer_id") or "").strip()
+                if sticky_peer_id and sticky_peer_id not in sticky_seen_peer_ids:
+                    sticky_seen_peer_ids.add(sticky_peer_id)
+                    print(f"INFO: sticky chat author {sticky_peer_id} ({sticky_member.get('name', '—')})")
+                if sticky_peer_id and not any(str(item.get("peer_id") or "").strip() == sticky_peer_id for item in chat_members):
+                    chat_members.append(sticky_member)
+            visible_peer_ids_before_step = {
+                str(item.get("peer_id") or "").strip()
+                for item in chat_members
+                if str(item.get("peer_id") or "").strip()
+            }
+            discovery_seen_before_step = _discovery_seen_peer_ids(discovery_state)
+            discovery_new_visible_ids = visible_peer_ids_before_step - discovery_seen_before_step
+            if visible_peer_ids_before_step and not discovery_new_visible_ids:
+                discovery_revisit_steps_total += 1
+            discovery_new_visible_total += len(discovery_new_visible_ids)
+            _discovery_note_visible_peers(discovery_state, visible_peer_ids_before_step)
+            current_view_signature = _discovery_note_view_signature(discovery_state, visible_peer_ids_before_step)
+            if current_view_signature and current_view_signature == previous_view_signature:
+                revisited_view_steps_total += 1
+                repeated_view_signature_streak += 1
             else:
-                visible_peer_ids = {item["peer_id"] for item in chat_members if item.get("peer_id")}
-                sticky_peer_id_for_step = str((sticky_member or {}).get("peer_id") or "").strip()
-                if sticky_peer_id_for_step:
-                    visible_peer_ids = {sticky_peer_id_for_step}
-                deep_targets = [
-                    item
-                    for item in members
-                    if item.get("peer_id") in visible_peer_ids
-                    and item.get("username") == "—"
-                    and item.get("peer_id") not in deep_seen_peer_ids
-                ]
-                if chat_target_peer_id:
-                    deep_targets = [item for item in deep_targets if str(item.get("peer_id") or "").strip() == chat_target_peer_id]
-                if chat_target_name:
-                    target_key = _name_key(chat_target_name)
-                    if target_key:
-                        deep_targets = [item for item in deep_targets if target_key in _name_key(str(item.get("name") or ""))]
-                limit = max(int(chat_deep_limit), 0)
-                if limit <= 0:
-                    deep_targets = []
+                repeated_view_signature_streak = 0
+            previous_view_signature = current_view_signature
+            before_count = len(members)
+
+            if chat_members:
+                members.extend(chat_members)
+                members = _dedupe_members(members)
+                history_prefilled, history_prefill_conflicts = _backfill_usernames_from_history(
+                    members=members,
+                    historical_username_to_peer=historical_username_to_peer,
+                    historical_peer_to_username=historical_peer_to_username,
+                )
+                history_prefilled_total += history_prefilled
+                history_prefill_conflicts_total += history_prefill_conflicts
+                empty_steps = 0
+            else:
+                empty_steps += 1
+            added = len(members) - before_count
+
+            if deep_usernames and members and chat_members:
+                if time.time() - started_at > max(max_runtime_sec, 5):
+                    print(f"WARN: skip deep (runtime limit {max_runtime_sec}s reached)")
                 else:
-                    deep_targets = deep_targets[:limit]
-                sticky_attempted_this_step = 0
-                if sticky_member and limit > 0:
-                    sticky_peer_id = str(sticky_member.get("peer_id") or "").strip()
-                    members_by_peer = {
-                        str(item.get("peer_id") or "").strip(): item
+                    visible_peer_ids = {item["peer_id"] for item in chat_members if item.get("peer_id")}
+                    sticky_peer_id_for_step = str((sticky_member or {}).get("peer_id") or "").strip()
+                    sticky_peer_on_cooldown = False
+                    if sticky_peer_id_for_step:
+                        sticky_peer_on_cooldown = _discovery_peer_in_cooldown(
+                            discovery_state,
+                            sticky_peer_id_for_step,
+                        )
+                    if sticky_peer_id_for_step and not sticky_peer_on_cooldown:
+                        visible_peer_ids = {sticky_peer_id_for_step}
+                    elif sticky_peer_on_cooldown:
+                        print(f"INFO: sticky peer {sticky_peer_id_for_step} is cooling down, use other visible peers first")
+                    deep_targets = [
+                        item
                         for item in members
-                        if str(item.get("peer_id") or "").strip()
-                    }
-                    sticky_target = members_by_peer.get(sticky_peer_id)
-                    if (
-                        sticky_target
-                        and sticky_target.get("username") == "—"
-                        and sticky_peer_id not in deep_seen_peer_ids
-                        and matches_chat_target(sticky_target)
-                    ):
-                        sticky_username, sticky_outcome = _try_username_via_mention_action(
+                        if item.get("peer_id") in visible_peer_ids
+                        and item.get("username") == "—"
+                        and item.get("peer_id") not in deep_seen_peer_ids
+                    ]
+                    if chat_target_peer_id:
+                        deep_targets = [item for item in deep_targets if str(item.get("peer_id") or "").strip() == chat_target_peer_id]
+                    if chat_target_name:
+                        target_key = _name_key(chat_target_name)
+                        if target_key:
+                            deep_targets = [item for item in deep_targets if target_key in _name_key(str(item.get("name") or ""))]
+                    limit = max(int(chat_deep_limit), 0)
+                    if limit <= 0:
+                        deep_targets = []
+                    else:
+                        prioritized_targets = sorted(
+                            deep_targets,
+                            key=lambda item: _discovery_target_priority(
+                                item,
+                                discovery_state=discovery_state,
+                                seen_peer_ids_before_step=discovery_seen_before_step,
+                                now=dt.datetime.now(dt.timezone.utc),
+                            ),
+                        )
+                        ready_targets = [
+                            item
+                            for item in prioritized_targets
+                            if not _discovery_peer_in_cooldown(discovery_state, str(item.get("peer_id") or "").strip())
+                        ]
+                        if ready_targets:
+                            discovery_cooldown_skips_total += max(len(prioritized_targets) - len(ready_targets), 0)
+                            deep_targets = ready_targets[:limit]
+                        else:
+                            if prioritized_targets:
+                                discovery_cooldown_skips_total += len(prioritized_targets)
+                            deep_targets = []
+                    sticky_attempted_this_step = 0
+                    if sticky_member and limit > 0:
+                        sticky_peer_id = str(sticky_member.get("peer_id") or "").strip()
+                        members_by_peer = {
+                            str(item.get("peer_id") or "").strip(): item
+                            for item in members
+                            if str(item.get("peer_id") or "").strip()
+                        }
+                        sticky_target = members_by_peer.get(sticky_peer_id)
+                        if (
+                            sticky_target
+                            and sticky_target.get("username") == "—"
+                            and sticky_peer_id not in deep_seen_peer_ids
+                            and matches_chat_target(sticky_target)
+                            and not _discovery_peer_in_cooldown(discovery_state, sticky_peer_id)
+                        ):
+                            sticky_username, sticky_outcome = _try_username_via_mention_action(
+                                server=server,
+                                token=token,
+                                client_id=client_id,
+                                tab_id=tab_id,
+                                peer_id=sticky_peer_id,
+                                supports_click_menu_text=supports_click_menu_text,
+                                use_sticky_anchor=True,
+                            )
+                            if sticky_outcome != "context_missing":
+                                sticky_attempted_this_step = 1
+                                sticky_mention_attempted_total += 1
+                                deep_attempted_total += 1
+                                deep_seen_peer_ids.add(sticky_peer_id)
+                                deep_targets = [
+                                    item
+                                    for item in deep_targets
+                                    if str(item.get("peer_id") or "").strip() != sticky_peer_id
+                                ]
+                                if sticky_username != "—":
+                                    assigned, conflict_value, reason = _assign_username_if_unique(
+                                        members_by_peer=members_by_peer,
+                                        username_to_peer=_seed_username_to_peer(members),
+                                        peer_id=sticky_peer_id,
+                                        username=sticky_username,
+                                        historical_username_to_peer=historical_username_to_peer,
+                                        historical_peer_to_username=historical_peer_to_username,
+                                    )
+                                    if assigned:
+                                        sticky_mention_updated_total += 1
+                                        deep_updated_total += 1
+                                        print(f"INFO: sticky mention {sticky_peer_id} -> {sticky_username}")
+                                        _discovery_note_peer_attempt(
+                                            discovery_state,
+                                            peer_id=sticky_peer_id,
+                                            outcome="sticky_mention_success",
+                                            username=sticky_username,
+                                        )
+                                    else:
+                                        _log_username_assignment_conflict(
+                                            sticky_username,
+                                            sticky_peer_id,
+                                            conflict_value,
+                                            reason,
+                                        )
+                                else:
+                                    if sticky_outcome == "menu_missing":
+                                        deep_runtime_hints["mention_unavailable"] = True
+                                    print(f"INFO: sticky mention unresolved for peer {sticky_peer_id} ({sticky_outcome})")
+                                    if sticky_outcome in {"menu_missing", "delivery_failure", "unresolved"}:
+                                        remaining_runtime = float(max_runtime_sec) - (time.time() - started_at)
+                                        if remaining_runtime > 4.0:
+                                            sticky_helper_username, sticky_helper_opened = _read_username_via_helper_tab(
+                                                server=server,
+                                                token=token,
+                                                client_id=client_id,
+                                                base_tab_id=tab_id,
+                                                peer_id=sticky_peer_id,
+                                                expected_name=str(sticky_target.get("name") or ""),
+                                                timeout_sec=max(5, min(timeout_sec, 8)),
+                                                tg_mode=_tg_web_mode_from_url(group_url),
+                                                helper_session=chat_helper_session,
+                                                restore_base_tab=False,
+                                            )
+                                            if sticky_helper_opened:
+                                                sticky_helper_attempted_total += 1
+                                                deep_attempted_total += 1
+                                            if sticky_helper_username != "—":
+                                                assigned, conflict_value, reason = _assign_username_if_unique(
+                                                    members_by_peer=members_by_peer,
+                                                    username_to_peer=_seed_username_to_peer(members),
+                                                    peer_id=sticky_peer_id,
+                                                    username=sticky_helper_username,
+                                                    historical_username_to_peer=historical_username_to_peer,
+                                                    historical_peer_to_username=historical_peer_to_username,
+                                                )
+                                                if assigned:
+                                                    sticky_helper_updated_total += 1
+                                                    deep_updated_total += 1
+                                                    print(f"INFO: sticky helper {sticky_peer_id} -> {sticky_helper_username}")
+                                                    _discovery_note_peer_attempt(
+                                                        discovery_state,
+                                                        peer_id=sticky_peer_id,
+                                                        outcome="sticky_helper_success",
+                                                        username=sticky_helper_username,
+                                                    )
+                                                else:
+                                                    _log_username_assignment_conflict(
+                                                        sticky_helper_username,
+                                                        sticky_peer_id,
+                                                        conflict_value,
+                                                        reason,
+                                                    )
+                                            else:
+                                                _discovery_note_peer_attempt(
+                                                    discovery_state,
+                                                    peer_id=sticky_peer_id,
+                                                    outcome=f"sticky_helper_blank:{sticky_outcome}",
+                                                )
+                                    else:
+                                        _discovery_note_peer_attempt(
+                                            discovery_state,
+                                            peer_id=sticky_peer_id,
+                                            outcome=f"sticky:{sticky_outcome}",
+                                        )
+                    if sticky_attempted_this_step and limit > 0:
+                        deep_targets = deep_targets[: max(limit - sticky_attempted_this_step, 0)]
+                    if deep_targets:
+                        elapsed = time.time() - started_at
+                        remaining_runtime = max(2.0, float(max_runtime_sec) - elapsed - 2.0)
+                        deep_runtime_budget = remaining_runtime
+                        if CHAT_DEEP_STEP_MAX_SEC > 0:
+                            deep_runtime_budget = min(deep_runtime_budget, max(6.0, CHAT_DEEP_STEP_MAX_SEC))
+                        attempted, updated, opened, opened_peer_ids = _enrich_usernames_deep_chat(
                             server=server,
                             token=token,
                             client_id=client_id,
                             tab_id=tab_id,
-                            peer_id=sticky_peer_id,
+                            timeout_sec=max(timeout_sec, 5),
+                            members=deep_targets,
+                            group_url=group_url,
+                            max_runtime_sec=deep_runtime_budget,
+                            mode=chat_deep_mode,
                             supports_click_menu_text=supports_click_menu_text,
-                            use_sticky_anchor=True,
+                            helper_only_initial=bool(deep_runtime_hints.get("mention_unavailable")),
+                            runtime_hints=deep_runtime_hints,
+                            discovery_state=discovery_state,
+                            helper_session=chat_helper_session,
                         )
-                        if sticky_outcome != "context_missing":
-                            sticky_attempted_this_step = 1
-                            sticky_mention_attempted_total += 1
-                            deep_attempted_total += 1
-                            deep_seen_peer_ids.add(sticky_peer_id)
-                            deep_targets = [
-                                item
-                                for item in deep_targets
-                                if str(item.get("peer_id") or "").strip() != sticky_peer_id
-                            ]
-                            if sticky_username != "—":
-                                assigned, conflict_value, reason = _assign_username_if_unique(
-                                    members_by_peer=members_by_peer,
-                                    username_to_peer=_seed_username_to_peer(members),
-                                    peer_id=sticky_peer_id,
-                                    username=sticky_username,
-                                    historical_username_to_peer=historical_username_to_peer,
-                                    historical_peer_to_username=historical_peer_to_username,
-                                )
-                                if assigned:
-                                    sticky_mention_updated_total += 1
-                                    deep_updated_total += 1
-                                    print(f"INFO: sticky mention {sticky_peer_id} -> {sticky_username}")
-                                else:
-                                    _log_username_assignment_conflict(
-                                        sticky_username,
-                                        sticky_peer_id,
-                                        conflict_value,
-                                        reason,
-                                    )
-                            else:
-                                if sticky_outcome == "menu_missing":
-                                    deep_runtime_hints["mention_unavailable"] = True
-                                print(f"INFO: sticky mention unresolved for peer {sticky_peer_id} ({sticky_outcome})")
-                                if sticky_outcome in {"menu_missing", "delivery_failure", "unresolved"}:
-                                    remaining_runtime = float(max_runtime_sec) - (time.time() - started_at)
-                                    if remaining_runtime > 4.0:
-                                        sticky_helper_username, sticky_helper_opened = _read_username_via_helper_tab(
-                                            server=server,
-                                            token=token,
-                                            client_id=client_id,
-                                            base_tab_id=tab_id,
-                                            peer_id=sticky_peer_id,
-                                            expected_name=str(sticky_target.get("name") or ""),
-                                            timeout_sec=max(5, min(timeout_sec, 8)),
-                                            tg_mode=_tg_web_mode_from_url(group_url),
-                                            restore_base_tab=True,
-                                        )
-                                        if sticky_helper_opened:
-                                            sticky_helper_attempted_total += 1
-                                            deep_attempted_total += 1
-                                        if sticky_helper_username != "—":
-                                            assigned, conflict_value, reason = _assign_username_if_unique(
-                                                members_by_peer=members_by_peer,
-                                                username_to_peer=_seed_username_to_peer(members),
-                                                peer_id=sticky_peer_id,
-                                                username=sticky_helper_username,
-                                                historical_username_to_peer=historical_username_to_peer,
-                                                historical_peer_to_username=historical_peer_to_username,
-                                            )
-                                            if assigned:
-                                                sticky_helper_updated_total += 1
-                                                deep_updated_total += 1
-                                                print(f"INFO: sticky helper {sticky_peer_id} -> {sticky_helper_username}")
-                                            else:
-                                                _log_username_assignment_conflict(
-                                                    sticky_helper_username,
-                                                    sticky_peer_id,
-                                                    conflict_value,
-                                                    reason,
-                                                )
-                if sticky_attempted_this_step and limit > 0:
-                    deep_targets = deep_targets[: max(limit - sticky_attempted_this_step, 0)]
-                if deep_targets:
-                    elapsed = time.time() - started_at
-                    remaining_runtime = max(2.0, float(max_runtime_sec) - elapsed - 2.0)
-                    deep_runtime_budget = remaining_runtime
-                    if CHAT_DEEP_STEP_MAX_SEC > 0:
-                        deep_runtime_budget = min(deep_runtime_budget, max(6.0, CHAT_DEEP_STEP_MAX_SEC))
-                    attempted, updated, opened, opened_peer_ids = _enrich_usernames_deep_chat(
-                        server=server,
-                        token=token,
-                        client_id=client_id,
-                        tab_id=tab_id,
-                        timeout_sec=max(timeout_sec, 5),
-                        members=deep_targets,
-                        group_url=group_url,
-                        max_runtime_sec=deep_runtime_budget,
-                        mode=chat_deep_mode,
-                        supports_click_menu_text=supports_click_menu_text,
-                        helper_only_initial=bool(deep_runtime_hints.get("mention_unavailable")),
-                        runtime_hints=deep_runtime_hints,
-                    )
-                    deep_attempted_total += attempted
-                    deep_updated_total += updated
-                    for peer_id in opened_peer_ids:
-                        deep_seen_peer_ids.add(peer_id)
-                    print(
-                        f"INFO: chat deep step {step}: processed {attempted}, "
-                        f"opened {opened}, filled {updated}, total_filled {deep_updated_total}"
-                    )
+                        deep_attempted_total += attempted
+                        deep_updated_total += updated
+                        for peer_id in opened_peer_ids:
+                            deep_seen_peer_ids.add(peer_id)
+                        print(
+                            f"INFO: chat deep step {step}: processed {attempted}, "
+                            f"opened {opened}, filled {updated}, total_filled {deep_updated_total}"
+                        )
 
-        print(f"INFO: chat step {step} collected {len(members)} unique users")
+            print(f"INFO: chat step {step} collected {len(members)} unique users")
 
-        timestamps = [int(value) for value in re.findall(r'data-timestamp="(\d+)"', html_payload)]
-        min_ts = min(timestamps) if timestamps else None
-        if min_ts is not None and min_ts == previous_min_ts:
-            unchanged_steps += 1
-        else:
-            unchanged_steps = 0
-        previous_min_ts = min_ts
-
-        if step >= minimum_steps:
-            if added <= 0:
-                no_growth_steps += 1
+            timestamps = [int(value) for value in re.findall(r'data-timestamp="(\d+)"', html_payload)]
+            min_ts = min(timestamps) if timestamps else None
+            if min_ts is not None and min_ts == previous_min_ts:
+                unchanged_steps += 1
             else:
-                no_growth_steps = 0
+                unchanged_steps = 0
+            previous_min_ts = min_ts
 
-        if step >= maximum_steps:
-            break
-        if empty_steps >= 2 and not members:
-            print("WARN: чат не читается (пустой DOM/не открыт диалог), останавливаюсь")
-            break
-        if step >= minimum_steps and no_growth_steps >= 2:
-            print("INFO: chat auto-stop after 2 no-growth steps")
-            break
-        if step >= minimum_steps and unchanged_steps >= 2:
-            break
+            if step >= minimum_steps:
+                discovery_productive = bool(discovery_state) and bool(discovery_new_visible_ids)
+                if added <= 0 and not discovery_productive:
+                    no_growth_steps += 1
+                else:
+                    no_growth_steps = 0
 
-        if not _scroll_chat_up(server, token, client_id, tab_id, timeout_sec=min(timeout_sec, 10)):
-            break
-        scroll_steps_done += 1
-        time.sleep(CHAT_SCROLL_SETTLE_SEC)
+            if (
+                discovery_state
+                and step >= 1
+                and added <= 0
+                and repeated_view_signature_streak >= _repeated_view_signature_stop_streak()
+            ):
+                print(
+                    "INFO: chat auto-stop after repeated identical discovery view "
+                    f"({repeated_view_signature_streak + 1} steps)"
+                )
+                break
+
+            if step >= maximum_steps:
+                break
+            if empty_steps >= 2 and not members:
+                print("WARN: чат не читается (пустой DOM/не открыт диалог), останавливаюсь")
+                break
+            if step >= minimum_steps and no_growth_steps >= 2:
+                print("INFO: chat auto-stop after 2 no-growth steps")
+                break
+            if step >= minimum_steps and unchanged_steps >= 2:
+                break
+
+            if not _scroll_chat_up(server, token, client_id, tab_id, timeout_sec=min(timeout_sec, 10)):
+                break
+            scroll_steps_done += 1
+            time.sleep(CHAT_SCROLL_SETTLE_SEC)
+    finally:
+        _close_helper_session_best_effort(
+            server=server,
+            token=token,
+            client_id=client_id,
+            base_tab_id=tab_id,
+            helper_session=chat_helper_session,
+            timeout_sec=min(timeout_sec, 4),
+        )
 
     stats = {
         "unique_members": len(members),
@@ -2666,6 +3474,12 @@ def _collect_members_from_chat(
         "sticky_mention_updated": sticky_mention_updated_total,
         "sticky_helper_attempted": sticky_helper_attempted_total,
         "sticky_helper_updated": sticky_helper_updated_total,
+        "burst_scrolls_done": 0,
+        "jump_scrolls_done": 0,
+        "revisited_view_steps": revisited_view_steps_total,
+        "discovery_new_visible": discovery_new_visible_total,
+        "discovery_cooldown_skips": discovery_cooldown_skips_total,
+        "discovery_revisit_steps": discovery_revisit_steps_total,
     }
     return members, stats
 
@@ -2683,6 +3497,8 @@ def _enrich_usernames_deep_chat(
     supports_click_menu_text: bool = False,
     helper_only_initial: bool = False,
     runtime_hints: dict[str, Any] | None = None,
+    discovery_state: dict[str, Any] | None = None,
+    helper_session: dict[str, Any] | None = None,
 ) -> tuple[int, int, int, list[str]]:
     members_by_peer = {item["peer_id"]: item for item in members}
     pending_peer_ids = [item["peer_id"] for item in members if item.get("username") == "—"]
@@ -2700,7 +3516,8 @@ def _enrich_usernames_deep_chat(
     opened = 0
     opened_peer_ids: list[str] = []
     started_at = time.time()
-    helper_session: dict[str, Any] = {"tab_id": None}
+    active_helper_session = helper_session if isinstance(helper_session, dict) else {"tab_id": None}
+    owns_helper_session = helper_session is None
     helper_only_for_rest = helper_only_initial
 
     try:
@@ -2711,7 +3528,14 @@ def _enrich_usernames_deep_chat(
             attempted += 1
             # Mark as processed for this run to avoid re-clicking the same peer again and again.
             opened_peer_ids.append(peer_id)
+            final_outcome = "unresolved"
+            final_username = "—"
             if not _is_specific_tg_dialog_url(group_url):
+                _discovery_note_peer_attempt(
+                    discovery_state,
+                    peer_id=peer_id,
+                    outcome="non_specific_dialog",
+                )
                 break
 
             if not helper_only_for_rest:
@@ -2724,14 +3548,25 @@ def _enrich_usernames_deep_chat(
                     timeout_sec=min(timeout_sec, 3),
                 ):
                     print("WARN: deep chat could not restore group dialog, skipping user")
+                    _discovery_note_peer_attempt(
+                        discovery_state,
+                        peer_id=peer_id,
+                        outcome="group_restore_failed",
+                    )
                     continue
 
                 current_url_before = _get_tab_url(server, token, client_id, tab_id)
                 current_fragment_before = current_url_before.split("#", 1)[1] if "#" in current_url_before else ""
                 if target_fragment and (not current_fragment_before or target_fragment not in current_fragment_before):
                     print("WARN: deep chat not in target group dialog, skipping user")
+                    _discovery_note_peer_attempt(
+                        discovery_state,
+                        peer_id=peer_id,
+                        outcome="wrong_group_dialog",
+                    )
                     continue
 
+            mention_outcome = "helper_only" if helper_only_for_rest else "unresolved"
             if not helper_only_for_rest and mode in ("mention", "full"):
                 mention_result = _try_username_via_mention_action(
                     server=server,
@@ -2751,10 +3586,18 @@ def _enrich_usernames_deep_chat(
                     existing_peer = username_to_peer.get(key)
                     if existing_peer and existing_peer != peer_id:
                         print(f"WARN: skip duplicate username {mention_username} for peer {peer_id} (already {existing_peer})")
+                        _discovery_note_peer_attempt(
+                            discovery_state,
+                            peer_id=peer_id,
+                            outcome="mention_duplicate",
+                            username=mention_username,
+                        )
                         continue
                     members_by_peer[peer_id]["username"] = mention_username
                     username_to_peer[key] = peer_id
                     updated += 1
+                    final_outcome = "mention_success"
+                    final_username = mention_username
                     print(f"INFO: chat mention {peer_id} -> {mention_username}")
                     _return_to_group_dialog_reliable(
                         server=server,
@@ -2763,6 +3606,12 @@ def _enrich_usernames_deep_chat(
                         tab_id=tab_id,
                         group_url=group_url,
                         timeout_sec=min(timeout_sec, 2),
+                    )
+                    _discovery_note_peer_attempt(
+                        discovery_state,
+                        peer_id=peer_id,
+                        outcome=final_outcome,
+                        username=final_username,
                     )
                     time.sleep(0.03)
                     continue
@@ -2786,7 +3635,7 @@ def _enrich_usernames_deep_chat(
                 expected_name=str(members_by_peer[peer_id].get("name") or ""),
                 timeout_sec=min(timeout_sec, 5),
                 tg_mode=tg_mode,
-                helper_session=helper_session,
+                helper_session=active_helper_session,
                 restore_base_tab=not helper_only_for_rest,
             )
             if helper_opened:
@@ -2796,21 +3645,50 @@ def _enrich_usernames_deep_chat(
                 existing_peer = username_to_peer.get(key)
                 if existing_peer and existing_peer != peer_id:
                     print(f"WARN: skip duplicate username {helper_username} for peer {peer_id} (already {existing_peer})")
+                    _discovery_note_peer_attempt(
+                        discovery_state,
+                        peer_id=peer_id,
+                        outcome="helper_duplicate",
+                        username=helper_username,
+                    )
                 else:
                     members_by_peer[peer_id]["username"] = helper_username
                     username_to_peer[key] = peer_id
                     updated += 1
+                    final_outcome = "helper_success"
+                    final_username = helper_username
                     print(f"INFO: chat helper {peer_id} -> {helper_username}")
+                    _discovery_note_peer_attempt(
+                        discovery_state,
+                        peer_id=peer_id,
+                        outcome=final_outcome,
+                        username=final_username,
+                    )
+            else:
+                _discovery_note_peer_attempt(
+                    discovery_state,
+                    peer_id=peer_id,
+                    outcome=f"helper_blank:{mention_outcome}",
+                )
             time.sleep(0.03)
     finally:
-        _close_helper_session_best_effort(
-            server=server,
-            token=token,
-            client_id=client_id,
-            base_tab_id=tab_id,
-            helper_session=helper_session,
-            timeout_sec=min(timeout_sec, 4),
-        )
+        if owns_helper_session:
+            _close_helper_session_best_effort(
+                server=server,
+                token=token,
+                client_id=client_id,
+                base_tab_id=tab_id,
+                helper_session=active_helper_session,
+                timeout_sec=min(timeout_sec, 4),
+            )
+        else:
+            _activate_tab_best_effort(
+                server,
+                token,
+                client_id,
+                tab_id,
+                timeout_sec=min(timeout_sec, 3),
+            )
 
     return attempted, updated, opened, opened_peer_ids
 
@@ -2911,6 +3789,19 @@ def _navigate_to_group_if_requested(
     # If caller passed explicit dialog URL, force target tab to this dialog first.
     if not _is_specific_tg_dialog_url(group_url):
         return
+    current_url = _detect_current_dialog_url(server, token, client_id, tab_id, timeout_sec=min(timeout_sec, 2))
+    target_fragment = group_url.split("#", 1)[1] if "#" in group_url else ""
+    current_fragment = current_url.split("#", 1)[1] if "#" in current_url else ""
+    if target_fragment and current_fragment.startswith("@"):
+        if _return_to_group_dialog_fast(
+            server=server,
+            token=token,
+            client_id=client_id,
+            tab_id=tab_id,
+            group_url=group_url,
+            timeout_sec=min(max(timeout_sec, 2), 4),
+        ):
+            return
     if _ensure_group_dialog_url(
         server=server,
         token=token,
@@ -2920,11 +3811,25 @@ def _navigate_to_group_if_requested(
         timeout_sec=max(timeout_sec, 5),
     ):
         return
-    current_url = _get_tab_url(server, token, client_id, tab_id)
-    target_fragment = group_url.split("#", 1)[1] if "#" in group_url else ""
+    if _force_return_to_group_dialog(
+        server=server,
+        token=token,
+        client_id=client_id,
+        tab_id=tab_id,
+        group_url=group_url,
+        timeout_sec=min(max(timeout_sec, 2), 5),
+    ):
+        return
+    current_url = _detect_current_dialog_url(server, token, client_id, tab_id, timeout_sec=min(timeout_sec, 2))
     current_fragment = current_url.split("#", 1)[1] if "#" in current_url else ""
     if current_url and current_fragment and (not target_fragment or target_fragment in current_fragment):
         return
+    if current_url and _username_from_tg_url(current_url) != "—":
+        if _is_dialog_surface_open(server, token, client_id, tab_id, timeout_sec=min(max(timeout_sec, 2), 5)):
+            print(
+                f"WARN: proceeding from Telegram username route {current_url} because the dialog surface is still open"
+            )
+            return
     raise RuntimeError(
         f"Telegram redirected to root page: {current_url or 'unknown'}. "
         f"Expected group URL with fragment: {group_url}"
@@ -2962,7 +3867,7 @@ def _force_return_to_group_dialog(
         )
         deadline = time.time() + 1.2
         while time.time() < deadline:
-            current_url = _get_tab_url(server, token, client_id, tab_id)
+            current_url = _detect_current_dialog_url(server, token, client_id, tab_id, timeout_sec=2)
             current_fragment = current_url.split("#", 1)[1] if "#" in current_url else ""
             if current_fragment and target_fragment in current_fragment:
                 return True
@@ -3139,6 +4044,8 @@ def _send_command_result(
     *,
     raise_on_fail: bool = True,
 ) -> dict[str, Any]:
+    command_timeout_sec = max(float(timeout_sec), 0.8)
+    create_request_timeout = min(max(command_timeout_sec, 0.8), 5.0)
     payload = {
         "issued_by": "telegram-members-non-pii-export",
         "timeout_ms": max(1000, timeout_sec * 1000),
@@ -3149,7 +4056,15 @@ def _send_command_result(
         },
         "command": command,
     }
-    created = _http_json_retry(server, token, "POST", "/api/commands", payload)
+    created = _http_json_retry(
+        server,
+        token,
+        "POST",
+        "/api/commands",
+        payload,
+        retries=2,
+        request_timeout_sec=create_request_timeout,
+    )
     if not created.get("ok") or not created.get("command_id"):
         raise RuntimeError(f"Command creation failed: {created}")
 
@@ -3157,7 +4072,23 @@ def _send_command_result(
     deadline = time.time() + timeout_sec
     missing_result_grace_deadline: float | None = None
     while True:
-        response = _http_json_retry(server, token, "GET", f"/api/commands/{command_id}")
+        poll_request_timeout = min(max(deadline - time.time(), 0.5), 5.0)
+        try:
+            response = _http_json_retry(
+                server,
+                token,
+                "GET",
+                f"/api/commands/{command_id}",
+                retries=1,
+                request_timeout_sec=poll_request_timeout,
+            )
+        except RuntimeError as exc:
+            if time.time() >= deadline:
+                if raise_on_fail:
+                    raise RuntimeError(f"Timeout waiting for command: {command.get('type')} ({exc})") from exc
+                return {"ok": False, "error": f"timeout waiting for command: {command.get('type')} ({exc})"}
+            time.sleep(0.2)
+            continue
         command_state = response.get("command") or {}
         status = str(command_state.get("status") or "")
         if status in TERMINAL_STATUSES:
@@ -3260,6 +4191,31 @@ def _send_get_html(
     return html_payload
 
 
+def _send_get_html_best_effort(
+    server: str,
+    token: str,
+    client_id: str,
+    tab_id: int,
+    timeout_sec: int,
+    selector: str = "body",
+) -> str:
+    delivery = _send_command_result(
+        server=server,
+        token=token,
+        client_id=client_id,
+        tab_id=tab_id,
+        timeout_sec=timeout_sec,
+        command={
+            "type": "get_html",
+            "selector": selector,
+            "timeout_ms": 10000,
+        },
+        raise_on_fail=False,
+    )
+    html_payload = (delivery.get("data") or {}).get("html")
+    return html_payload if isinstance(html_payload, str) else ""
+
+
 def _open_helper_tab(
     server: str,
     token: str,
@@ -3274,7 +4230,7 @@ def _open_helper_tab(
         client_id=client_id,
         tab_id=tab_id,
         timeout_sec=max(4, timeout_sec),
-        command={"type": "new_tab", "url": url, "active": True},
+        command={"type": "new_tab", "url": url, "active": False},
         raise_on_fail=False,
     )
     data = result.get("data") or {}
@@ -3331,9 +4287,12 @@ def _close_helper_session_best_effort(
     helper_tab_id = _helper_session_tab_id(helper_session)
     if helper_tab_id is not None:
         _close_tab_best_effort(server, token, client_id, helper_tab_id, timeout_sec=max(2, timeout_sec))
+        needs_restore = bool((helper_session or {}).get("needs_base_restore")) if isinstance(helper_session, dict) else False
+        if needs_restore:
+            _activate_tab_best_effort(server, token, client_id, base_tab_id, timeout_sec=min(max(timeout_sec, 2), 3))
     if isinstance(helper_session, dict):
         helper_session["tab_id"] = None
-    _activate_tab_best_effort(server, token, client_id, base_tab_id, timeout_sec=min(max(timeout_sec, 2), 3))
+        helper_session["needs_base_restore"] = False
 
 
 def _read_username_via_helper_tab(
@@ -3349,38 +4308,60 @@ def _read_username_via_helper_tab(
     *,
     expected_name: str = "",
 ) -> tuple[str, bool]:
+    helper_deadline = time.time() + _effective_timeout_sec(timeout_sec, minimum=1.0)
     mode = tg_mode if tg_mode in {"a", "k"} else "a"
     helper_url = f"https://web.telegram.org/{mode}/#{peer_id}"
     created_now = False
     helper_tab_id = _helper_session_tab_id(helper_session)
+    helper_session_dict = helper_session if isinstance(helper_session, dict) else None
     if helper_tab_id is None:
+        if time.time() >= helper_deadline:
+            return "—", False
+        open_started_at = time.time()
         helper_tab_id = _open_helper_tab(
             server=server,
             token=token,
             client_id=client_id,
             tab_id=base_tab_id,
             url=helper_url,
-            timeout_sec=max(4, timeout_sec),
+            timeout_sec=_deadline_timeout(helper_deadline, max(4, timeout_sec), minimum=0.8),
+        )
+        _mention_trace_step(
+            f"peer:{peer_id}",
+            "helper-open-tab",
+            open_started_at,
+            tab_id=helper_tab_id or "—",
         )
         if helper_tab_id is None:
             return "—", False
         created_now = True
-        if isinstance(helper_session, dict):
-            helper_session["tab_id"] = helper_tab_id
+        if helper_session_dict is not None:
+            helper_session_dict["tab_id"] = helper_tab_id
+            helper_session_dict["needs_base_restore"] = False
     else:
-        _activate_tab_best_effort(server, token, client_id, helper_tab_id, timeout_sec=min(max(timeout_sec, 2), 3))
+        if time.time() >= helper_deadline:
+            return "—", True
+        navigate_started_at = time.time()
         navigate_result = _send_command_result(
             server=server,
             token=token,
             client_id=client_id,
             tab_id=helper_tab_id,
-            timeout_sec=max(3, timeout_sec),
+            timeout_sec=_deadline_timeout(helper_deadline, max(3, timeout_sec), minimum=0.8),
             command={"type": "navigate", "url": helper_url},
             raise_on_fail=False,
         )
+        _mention_trace_step(
+            f"peer:{peer_id}",
+            "helper-navigate",
+            navigate_started_at,
+            ok=int(bool(navigate_result.get("ok"))),
+            tab_id=helper_tab_id,
+        )
         if not navigate_result.get("ok"):
-            if isinstance(helper_session, dict):
-                helper_session["tab_id"] = None
+            if helper_session_dict is not None:
+                helper_session_dict["tab_id"] = None
+                helper_session_dict["needs_base_restore"] = False
             _close_tab_best_effort(server, token, client_id, helper_tab_id, timeout_sec=min(max(timeout_sec, 2), 3))
             helper_tab_id = _open_helper_tab(
                 server=server,
@@ -3388,71 +4369,151 @@ def _read_username_via_helper_tab(
                 client_id=client_id,
                 tab_id=base_tab_id,
                 url=helper_url,
-                timeout_sec=max(4, timeout_sec),
+                timeout_sec=_deadline_timeout(helper_deadline, max(4, timeout_sec), minimum=0.8),
             )
             if helper_tab_id is None:
                 return "—", False
             created_now = True
-            if isinstance(helper_session, dict):
-                helper_session["tab_id"] = helper_tab_id
+            if helper_session_dict is not None:
+                helper_session_dict["tab_id"] = helper_tab_id
+                helper_session_dict["needs_base_restore"] = False
 
     try:
-        _send_command_result(
-            server=server,
-            token=token,
-            client_id=client_id,
-            tab_id=helper_tab_id,
-            timeout_sec=min(max(timeout_sec, 2), 4),
-            command={
-                "type": "wait_selector",
-                "selector": "body",
-                "timeout_ms": 2400,
-                "visible_only": False,
-            },
-            raise_on_fail=False,
-        )
-        time.sleep(0.06)
-
-        if not _wait_for_helper_target_identity(
+        if time.time() >= helper_deadline:
+            return "—", True
+        wait_identity_started_at = time.time()
+        identity_confirmed = _wait_for_helper_target_identity(
             server=server,
             token=token,
             client_id=client_id,
             tab_id=helper_tab_id,
             expected_peer_id=peer_id,
             expected_name=expected_name,
-            timeout_sec=min(max(float(timeout_sec) * 0.4, 0.8), 2.5),
-        ):
+            timeout_sec=min(
+                _deadline_timeout(helper_deadline, min(max(float(timeout_sec) * 0.4, 0.8), 2.5)),
+                2.5,
+            ),
+        )
+        route_soft_confirmed = False
+        if not identity_confirmed and time.time() < helper_deadline:
+            route_soft_started_at = time.time()
+            route_soft_confirmed = _soft_confirm_helper_target_route(
+                server=server,
+                token=token,
+                client_id=client_id,
+                tab_id=helper_tab_id,
+                expected_peer_id=peer_id,
+                expected_name=expected_name,
+                timeout_sec=min(
+                    _deadline_timeout(helper_deadline, 0.5, minimum=0.3),
+                    0.5,
+                ),
+            )
+            _mention_trace_step(
+                f"peer:{peer_id}",
+                "helper-soft-route",
+                route_soft_started_at,
+                matched=int(route_soft_confirmed),
+                tab_id=helper_tab_id,
+            )
+            if route_soft_confirmed:
+                # Route-only soft confirm means Telegram loaded the target helper URL
+                # but did not expose a stable header in time; foreground once, then continue.
+                activate_soft_started_at = time.time()
+                remaining_soft_activate = helper_deadline - time.time()
+                if remaining_soft_activate > 0.35:
+                    _send_command_result(
+                        server=server,
+                        token=token,
+                        client_id=client_id,
+                        tab_id=helper_tab_id,
+                        timeout_sec=_deadline_timeout(helper_deadline, min(0.8, remaining_soft_activate), minimum=0.35),
+                        command={"type": "activate_tab"},
+                        raise_on_fail=False,
+                    )
+                    _mention_trace_step(
+                        f"peer:{peer_id}",
+                        "helper-soft-activate",
+                        activate_soft_started_at,
+                        tab_id=helper_tab_id,
+                    )
+                    if helper_session_dict is not None and not restore_base_tab:
+                        helper_session_dict["needs_base_restore"] = True
+        identity_confirmed = identity_confirmed or route_soft_confirmed
+        _mention_trace_step(
+            f"peer:{peer_id}",
+            "helper-wait-identity",
+            wait_identity_started_at,
+            matched=int(identity_confirmed),
+            soft=int(route_soft_confirmed),
+            tab_id=helper_tab_id,
+        )
+        if not identity_confirmed:
             return "—", True
 
-        quick_username, _ = _poll_username_from_tab_url(
-            server=server,
-            token=token,
-            client_id=client_id,
-            tab_id=helper_tab_id,
-            timeout_sec=0.7,
-        )
-        if quick_username != "—":
-            return quick_username, True
+        prefer_profile_after_soft_route = bool(route_soft_confirmed and _username_from_tg_url(helper_url) == "—")
+        if not prefer_profile_after_soft_route:
+            remaining_quick = helper_deadline - time.time()
+            if remaining_quick <= 0:
+                return "—", True
+            quick_url_started_at = time.time()
+            quick_username, _ = _poll_username_from_tab_url(
+                server=server,
+                token=token,
+                client_id=client_id,
+                tab_id=helper_tab_id,
+                timeout_sec=min(0.7, max(remaining_quick, 0.2)),
+            )
+            _mention_trace_step(
+                f"peer:{peer_id}",
+                "helper-quick-url",
+                quick_url_started_at,
+                value=quick_username,
+                tab_id=helper_tab_id,
+            )
+            if quick_username != "—":
+                return quick_username, True
 
-        page_username, _ = _poll_username_from_page_location(
-            server=server,
-            token=token,
-            client_id=client_id,
-            tab_id=helper_tab_id,
-            timeout_sec=0.7,
-        )
-        if page_username != "—":
-            return page_username, True
+            remaining_page = helper_deadline - time.time()
+            if remaining_page <= 0:
+                return "—", True
+            page_url_started_at = time.time()
+            page_username, _ = _poll_username_from_page_location(
+                server=server,
+                token=token,
+                client_id=client_id,
+                tab_id=helper_tab_id,
+                timeout_sec=min(0.7, max(remaining_page, 0.2)),
+            )
+            _mention_trace_step(
+                f"peer:{peer_id}",
+                "helper-page-url",
+                page_url_started_at,
+                value=page_username,
+                tab_id=helper_tab_id,
+            )
+            if page_username != "—":
+                return page_username, True
 
+        if time.time() >= helper_deadline:
+            return "—", True
         header_html = ""
         try:
+            header_started_at = time.time()
             header_html = _send_get_html(
                 server=server,
                 token=token,
                 client_id=client_id,
                 tab_id=helper_tab_id,
-                timeout_sec=max(3, min(timeout_sec, 5)),
+                timeout_sec=_deadline_timeout(helper_deadline, max(3, min(timeout_sec, 5))),
                 selector=".MiddleHeader, .chat-info, .sidebar-header",
+            )
+            _mention_trace_step(
+                f"peer:{peer_id}",
+                "helper-header-html",
+                header_started_at,
+                html=int(bool(header_html)),
+                tab_id=helper_tab_id,
             )
         except RuntimeError:
             header_html = ""
@@ -3469,12 +4530,15 @@ def _read_username_via_helper_tab(
         if "bot" in header_status or "monthly users" in header_status:
             return "—", True
 
+        if time.time() >= helper_deadline:
+            return "—", True
+        wait_profile_started_at = time.time()
         _send_command_result(
             server=server,
             token=token,
             client_id=client_id,
             tab_id=helper_tab_id,
-            timeout_sec=max(4, timeout_sec),
+            timeout_sec=_deadline_timeout(helper_deadline, max(4, timeout_sec)),
             command={
                 "type": "wait_selector",
                 "selector": ".MiddleHeader .ChatInfo .fullName, .chat-info .peer-title, .sidebar-header .peer-title, body",
@@ -3483,12 +4547,29 @@ def _read_username_via_helper_tab(
             },
             raise_on_fail=False,
         )
+        _mention_trace_step(
+            f"peer:{peer_id}",
+            "helper-wait-profile",
+            wait_profile_started_at,
+            tab_id=helper_tab_id,
+        )
+        if time.time() >= helper_deadline:
+            return "—", True
+        profile_started_at = time.time()
         username = _open_current_chat_user_info_and_read_username(
             server=server,
             token=token,
             client_id=client_id,
             tab_id=helper_tab_id,
             timeout_sec=max(4, timeout_sec),
+            deadline=helper_deadline,
+        )
+        _mention_trace_step(
+            f"peer:{peer_id}",
+            "helper-read-profile",
+            profile_started_at,
+            value=username,
+            tab_id=helper_tab_id,
         )
         return username, True
     finally:
@@ -3496,8 +4577,8 @@ def _read_username_via_helper_tab(
             _activate_tab_best_effort(server, token, client_id, base_tab_id, timeout_sec=min(timeout_sec, 3))
         if helper_session is None:
             _close_tab_best_effort(server, token, client_id, helper_tab_id, timeout_sec=min(timeout_sec, 4))
-        elif created_now and isinstance(helper_session, dict):
-            helper_session["tab_id"] = helper_tab_id
+        elif created_now and helper_session_dict is not None:
+            helper_session_dict["tab_id"] = helper_tab_id
 
 
 def _close_profile_card(server: str, token: str, client_id: str, tab_id: int) -> None:
@@ -4034,6 +5115,8 @@ def main() -> int:
                 )
 
         if args.force_navigate:
+            if CHAT_MENTION_TRACE:
+                print("INFO: chat mention trace stage force-navigate:start")
             _navigate_to_group_if_requested(
                 server=server,
                 token=token,
@@ -4042,6 +5125,8 @@ def main() -> int:
                 group_url=group_url,
                 timeout_sec=max(args.timeout, 5),
             )
+            if CHAT_MENTION_TRACE:
+                print("INFO: chat mention trace stage force-navigate:done")
 
         identity_history_path = (
             Path(args.identity_history).expanduser()
@@ -4134,6 +5219,8 @@ def main() -> int:
             if chat_deep and chat_scroll_steps_effective < 2:
                 chat_scroll_steps_effective = 2
                 print("INFO: deep mode -> using 3 chat passes (2 upward scrolls) to refresh visible users")
+            if CHAT_MENTION_TRACE:
+                print("INFO: chat mention trace stage chat-collect:start")
             chat_members, chat_stats = _collect_members_from_chat(
                 server=server,
                 token=token,
@@ -4152,7 +5239,10 @@ def main() -> int:
                 supports_click_menu_text=supports_click_menu_text,
                 historical_username_to_peer=historical_username_to_peer,
                 historical_peer_to_username=historical_peer_to_username,
+                discovery_state=discovery_state,
             )
+            if CHAT_MENTION_TRACE:
+                print("INFO: chat mention trace stage chat-collect:done")
             if not chat_members:
                 raise RuntimeError(
                     "Не найдены авторы сообщений в чате. Откройте группу в режиме чата "
@@ -4209,6 +5299,10 @@ def main() -> int:
                 mention_updated = 0
                 unresolved = sum(1 for item in members if str(item.get("username") or "—").strip() == "—")
                 if unresolved > 0 and not runtime_limited and args.chat_deep_mode in ("url", "full"):
+                    mention_runtime_budget = min(float(max(args.chat_max_runtime, 5)), 30.0)
+                    if CHAT_DEEP_STEP_MAX_SEC > 0:
+                        mention_runtime_budget = min(mention_runtime_budget, max(6.0, CHAT_DEEP_STEP_MAX_SEC))
+                    mention_runtime_budget = max(6.0, mention_runtime_budget)
                     mention_attempted, mention_updated = _enrich_chat_usernames_via_mentions(
                         server=server,
                         token=token,
@@ -4218,6 +5312,8 @@ def main() -> int:
                         group_url=group_url,
                         members=members,
                         deep_limit=max(args.chat_deep_limit, 0),
+                        discovery_state=discovery_state,
+                        max_runtime_sec=mention_runtime_budget,
                     )
                     if mention_attempted:
                         print(

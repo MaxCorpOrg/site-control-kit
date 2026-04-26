@@ -58,6 +58,35 @@ class TelegramContactChainTests(unittest.TestCase):
         self.assertFalse(self.mod.reached_chain_target(19, 20))
         self.assertFalse(self.mod.reached_chain_target(50, 0))
 
+    def test_discovery_new_visible_reads_nested_chat_stats(self) -> None:
+        self.assertEqual(
+            self.mod.discovery_new_visible(
+                {
+                    "chat_stats": {
+                        "discovery_new_visible": 7,
+                    }
+                }
+            ),
+            7,
+        )
+        self.assertEqual(
+            self.mod.discovery_new_visible(
+                {
+                    "chat_discovery_new_visible": 5,
+                    "chat_stats": {
+                        "discovery_new_visible": 2,
+                    },
+                }
+            ),
+            5,
+        )
+        self.assertEqual(self.mod.discovery_new_visible({}), 0)
+
+    def test_is_productive_discovery_run_requires_new_visible_peers(self) -> None:
+        self.assertTrue(self.mod.is_productive_discovery_run({"chat_discovery_new_visible": 3}))
+        self.assertFalse(self.mod.is_productive_discovery_run({"chat_discovery_new_visible": 0}))
+        self.assertFalse(self.mod.is_productive_discovery_run({}))
+
     def test_is_productive_deep_yield_requires_stop_flag_and_updates(self) -> None:
         self.assertTrue(
             self.mod.is_productive_deep_yield(
@@ -116,6 +145,31 @@ class TelegramContactChainTests(unittest.TestCase):
         self.assertEqual(env["CHAT_MAX_RUNTIME"], "999")
         self.assertEqual(env["CHAT_DEEP_LIMIT"], "60")
         self.assertEqual(env["TELEGRAM_CHAT_DISCOVERY_SCROLL_BURST"], "3")
+
+    def test_collect_env_snapshot_keeps_effective_overrides(self) -> None:
+        env = {
+            "TELEGRAM_CHAIN_PROFILE": "fast",
+            "CHAT_PROFILE": "fast",
+            "CHAT_MAX_RUNTIME": "90",
+            "CHAT_SCROLL_STEPS": "4",
+            "CHAT_DEEP_LIMIT": "8",
+            "CHAT_CLIENT_ID": "client-1",
+            "UNRELATED": "drop-me",
+        }
+
+        snapshot = self.mod.collect_env_snapshot(env)
+
+        self.assertEqual(
+            snapshot,
+            {
+                "TELEGRAM_CHAIN_PROFILE": "fast",
+                "CHAT_PROFILE": "fast",
+                "CHAT_SCROLL_STEPS": "4",
+                "CHAT_DEEP_LIMIT": "8",
+                "CHAT_MAX_RUNTIME": "90",
+                "CHAT_CLIENT_ID": "client-1",
+            },
+        )
 
     def test_main_skips_sleep_after_productive_yield_run(self) -> None:
         group_url = "https://web.telegram.org/k/#-2465948544"
@@ -233,6 +287,118 @@ class TelegramContactChainTests(unittest.TestCase):
 
             self.assertEqual(exit_code, 0)
             sleep_mock.assert_called_once_with(7.0)
+
+    def test_main_discovery_progress_prevents_idle_stop_without_new_batch_rows(self) -> None:
+        group_url = "https://web.telegram.org/k/#-2465948544"
+        payloads = [
+            {
+                "status": "completed",
+                "new_usernames": 0,
+                "unique_members": 10,
+                "safe_count": 3,
+                "members_with_username": 6,
+                "chat_stats": {
+                    "discovery_new_visible": 10,
+                },
+            },
+            {
+                "status": "completed",
+                "new_usernames": 0,
+                "unique_members": 12,
+                "safe_count": 3,
+                "members_with_username": 7,
+                "chat_stats": {
+                    "discovery_new_visible": 4,
+                },
+            },
+        ]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_root = Path(tmpdir) / "out"
+            chat_dir = self.mod.chat_dir_for(group_url, output_root)
+            run_index = {"value": 0}
+
+            def fake_run(*_args, **_kwargs):
+                run_index["value"] += 1
+                run_dir = chat_dir / "runs" / f"20260420T14000{run_index['value']}Z"
+                run_dir.mkdir(parents=True, exist_ok=True)
+                (run_dir / "run.json").write_text(
+                    json.dumps(payloads[run_index["value"] - 1], ensure_ascii=False),
+                    encoding="utf-8",
+                )
+                return subprocess.CompletedProcess(["bash"], 0)
+
+            argv = [
+                "telegram_contact_chain.py",
+                group_url,
+                str(output_root),
+                "--runs",
+                "2",
+                "--stop-after-idle",
+                "1",
+            ]
+
+            with (
+                mock.patch.object(self.mod.subprocess, "run", side_effect=fake_run),
+                mock.patch.object(self.mod.time, "sleep"),
+                mock.patch.object(sys, "argv", argv),
+            ):
+                exit_code = self.mod.main()
+
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(run_index["value"], 2)
+
+            chain_json = sorted((chat_dir / "chains").glob("*/chain.json"))[-1]
+            payload = json.loads(chain_json.read_text(encoding="utf-8"))
+            self.assertEqual(payload["status"], "completed")
+            self.assertEqual(payload["discovery_progress_runs"], 2)
+            self.assertEqual(payload["best_members_with_username"], 7)
+            self.assertEqual(payload["attempts"][0]["idle_runs"], 0)
+            self.assertTrue(payload["attempts"][0]["discovery_progress"])
+            self.assertTrue(payload["attempts"][0]["productive_run"])
+
+    def test_main_stops_after_target_members_with_username(self) -> None:
+        group_url = "https://web.telegram.org/k/#-2465948544"
+        payload = {
+            "status": "completed",
+            "new_usernames": 0,
+            "unique_members": 40,
+            "safe_count": 20,
+            "members_with_username": 100,
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_root = Path(tmpdir) / "out"
+            chat_dir = self.mod.chat_dir_for(group_url, output_root)
+
+            def fake_run(*_args, **_kwargs):
+                run_dir = chat_dir / "runs" / "20260420T150001Z"
+                run_dir.mkdir(parents=True, exist_ok=True)
+                (run_dir / "run.json").write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+                return subprocess.CompletedProcess(["bash"], 0)
+
+            argv = [
+                "telegram_contact_chain.py",
+                group_url,
+                str(output_root),
+                "--runs",
+                "3",
+                "--target-members-with-username",
+                "100",
+            ]
+
+            with (
+                mock.patch.object(self.mod.subprocess, "run", side_effect=fake_run),
+                mock.patch.object(sys, "argv", argv),
+            ):
+                exit_code = self.mod.main()
+
+            self.assertEqual(exit_code, 0)
+
+            chain_json = sorted((chat_dir / "chains").glob("*/chain.json"))[-1]
+            chain_payload = json.loads(chain_json.read_text(encoding="utf-8"))
+            self.assertEqual(chain_payload["status"], "target_members_with_username_reached")
+            self.assertEqual(chain_payload["target_members_with_username"], 100)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,82 @@
+{
+  "group_url": "https://web.telegram.org/a/#-1002465948544",
+  "source_mode": "chat",
+  "generated_at": "2026-04-26T10:48:38",
+  "count": 9,
+  "usernames": [
+    "@wanderlinde_baza",
+    "@fuckeeva",
+    "@tri87true",
+    "@super_pavlik",
+    "@bychkov_aa",
+    "@holaaloe",
+    "@iris_bs_bot",
+    "@bulan04",
+    "@andreu_bogatchenko"
+  ],
+  "rows": [
+    {
+      "username": "@wanderlinde_baza",
+      "peer_id": "7730689749",
+      "name": "Летаргический сон",
+      "status": "из чата",
+      "role": "модератор"
+    },
+    {
+      "username": "@fuckeeva",
+      "peer_id": "858739581",
+      "name": "Анна Fuckeeva",
+      "status": "из чата",
+      "role": "—"
+    },
+    {
+      "username": "@tri87true",
+      "peer_id": "555101371",
+      "name": "Тэймур Гусейнов",
+      "status": "из чата",
+      "role": "—"
+    },
+    {
+      "username": "@super_pavlik",
+      "peer_id": "1621138520",
+      "name": "Павел Сухомлинов",
+      "status": "из чата",
+      "role": "—"
+    },
+    {
+      "username": "@bychkov_aa",
+      "peer_id": "1291639730",
+      "name": "Evidence Based Cult",
+      "status": "из чата",
+      "role": "модератор"
+    },
+    {
+      "username": "@holaaloe",
+      "peer_id": "351524223",
+      "name": "Дмитрий Ежов",
+      "status": "из чата",
+      "role": "—"
+    },
+    {
+      "username": "@iris_bs_bot",
+      "peer_id": "5137994780",
+      "name": "Iris | Bright Sophie",
+      "status": "из чата",
+      "role": "Admin"
+    },
+    {
+      "username": "@bulan04",
+      "peer_id": "891274018",
+      "name": "Bulka",
+      "status": "из чата",
+      "role": "Модератор"
+    },
+    {
+      "username": "@andreu_bogatchenko",
+      "peer_id": "8055002493",
+      "name": "🤹🏻‍♂️",
+      "status": "из чата",
+      "role": "—"
+    }
+  ]
+}

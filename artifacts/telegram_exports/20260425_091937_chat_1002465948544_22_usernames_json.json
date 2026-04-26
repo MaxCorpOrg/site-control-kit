@@ -1,0 +1,74 @@
+{
+  "group_url": "https://web.telegram.org/a/#-1002465948544",
+  "source_mode": "chat",
+  "generated_at": "2026-04-25T09:19:37",
+  "count": 8,
+  "usernames": [
+    "@Bychkov_AA",
+    "@oleg_klsnkv",
+    "@Tri87true",
+    "@osipoly",
+    "@HolaAloe",
+    "@fuckeeva",
+    "@kamaz_master1",
+    "@super_pavlik"
+  ],
+  "rows": [
+    {
+      "username": "@Bychkov_AA",
+      "peer_id": "1291639730",
+      "name": "Алексей Андреевич",
+      "status": "из чата",
+      "role": "модератор"
+    },
+    {
+      "username": "@oleg_klsnkv",
+      "peer_id": "547163094",
+      "name": "Олег Колесников",
+      "status": "из чата",
+      "role": "—"
+    },
+    {
+      "username": "@Tri87true",
+      "peer_id": "555101371",
+      "name": "Тэймур Гусейнов",
+      "status": "из чата",
+      "role": "—"
+    },
+    {
+      "username": "@osipoly",
+      "peer_id": "1238534353",
+      "name": "Ольга",
+      "status": "из чата",
+      "role": "—"
+    },
+    {
+      "username": "@HolaAloe",
+      "peer_id": "351524223",
+      "name": "Дмитрий Ежов",
+      "status": "из чата",
+      "role": "—"
+    },
+    {
+      "username": "@fuckeeva",
+      "peer_id": "858739581",
+      "name": "Анна Fuckeeva",
+      "status": "из чата",
+      "role": "—"
+    },
+    {
+      "username": "@kamaz_master1",
+      "peer_id": "1404471788",
+      "name": "Камаз",
+      "status": "из чата",
+      "role": "—"
+    },
+    {
+      "username": "@super_pavlik",
+      "peer_id": "1621138520",
+      "name": "Павел Сухомлинов",
+      "status": "из чата",
+      "role": "—"
+    }
+  ]
+}

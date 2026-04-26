@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 
-from webcontrol.store import ControlStore
+from webcontrol.store import ControlStore, MAX_PERSISTED_TERMINAL_COMMANDS
 
 
 class ControlStoreTests(unittest.TestCase):
@@ -307,6 +307,78 @@ class ControlStoreTests(unittest.TestCase):
 
         self.assertIn("clients", payload)
         save_mock.assert_not_called()
+
+    def test_init_prunes_old_terminal_commands_and_cleans_queues(self) -> None:
+        commands = {}
+        for idx in range(MAX_PERSISTED_TERMINAL_COMMANDS + 5):
+            command_id = f"cmd-{idx:03d}"
+            timestamp = f"2026-04-26T05:{idx:02d}:00+00:00"
+            commands[command_id] = {
+                "id": command_id,
+                "created_at": timestamp,
+                "expires_at": "2026-04-26T06:00:00+00:00",
+                "status": "completed",
+                "issued_by": "test",
+                "target": {"client_id": "c1"},
+                "target_client_ids": ["c1"],
+                "timeout_ms": 1000,
+                "command": {"type": "extract_text", "selector": "body"},
+                "deliveries": {
+                    "c1": {
+                        "status": "completed",
+                        "updated_at": timestamp,
+                        "result": {"ok": True, "status": "completed", "data": {"text": f"ok-{idx}"}, "error": None, "logs": []},
+                    }
+                },
+                "last_update": timestamp,
+                "rejection_reason": None,
+            }
+        commands["pending-1"] = {
+            "id": "pending-1",
+            "created_at": "2026-04-26T06:10:00+00:00",
+            "expires_at": "2026-04-26T06:20:00+00:00",
+            "status": "pending",
+            "issued_by": "test",
+            "target": {"client_id": "c1"},
+            "target_client_ids": ["c1"],
+            "timeout_ms": 1000,
+            "command": {"type": "click", "selector": "body"},
+            "deliveries": {"c1": {"status": "pending", "updated_at": "2026-04-26T06:10:00+00:00", "result": None}},
+            "last_update": "2026-04-26T06:10:00+00:00",
+            "rejection_reason": None,
+        }
+        payload = {
+            "version": 1,
+            "created_at": "2026-04-26T05:00:00+00:00",
+            "clients": {
+                "c1": {
+                    "client_id": "c1",
+                    "created_at": "2026-04-26T05:00:00+00:00",
+                    "last_seen": "2026-04-26T05:10:00+00:00",
+                    "tabs": [],
+                    "meta": {},
+                    "user_agent": "ua",
+                    "extension_version": "0.1",
+                }
+            },
+            "commands": commands,
+            "queues": {"c1": ["cmd-000", "pending-1", "missing-cmd"]},
+            "telegram_users": {},
+        }
+        self.state_file.write_text(json.dumps(payload), encoding="utf-8")
+
+        pruned_store = ControlStore(self.state_file)
+
+        persisted = json.loads(self.state_file.read_text(encoding="utf-8"))
+        persisted_commands = persisted["commands"]
+        self.assertEqual(
+            len([item for item in persisted_commands.values() if item["status"] in {"completed", "failed", "partial", "cancelled", "expired", "rejected"}]),
+            MAX_PERSISTED_TERMINAL_COMMANDS,
+        )
+        self.assertIn("pending-1", persisted_commands)
+        self.assertNotIn("cmd-000", persisted_commands)
+        self.assertEqual(persisted["queues"]["c1"], ["pending-1"])
+        self.assertIsNotNone(pruned_store.get_command("pending-1"))
 
 
 if __name__ == "__main__":

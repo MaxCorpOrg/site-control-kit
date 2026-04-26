@@ -378,3 +378,300 @@ Usernames TXT: `/tmp/telegram_live_verify_2_usernames.txt`
 Usernames JSON: `/tmp/telegram_live_verify_2_usernames.json`
 Архив usernames TXT: `/home/max/site-control-kit/artifacts/telegram_exports/20260424_171947_chat_1002465948544_20_usernames_txt.txt`
 Архив usernames JSON: `/home/max/site-control-kit/artifacts/telegram_exports/20260424_171947_chat_1002465948544_20_usernames_json.json`
+
+## 2026-04-25 09:15:28
+Группа: `https://web.telegram.org/a/#-1002465948544`
+Режим: `chat`
+Участников: **15**
+Основной файл: `/tmp/telegram_discovery_run1.md`
+Архивная копия: `/home/max/site-control-kit/artifacts/telegram_exports/20260425_091528_chat_1002465948544_15.md`
+Usernames TXT: `/tmp/telegram_discovery_run1_usernames.txt`
+Usernames JSON: `/tmp/telegram_discovery_run1_usernames.json`
+Архив usernames TXT: `/home/max/site-control-kit/artifacts/telegram_exports/20260425_091528_chat_1002465948544_15_usernames_txt.txt`
+Архив usernames JSON: `/home/max/site-control-kit/artifacts/telegram_exports/20260425_091528_chat_1002465948544_15_usernames_json.json`
+
+## 2026-04-25 09:19:37
+Группа: `https://web.telegram.org/a/#-1002465948544`
+Режим: `chat`
+Участников: **22**
+Основной файл: `/tmp/telegram_discovery_run2.md`
+Архивная копия: `/home/max/site-control-kit/artifacts/telegram_exports/20260425_091937_chat_1002465948544_22.md`
+Usernames TXT: `/tmp/telegram_discovery_run2_usernames.txt`
+Usernames JSON: `/tmp/telegram_discovery_run2_usernames.json`
+Архив usernames TXT: `/home/max/site-control-kit/artifacts/telegram_exports/20260425_091937_chat_1002465948544_22_usernames_txt.txt`
+Архив usernames JSON: `/home/max/site-control-kit/artifacts/telegram_exports/20260425_091937_chat_1002465948544_22_usernames_json.json`
+
+## 2026-04-25 09:29:58
+Группа: `https://web.telegram.org/a/#-1002465948544`
+Режим: `chat`
+Участников: **18**
+Основной файл: `/tmp/telegram_contact_batch.zGKWkC.md`
+Архивная копия: `/home/max/site-control-kit/artifacts/telegram_exports/20260425_092958_chat_1002465948544_18.md`
+Usernames TXT: `/tmp/telegram_contact_batch.zGKWkC_usernames.txt`
+Usernames JSON: `/tmp/telegram_contact_batch.zGKWkC_usernames.json`
+Архив usernames TXT: `/home/max/site-control-kit/artifacts/telegram_exports/20260425_092958_chat_1002465948544_18_usernames_txt.txt`
+Архив usernames JSON: `/home/max/site-control-kit/artifacts/telegram_exports/20260425_092958_chat_1002465948544_18_usernames_json.json`
+
+## 2026-04-25 09:34:14
+Группа: `https://web.telegram.org/a/#-1002465948544`
+Режим: `chat`
+Участников: **23**
+Основной файл: `/tmp/telegram_contact_batch.UZ04pE.md`
+Архивная копия: `/home/max/site-control-kit/artifacts/telegram_exports/20260425_093414_chat_1002465948544_23.md`
+Usernames TXT: `/tmp/telegram_contact_batch.UZ04pE_usernames.txt`
+Usernames JSON: `/tmp/telegram_contact_batch.UZ04pE_usernames.json`
+Архив usernames TXT: `/home/max/site-control-kit/artifacts/telegram_exports/20260425_093414_chat_1002465948544_23_usernames_txt.txt`
+Архив usernames JSON: `/home/max/site-control-kit/artifacts/telegram_exports/20260425_093414_chat_1002465948544_23_usernames_json.json`
+
+## 2026-04-25 10:29:30
+Группа: `https://web.telegram.org/a/#-1002465948544`
+Режим: `chat`
+Участников: **15**
+Основной файл: `/tmp/telegram_contact_batch.g0CONe.md`
+Архивная копия: `/home/max/site-control-kit/artifacts/telegram_exports/20260425_102930_chat_1002465948544_15.md`
+Usernames TXT: `/tmp/telegram_contact_batch.g0CONe_usernames.txt`
+Usernames JSON: `/tmp/telegram_contact_batch.g0CONe_usernames.json`
+Архив usernames TXT: `/home/max/site-control-kit/artifacts/telegram_exports/20260425_102930_chat_1002465948544_15_usernames_txt.txt`
+Архив usernames JSON: `/home/max/site-control-kit/artifacts/telegram_exports/20260425_102930_chat_1002465948544_15_usernames_json.json`
+
+## 2026-04-25 10:37:07
+Группа: `https://web.telegram.org/a/#-1002465948544`
+Режим: `chat`
+Участников: **15**
+Основной файл: `/tmp/telegram_contact_batch.o4aCp2.md`
+Архивная копия: `/home/max/site-control-kit/artifacts/telegram_exports/20260425_103707_chat_1002465948544_15.md`
+Usernames TXT: `/tmp/telegram_contact_batch.o4aCp2_usernames.txt`
+Usernames JSON: `/tmp/telegram_contact_batch.o4aCp2_usernames.json`
+Архив usernames TXT: `/home/max/site-control-kit/artifacts/telegram_exports/20260425_103707_chat_1002465948544_15_usernames_txt.txt`
+Архив usernames JSON: `/home/max/site-control-kit/artifacts/telegram_exports/20260425_103707_chat_1002465948544_15_usernames_json.json`
+
+## 2026-04-25 10:40:15
+Группа: `https://web.telegram.org/a/#-1002465948544`
+Режим: `chat`
+Участников: **15**
+Основной файл: `/tmp/telegram_contact_batch.Kp75m3.md`
+Архивная копия: `/home/max/site-control-kit/artifacts/telegram_exports/20260425_104015_chat_1002465948544_15.md`
+Usernames TXT: `/tmp/telegram_contact_batch.Kp75m3_usernames.txt`
+Usernames JSON: `/tmp/telegram_contact_batch.Kp75m3_usernames.json`
+Архив usernames TXT: `/home/max/site-control-kit/artifacts/telegram_exports/20260425_104015_chat_1002465948544_15_usernames_txt.txt`
+Архив usernames JSON: `/home/max/site-control-kit/artifacts/telegram_exports/20260425_104015_chat_1002465948544_15_usernames_json.json`
+
+## 2026-04-25 11:05:01
+Группа: `https://web.telegram.org/a/#-1002465948544`
+Режим: `chat`
+Участников: **15**
+Основной файл: `/tmp/telegram_contact_batch.PvTwIi.md`
+Архивная копия: `/home/max/site-control-kit/artifacts/telegram_exports/20260425_110501_chat_1002465948544_15.md`
+Usernames TXT: `/tmp/telegram_contact_batch.PvTwIi_usernames.txt`
+Usernames JSON: `/tmp/telegram_contact_batch.PvTwIi_usernames.json`
+Архив usernames TXT: `/home/max/site-control-kit/artifacts/telegram_exports/20260425_110501_chat_1002465948544_15_usernames_txt.txt`
+Архив usernames JSON: `/home/max/site-control-kit/artifacts/telegram_exports/20260425_110501_chat_1002465948544_15_usernames_json.json`
+
+## 2026-04-25 11:07:14
+Группа: `https://web.telegram.org/a/#-1002465948544`
+Режим: `chat`
+Участников: **15**
+Основной файл: `/tmp/telegram_contact_batch.9MNesD.md`
+Архивная копия: `/home/max/site-control-kit/artifacts/telegram_exports/20260425_110714_chat_1002465948544_15.md`
+Usernames TXT: `/tmp/telegram_contact_batch.9MNesD_usernames.txt`
+Usernames JSON: `/tmp/telegram_contact_batch.9MNesD_usernames.json`
+Архив usernames TXT: `/home/max/site-control-kit/artifacts/telegram_exports/20260425_110714_chat_1002465948544_15_usernames_txt.txt`
+Архив usernames JSON: `/home/max/site-control-kit/artifacts/telegram_exports/20260425_110714_chat_1002465948544_15_usernames_json.json`
+
+## 2026-04-25 12:02:01
+Группа: `https://web.telegram.org/a/#-1002465948544`
+Режим: `chat`
+Участников: **15**
+Основной файл: `/tmp/telegram_contact_batch.FnP2gl.md`
+Архивная копия: `/home/max/site-control-kit/artifacts/telegram_exports/20260425_120201_chat_1002465948544_15.md`
+Usernames TXT: `/tmp/telegram_contact_batch.FnP2gl_usernames.txt`
+Usernames JSON: `/tmp/telegram_contact_batch.FnP2gl_usernames.json`
+Архив usernames TXT: `/home/max/site-control-kit/artifacts/telegram_exports/20260425_120201_chat_1002465948544_15_usernames_txt.txt`
+Архив usernames JSON: `/home/max/site-control-kit/artifacts/telegram_exports/20260425_120201_chat_1002465948544_15_usernames_json.json`
+
+## 2026-04-25 12:08:29
+Группа: `https://web.telegram.org/a/#-1002465948544`
+Режим: `chat`
+Участников: **15**
+Основной файл: `/tmp/telegram_contact_batch.5BePaO.md`
+Архивная копия: `/home/max/site-control-kit/artifacts/telegram_exports/20260425_120829_chat_1002465948544_15.md`
+Usernames TXT: `/tmp/telegram_contact_batch.5BePaO_usernames.txt`
+Usernames JSON: `/tmp/telegram_contact_batch.5BePaO_usernames.json`
+Архив usernames TXT: `/home/max/site-control-kit/artifacts/telegram_exports/20260425_120829_chat_1002465948544_15_usernames_txt.txt`
+Архив usernames JSON: `/home/max/site-control-kit/artifacts/telegram_exports/20260425_120829_chat_1002465948544_15_usernames_json.json`
+
+## 2026-04-26 08:59:46
+Группа: `https://web.telegram.org/a/#-1002465948544`
+Режим: `chat`
+Участников: **20**
+Основной файл: `/tmp/telegram_contact_batch.L1lXD5.md`
+Архивная копия: `/home/max/site-control-kit/artifacts/telegram_exports/20260426_085946_chat_1002465948544_20.md`
+Usernames TXT: `/tmp/telegram_contact_batch.L1lXD5_usernames.txt`
+Usernames JSON: `/tmp/telegram_contact_batch.L1lXD5_usernames.json`
+Архив usernames TXT: `/home/max/site-control-kit/artifacts/telegram_exports/20260426_085946_chat_1002465948544_20_usernames_txt.txt`
+Архив usernames JSON: `/home/max/site-control-kit/artifacts/telegram_exports/20260426_085946_chat_1002465948544_20_usernames_json.json`
+
+## 2026-04-26 09:09:24
+Группа: `https://web.telegram.org/a/#-1002465948544`
+Режим: `chat`
+Участников: **12**
+Основной файл: `/tmp/telegram_contact_batch.yNjQbv.md`
+Архивная копия: `/home/max/site-control-kit/artifacts/telegram_exports/20260426_090924_chat_1002465948544_12.md`
+Usernames TXT: `/tmp/telegram_contact_batch.yNjQbv_usernames.txt`
+Usernames JSON: `/tmp/telegram_contact_batch.yNjQbv_usernames.json`
+Архив usernames TXT: `/home/max/site-control-kit/artifacts/telegram_exports/20260426_090924_chat_1002465948544_12_usernames_txt.txt`
+Архив usernames JSON: `/home/max/site-control-kit/artifacts/telegram_exports/20260426_090924_chat_1002465948544_12_usernames_json.json`
+
+## 2026-04-26 10:05:24
+Группа: `https://web.telegram.org/a/#-1002465948544`
+Режим: `chat`
+Участников: **41**
+Основной файл: `/tmp/telegram_contact_batch.qhKSIh.md`
+Архивная копия: `/home/max/site-control-kit/artifacts/telegram_exports/20260426_100524_chat_1002465948544_41.md`
+Usernames TXT: `/tmp/telegram_contact_batch.qhKSIh_usernames.txt`
+Usernames JSON: `/tmp/telegram_contact_batch.qhKSIh_usernames.json`
+Архив usernames TXT: `/home/max/site-control-kit/artifacts/telegram_exports/20260426_100524_chat_1002465948544_41_usernames_txt.txt`
+Архив usernames JSON: `/home/max/site-control-kit/artifacts/telegram_exports/20260426_100524_chat_1002465948544_41_usernames_json.json`
+
+## 2026-04-26 10:26:34
+Группа: `https://web.telegram.org/a/#-1002465948544`
+Режим: `chat`
+Участников: **43**
+Основной файл: `/tmp/telegram_contact_batch.TvOCiD.md`
+Архивная копия: `/home/max/site-control-kit/artifacts/telegram_exports/20260426_102634_chat_1002465948544_43.md`
+Usernames TXT: `/tmp/telegram_contact_batch.TvOCiD_usernames.txt`
+Usernames JSON: `/tmp/telegram_contact_batch.TvOCiD_usernames.json`
+Архив usernames TXT: `/home/max/site-control-kit/artifacts/telegram_exports/20260426_102634_chat_1002465948544_43_usernames_txt.txt`
+Архив usernames JSON: `/home/max/site-control-kit/artifacts/telegram_exports/20260426_102634_chat_1002465948544_43_usernames_json.json`
+
+## 2026-04-26 10:30:30
+Группа: `https://web.telegram.org/a/#-1002465948544`
+Режим: `chat`
+Участников: **37**
+Основной файл: `/tmp/telegram_contact_batch.E8pG4D.md`
+Архивная копия: `/home/max/site-control-kit/artifacts/telegram_exports/20260426_103030_chat_1002465948544_37.md`
+Usernames TXT: `/tmp/telegram_contact_batch.E8pG4D_usernames.txt`
+Usernames JSON: `/tmp/telegram_contact_batch.E8pG4D_usernames.json`
+Архив usernames TXT: `/home/max/site-control-kit/artifacts/telegram_exports/20260426_103030_chat_1002465948544_37_usernames_txt.txt`
+Архив usernames JSON: `/home/max/site-control-kit/artifacts/telegram_exports/20260426_103030_chat_1002465948544_37_usernames_json.json`
+
+## 2026-04-26 10:36:38
+Группа: `https://web.telegram.org/a/#-1002465948544`
+Режим: `chat`
+Участников: **42**
+Основной файл: `/tmp/telegram_contact_batch.FJQKo6.md`
+Архивная копия: `/home/max/site-control-kit/artifacts/telegram_exports/20260426_103638_chat_1002465948544_42.md`
+Usernames TXT: `/tmp/telegram_contact_batch.FJQKo6_usernames.txt`
+Usernames JSON: `/tmp/telegram_contact_batch.FJQKo6_usernames.json`
+Архив usernames TXT: `/home/max/site-control-kit/artifacts/telegram_exports/20260426_103638_chat_1002465948544_42_usernames_txt.txt`
+Архив usernames JSON: `/home/max/site-control-kit/artifacts/telegram_exports/20260426_103638_chat_1002465948544_42_usernames_json.json`
+
+## 2026-04-26 10:45:36
+Группа: `https://web.telegram.org/a/#-1002465948544`
+Режим: `chat`
+Участников: **40**
+Основной файл: `/tmp/telegram_contact_batch.67jx7e.md`
+Архивная копия: `/home/max/site-control-kit/artifacts/telegram_exports/20260426_104536_chat_1002465948544_40.md`
+Usernames TXT: `/tmp/telegram_contact_batch.67jx7e_usernames.txt`
+Usernames JSON: `/tmp/telegram_contact_batch.67jx7e_usernames.json`
+Архив usernames TXT: `/home/max/site-control-kit/artifacts/telegram_exports/20260426_104536_chat_1002465948544_40_usernames_txt.txt`
+Архив usernames JSON: `/home/max/site-control-kit/artifacts/telegram_exports/20260426_104536_chat_1002465948544_40_usernames_json.json`
+
+## 2026-04-26 10:48:38
+Группа: `https://web.telegram.org/a/#-1002465948544`
+Режим: `chat`
+Участников: **36**
+Основной файл: `/tmp/telegram_contact_batch.4OHYN0.md`
+Архивная копия: `/home/max/site-control-kit/artifacts/telegram_exports/20260426_104838_chat_1002465948544_36.md`
+Usernames TXT: `/tmp/telegram_contact_batch.4OHYN0_usernames.txt`
+Usernames JSON: `/tmp/telegram_contact_batch.4OHYN0_usernames.json`
+Архив usernames TXT: `/home/max/site-control-kit/artifacts/telegram_exports/20260426_104838_chat_1002465948544_36_usernames_txt.txt`
+Архив usernames JSON: `/home/max/site-control-kit/artifacts/telegram_exports/20260426_104838_chat_1002465948544_36_usernames_json.json`
+
+## 2026-04-26 11:04:44
+Группа: `https://web.telegram.org/a/#-1002465948544`
+Режим: `chat`
+Участников: **45**
+Основной файл: `/tmp/telegram_contact_batch.XB0BuN.md`
+Архивная копия: `/home/max/site-control-kit/artifacts/telegram_exports/20260426_110444_chat_1002465948544_45.md`
+Usernames TXT: `/tmp/telegram_contact_batch.XB0BuN_usernames.txt`
+Usernames JSON: `/tmp/telegram_contact_batch.XB0BuN_usernames.json`
+Архив usernames TXT: `/home/max/site-control-kit/artifacts/telegram_exports/20260426_110444_chat_1002465948544_45_usernames_txt.txt`
+Архив usernames JSON: `/home/max/site-control-kit/artifacts/telegram_exports/20260426_110444_chat_1002465948544_45_usernames_json.json`
+
+## 2026-04-26 11:08:20
+Группа: `https://web.telegram.org/a/#-1002465948544`
+Режим: `chat`
+Участников: **41**
+Основной файл: `/tmp/telegram_contact_batch.1hnwa8.md`
+Архивная копия: `/home/max/site-control-kit/artifacts/telegram_exports/20260426_110820_chat_1002465948544_41.md`
+Usernames TXT: `/tmp/telegram_contact_batch.1hnwa8_usernames.txt`
+Usernames JSON: `/tmp/telegram_contact_batch.1hnwa8_usernames.json`
+Архив usernames TXT: `/home/max/site-control-kit/artifacts/telegram_exports/20260426_110820_chat_1002465948544_41_usernames_txt.txt`
+Архив usernames JSON: `/home/max/site-control-kit/artifacts/telegram_exports/20260426_110820_chat_1002465948544_41_usernames_json.json`
+
+## 2026-04-26 11:51:20
+Группа: `https://web.telegram.org/a/#-1002465948544`
+Режим: `chat`
+Участников: **13**
+Основной файл: `/tmp/telegram_contact_batch.IIIsYl.md`
+Архивная копия: `/home/max/site-control-kit/artifacts/telegram_exports/20260426_115120_chat_1002465948544_13.md`
+Usernames TXT: `/tmp/telegram_contact_batch.IIIsYl_usernames.txt`
+Usernames JSON: `/tmp/telegram_contact_batch.IIIsYl_usernames.json`
+Архив usernames TXT: `/home/max/site-control-kit/artifacts/telegram_exports/20260426_115120_chat_1002465948544_13_usernames_txt.txt`
+Архив usernames JSON: `/home/max/site-control-kit/artifacts/telegram_exports/20260426_115120_chat_1002465948544_13_usernames_json.json`
+
+## 2026-04-26 12:16:20
+Группа: `https://web.telegram.org/a/#-1002465948544`
+Режим: `chat`
+Участников: **13**
+Основной файл: `/tmp/telegram_contact_batch.aBVGwA.md`
+Архивная копия: `/home/max/site-control-kit/artifacts/telegram_exports/20260426_121620_chat_1002465948544_13.md`
+Usernames TXT: `/tmp/telegram_contact_batch.aBVGwA_usernames.txt`
+Usernames JSON: `/tmp/telegram_contact_batch.aBVGwA_usernames.json`
+Архив usernames TXT: `/home/max/site-control-kit/artifacts/telegram_exports/20260426_121620_chat_1002465948544_13_usernames_txt.txt`
+Архив usernames JSON: `/home/max/site-control-kit/artifacts/telegram_exports/20260426_121620_chat_1002465948544_13_usernames_json.json`
+
+## 2026-04-26 12:18:17
+Группа: `https://web.telegram.org/a/#-1002465948544`
+Режим: `chat`
+Участников: **13**
+Основной файл: `/tmp/telegram_contact_batch.u2xNP7.md`
+Архивная копия: `/home/max/site-control-kit/artifacts/telegram_exports/20260426_121817_chat_1002465948544_13.md`
+Usernames TXT: `/tmp/telegram_contact_batch.u2xNP7_usernames.txt`
+Usernames JSON: `/tmp/telegram_contact_batch.u2xNP7_usernames.json`
+Архив usernames TXT: `/home/max/site-control-kit/artifacts/telegram_exports/20260426_121817_chat_1002465948544_13_usernames_txt.txt`
+Архив usernames JSON: `/home/max/site-control-kit/artifacts/telegram_exports/20260426_121817_chat_1002465948544_13_usernames_json.json`
+
+## 2026-04-26 12:19:40
+Группа: `https://web.telegram.org/a/#-1002465948544`
+Режим: `chat`
+Участников: **13**
+Основной файл: `/tmp/telegram_contact_batch.G7Q2Hv.md`
+Архивная копия: `/home/max/site-control-kit/artifacts/telegram_exports/20260426_121940_chat_1002465948544_13.md`
+Usernames TXT: `/tmp/telegram_contact_batch.G7Q2Hv_usernames.txt`
+Usernames JSON: `/tmp/telegram_contact_batch.G7Q2Hv_usernames.json`
+Архив usernames TXT: `/home/max/site-control-kit/artifacts/telegram_exports/20260426_121940_chat_1002465948544_13_usernames_txt.txt`
+Архив usernames JSON: `/home/max/site-control-kit/artifacts/telegram_exports/20260426_121940_chat_1002465948544_13_usernames_json.json`
+
+## 2026-04-26 12:22:10
+Группа: `https://web.telegram.org/a/#-1002465948544`
+Режим: `chat`
+Участников: **13**
+Основной файл: `/tmp/telegram_contact_batch.ZDDRyS.md`
+Архивная копия: `/home/max/site-control-kit/artifacts/telegram_exports/20260426_122210_chat_1002465948544_13.md`
+Usernames TXT: `/tmp/telegram_contact_batch.ZDDRyS_usernames.txt`
+Usernames JSON: `/tmp/telegram_contact_batch.ZDDRyS_usernames.json`
+Архив usernames TXT: `/home/max/site-control-kit/artifacts/telegram_exports/20260426_122210_chat_1002465948544_13_usernames_txt.txt`
+Архив usernames JSON: `/home/max/site-control-kit/artifacts/telegram_exports/20260426_122210_chat_1002465948544_13_usernames_json.json`
+
+## 2026-04-26 12:24:12
+Группа: `https://web.telegram.org/a/#-1002465948544`
+Режим: `chat`
+Участников: **13**
+Основной файл: `/tmp/telegram_contact_batch.BrpA6L.md`
+Архивная копия: `/home/max/site-control-kit/artifacts/telegram_exports/20260426_122412_chat_1002465948544_13.md`
+Usernames TXT: `/tmp/telegram_contact_batch.BrpA6L_usernames.txt`
+Usernames JSON: `/tmp/telegram_contact_batch.BrpA6L_usernames.json`
+Архив usernames TXT: `/home/max/site-control-kit/artifacts/telegram_exports/20260426_122412_chat_1002465948544_13_usernames_txt.txt`
+Архив usernames JSON: `/home/max/site-control-kit/artifacts/telegram_exports/20260426_122412_chat_1002465948544_13_usernames_json.json`

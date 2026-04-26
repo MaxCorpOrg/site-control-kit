@@ -1,5 +1,356 @@
 # CODEX_STATE
 
+## 2026-04-26
+
+- Новый live blocker перед реальным exporter path оказался не в Telegram DOM, а в hub control-plane:
+  - forced `CHAT_TAB_ID=997919930` уже устарел; после relaunch живой tab у `client-601f3396-50aa-4989-ae5d-9c450e28f65e` стал `997920139`;
+  - temp run `/tmp/tg_mention_probe_live/chat_-1002465948544/runs/20260426T055541Z/run.json` упал ещё до export path с `tab_id not found`;
+  - следующий temp run `/tmp/tg_mention_probe_live/chat_-1002465948544/runs/20260426T055744Z/run.json` уже на живом tab упёрся в `force-navigate:start` с `Network error: timed out`.
+- Корень проблемы подтверждён локально:
+  - `/home/max/.site-control-kit/state.json` разросся до `88995936` байт;
+  - внутри было `2286` terminal-команд (`1552 completed`, `439 failed`, `295 expired`);
+  - server log на старом hub показал `POST /api/commands HTTP/1.1" 200 -` и сразу `BrokenPipeError`, то есть клиент таймаутился, пока hub ещё дописывал раздутый state.
+- Точечный фикс сделан в `webcontrol/store.py`:
+  - persisted terminal commands теперь bounded и pruning держит только последние `40` terminal-записей;
+  - pruning запускается на startup и перед save;
+  - queues очищаются от orphan `command_id`;
+  - добавлен regression coverage в `tests/test_store.py`.
+- После рестарта локального hub state реально ужался:
+  - `/home/max/.site-control-kit/state.json` -> `1030707` байт;
+  - persisted commands -> `40`.
+- Проверки после фикса:
+  - `python3 -m py_compile scripts/export_telegram_members_non_pii.py webcontrol/store.py tests/test_store.py` -> OK;
+  - `PYTHONPATH=/home/max/site-control-kit python3 -m unittest tests.test_store` -> `15 tests OK`;
+  - `PYTHONPATH=/home/max/site-control-kit python3 -m unittest tests.test_telegram_export_runtime` -> `49 tests OK`;
+  - `PYTHONPATH=/home/max/site-control-kit python3 -m unittest discover -s tests -p 'test_*.py'` -> `147 tests OK`.
+- Live re-verify после pruning:
+  - direct helper checks на живом `client/tab` снова проходят:
+    - `_detect_current_dialog_url(...)` -> OK
+    - `_is_dialog_surface_open(...)` -> OK
+    - `_ensure_group_dialog_url(...)` -> OK
+  - успешный forced trace-run:
+    - run: `/tmp/tg_mention_probe_live/chat_-1002465948544/runs/20260426T060315Z/run.json`
+    - log: `/tmp/tg_mention_probe_live/chat_-1002465948544/runs/20260426T060315Z/export.log`
+    - stats: `/tmp/tg_mention_probe_live/chat_-1002465948544/runs/20260426T060315Z/export_stats.json`
+  - факт по стадиям:
+    - exporter дошёл до `force-navigate:done`;
+    - exporter дошёл до `chat-collect:start` и `chat-collect:done`;
+    - отдельный auxiliary mention pass уже не стал следующим blocker, потому что его срезал общий runtime limit.
+  - key stats этого run:
+    - `unique_members=41`
+    - `members_with_username=14`
+    - `history_backfilled_total=14`
+    - `deep_attempted_total=5`
+    - `deep_updated_total=0`
+    - `chat_runtime_limited=1`
+    - `discovery_new_visible=41`
+- Практический вывод после этого live verify:
+  - старый blocker `force-navigate:start -> Network error: timed out` снят;
+  - новый точный blocker теперь уже внутри `chat collect`, а не до navigation и не внутри отдельного post-collect mention pass;
+  - helper-heavy path на peer с `menu_missing`/helper-open/wait-body/wait-identity съедает `120s`, и run заканчивается строкой `skip mention deep because chat runtime limit was reached`;
+  - следующий throughput-шаг к `100 @username` теперь должен ускорять helper/chat-collect path, а не чинить hub timeouts или снова разбирать stale `997919930`.
+- Следующий throughput-фикс после этого уже внедрён:
+  - `_wait_for_helper_target_identity()` теперь умеет fast-accept по стабильному numeric helper-route, но не принимает его при явном header-conflict;
+  - `_poll_username_from_page_location()` теперь реально уважает короткий timeout budget, а не жёстко ждал `2s` на каждый `get_page_url`;
+  - helper session для chat-deep вынесен на уровень всего `chat collect`, поэтому между scroll-step используется `helper-navigate` в тот же helper tab вместо нового `new_tab` на каждом шаге.
+- Новый regression coverage:
+  - route-based helper identity accept;
+  - route fast-path не срабатывает при conflicting header;
+  - page-location username poll уважает короткий timeout budget.
+- Проверки после этого:
+  - `python3 -m py_compile scripts/export_telegram_members_non_pii.py tests/test_telegram_export_runtime.py` -> OK;
+  - `PYTHONPATH=/home/max/site-control-kit python3 -m unittest tests.test_telegram_export_runtime` -> `52 tests OK`;
+  - `PYTHONPATH=/home/max/site-control-kit python3 -m unittest discover -s tests -p 'test_*.py'` -> `150 tests OK`.
+- Live re-verify после helper fast-path + helper session reuse:
+  - run: `/tmp/tg_mention_probe_live/chat_-1002465948544/runs/20260426T063418Z/run.json`
+  - log: `/tmp/tg_mention_probe_live/chat_-1002465948544/runs/20260426T063418Z/export.log`
+  - stats: `/tmp/tg_mention_probe_live/chat_-1002465948544/runs/20260426T063418Z/export_stats.json`
+  - новый trace-факт:
+    - первый helper peer ещё открывает `helper-open-tab`;
+    - все следующие peer в этом же run уже идут через `helper-navigate` в тот же `tab_id=997920228`;
+    - `helper-wait-identity` на zero-yield peer часто упал в диапазон `0.62..1.07s`;
+    - `helper-page-url` больше не висит по `2s` и в live trace опустился до `0.50..0.55s`.
+  - key stats этого run:
+    - `unique_members=42`
+    - `members_with_username=12`
+    - `history_backfilled_total=12`
+    - `deep_attempted_total=7`
+    - `deep_updated_total=0`
+    - `chat_scroll_steps_done=10`
+    - `chat_runtime_limited=1`
+- Практический вывод после этого шага:
+  - helper throughput реально вырос: на том же `120s` run дошёл до `7` deep attempts вместо `5`;
+  - текущий blocker не снят полностью, но заметно сузился: основной лимит всё ещё внутри helper-heavy `chat collect`, а не в control-plane, не в repeated open-tab, и не в `helper-page-url` over-wait;
+  - следующий шаг к `100 @username` теперь уже ещё точнее: резать per-peer helper cost дальше и/или поднимать `CHAT_MAX_RUNTIME` уже на chain/live уровне после того, как helper path перестал сжигать секунды на лишние tab open/page-url waits.
+- Следующий throughput-фикс после этого уже внедрён:
+  - helper tabs теперь открываются в фоне (`new_tab active=false`) и reuse path больше не делает лишний `activate_tab` перед каждым `navigate`;
+  - отдельный `helper-wait-body` убран, чтобы не тратить ещё один poll-round-trip на каждый helper peer;
+  - sticky helper fallback теперь использует тот же `chat_helper_session`, что и обычный helper path, вместо отдельного helper tab на каждый sticky miss;
+  - regression coverage добавлен в `tests/test_telegram_export_runtime.py` и `tests/test_telegram_deep_helper.py` для background helper tab, reuse без activate, conditional restore и sticky shared helper session.
+- Промежуточный live probe после background helper + no `helper-wait-body`:
+  - run: `/tmp/tg_mention_probe_live/chat_-1002465948544/runs/20260426T064323Z/run.json`
+  - stats: `/tmp/tg_mention_probe_live/chat_-1002465948544/runs/20260426T064323Z/export_stats.json`
+  - этот run вскрыл остаточный leak:
+    - sticky helper path ещё открывал новые helper tabs (`997920230`, `997920232`, `997920234`, `997920235`) и обходил общий helper session;
+    - `helper-wait-body` уже исчез из trace;
+    - `deep_attempted_total = 8`, `members_with_username = 11`, `chat_runtime_limited = 1`.
+- После прокидывания shared helper session и в sticky fallback новый live re-verify:
+  - run: `/tmp/tg_mention_probe_live/chat_-1002465948544/runs/20260426T064626Z/run.json`
+  - log: `/tmp/tg_mention_probe_live/chat_-1002465948544/runs/20260426T064626Z/export.log`
+  - stats: `/tmp/tg_mention_probe_live/chat_-1002465948544/runs/20260426T064626Z/export_stats.json`
+  - новый trace-факт:
+    - helper reuse остаётся на одном и том же `tab_id=997920238`;
+    - `helper-open-tab` есть только на первом peer;
+    - дальше идут только `helper-navigate 0.69..1.23s`;
+    - `helper-wait-body` больше не появляется вообще.
+  - key stats:
+    - `unique_members = 36`
+    - `members_with_username = 9`
+    - `deep_attempted_total = 7`
+    - `chat_scroll_steps_done = 11`
+    - `chat_runtime_limited = 1`
+- Проверки после этого:
+  - `python3 -m py_compile scripts/export_telegram_members_non_pii.py tests/test_telegram_export_runtime.py tests/test_telegram_deep_helper.py` -> OK;
+  - `PYTHONPATH=/home/max/site-control-kit python3 -m unittest tests.test_telegram_export_runtime` -> `55 tests OK`;
+  - `PYTHONPATH=/home/max/site-control-kit python3 -m unittest discover -s tests -p 'test_*.py'` -> `153 tests OK`.
+- Практический вывод после этого шага:
+  - repeated helper open-tab/foreground churn больше не основной blocker;
+  - текущий live limit теперь ещё точнее: `helper-wait-identity` держит примерно `2.0..2.5s` на zero-yield peer и именно там уходит runtime внутри `chat collect`;
+  - до пути на `100 @username` мы приблизились по throughput path, но текущий best live ceiling по username всё ещё остаётся на run `20260426T060315Z` с `14` username, то есть следующий шаг должен резать именно `helper-wait-identity`, а не снова session/open-tab overhead.
+- Следующий identity-throughput шаг после этого уже внедрён:
+  - `_wait_for_helper_target_identity()` теперь читает helper-route через direct page location (`get_page_url`) с fallback на stale hub tab URL, а не только через heartbeat state;
+  - добавлен `_read_dialog_fragment_best_effort()`;
+  - `_wait_for_helper_target_identity()` теперь умеет early reject после двух одинаковых non-target route и больше не ждёт full timeout только из-за stale `tab_url`;
+  - `_get_page_url_best_effort()` теперь реально уважает короткий timeout budget до `0.3s`, а не принудительно поднимал его до `1s`.
+- Новый regression coverage:
+  - stable non-target helper-route -> early reject;
+  - helper route reader предпочитает page location перед stale hub `tab_url`;
+  - `_get_page_url_best_effort()` уважает короткий timeout budget.
+- Диагностический live run после route-first helper identity, но до фикса short `get_page_url` budget:
+  - run: `/tmp/tg_mention_probe_live/chat_-1002465948544/runs/20260426T070235Z/run.json`
+  - stats: `/tmp/tg_mention_probe_live/chat_-1002465948544/runs/20260426T070235Z/export_stats.json`
+  - trace показал регресс:
+    - `helper-wait-identity` avg вырос до `2.987s` против `2.146s` на baseline `20260426T064626Z`;
+    - несколько peer дали `3.53..3.56s`;
+    - это вывело на точный cause: `_get_page_url_best_effort()` тайно держал минимум `1s`.
+- После фикса short budget новый live re-verify:
+  - run: `/tmp/tg_mention_probe_live/chat_-1002465948544/runs/20260426T070607Z/run.json`
+  - log: `/tmp/tg_mention_probe_live/chat_-1002465948544/runs/20260426T070607Z/export.log`
+  - stats: `/tmp/tg_mention_probe_live/chat_-1002465948544/runs/20260426T070607Z/export_stats.json`
+  - новый trace-факт:
+    - `helper-wait-identity` вернулся почти к baseline: avg `2.243s` по `6` peer против `2.146s` у `20260426T064626Z`;
+    - типичные zero-yield значения снова в районе `2.08..2.21s`, хотя один sticky helper peer всё ещё дал `2.88s`;
+    - общий helper reuse сохранился, repeated `helper-open-tab` regress не вернулся.
+  - key stats:
+    - `unique_members = 41`
+    - `members_with_username = 11`
+    - `deep_attempted_total = 7`
+    - `chat_scroll_steps_done = 12`
+    - `chat_runtime_limited = 1`
+- Проверки после этого:
+  - `python3 -m py_compile scripts/export_telegram_members_non_pii.py tests/test_telegram_export_runtime.py` -> OK;
+  - `PYTHONPATH=/home/max/site-control-kit python3 -m unittest tests.test_telegram_export_runtime` -> `58 tests OK`;
+  - `PYTHONPATH=/home/max/site-control-kit python3 -m unittest discover -s tests -p 'test_*.py'` -> `156 tests OK`.
+- Практический вывод после этого шага:
+  - short-budget bug в helper route probe снят;
+  - route-first helper identity больше не даёт явный latency regression;
+  - но сам blocker всё ещё не снят: `helper-wait-identity` остаётся главным zero-yield cost center, а лучший live ceiling по username всё ещё у `20260426T060315Z` (`14` username).
+- Следующий helper-profile шаг после этого уже внедрён:
+  - `_open_current_chat_user_info_and_read_username()` теперь приоритетно кликает по `.MiddleHeader .ChatInfo .fullName` и `.MiddleHeader .ChatInfo`, а не по generic `.chat-info` path;
+  - после `wait_selector` функция больше не считает пустой `RightColumn` shell успешным profile-open: она читает `RIGHT_COLUMN_SELECTOR`, проверяет реальный profile content и, если справа открылся только shell, закрывает его и продолжает со следующим selector.
+- Новый regression coverage:
+  - `tests/test_telegram_deep_helper.py` теперь покрывает:
+    - приоритет текущего Telegram header selector;
+    - пропуск пустого `RightColumn` shell и переход к следующему working selector.
+- Manual helper probes после этого:
+  - direct helper page на known-good peer `306536305` после ~`11s` уже действительно открывает populated `User Info` и показывает `@alxkat`, если кликнуть по `.MiddleHeader .ChatInfo .fullName` или `.MiddleHeader .ChatInfo`;
+  - но прямой `_read_username_via_helper_tab(... peer_id='306536305' ...)` всё ещё возвращает `—` примерно за `3.61s`, то есть exporter чаще не доходит до исправленного profile-open path из-за identity gate раньше этого места.
+- Full live re-verify после profile-open фикса:
+  - run: `/tmp/tg_mention_probe_live/chat_-1002465948544/runs/20260426T075023Z/run.json`
+  - log: `/tmp/tg_mention_probe_live/chat_-1002465948544/runs/20260426T075023Z/export.log`
+  - stats: `/tmp/tg_mention_probe_live/chat_-1002465948544/runs/20260426T075023Z/export_stats.json`
+  - run оказался слабее baseline из-за repeated identical discovery view:
+    - `unique_members = 13`
+    - `members_with_username = 5`
+    - `deep_attempted_total = 2`
+    - `deep_updated_total = 0`
+    - `chat_revisited_view_steps = 3`
+    - `discovery_new_visible = 0`
+  - trace-факт:
+    - оба helper peer снова закончились на `helper-wait-identity ... matched=0`;
+    - новых helper/profile usernames run не дал.
+- Проверки после этого:
+  - `python3 -m py_compile scripts/export_telegram_members_non_pii.py tests/test_telegram_deep_helper.py tests/test_telegram_export_runtime.py` -> OK;
+  - `PYTHONPATH=/home/max/site-control-kit python3 -m unittest tests.test_telegram_deep_helper tests.test_telegram_export_runtime` -> `66 tests OK`;
+  - `PYTHONPATH=/home/max/site-control-kit python3 -m unittest discover -s tests -p 'test_*.py'` -> `157 tests OK`.
+- Практический вывод после этого шага:
+  - пустой `RightColumn` shell больше не является текущим главным blocker;
+  - новый точный blocker уже уже: exporter не доходит до исправленного profile-open path, потому что `helper-wait-identity` слишком часто завершает helper peer на `matched=0`;
+  - лучший live ceiling по username всё ещё у `20260426T060315Z` (`14` username).
+- Следующий helper-route шаг после этого уже внедрён:
+  - добавлен `_soft_confirm_helper_target_route()`:
+    - late soft-accept по helper-route для target peer;
+    - с защитой от conflicting header/title;
+  - при `soft=1` helper path делает только короткий deadline-aware foreground kick;
+  - numeric helper-route после `soft=1` больше не тратит budget на пустой `quick-url/page-url`.
+- Новый regression coverage:
+  - `tests/test_telegram_export_runtime.py` теперь покрывает:
+    - soft-route accept без header-conflict;
+    - soft-route reject при conflicting header;
+    - helper-read до profile path после soft-route confirm без URL polling.
+- Проверки после этого:
+  - `python3 -m py_compile scripts/export_telegram_members_non_pii.py tests/test_telegram_export_runtime.py` -> OK;
+  - `PYTHONPATH=/home/max/site-control-kit python3 -m unittest tests.test_telegram_export_runtime` -> `61 tests OK`;
+  - `PYTHONPATH=/home/max/site-control-kit python3 -m unittest discover -s tests -p 'test_*.py'` -> `160 tests OK`.
+- Новый isolated live re-verify:
+  - run: `/tmp/tg_mention_probe_live_softroute/chat_-1002465948544/runs/20260426T081833Z/run.json`
+  - log: `/tmp/tg_mention_probe_live_softroute/chat_-1002465948544/runs/20260426T081833Z/export.log`
+  - stats: `/tmp/tg_mention_probe_live_softroute/chat_-1002465948544/runs/20260426T081833Z/export_stats.json`
+  - trace впервые показал:
+    - `helper-soft-route matched=1`;
+    - `helper-soft-activate`;
+    - `helper-wait-identity matched=1 soft=1`;
+    - затем `helper-quick-url` и `helper-page-url`.
+  - key stats:
+    - `unique_members = 13`
+    - `members_with_username = 5`
+    - `deep_attempted_total = 5`
+    - `deep_updated_total = 0`
+    - `chat_runtime_limited = 0`
+- Дополнительные fresh-run после этого:
+  - `/tmp/tg_mention_probe_live_softroute2/chat_-1002465948544/runs/20260426T082107Z/run.json`
+  - `/tmp/tg_mention_probe_live_softroute3/chat_-1002465948544/runs/20260426T082310Z/run.json`
+  - оба показали тот же остаточный blocker:
+    - sticky peer `972235006` снова дал `helper-soft-route matched=0`;
+    - helper peer `1070441119`, `1410391920`, `384346224` тоже остались на `helper-wait-identity matched=0`;
+    - `deep_updated_total` так и осталось `0`.
+- Практический вывод после этого шага:
+  - soft-route fallback реально продвинул exporter на одну стадию дальше identity gate, но пока только в части live run;
+  - новый главный blocker ещё уже: live Telegram DOM нестабильно materialize-ит helper-route target, поэтому soft-route иногда срабатывает, но чаще helper peer всё ещё умирает на `matched=0`;
+  - до пути на `100 @username` мы пока приблизились по runtime-path и по локализации blocker, но не по реальному username ceiling: лучший live результат всё ещё `14` username у `20260426T060315Z`.
+
+## 2026-04-25
+
+- Следующий throughput-шаг к `100 @username` вынесен в orchestration layer:
+  - `scripts/telegram_contact_chain.py` теперь считает run productive не только по `new_usernames`, но и по росту `unique_members`, `members_with_username`, `discovery_new_visible` и productive deep-yield;
+  - это убирает преждевременный `stopped_on_idle`, когда exporter ещё реально расширяет покрытие по peer, но batch-дельта маленькая;
+  - добавлен target `--target-members-with-username`, чтобы цепочка могла идти прямо к количеству peer с username;
+  - `chain.json` теперь сохраняет реальные effective env запуска (`CHAT_MAX_RUNTIME`, `CHAT_SCROLL_STEPS`, `CHAT_DEEP_LIMIT`, `CHAT_CLIENT_ID`, `CHAT_TAB_ID`), а не только preset profile.
+- `tests/test_telegram_contact_chain.py` получил новый regression coverage:
+  - чтение `discovery_new_visible` из `run.json/chat_stats`;
+  - productive discovery-run;
+  - запрет раннего idle-stop при discovery progress без новых batch rows;
+  - новый chain target по `members_with_username`;
+  - snapshot effective env для handoff.
+- Live verify на реальном chat-dir `/home/max/telegram_contact_batches/chat_-1002465948544`:
+  - chain summary: `/home/max/telegram_contact_batches/chat_-1002465948544/chains/20260425T052627Z/chain.json`;
+  - run1: `/home/max/telegram_contact_batches/chat_-1002465948544/runs/20260425T052627Z/run.json`
+    - `unique_members=18`
+    - `members_with_username=9`
+    - `safe_count=9`
+    - `discovery_new_visible=18`
+    - `new_usernames=1`
+  - run2: `/home/max/telegram_contact_batches/chat_-1002465948544/runs/20260425T052959Z/run.json`
+    - `unique_members=23`
+    - `members_with_username=8`
+    - `safe_count=8`
+    - `discovery_new_visible=9`
+    - `new_usernames=1`
+  - ключевой факт: даже при `--stop-after-idle 1` chain прошёл оба run, потому что оба были productive по discovery/coverage.
+- Discovery state на боевом chat-dir теперь уже реально живой:
+  - `/home/max/telegram_contact_batches/chat_-1002465948544/discovery_state.json`
+  - `version=2`
+  - `seen_peer_ids=27`
+  - cooldown peers: `966384255`, `6964266260`
+  - оба пришли как `helper_blank:context_missing`, значит следующий bottleneck снова не в chain scheduler, а в helper-resolve на реально неизвестных peer.
+- Новые numbered batches после live chain:
+  - `/home/max/telegram_contact_batches/chat_-1002465948544/8.txt`
+  - `/home/max/telegram_contact_batches/chat_-1002465948544/9.txt`
+  - суммарно numbered batches сейчас дают `16` уникальных username.
+- Архивы свежих live-run:
+  - `/home/max/site-control-kit/artifacts/telegram_exports/20260425_092958_chat_1002465948544_18.md`
+  - `/home/max/site-control-kit/artifacts/telegram_exports/20260425_093414_chat_1002465948544_23.md`
+- Проверки:
+  - `python3 -m py_compile scripts/telegram_contact_chain.py scripts/export_telegram_members_non_pii.py` -> OK;
+  - `PYTHONPATH=/home/max/site-control-kit python3 -m unittest tests/test_telegram_contact_chain.py` -> `16 tests OK`;
+  - `PYTHONPATH=/home/max/site-control-kit python3 -m unittest discover -s tests -p 'test_*.py'` -> `125 tests OK`.
+- Следующий live blocker после этого вскрыт и частично снят:
+  - `run 20260425T062608Z` на `deep` профиле показал новый дефект: `8` scroll steps дали те же `15` peer, `discovery_new_visible=0`, `discovery_revisit_steps=8`, `deep_attempted=0`, и exporter всё равно сжёг весь `180s`;
+  - в `scripts/export_telegram_members_non_pii.py` добавлен ранний stop-path для repeated identical discovery view, независимый от `minimum_steps`;
+  - stats теперь честно пишут `revisited_view_steps`, плюс `burst_scrolls_done`/`jump_scrolls_done` всегда присутствуют в `chat_stats`.
+- Новый regression test:
+  - repeated identical view при `scroll_steps=8` и active discovery state останавливается после `4` одинаковых view, а не ждёт конца обязательных шагов.
+- Live re-verify после патча:
+  - chain: `/home/max/telegram_contact_batches/chat_-1002465948544/chains/20260425T063414Z/chain.json`
+  - status: `stopped_on_no_growth`
+  - run1: `/home/max/telegram_contact_batches/chat_-1002465948544/runs/20260425T063414Z/run.json`
+  - run2: `/home/max/telegram_contact_batches/chat_-1002465948544/runs/20260425T063708Z/run.json`
+  - оба run:
+    - `unique_members=15`
+    - `members_with_username=5`
+    - `chat_scroll_steps_done=3`
+    - `chat_revisited_view_steps=3`
+    - `chat_runtime_limited=0`
+    - `deep_attempted_total=2`
+    - `deep_updated_total=0`
+  - archive artifacts:
+    - `/home/max/site-control-kit/artifacts/telegram_exports/20260425_103707_chat_1002465948544_15.md`
+    - `/home/max/site-control-kit/artifacts/telegram_exports/20260425_104015_chat_1002465948544_15.md`
+- Практический вывод:
+  - scroll waste снят: run больше не дожигает `180s` на одном и том же visible-layer;
+  - bottleneck сместился дальше: теперь runtime уходит уже в `chat mention deep done: processed 2, filled 0`;
+  - следующий шаг к `100 @username` был переведён в cooldown/deprioritize для zero-yield deep peer после repeated-view stop.
+- Следующий live-фикс после этого уже внедрён:
+  - `_normalize_username_from_mention_input()` теперь принимает raw `username` без префикса `@`, который реально возвращает `_extract_chat_mention_usernames()`;
+  - `discovery_state.json` теперь хранит `mention_candidate_states` и cooldown для zero-yield mention-кандидатов, а не только `peer_states` для helper/context-missing blank peer;
+  - `tests/test_telegram_export_parser.py` и `tests/test_telegram_export_runtime.py` получили regression coverage на raw mention input, zero-yield candidate cooldown и success-path записи для mention candidate.
+- Live verify нового mention-candidate cooldown:
+  - chain: `/home/max/telegram_contact_batches/chat_-1002465948544/chains/20260425T070126Z/chain.json`
+  - run1: `/home/max/telegram_contact_batches/chat_-1002465948544/runs/20260425T070126Z/run.json`
+    - `unique_members=15`
+    - `members_with_username=5`
+    - `deep_attempted_total=2`
+    - `deep_updated_total=0`
+  - run2: `/home/max/telegram_contact_batches/chat_-1002465948544/runs/20260425T070502Z/run.json`
+    - `unique_members=15`
+    - `members_with_username=5`
+    - `deep_attempted_total=0`
+    - `deep_updated_total=0`
+  - export logs:
+    - `/home/max/telegram_contact_batches/chat_-1002465948544/runs/20260425T070126Z/export.log`
+    - `/home/max/telegram_contact_batches/chat_-1002465948544/runs/20260425T070502Z/export.log`
+  - discovery state:
+    - `/home/max/telegram_contact_batches/chat_-1002465948544/discovery_state.json`
+    - `mention_candidate_states` уже содержит:
+      - `@plaguezonebot -> mention_peer_unknown`
+      - `@oleghellmode -> mention_peer_unknown`
+- Практический вывод после этого verify:
+  - repeated zero-yield mention-кандидаты уже не съедают каждый следующий run;
+  - следующий bottleneck теперь уже не в same-candidate repetition, а в том, что часть mention-кандидатов вообще не даёт целевой `peer_id` и уходит в `mention_peer_unknown`.
+- Проверки:
+  - `python3 -m py_compile scripts/export_telegram_members_non_pii.py` -> OK;
+  - `PYTHONPATH=/home/max/site-control-kit python3 -m unittest tests.test_telegram_export_parser tests.test_telegram_export_runtime` -> `50 tests OK`;
+  - `PYTHONPATH=/home/max/site-control-kit python3 -m unittest discover -s tests -p 'test_*.py'` -> `129 tests OK`.
+- Следующий кодовый шаг после этого уже внедрён:
+  - `mention` URL-pass теперь не читает identity только одним regex из `body`, а собирает её через `_read_current_opened_identity()` / `_wait_for_current_opened_identity()` с fallback на текущий opened header и `data-peer-id`;
+  - если `peer_id` не прочитался, но title страницы ровно и уникально совпал с видимым member name, exporter может сделать безопасный `title-mapped` peer-bound match;
+  - extra mention-pass переведён на best-effort HTML read, отдельный runtime cap и кандидатный cap через `TELEGRAM_CHAT_MENTION_DEEP_MAX_PER_STEP`, плюс на нём укорочены navigate/read/restore timeouts.
+- Новый regression coverage:
+  - waited identity peer-id fallback;
+  - unique exact title-match fallback;
+  - empty best-effort body -> skip без зависания;
+  - candidate cap;
+  - mention-pass runtime budget.
+- Проверки после этого:
+  - `PYTHONPATH=/home/max/site-control-kit python3 -m unittest tests.test_telegram_export_runtime tests.test_telegram_export_parser` -> `56 tests OK`;
+  - `PYTHONPATH=/home/max/site-control-kit python3 -m unittest discover -s tests -p 'test_*.py'` -> `135 tests OK`.
+- Live verify этого шага пока частичный:
+  - temp probe на forced client/tab `client-601f3396-50aa-4989-ae5d-9c450e28f65e` / `997919930` оставил partial run `/tmp/tg_mention_probe_root/chat_-1002465948544/runs/20260425T082329Z/run.json`;
+  - log `/tmp/tg_mention_probe_root/chat_-1002465948544/runs/20260425T082329Z/export.log` дошёл только до:
+    - `chat auto-stop after repeated identical discovery view (4 steps)`
+    - `history backfill restored 5 username(s)`
+  - `chat mention deep done` в live ещё не напечатался, то есть текущий остаточный blocker уже внутри первого реального auxiliary mention-pass на live DOM.
+
 ## 2026-04-24
 
 - Проверен репозиторий `site-control-kit`: отдельного Telegram Bot API framework/handler (`aiogram`, `telebot`, `callback_query`) не было; входящие POST обрабатываются в `webcontrol/server.py`.
@@ -67,6 +418,22 @@
   - `/tmp/telegram_live_verify_2.md` -> `20` members, `8` usernames;
   - `output_usernames_cleared_total = 0`;
   - archive: `/home/max/site-control-kit/artifacts/telegram_exports/20260424_171947_chat_1002465948544_20.md`.
+- Следующий шаг для роста к `100 @username` уже внедрён в discovery layer:
+  - `discovery_state.json` поднят до `version=2` и теперь хранит `peer_states` с `attempt_count`, `failure_count`, `last_outcome`, `cooldown_until`;
+  - blank peer после helper/mention fail попадает в cooldown и не должен съедать следующий run тем же самым sticky/deep target;
+  - если sticky peer уже в cooldown, exporter больше не держит шаг в sticky-only и переключается на других visible peer;
+  - deep targets теперь сортируются с приоритетом genuinely new peer, а не тех, кто уже недавно жёг runtime впустую.
+- Live pair-run на временном discovery state:
+  - run1: `/home/max/site-control-kit/artifacts/telegram_exports/20260425_091528_chat_1002465948544_15.md`
+    - sticky blank peer: `5364308868`
+    - discovery state: `helper_blank:menu_missing`, cooldown до `2026-04-25T07:15:00+00:00`
+    - stats: `unique_members=15`, `scroll_steps_done=1`, `members_with_username=7`, `discovery_new_visible=15`
+  - run2: `/home/max/site-control-kit/artifacts/telegram_exports/20260425_091937_chat_1002465948544_22.md`
+    - sticky уже ушёл на другие peer (`1291639730`, `547163094`, `7965869498`), старый `5364308868` не съел новый deep-step
+    - stats: `unique_members=22`, `scroll_steps_done=3`, `members_with_username=8`, `discovery_new_visible=8`, `discovery_revisit_steps=1`
+  - temp discovery state после пары run:
+    - `seen_peer_ids`: `15 -> 23`
+    - cooldown peers: `5364308868`, `7965869498`
 - В `scripts/export_telegram_members_non_pii.py` добавлен pre-deep history backfill:
   - `_collect_members_from_chat()` восстанавливает известные username из `historical_peer_to_username` до выбора `deep_targets`;
   - уже известные `peer_id` больше не съедают `CHAT_DEEP_LIMIT` и runtime helper/deep;
@@ -80,7 +447,7 @@
   - `node --check extension/content.js && node --check extension/background.js` -> OK;
   - `python3 -m unittest tests.test_telegram_export_parser tests.test_telegram_export_runtime` -> `43 tests OK`;
   - Telegram-related расширенный набор -> `82 tests OK`;
-  - `python3 -m unittest discover -s tests -p 'test_*.py'` -> `117 tests OK`.
+  - `PYTHONPATH=/home/max/site-control-kit python3 -m unittest discover -s tests -p 'test_*.py'` -> `120 tests OK`.
 - Live smoke:
   - команда: `CHAT_PROFILE=fast CHAT_MAX_RUNTIME=90 CHAT_SCROLL_STEPS=4 CHAT_DEEP_LIMIT=12 ./scripts/auto_collect_usernames.sh 'https://web.telegram.org/a/#-1002465948544' '/tmp/telegram_live_after_prefill.md'`;
   - результат: `22` members, `9` usernames, `pre-deep history backfill restored 9 username(s)`;

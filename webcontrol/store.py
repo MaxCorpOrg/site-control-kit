@@ -18,6 +18,7 @@ TERMINAL_COMMAND_STATUSES = {
     "rejected",
 }
 CLIENT_ONLINE_WINDOW_SECONDS = 30
+MAX_PERSISTED_TERMINAL_COMMANDS = 40
 
 
 def _parse_iso(ts: str | None) -> datetime | None:
@@ -39,6 +40,9 @@ class ControlStore:
         self.state_file = state_file
         self._lock = threading.RLock()
         self._state = self._load_state()
+        with self._lock:
+            if self._prune_terminal_commands():
+                self._save()
 
     def _load_state(self) -> dict[str, Any]:
         state = load_json(self.state_file, default={})
@@ -53,7 +57,57 @@ class ControlStore:
         return state
 
     def _save(self) -> None:
+        self._prune_terminal_commands()
         dump_json(self.state_file, self._state)
+
+    @staticmethod
+    def _command_sort_key(command: dict[str, Any]) -> tuple[str, str, str]:
+        return (
+            str(command.get("last_update") or command.get("created_at") or ""),
+            str(command.get("created_at") or ""),
+            str(command.get("id") or ""),
+        )
+
+    def _prune_terminal_commands(self) -> bool:
+        commands = self._state.setdefault("commands", {})
+        if not isinstance(commands, dict):
+            self._state["commands"] = {}
+            commands = self._state["commands"]
+
+        keep_ids: set[str] = set()
+        terminal_commands: list[tuple[tuple[str, str, str], str]] = []
+        for command_id, command in commands.items():
+            status = str((command or {}).get("status") or "")
+            if status in TERMINAL_COMMAND_STATUSES:
+                terminal_commands.append((self._command_sort_key(command), command_id))
+                continue
+            keep_ids.add(command_id)
+
+        terminal_commands.sort(key=lambda item: item[0], reverse=True)
+        keep_ids.update(command_id for _, command_id in terminal_commands[:MAX_PERSISTED_TERMINAL_COMMANDS])
+
+        changed = False
+        for command_id in list(commands):
+            if command_id in keep_ids:
+                continue
+            del commands[command_id]
+            changed = True
+
+        queues = self._state.setdefault("queues", {})
+        if not isinstance(queues, dict):
+            self._state["queues"] = {}
+            queues = self._state["queues"]
+            changed = True
+        for client_id, queue in list(queues.items()):
+            if not isinstance(queue, list):
+                queues[client_id] = []
+                changed = True
+                continue
+            filtered_queue = [command_id for command_id in queue if command_id in commands]
+            if filtered_queue != queue:
+                queues[client_id] = filtered_queue
+                changed = True
+        return changed
 
     def _client_is_online(self, client: dict[str, Any], *, now: datetime | None = None) -> bool:
         last_seen = _parse_iso(str(client.get("last_seen", "")).strip())

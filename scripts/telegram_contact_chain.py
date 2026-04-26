@@ -29,6 +29,25 @@ from telegram_profiles import (  # noqa: E402
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 COLLECT_SCRIPT = ROOT_DIR / "scripts" / "collect_new_telegram_contacts.sh"
+COLLECT_ENV_KEYS = (
+    "TELEGRAM_CHAIN_PROFILE",
+    "CHAT_PROFILE",
+    "CHAT_SCROLL_STEPS",
+    "CHAT_DEEP_LIMIT",
+    "CHAT_TIMEOUT_SEC",
+    "CHAT_MAX_RUNTIME",
+    "CHAT_DEEP_MODE",
+    "CHAT_MIN_MEMBERS",
+    "CHAT_MAX_MEMBERS",
+    "CHAT_CLIENT_ID",
+    "CHAT_TAB_ID",
+    "TELEGRAM_CHAT_DEEP_STEP_MAX_SEC",
+    "TELEGRAM_CHAT_MENTION_DEEP_MAX_PER_STEP",
+    "TELEGRAM_CHAT_DEEP_PRIORITY_MIN_RUNTIME",
+    "TELEGRAM_CHAT_DEEP_PRIORITY_EXTRA_ROUNDS",
+    "TELEGRAM_CHAT_DISCOVERY_SCROLL_BURST",
+    "TELEGRAM_CHAT_JUMP_SCROLL_TRIGGER_STALL",
+)
 
 
 def chat_slug_from_group_url(group_url: str) -> str:
@@ -71,6 +90,26 @@ def reached_chain_target(current_value: int, target_value: int) -> bool:
     return target_value > 0 and current_value >= target_value
 
 
+def _chat_stats(run_payload: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(run_payload, dict):
+        return {}
+    value = run_payload.get("chat_stats")
+    return value if isinstance(value, dict) else {}
+
+
+def discovery_new_visible(run_payload: dict[str, Any]) -> int:
+    if not isinstance(run_payload, dict):
+        return 0
+    direct_value = run_payload.get("chat_discovery_new_visible")
+    if direct_value is not None:
+        return int(direct_value or 0)
+    return int(_chat_stats(run_payload).get("discovery_new_visible", 0) or 0)
+
+
+def is_productive_discovery_run(run_payload: dict[str, Any]) -> bool:
+    return discovery_new_visible(run_payload) > 0
+
+
 def is_productive_deep_yield(run_payload: dict[str, Any]) -> bool:
     if not isinstance(run_payload, dict):
         return False
@@ -102,6 +141,15 @@ def build_collect_env(profile_name: str) -> dict[str, str]:
     env["TELEGRAM_CHAIN_PROFILE"] = resolve_profile_name(profile_name)
     env.setdefault("CHAT_PROFILE", resolve_profile_name(profile_name))
     return env
+
+
+def collect_env_snapshot(env: dict[str, str]) -> dict[str, str]:
+    snapshot: dict[str, str] = {}
+    for key in COLLECT_ENV_KEYS:
+        value = str(env.get(key) or "").strip()
+        if value:
+            snapshot[key] = value
+    return snapshot
 
 
 def write_chain_summary(path: Path, payload: dict[str, Any]) -> None:
@@ -151,6 +199,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Stop once run.json reaches at least this many safe usernames (0 = disabled).",
     )
     parser.add_argument(
+        "--target-members-with-username",
+        type=int,
+        default=max(int(os.environ.get("TELEGRAM_CHAIN_TARGET_MEMBERS_WITH_USERNAME", "0") or "0"), 0),
+        help="Stop once run.json reaches at least this many visible members with username (0 = disabled).",
+    )
+    parser.add_argument(
         "--stop-after-no-growth",
         type=int,
         default=max(int(os.environ.get("TELEGRAM_CHAIN_STOP_AFTER_NO_GROWTH", "0") or "0"), 0),
@@ -184,7 +238,10 @@ def main() -> int:
     no_growth_runs = 0
     best_unique_members = 0
     best_safe_count = 0
+    best_members_with_username = 0
     productive_yield_runs = 0
+    discovery_progress_runs = 0
+    discovery_new_visible_total = 0
     chain_status = "completed"
 
     with chain_log_path.open("w", encoding="utf-8") as log_fh:
@@ -207,29 +264,48 @@ def main() -> int:
             unique_members = int(run_payload.get("unique_members", 0) or 0)
             safe_count = int(run_payload.get("safe_count", 0) or 0)
             members_with_username = int(run_payload.get("members_with_username", 0) or 0)
+            discovery_new_visible_count = discovery_new_visible(run_payload)
             chat_deep_priority_rounds = int(run_payload.get("chat_deep_priority_rounds", 0) or 0)
             chat_deep_yield_stop = int(run_payload.get("chat_deep_yield_stop", 0) or 0)
             run_status = str(run_payload.get("status") or ("completed" if completed.returncode == 0 else "failed"))
             unique_progress = False
             safe_progress = False
+            members_with_username_progress = False
             productive_yield = run_status == "completed" and is_productive_deep_yield(run_payload)
+            discovery_progress = run_status == "completed" and is_productive_discovery_run(run_payload)
+            productive_run = False
 
             if productive_yield:
                 productive_yield_runs += 1
-
-            if run_status == "completed" and new_usernames <= 0:
-                idle_runs += 1
-            elif run_status == "completed":
-                idle_runs = 0
+            if discovery_progress:
+                discovery_progress_runs += 1
+                discovery_new_visible_total += discovery_new_visible_count
 
             if run_status == "completed":
                 unique_progress = unique_members > best_unique_members
                 safe_progress = safe_count > best_safe_count
+                members_with_username_progress = members_with_username > best_members_with_username
                 if unique_progress:
                     best_unique_members = unique_members
                 if safe_progress:
                     best_safe_count = safe_count
-                if unique_progress or safe_progress:
+                if members_with_username_progress:
+                    best_members_with_username = members_with_username
+                productive_run = any(
+                    (
+                        new_usernames > 0,
+                        unique_progress,
+                        safe_progress,
+                        members_with_username_progress,
+                        discovery_progress,
+                        productive_yield,
+                    )
+                )
+                if productive_run:
+                    idle_runs = 0
+                else:
+                    idle_runs += 1
+                if unique_progress or safe_progress or members_with_username_progress or discovery_progress:
                     no_growth_runs = 0
                 else:
                     no_growth_runs += 1
@@ -246,23 +322,29 @@ def main() -> int:
                     "unique_members": unique_members,
                     "safe_count": safe_count,
                     "members_with_username": members_with_username,
+                    "discovery_new_visible": discovery_new_visible_count,
                     "chat_deep_priority_rounds": chat_deep_priority_rounds,
                     "chat_deep_yield_stop": chat_deep_yield_stop,
                     "productive_yield": productive_yield,
+                    "discovery_progress": discovery_progress,
+                    "productive_run": productive_run,
                     "unique_progress": unique_progress,
                     "safe_progress": safe_progress,
+                    "members_with_username_progress": members_with_username_progress,
                     "batch_path": str(run_payload.get("batch_path") or ""),
                     "idle_runs": idle_runs,
                     "no_growth_runs": no_growth_runs,
                     "best_unique_members": best_unique_members,
                     "best_safe_count": best_safe_count,
+                    "best_members_with_username": best_members_with_username,
                 }
             )
             log_fh.write(
                 f"[{datetime.now(timezone.utc).replace(microsecond=0).isoformat()}] "
                 f"run {attempt_index} exit={completed.returncode} status={run_status} new={new_usernames} "
-                f"unique={unique_members} safe={safe_count} idle={idle_runs} no_growth={no_growth_runs} "
-                f"deep_yield={int(productive_yield)}\n"
+                f"unique={unique_members} with_username={members_with_username} safe={safe_count} "
+                f"discovery_new={discovery_new_visible_count} productive={int(productive_run)} "
+                f"idle={idle_runs} no_growth={no_growth_runs} deep_yield={int(productive_yield)}\n"
             )
             log_fh.flush()
 
@@ -274,6 +356,9 @@ def main() -> int:
                 break
             if reached_chain_target(safe_count, int(args.target_safe_count)):
                 chain_status = "target_safe_count_reached"
+                break
+            if reached_chain_target(members_with_username, int(args.target_members_with_username)):
+                chain_status = "target_members_with_username_reached"
                 break
             if should_stop_after_idle(idle_runs, int(args.stop_after_idle)):
                 chain_status = "stopped_on_idle"
@@ -309,16 +394,20 @@ def main() -> int:
         "stop_after_no_growth": int(args.stop_after_no_growth),
         "target_unique_members": int(args.target_unique_members),
         "target_safe_count": int(args.target_safe_count),
+        "target_members_with_username": int(args.target_members_with_username),
         "skip_interval_on_productive_yield": bool(args.skip_interval_on_productive_yield),
+        "discovery_progress_runs": discovery_progress_runs,
+        "discovery_new_visible_total": discovery_new_visible_total,
         "productive_yield_runs": productive_yield_runs,
-        "collect_env_overrides": dict(resolve_profile(profile_name).get("env") or {}),
+        "collect_env_overrides": collect_env_snapshot(collect_env),
         "best_unique_members": best_unique_members,
         "best_safe_count": best_safe_count,
+        "best_members_with_username": best_members_with_username,
         "attempts": attempts,
     }
     write_chain_summary(chain_summary_path, summary)
     print(f"INFO: chain summary saved to {chain_summary_path}", flush=True)
-    return 0 if chain_status in {"completed", "stopped_on_idle", "stopped_on_no_growth", "target_unique_members_reached", "target_safe_count_reached"} else 1
+    return 0 if chain_status in {"completed", "stopped_on_idle", "stopped_on_no_growth", "target_unique_members_reached", "target_safe_count_reached", "target_members_with_username_reached"} else 1
 
 
 if __name__ == "__main__":

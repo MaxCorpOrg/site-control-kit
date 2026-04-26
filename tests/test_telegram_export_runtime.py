@@ -63,6 +63,47 @@ class TelegramExportRuntimeTests(unittest.TestCase):
         self.assertEqual(stats["auto_extra_steps"], 3)
         self.assertEqual(mock_scroll.call_count, 4)
 
+    def test_collect_members_from_chat_auto_stops_on_repeated_identical_view_before_minimum_steps(self) -> None:
+        member = {"peer_id": "1", "name": "One", "username": "—", "status": "из чата", "role": "—"}
+        parse_sequence = [[member]] * 10
+        discovery_state = {
+            "peer_states": {},
+            "seen_peer_ids": [],
+            "seen_view_signatures": [],
+        }
+
+        with (
+            patch.object(self.mod, "CHAT_JUMP_SCROLL_TRIGGER_STALL", 2),
+            patch.object(self.mod, "_send_get_html", side_effect=[f"h{i}" for i in range(10)]),
+            patch.object(self.mod, "_parse_chat_members", side_effect=parse_sequence),
+            patch.object(self.mod, "_read_sticky_chat_author_member", return_value=None),
+            patch.object(self.mod, "_scroll_chat_up", return_value=True) as mock_scroll,
+        ):
+            members, stats = self.mod._collect_members_from_chat(
+                server="http://127.0.0.1:8765",
+                token="token",
+                client_id="client-1",
+                tab_id=1,
+                timeout_sec=5,
+                scroll_steps=8,
+                group_url="https://web.telegram.org/a/#-1002465948544",
+                deep_usernames=False,
+                chat_deep_limit=0,
+                max_runtime_sec=120,
+                auto_extra_steps=0,
+                discovery_state=discovery_state,
+            )
+
+        self.assertEqual(len(members), 1)
+        self.assertEqual(stats["unique_members"], 1)
+        self.assertEqual(stats["scroll_steps_done"], 3)
+        self.assertEqual(stats["revisited_view_steps"], 3)
+        self.assertEqual(stats["discovery_revisit_steps"], 3)
+        self.assertEqual(stats["discovery_new_visible"], 1)
+        self.assertEqual(stats["burst_scrolls_done"], 0)
+        self.assertEqual(stats["jump_scrolls_done"], 0)
+        self.assertEqual(mock_scroll.call_count, 3)
+
     def test_collect_members_from_chat_caps_deep_step_runtime_budget(self) -> None:
         member1 = {"peer_id": "1", "name": "One", "username": "—", "status": "из чата", "role": "—"}
         deep_budgets: list[float] = []
@@ -209,7 +250,8 @@ class TelegramExportRuntimeTests(unittest.TestCase):
         self.assertEqual(mock_helper.call_count, 1)
         self.assertEqual(mock_helper.call_args.kwargs["peer_id"], "8055002493")
         self.assertEqual(mock_helper.call_args.kwargs["expected_name"], "Sticky User")
-        self.assertTrue(mock_helper.call_args.kwargs["restore_base_tab"])
+        self.assertFalse(mock_helper.call_args.kwargs["restore_base_tab"])
+        self.assertIsInstance(mock_helper.call_args.kwargs["helper_session"], dict)
         self.assertEqual(members[0]["username"], "@sticky_helper")
         self.assertEqual(stats["sticky_mention_attempted"], 1)
         self.assertEqual(stats["sticky_mention_updated"], 0)
@@ -217,6 +259,61 @@ class TelegramExportRuntimeTests(unittest.TestCase):
         self.assertEqual(stats["sticky_helper_updated"], 1)
         self.assertEqual(stats["deep_attempted"], 2)
         self.assertEqual(stats["deep_updated"], 1)
+
+    def test_collect_members_from_chat_skips_sticky_only_when_sticky_peer_is_in_discovery_cooldown(self) -> None:
+        sticky_member = {
+            "peer_id": "8055002493",
+            "name": "Sticky User",
+            "username": "—",
+            "status": "из чата",
+            "role": "—",
+        }
+        other_visible = {
+            "peer_id": "42",
+            "name": "Other Visible",
+            "username": "—",
+            "status": "из чата",
+            "role": "—",
+        }
+        discovery_state = {
+            "peer_states": {
+                "8055002493": {
+                    "cooldown_until": "2099-01-01T00:00:00+00:00",
+                }
+            },
+            "seen_peer_ids": [],
+            "seen_view_signatures": [],
+        }
+
+        with (
+            patch.object(self.mod, "_send_get_html", return_value="h0"),
+            patch.object(self.mod, "_parse_chat_members", return_value=[other_visible]),
+            patch.object(self.mod, "_read_sticky_chat_author_member", return_value=sticky_member),
+            patch.object(self.mod, "_enrich_usernames_deep_chat", return_value=(1, 1, 1, ["42"])) as mock_deep,
+            patch.object(self.mod, "_scroll_chat_up", return_value=False),
+        ):
+            members, stats = self.mod._collect_members_from_chat(
+                server="http://127.0.0.1:8765",
+                token="token",
+                client_id="client-1",
+                tab_id=1,
+                timeout_sec=5,
+                scroll_steps=0,
+                group_url="https://web.telegram.org/a/#-1002465948544",
+                deep_usernames=True,
+                chat_deep_limit=12,
+                max_runtime_sec=60,
+                discovery_state=discovery_state,
+            )
+
+        self.assertEqual({item["peer_id"] for item in members}, {"8055002493", "42"})
+        self.assertEqual(stats["sticky_mention_attempted"], 0)
+        self.assertEqual(mock_deep.call_count, 1)
+        self.assertEqual(
+            [item["peer_id"] for item in mock_deep.call_args.kwargs["members"]],
+            ["42"],
+        )
+        self.assertEqual(set(discovery_state["seen_peer_ids"]), {"8055002493", "42"})
 
     def test_collect_members_from_chat_limits_deep_to_sticky_author_when_available(self) -> None:
         sticky_member = {
@@ -261,6 +358,225 @@ class TelegramExportRuntimeTests(unittest.TestCase):
         self.assertEqual(stats["sticky_authors_seen"], 1)
         self.assertEqual(stats["deep_attempted"], 0)
         self.assertEqual(stats["deep_updated"], 0)
+
+    def test_enrich_chat_usernames_via_mentions_skips_cooled_candidates_and_records_zero_yield(self) -> None:
+        members = [
+            {"peer_id": "42", "name": "Target", "username": "—", "status": "из чата", "role": "—"},
+        ]
+        discovery_state = {
+            "mention_candidate_states": {
+                "@skip_user": {
+                    "cooldown_until": "2099-01-01T00:00:00+00:00",
+                }
+            }
+        }
+        body_html = '<div>@skip_user and @other_user</div>'
+        user_html = '<div class="chat-info"><span class="peer-title" data-peer-id="999"></span></div>'
+
+        with (
+            patch.object(self.mod, "_send_get_html_best_effort", side_effect=[body_html, user_html]),
+            patch.object(self.mod, "_send_command_result", return_value={"ok": True}),
+            patch.object(self.mod, "_wait_for_current_opened_identity", return_value=("", "")),
+            patch.object(self.mod.time, "sleep", return_value=None),
+        ):
+            attempted, updated = self.mod._enrich_chat_usernames_via_mentions(
+                server="http://127.0.0.1:8765",
+                token="token",
+                client_id="client-1",
+                tab_id=1,
+                timeout_sec=5,
+                group_url="https://web.telegram.org/a/#-1002465948544",
+                members=members,
+                deep_limit=4,
+                discovery_state=discovery_state,
+            )
+
+        self.assertEqual(attempted, 1)
+        self.assertEqual(updated, 0)
+        self.assertEqual(members[0]["username"], "—")
+        self.assertEqual(discovery_state["mention_candidate_states"]["@other_user"]["failure_count"], 1)
+        self.assertEqual(discovery_state["mention_candidate_states"]["@other_user"]["last_outcome"], "mention_non_target")
+        self.assertEqual(discovery_state["mention_candidate_states"]["@other_user"]["last_peer_id"], "999")
+
+    def test_enrich_chat_usernames_via_mentions_records_success_for_peer_and_candidate(self) -> None:
+        members = [
+            {"peer_id": "42", "name": "Target", "username": "—", "status": "из чата", "role": "—"},
+        ]
+        discovery_state = {}
+        body_html = '<div>@target_user</div>'
+        user_html = '<div class="chat-info"><span class="peer-title" data-peer-id="42"></span></div>'
+
+        with (
+            patch.object(self.mod, "_send_get_html_best_effort", side_effect=[body_html, user_html]),
+            patch.object(self.mod, "_send_command_result", return_value={"ok": True}),
+            patch.object(self.mod, "_wait_for_current_opened_identity", return_value=("", "")),
+            patch.object(self.mod.time, "sleep", return_value=None),
+        ):
+            attempted, updated = self.mod._enrich_chat_usernames_via_mentions(
+                server="http://127.0.0.1:8765",
+                token="token",
+                client_id="client-1",
+                tab_id=1,
+                timeout_sec=5,
+                group_url="https://web.telegram.org/a/#-1002465948544",
+                members=members,
+                deep_limit=4,
+                discovery_state=discovery_state,
+            )
+
+        self.assertEqual(attempted, 1)
+        self.assertEqual(updated, 1)
+        self.assertEqual(members[0]["username"], "@target_user")
+        self.assertEqual(discovery_state["peer_states"]["42"]["last_outcome"], "mention_deep_success")
+        self.assertEqual(discovery_state["mention_candidate_states"]["@target_user"]["last_outcome"], "mention_deep_success")
+        self.assertEqual(discovery_state["mention_candidate_states"]["@target_user"]["last_peer_id"], "42")
+
+    def test_enrich_chat_usernames_via_mentions_uses_waited_identity_peer_id_without_body_peer_markup(self) -> None:
+        members = [
+            {"peer_id": "42", "name": "Target", "username": "—", "status": "из чата", "role": "—"},
+        ]
+        discovery_state = {}
+        body_html = '<div>@target_user</div>'
+
+        with (
+            patch.object(self.mod, "_send_get_html_best_effort", return_value=body_html),
+            patch.object(self.mod, "_send_command_result", return_value={"ok": True}),
+            patch.object(self.mod, "_wait_for_current_opened_identity", return_value=("42", "Target")),
+            patch.object(self.mod.time, "sleep", return_value=None),
+        ):
+            attempted, updated = self.mod._enrich_chat_usernames_via_mentions(
+                server="http://127.0.0.1:8765",
+                token="token",
+                client_id="client-1",
+                tab_id=1,
+                timeout_sec=5,
+                group_url="https://web.telegram.org/a/#-1002465948544",
+                members=members,
+                deep_limit=4,
+                discovery_state=discovery_state,
+            )
+
+        self.assertEqual(attempted, 1)
+        self.assertEqual(updated, 1)
+        self.assertEqual(members[0]["username"], "@target_user")
+        self.assertEqual(discovery_state["peer_states"]["42"]["last_outcome"], "mention_deep_success")
+
+    def test_enrich_chat_usernames_via_mentions_uses_unique_title_match_when_peer_id_missing(self) -> None:
+        members = [
+            {"peer_id": "42", "name": "Exact Target Name", "username": "—", "status": "из чата", "role": "—"},
+        ]
+        discovery_state = {}
+        body_html = '<div>@target_user</div>'
+
+        with (
+            patch.object(self.mod, "_send_get_html_best_effort", return_value=body_html),
+            patch.object(self.mod, "_send_command_result", return_value={"ok": True}),
+            patch.object(self.mod, "_wait_for_current_opened_identity", return_value=("", "Exact Target Name")),
+            patch.object(self.mod.time, "sleep", return_value=None),
+        ):
+            attempted, updated = self.mod._enrich_chat_usernames_via_mentions(
+                server="http://127.0.0.1:8765",
+                token="token",
+                client_id="client-1",
+                tab_id=1,
+                timeout_sec=5,
+                group_url="https://web.telegram.org/a/#-1002465948544",
+                members=members,
+                deep_limit=4,
+                discovery_state=discovery_state,
+            )
+
+        self.assertEqual(attempted, 1)
+        self.assertEqual(updated, 1)
+        self.assertEqual(members[0]["username"], "@target_user")
+        self.assertEqual(discovery_state["mention_candidate_states"]["@target_user"]["last_peer_id"], "42")
+
+    def test_enrich_chat_usernames_via_mentions_respects_runtime_budget(self) -> None:
+        members = [
+            {"peer_id": "42", "name": "Target", "username": "—", "status": "из чата", "role": "—"},
+        ]
+        discovery_state = {}
+        body_html = '<div>@other_user @target_user</div>'
+        time_calls = {"count": 0}
+
+        def fake_time() -> float:
+            time_calls["count"] += 1
+            return 0.0 if time_calls["count"] <= 5 else 1.1
+
+        with (
+            patch.object(self.mod, "_send_get_html_best_effort", return_value=body_html),
+            patch.object(self.mod, "_send_command_result", return_value={"ok": True}),
+            patch.object(self.mod, "_wait_for_current_opened_identity", return_value=("999", "Other")),
+            patch.object(self.mod, "_is_specific_tg_dialog_url", return_value=False),
+            patch.object(self.mod.time, "sleep", return_value=None),
+            patch.object(self.mod.time, "time", side_effect=fake_time),
+        ):
+            attempted, updated = self.mod._enrich_chat_usernames_via_mentions(
+                server="http://127.0.0.1:8765",
+                token="token",
+                client_id="client-1",
+                tab_id=1,
+                timeout_sec=5,
+                group_url="https://web.telegram.org/a/#-1002465948544",
+                members=members,
+                deep_limit=4,
+                discovery_state=discovery_state,
+                max_runtime_sec=0.5,
+            )
+
+        self.assertEqual(attempted, 1)
+        self.assertEqual(updated, 0)
+        self.assertNotIn("@target_user", discovery_state.get("mention_candidate_states", {}))
+
+    def test_enrich_chat_usernames_via_mentions_returns_zero_when_best_effort_body_is_empty(self) -> None:
+        members = [
+            {"peer_id": "42", "name": "Target", "username": "—", "status": "из чата", "role": "—"},
+        ]
+
+        with patch.object(self.mod, "_send_get_html_best_effort", return_value=""):
+            attempted, updated = self.mod._enrich_chat_usernames_via_mentions(
+                server="http://127.0.0.1:8765",
+                token="token",
+                client_id="client-1",
+                tab_id=1,
+                timeout_sec=5,
+                group_url="https://web.telegram.org/a/#-1002465948544",
+                members=members,
+                deep_limit=4,
+            )
+
+        self.assertEqual((attempted, updated), (0, 0))
+
+    def test_enrich_chat_usernames_via_mentions_respects_candidate_cap(self) -> None:
+        members = [
+            {"peer_id": "42", "name": "Target", "username": "—", "status": "из чата", "role": "—"},
+        ]
+        discovery_state = {}
+        body_html = '<div>@other_user @target_user</div>'
+
+        with (
+            patch.object(self.mod, "CHAT_MENTION_DEEP_MAX_PER_STEP", 1),
+            patch.object(self.mod, "_send_get_html_best_effort", return_value=body_html),
+            patch.object(self.mod, "_send_command_result", return_value={"ok": True}),
+            patch.object(self.mod, "_wait_for_current_opened_identity", return_value=("999", "Other")),
+            patch.object(self.mod.time, "sleep", return_value=None),
+        ):
+            attempted, updated = self.mod._enrich_chat_usernames_via_mentions(
+                server="http://127.0.0.1:8765",
+                token="token",
+                client_id="client-1",
+                tab_id=1,
+                timeout_sec=5,
+                group_url="https://web.telegram.org/a/#-1002465948544",
+                members=members,
+                deep_limit=4,
+                discovery_state=discovery_state,
+            )
+
+        self.assertEqual(attempted, 1)
+        self.assertEqual(updated, 0)
+        self.assertIn("@other_user", discovery_state.get("mention_candidate_states", {}))
+        self.assertNotIn("@target_user", discovery_state.get("mention_candidate_states", {}))
 
     def test_archive_export_copy_writes_index(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -522,8 +838,16 @@ class TelegramExportRuntimeTests(unittest.TestCase):
         ]
 
         with (
-            patch.object(self.mod, "_http_json_retry", side_effect=http_responses),
-            patch.object(self.mod.time, "time", side_effect=[0.0, 1.0, 200.0, 201.0]),
+            patch.object(
+                self.mod,
+                "_http_json_retry",
+                side_effect=itertools.chain(http_responses, itertools.repeat(http_responses[-1])),
+            ),
+            patch.object(
+                self.mod.time,
+                "time",
+                side_effect=itertools.chain([0.0, 1.0, 200.0, 201.0, 400.0, 401.0], itertools.repeat(401.0)),
+            ),
             patch.object(self.mod.time, "sleep", return_value=None),
         ):
             with self.assertRaises(RuntimeError) as ctx:
@@ -539,6 +863,95 @@ class TelegramExportRuntimeTests(unittest.TestCase):
         self.assertIn("finished without result", str(ctx.exception))
         self.assertIn("command_status=expired", str(ctx.exception))
         self.assertIn("delivery_status=expired", str(ctx.exception))
+
+    def test_send_command_result_uses_bounded_request_timeouts(self) -> None:
+        request_timeouts: list[tuple[str, str, float | None]] = []
+
+        def fake_http_json_retry(server, token, method, path, payload=None, retries=3, request_timeout_sec=None):
+            request_timeouts.append((method, path, request_timeout_sec))
+            if method == "POST":
+                return {"ok": True, "command_id": "cmd-3"}
+            return {
+                "command": {
+                    "status": "completed",
+                    "deliveries": {
+                        "client-1": {
+                            "status": "completed",
+                            "result": {
+                                "ok": True,
+                                "status": "completed",
+                                "data": {"tabId": 123},
+                                "error": None,
+                                "logs": [],
+                            },
+                        }
+                    },
+                }
+            }
+
+        with patch.object(self.mod, "_http_json_retry", side_effect=fake_http_json_retry):
+            result = self.mod._send_command_result(
+                server="http://127.0.0.1:8765",
+                token="token",
+                client_id="client-1",
+                tab_id=1,
+                timeout_sec=5,
+                command={"type": "get_html", "selector": "body"},
+            )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(request_timeouts[0][:2], ("POST", "/api/commands"))
+        self.assertLessEqual(float(request_timeouts[0][2]), 5.0)
+        self.assertEqual(request_timeouts[1][:2], ("GET", "/api/commands/cmd-3"))
+        self.assertLessEqual(float(request_timeouts[1][2]), 5.0)
+
+    def test_send_command_result_retries_after_poll_transport_timeout(self) -> None:
+        responses = iter(
+            [
+                {"ok": True, "command_id": "cmd-4"},
+                RuntimeError("Network error: timed out"),
+                {
+                    "command": {
+                        "status": "completed",
+                        "deliveries": {
+                            "client-1": {
+                                "status": "completed",
+                                "result": {
+                                    "ok": True,
+                                    "status": "completed",
+                                    "data": {"tabId": 456},
+                                    "error": None,
+                                    "logs": [],
+                                },
+                            }
+                        },
+                    }
+                },
+            ]
+        )
+
+        def fake_http_json_retry(server, token, method, path, payload=None, retries=3, request_timeout_sec=None):
+            response = next(responses)
+            if isinstance(response, Exception):
+                raise response
+            return response
+
+        with (
+            patch.object(self.mod, "_http_json_retry", side_effect=fake_http_json_retry),
+            patch.object(self.mod.time, "time", side_effect=itertools.count()),
+            patch.object(self.mod.time, "sleep", return_value=None),
+        ):
+            result = self.mod._send_command_result(
+                server="http://127.0.0.1:8765",
+                token="token",
+                client_id="client-1",
+                tab_id=1,
+                timeout_sec=5,
+                command={"type": "get_html", "selector": "body"},
+            )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["data"]["tabId"], 456)
 
     def test_try_username_via_mention_action_bails_out_on_delivery_failure(self) -> None:
         def fake_send_command_result(**kwargs):
@@ -793,6 +1206,38 @@ class TelegramExportRuntimeTests(unittest.TestCase):
         self.assertEqual(mock_helper.call_args_list[1].kwargs["expected_name"], "Bob")
         self.assertEqual(mock_helper.call_args_list[1].kwargs["restore_base_tab"], False)
 
+    def test_enrich_usernames_deep_chat_records_helper_blank_in_discovery_state(self) -> None:
+        discovery_state = {"peer_states": {}, "seen_peer_ids": [], "seen_view_signatures": []}
+
+        with (
+            patch.object(self.mod, "_return_to_group_dialog_reliable", return_value=True),
+            patch.object(self.mod, "_get_tab_url", return_value="https://web.telegram.org/a/#-1002465948544"),
+            patch.object(self.mod, "_try_username_via_mention_action", return_value=("—", "delivery_failure")),
+            patch.object(self.mod, "_read_username_via_helper_tab", return_value=("—", True)),
+            patch.object(self.mod, "_close_helper_session_best_effort", return_value=None),
+        ):
+            attempted, updated, opened, opened_peer_ids = self.mod._enrich_usernames_deep_chat(
+                server="http://127.0.0.1:8765",
+                token="token",
+                client_id="client-1",
+                tab_id=1,
+                timeout_sec=5,
+                members=[{"peer_id": "42", "name": "Alice", "username": "—", "status": "из чата", "role": "—"}],
+                group_url="https://web.telegram.org/a/#-1002465948544",
+                max_runtime_sec=12,
+                mode="mention",
+                supports_click_menu_text=True,
+                discovery_state=discovery_state,
+            )
+
+        self.assertEqual((attempted, updated, opened, opened_peer_ids), (1, 0, 1, ["42"]))
+        self.assertEqual(discovery_state["peer_states"]["42"]["failure_count"], 1)
+        self.assertEqual(
+            discovery_state["peer_states"]["42"]["last_outcome"],
+            "helper_blank:delivery_failure",
+        )
+        self.assertTrue(discovery_state["peer_states"]["42"]["cooldown_until"])
+
     def test_wait_for_helper_target_identity_rejects_stale_other_profile(self) -> None:
         header_html = (
             '<div class="MiddleHeader">'
@@ -805,7 +1250,10 @@ class TelegramExportRuntimeTests(unittest.TestCase):
             self.assertEqual(kwargs["command"]["type"], "get_html")
             return {"ok": True, "data": {"html": header_html}}
 
-        with patch.object(self.mod, "_send_command_result", side_effect=fake_send_command_result):
+        with (
+            patch.object(self.mod, "_send_command_result", side_effect=fake_send_command_result),
+            patch.object(self.mod, "_read_dialog_fragment_best_effort", return_value=""),
+        ):
             matched = self.mod._wait_for_helper_target_identity(
                 server="http://127.0.0.1:8765",
                 token="token",
@@ -835,7 +1283,10 @@ class TelegramExportRuntimeTests(unittest.TestCase):
             self.assertEqual(kwargs["command"]["type"], "get_html")
             return {"ok": True, "data": {"html": next(header_htmls)}}
 
-        with patch.object(self.mod, "_send_command_result", side_effect=fake_send_command_result):
+        with (
+            patch.object(self.mod, "_send_command_result", side_effect=fake_send_command_result),
+            patch.object(self.mod, "_read_dialog_fragment_best_effort", return_value=""),
+        ):
             matched = self.mod._wait_for_helper_target_identity(
                 server="http://127.0.0.1:8765",
                 token="token",
@@ -848,12 +1299,377 @@ class TelegramExportRuntimeTests(unittest.TestCase):
 
         self.assertTrue(matched)
 
+    def test_wait_for_helper_target_identity_accepts_matching_route_after_two_polls(self) -> None:
+        with (
+            patch.object(
+                self.mod,
+                "_read_helper_header_identity",
+                side_effect=[("", ""), ("", "")],
+            ),
+            patch.object(
+                self.mod,
+                "_read_dialog_fragment_best_effort",
+                return_value="6964266260",
+            ),
+            patch.object(self.mod.time, "sleep", return_value=None),
+        ):
+            matched = self.mod._wait_for_helper_target_identity(
+                server="http://127.0.0.1:8765",
+                token="token",
+                client_id="client-1",
+                tab_id=77,
+                expected_peer_id="6964266260",
+                expected_name="Evgeniy",
+                timeout_sec=0.8,
+            )
+
+        self.assertTrue(matched)
+
+    def test_wait_for_helper_target_identity_rejects_route_when_header_conflicts(self) -> None:
+        with (
+            patch.object(
+                self.mod,
+                "_read_helper_header_identity",
+                return_value=("555101371", "Тэймур Гусейнов"),
+            ),
+            patch.object(
+                self.mod,
+                "_read_dialog_fragment_best_effort",
+                return_value="6964266260",
+            ),
+            patch.object(self.mod.time, "sleep", return_value=None),
+        ):
+            matched = self.mod._wait_for_helper_target_identity(
+                server="http://127.0.0.1:8765",
+                token="token",
+                client_id="client-1",
+                tab_id=77,
+                expected_peer_id="6964266260",
+                expected_name="Evgeniy",
+                timeout_sec=0.6,
+            )
+
+        self.assertFalse(matched)
+
+    def test_wait_for_helper_target_identity_rejects_stable_non_target_route_after_two_polls(self) -> None:
+        with (
+            patch.object(
+                self.mod,
+                "_read_helper_header_identity",
+                side_effect=[("", ""), ("", "")],
+            ),
+            patch.object(
+                self.mod,
+                "_read_dialog_fragment_best_effort",
+                side_effect=[
+                    "@plaguezonebot",
+                    "@plaguezonebot",
+                ],
+            ),
+            patch.object(self.mod.time, "sleep", return_value=None),
+        ):
+            matched = self.mod._wait_for_helper_target_identity(
+                server="http://127.0.0.1:8765",
+                token="token",
+                client_id="client-1",
+                tab_id=77,
+                expected_peer_id="6964266260",
+                expected_name="Evgeniy",
+                timeout_sec=0.8,
+            )
+
+        self.assertFalse(matched)
+
+    def test_soft_confirm_helper_target_route_accepts_matching_route_without_conflict(self) -> None:
+        with (
+            patch.object(self.mod, "_read_dialog_fragment_best_effort", return_value="6964266260"),
+            patch.object(self.mod, "_read_helper_header_identity", return_value=("", "")),
+        ):
+            matched = self.mod._soft_confirm_helper_target_route(
+                server="http://127.0.0.1:8765",
+                token="token",
+                client_id="client-1",
+                tab_id=77,
+                expected_peer_id="6964266260",
+                expected_name="Evgeniy",
+                timeout_sec=0.6,
+            )
+
+        self.assertTrue(matched)
+
+    def test_soft_confirm_helper_target_route_rejects_conflicting_header(self) -> None:
+        with (
+            patch.object(self.mod, "_read_dialog_fragment_best_effort", return_value="6964266260"),
+            patch.object(self.mod, "_read_helper_header_identity", return_value=("555101371", "Тэймур Гусейнов")),
+        ):
+            matched = self.mod._soft_confirm_helper_target_route(
+                server="http://127.0.0.1:8765",
+                token="token",
+                client_id="client-1",
+                tab_id=77,
+                expected_peer_id="6964266260",
+                expected_name="Evgeniy",
+                timeout_sec=0.6,
+            )
+
+        self.assertFalse(matched)
+
+    def test_read_dialog_fragment_best_effort_prefers_page_location_over_stale_tab_url(self) -> None:
+        with (
+            patch.object(self.mod, "_get_page_url_best_effort", return_value="https://web.telegram.org/a/#6964266260"),
+            patch.object(self.mod, "_get_tab_url", return_value="https://web.telegram.org/a/#@PLAGUEZONEBOT"),
+        ):
+            fragment = self.mod._read_dialog_fragment_best_effort(
+                server="http://127.0.0.1:8765",
+                token="token",
+                client_id="client-1",
+                tab_id=77,
+                timeout_sec=0.6,
+            )
+
+        self.assertEqual(fragment, "6964266260")
+
+    def test_get_page_url_best_effort_respects_short_timeout_budget(self) -> None:
+        seen_timeouts: list[float] = []
+
+        def fake_send_command_result(**kwargs):
+            seen_timeouts.append(float(kwargs["timeout_sec"]))
+            return {"ok": True, "data": {"url": "https://web.telegram.org/a/#6964266260"}}
+
+        with patch.object(self.mod, "_send_command_result", side_effect=fake_send_command_result):
+            url = self.mod._get_page_url_best_effort(
+                server="http://127.0.0.1:8765",
+                token="token",
+                client_id="client-1",
+                tab_id=77,
+                timeout_sec=0.35,
+            )
+
+        self.assertEqual(url, "https://web.telegram.org/a/#6964266260")
+        self.assertEqual(len(seen_timeouts), 1)
+        self.assertGreaterEqual(seen_timeouts[0], 0.3)
+        self.assertLessEqual(seen_timeouts[0], 0.35)
+
+    def test_wait_for_current_opened_identity_uses_peer_attribute_fallback(self) -> None:
+        with (
+            patch.object(self.mod, "_read_current_opened_identity", side_effect=[("", ""), ("42", "Target")]),
+            patch.object(self.mod.time, "sleep", return_value=None),
+        ):
+            peer_id, title = self.mod._wait_for_current_opened_identity(
+                server="http://127.0.0.1:8765",
+                token="token",
+                client_id="client-1",
+                tab_id=77,
+                timeout_sec=0.8,
+            )
+
+        self.assertEqual(peer_id, "42")
+        self.assertEqual(title, "Target")
+
+    def test_poll_username_from_page_location_respects_short_timeout_budget(self) -> None:
+        seen_timeouts: list[float] = []
+
+        def fake_send_command_result(**kwargs):
+            seen_timeouts.append(float(kwargs["timeout_sec"]))
+            return {"ok": True, "data": {"url": "https://web.telegram.org/a/#6964266260"}}
+
+        with (
+            patch.object(self.mod, "_send_command_result", side_effect=fake_send_command_result),
+            patch.object(self.mod.time, "sleep", return_value=None),
+            patch.object(
+                self.mod.time,
+                "time",
+                side_effect=itertools.chain([0.0, 0.0, 0.6], itertools.repeat(0.6)),
+            ),
+        ):
+            username, url = self.mod._poll_username_from_page_location(
+                server="http://127.0.0.1:8765",
+                token="token",
+                client_id="client-1",
+                tab_id=77,
+                timeout_sec=0.6,
+            )
+
+        self.assertEqual(username, "—")
+        self.assertEqual(url, "https://web.telegram.org/a/#6964266260")
+        self.assertEqual(len(seen_timeouts), 1)
+        self.assertGreaterEqual(seen_timeouts[0], 0.4)
+        self.assertLessEqual(seen_timeouts[0], 0.6)
+
+    def test_navigate_to_group_if_requested_recovers_from_username_tab_via_history_back(self) -> None:
+        with (
+            patch.object(self.mod, "_detect_current_dialog_url", return_value="https://web.telegram.org/a/#@PLAGUEZONEBOT"),
+            patch.object(self.mod, "_return_to_group_dialog_fast", return_value=True) as mock_fast_return,
+            patch.object(self.mod, "_ensure_group_dialog_url", side_effect=AssertionError("unexpected ensure")),
+        ):
+            self.mod._navigate_to_group_if_requested(
+                server="http://127.0.0.1:8765",
+                token="token",
+                client_id="client-1",
+                tab_id=77,
+                group_url="https://web.telegram.org/a/#-1002465948544",
+                timeout_sec=5,
+            )
+
+        mock_fast_return.assert_called_once()
+
+    def test_navigate_to_group_if_requested_uses_forced_return_after_ensure_failure(self) -> None:
+        with (
+            patch.object(self.mod, "_detect_current_dialog_url", side_effect=[
+                "https://web.telegram.org/a/#@PLAGUEZONEBOT",
+                "https://web.telegram.org/a/#-1002465948544",
+            ]),
+            patch.object(self.mod, "_return_to_group_dialog_fast", return_value=False) as mock_fast_return,
+            patch.object(self.mod, "_ensure_group_dialog_url", return_value=False) as mock_ensure,
+            patch.object(self.mod, "_force_return_to_group_dialog", return_value=True) as mock_force_return,
+        ):
+            self.mod._navigate_to_group_if_requested(
+                server="http://127.0.0.1:8765",
+                token="token",
+                client_id="client-1",
+                tab_id=77,
+                group_url="https://web.telegram.org/a/#-1002465948544",
+                timeout_sec=5,
+            )
+
+        mock_fast_return.assert_called_once()
+        mock_ensure.assert_called_once()
+        mock_force_return.assert_called_once()
+
+    def test_ensure_group_dialog_url_uses_detected_page_url_after_navigate(self) -> None:
+        with (
+            patch.object(
+                self.mod,
+                "_detect_current_dialog_url",
+                side_effect=["https://web.telegram.org/a/#@PLAGUEZONEBOT", "https://web.telegram.org/a/#-1002465948544"],
+            ),
+            patch.object(self.mod, "_send_command_result", return_value={"ok": True}),
+            patch.object(self.mod, "_is_dialog_surface_open", return_value=True),
+            patch.object(self.mod, "_open_group_from_dialog_list", side_effect=AssertionError("unexpected dialog list open")),
+            patch.object(self.mod.time, "sleep", return_value=None),
+        ):
+            matched = self.mod._ensure_group_dialog_url(
+                server="http://127.0.0.1:8765",
+                token="token",
+                client_id="client-1",
+                tab_id=77,
+                group_url="https://web.telegram.org/a/#-1002465948544",
+                timeout_sec=5,
+            )
+
+        self.assertTrue(matched)
+
+    def test_navigate_to_group_if_requested_allows_username_route_when_dialog_surface_is_open(self) -> None:
+        with (
+            patch.object(self.mod, "_detect_current_dialog_url", return_value="https://web.telegram.org/a/#@PLAGUEZONEBOT"),
+            patch.object(self.mod, "_return_to_group_dialog_fast", return_value=False),
+            patch.object(self.mod, "_ensure_group_dialog_url", return_value=False),
+            patch.object(self.mod, "_force_return_to_group_dialog", return_value=False),
+            patch.object(self.mod, "_is_dialog_surface_open", return_value=True),
+        ):
+            self.mod._navigate_to_group_if_requested(
+                server="http://127.0.0.1:8765",
+                token="token",
+                client_id="client-1",
+                tab_id=77,
+                group_url="https://web.telegram.org/a/#-1002465948544",
+                timeout_sec=5,
+            )
+
+    def test_wait_for_current_opened_identity_passes_short_budget_to_reader(self) -> None:
+        budgets: list[float] = []
+
+        def fake_read_current_opened_identity(**kwargs):
+            budgets.append(float(kwargs["timeout_sec"]))
+            return "42", "Target"
+
+        with patch.object(self.mod, "_read_current_opened_identity", side_effect=fake_read_current_opened_identity):
+            peer_id, title = self.mod._wait_for_current_opened_identity(
+                server="http://127.0.0.1:8765",
+                token="token",
+                client_id="client-1",
+                tab_id=77,
+                timeout_sec=0.8,
+            )
+
+        self.assertEqual(peer_id, "42")
+        self.assertEqual(title, "Target")
+        self.assertEqual(len(budgets), 1)
+        self.assertGreaterEqual(budgets[0], 0.4)
+        self.assertLessEqual(budgets[0], 0.8)
+
+    def test_get_current_opened_peer_id_respects_short_timeout(self) -> None:
+        seen_timeouts: list[float] = []
+
+        def fake_send_command_result(**kwargs):
+            seen_timeouts.append(float(kwargs["timeout_sec"]))
+            return {"ok": True, "data": {"value": "42"}}
+
+        with patch.object(self.mod, "_send_command_result", side_effect=fake_send_command_result):
+            peer_id = self.mod._get_current_opened_peer_id(
+                server="http://127.0.0.1:8765",
+                token="token",
+                client_id="client-1",
+                tab_id=77,
+                timeout_sec=0.8,
+            )
+
+        self.assertEqual(peer_id, "42")
+        self.assertEqual(len(seen_timeouts), 1)
+        self.assertGreaterEqual(seen_timeouts[0], 0.4)
+        self.assertLessEqual(seen_timeouts[0], 0.8)
+
+    def test_read_helper_header_identity_respects_short_timeout(self) -> None:
+        seen_timeouts: list[float] = []
+
+        def fake_send_command_result(**kwargs):
+            seen_timeouts.append(float(kwargs["timeout_sec"]))
+            return {"ok": True, "data": {"html": '<div data-peer-id="42"><span class="peer-title">Target</span></div>'}}
+
+        with patch.object(self.mod, "_send_command_result", side_effect=fake_send_command_result):
+            peer_id, title = self.mod._read_helper_header_identity(
+                server="http://127.0.0.1:8765",
+                token="token",
+                client_id="client-1",
+                tab_id=77,
+                timeout_sec=0.8,
+            )
+
+        self.assertEqual(peer_id, "42")
+        self.assertEqual(title, "Target")
+        self.assertEqual(len(seen_timeouts), 1)
+        self.assertGreaterEqual(seen_timeouts[0], 0.4)
+        self.assertLessEqual(seen_timeouts[0], 0.8)
+
+    def test_open_helper_tab_uses_background_tab(self) -> None:
+        seen_command: dict[str, object] = {}
+
+        def fake_send_command_result(**kwargs):
+            seen_command.update(kwargs["command"])
+            return {"ok": True, "data": {"tabId": 77}}
+
+        with patch.object(self.mod, "_send_command_result", side_effect=fake_send_command_result):
+            tab_id = self.mod._open_helper_tab(
+                server="http://127.0.0.1:8765",
+                token="token",
+                client_id="client-1",
+                tab_id=1,
+                url="https://web.telegram.org/a/#6964266260",
+                timeout_sec=5,
+            )
+
+        self.assertEqual(tab_id, 77)
+        self.assertEqual(seen_command["type"], "new_tab")
+        self.assertEqual(seen_command["url"], "https://web.telegram.org/a/#6964266260")
+        self.assertFalse(bool(seen_command["active"]))
+
     def test_read_username_via_helper_tab_returns_blank_when_target_identity_not_confirmed(self) -> None:
         with (
             patch.object(self.mod, "_helper_session_tab_id", return_value=None),
             patch.object(self.mod, "_open_helper_tab", return_value=77),
             patch.object(self.mod, "_send_command_result", return_value={"ok": True}),
             patch.object(self.mod, "_wait_for_helper_target_identity", return_value=False),
+            patch.object(self.mod, "_soft_confirm_helper_target_route", return_value=False),
             patch.object(self.mod, "_poll_username_from_tab_url", side_effect=AssertionError("unexpected stale tab url read")),
             patch.object(self.mod, "_poll_username_from_page_location", side_effect=AssertionError("unexpected stale page url read")),
             patch.object(self.mod, "_send_get_html", side_effect=AssertionError("unexpected stale header read")),
@@ -874,6 +1690,141 @@ class TelegramExportRuntimeTests(unittest.TestCase):
 
         self.assertEqual(username, "—")
         self.assertTrue(opened)
+
+    def test_read_username_via_helper_tab_reuses_session_without_activate(self) -> None:
+        with (
+            patch.object(self.mod, "_send_command_result", return_value={"ok": True}),
+            patch.object(self.mod, "_wait_for_helper_target_identity", return_value=False),
+            patch.object(self.mod, "_soft_confirm_helper_target_route", return_value=False),
+            patch.object(self.mod, "_poll_username_from_tab_url", side_effect=AssertionError("unexpected stale tab url read")),
+            patch.object(self.mod, "_poll_username_from_page_location", side_effect=AssertionError("unexpected stale page url read")),
+            patch.object(self.mod, "_send_get_html", side_effect=AssertionError("unexpected stale header read")),
+            patch.object(self.mod, "_open_current_chat_user_info_and_read_username", side_effect=AssertionError("unexpected stale profile read")),
+            patch.object(self.mod, "_activate_tab_best_effort", return_value=None) as mock_activate,
+            patch.object(self.mod, "_close_tab_best_effort", return_value=None),
+        ):
+            username, opened = self.mod._read_username_via_helper_tab(
+                server="http://127.0.0.1:8765",
+                token="token",
+                client_id="client-1",
+                base_tab_id=1,
+                peer_id="6964266260",
+                expected_name="Evgeniy",
+                timeout_sec=5,
+                tg_mode="a",
+                helper_session={"tab_id": 77},
+                restore_base_tab=False,
+            )
+
+        self.assertEqual(username, "—")
+        self.assertTrue(opened)
+        mock_activate.assert_not_called()
+
+    def test_read_username_via_helper_tab_respects_overall_deadline_after_open(self) -> None:
+        with (
+            patch.object(self.mod, "_helper_session_tab_id", return_value=None),
+            patch.object(self.mod, "_open_helper_tab", return_value=77) as mock_open,
+            patch.object(self.mod, "_send_command_result", side_effect=AssertionError("unexpected helper command after deadline")),
+            patch.object(self.mod, "_wait_for_helper_target_identity", side_effect=AssertionError("unexpected identity wait after deadline")),
+            patch.object(self.mod, "_activate_tab_best_effort", return_value=None),
+            patch.object(self.mod, "_close_tab_best_effort", return_value=None),
+            patch.object(
+                self.mod.time,
+                "time",
+                side_effect=itertools.chain([0.0, 0.0, 0.0, 10.0], itertools.repeat(10.0)),
+            ),
+        ):
+            username, opened = self.mod._read_username_via_helper_tab(
+                server="http://127.0.0.1:8765",
+                token="token",
+                client_id="client-1",
+                base_tab_id=1,
+                peer_id="6964266260",
+                expected_name="Evgeniy",
+                timeout_sec=5,
+                tg_mode="a",
+            )
+
+        self.assertEqual(username, "—")
+        self.assertTrue(opened)
+        self.assertEqual(mock_open.call_count, 1)
+
+    def test_read_username_via_helper_tab_soft_route_confirm_reaches_profile_read(self) -> None:
+        helper_session = {"tab_id": None, "needs_base_restore": False}
+
+        with (
+            patch.object(self.mod, "_open_helper_tab", return_value=77),
+            patch.object(self.mod, "_wait_for_helper_target_identity", return_value=False),
+            patch.object(self.mod, "_soft_confirm_helper_target_route", return_value=True),
+            patch.object(self.mod, "_send_command_result", return_value={"ok": True}),
+            patch.object(self.mod, "_poll_username_from_tab_url", side_effect=AssertionError("unexpected url polling after soft route confirm")),
+            patch.object(self.mod, "_poll_username_from_page_location", side_effect=AssertionError("unexpected page-url polling after soft route confirm")),
+            patch.object(self.mod, "_send_get_html", side_effect=RuntimeError("missing header")),
+            patch.object(self.mod, "_open_current_chat_user_info_and_read_username", return_value="@evgeniy"),
+        ):
+            username, opened = self.mod._read_username_via_helper_tab(
+                server="http://127.0.0.1:8765",
+                token="token",
+                client_id="client-1",
+                base_tab_id=1,
+                peer_id="6964266260",
+                expected_name="Evgeniy",
+                timeout_sec=5,
+                tg_mode="a",
+                helper_session=helper_session,
+                restore_base_tab=False,
+            )
+
+        self.assertEqual(username, "@evgeniy")
+        self.assertTrue(opened)
+        self.assertTrue(helper_session["needs_base_restore"])
+
+    def test_close_helper_session_best_effort_skips_restore_when_not_needed(self) -> None:
+        helper_session = {"tab_id": 77, "needs_base_restore": False}
+        with (
+            patch.object(self.mod, "_close_tab_best_effort", return_value=None) as mock_close,
+            patch.object(self.mod, "_activate_tab_best_effort", return_value=None) as mock_activate,
+        ):
+            self.mod._close_helper_session_best_effort(
+                server="http://127.0.0.1:8765",
+                token="token",
+                client_id="client-1",
+                base_tab_id=1,
+                helper_session=helper_session,
+                timeout_sec=5,
+            )
+
+        mock_close.assert_called_once()
+        mock_activate.assert_not_called()
+        self.assertIsNone(helper_session["tab_id"])
+        self.assertFalse(helper_session["needs_base_restore"])
+
+    def test_open_current_chat_user_info_and_read_username_respects_deadline(self) -> None:
+        seen_command_types: list[str] = []
+
+        def fake_send_command_result(**kwargs):
+            seen_command_types.append(kwargs["command"]["type"])
+            return {"ok": True}
+
+        with (
+            patch.object(self.mod, "_send_command_result", side_effect=fake_send_command_result),
+            patch.object(
+                self.mod.time,
+                "time",
+                side_effect=itertools.chain([0.0, 0.0, 2.0], itertools.repeat(2.0)),
+            ),
+        ):
+            username = self.mod._open_current_chat_user_info_and_read_username(
+                server="http://127.0.0.1:8765",
+                token="token",
+                client_id="client-1",
+                tab_id=77,
+                timeout_sec=5,
+                deadline=1.0,
+            )
+
+        self.assertEqual(username, "—")
+        self.assertEqual(seen_command_types, ["click"])
 
     def test_client_supports_content_command_detects_click_menu_text(self) -> None:
         clients = [

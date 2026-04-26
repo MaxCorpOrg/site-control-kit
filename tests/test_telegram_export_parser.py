@@ -210,6 +210,10 @@ class TelegramExportParserTests(unittest.TestCase):
         self.assertEqual(self.mod._normalize_username("@1291639730"), "—")
         self.assertEqual(self.mod._normalize_username("https://t.me/1291639730"), "—")
 
+    def test_normalize_username_from_mention_input_accepts_raw_username(self) -> None:
+        self.assertEqual(self.mod._normalize_username_from_mention_input("other_user"), "@other_user")
+        self.assertEqual(self.mod._normalize_username_from_mention_input("1291639730"), "—")
+
     def test_chat_peer_anchor_selectors_include_current_tg_web_avatar(self) -> None:
         selectors = self.mod._chat_peer_anchor_selectors("1291639730")
         self.assertIn('.sender-group-container .Avatar.interactive[data-peer-id="1291639730"]', selectors)
@@ -301,6 +305,57 @@ class TelegramExportParserTests(unittest.TestCase):
         self.assertEqual(username_to_peer["@legacy_user"], "999")
         self.assertEqual(peer_to_username["999"], "@legacy_user")
         self.assertNotIn("1663660771", peer_to_username)
+
+    def test_load_discovery_state_preserves_peer_states(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "discovery_state.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "version": 2,
+                        "updated_at": "2026-04-25T00:00:00+00:00",
+                        "seen_view_signatures": ["42,43"],
+                        "seen_peer_ids": ["42", "43"],
+                        "peer_states": {
+                            "42": {
+                                "attempt_count": 3,
+                                "success_count": 1,
+                                "failure_count": 2,
+                                "last_outcome": "helper_blank:delivery_failure",
+                                "last_attempted_at": "2026-04-25T00:00:00+00:00",
+                                "last_username": "@alice_42",
+                                "cooldown_until": "2026-04-25T06:00:00+00:00",
+                            }
+                        },
+                        "mention_candidate_states": {
+                            "@alice_42": {
+                                "attempt_count": 2,
+                                "success_count": 0,
+                                "failure_count": 2,
+                                "last_outcome": "mention_non_target",
+                                "last_attempted_at": "2026-04-25T00:00:00+00:00",
+                                "last_peer_id": "999",
+                                "cooldown_until": "2026-04-25T03:00:00+00:00",
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            state = self.mod._load_discovery_state(path)
+
+        self.assertEqual(state["version"], 2)
+        self.assertEqual(state["seen_peer_ids"], ["42", "43"])
+        self.assertEqual(state["seen_view_signatures"], ["42,43"])
+        self.assertEqual(state["peer_states"]["42"]["attempt_count"], 3)
+        self.assertEqual(state["peer_states"]["42"]["success_count"], 1)
+        self.assertEqual(state["peer_states"]["42"]["failure_count"], 2)
+        self.assertEqual(state["peer_states"]["42"]["last_username"], "@alice_42")
+        self.assertEqual(state["peer_states"]["42"]["cooldown_until"], "2026-04-25T06:00:00+00:00")
+        self.assertEqual(state["mention_candidate_states"]["@alice_42"]["attempt_count"], 2)
+        self.assertEqual(state["mention_candidate_states"]["@alice_42"]["failure_count"], 2)
+        self.assertEqual(state["mention_candidate_states"]["@alice_42"]["last_peer_id"], "999")
 
     def test_build_parser_defaults_to_both(self) -> None:
         parser = self.mod.build_parser()
