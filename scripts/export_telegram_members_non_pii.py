@@ -42,6 +42,7 @@ USERNAME_SUBTITLE_MARKERS = (
     "nome utente",
     "kullanıcı adı",
 )
+BOT_TEXT_RE = re.compile(r"(^|[^a-zа-я0-9_])(bot|бот)([^a-zа-я0-9_]|$)", flags=re.I)
 CHAT_TOP_SELECTOR = ".MessageList.custom-scroll .backwards-trigger"
 CHAT_SCROLL_SELECTORS = (
     ".MessageList.custom-scroll .backwards-trigger",
@@ -257,21 +258,50 @@ def _dialog_row_fragment(fragment: str) -> str:
     return value
 
 
+def _extract_tab_meta_from_clients(clients: Any, client_id: str, tab_id: int) -> tuple[str, str]:
+    if not isinstance(clients, list):
+        return "", ""
+    for client in clients:
+        if str(client.get("client_id") or "").strip() != client_id:
+            continue
+        tabs = client.get("tabs") or []
+        if not isinstance(tabs, list):
+            return "", ""
+        for tab in tabs:
+            if tab.get("id") != tab_id:
+                continue
+            tab_url = str(tab.get("url") or "").strip()
+            tab_title = _compact(str(tab.get("title") or ""))
+            return tab_url, tab_title
+        return "", ""
+    return "", ""
+
+
 def _get_tab_url(server: str, token: str, client_id: str, tab_id: int) -> str:
     clients_response = _http_json_retry(server, token, "GET", "/api/clients")
-    clients = clients_response.get("clients") or []
-    if isinstance(clients, list):
-        for client in clients:
-            if str(client.get("client_id") or "").strip() != client_id:
-                continue
-            tabs = client.get("tabs") or []
-            if not isinstance(tabs, list):
-                break
-            for tab in tabs:
-                if tab.get("id") == tab_id:
-                    return str(tab.get("url") or "").strip()
-            break
-    return ""
+    tab_url, _tab_title = _extract_tab_meta_from_clients(clients_response.get("clients") or [], client_id, tab_id)
+    return tab_url
+
+
+def _get_tab_meta_best_effort(
+    server: str,
+    token: str,
+    client_id: str,
+    tab_id: int,
+    timeout_sec: float,
+) -> tuple[str, str]:
+    request_timeout_sec = min(max(float(timeout_sec), 0.3), 1.0)
+    try:
+        clients_response = _http_json(
+            server,
+            token,
+            "GET",
+            "/api/clients",
+            request_timeout_sec=request_timeout_sec,
+        )
+    except RuntimeError:
+        return "", ""
+    return _extract_tab_meta_from_clients(clients_response.get("clients") or [], client_id, tab_id)
 
 
 def _get_page_url_best_effort(
@@ -536,6 +566,24 @@ def _normalize_username_from_mention_input(value: str) -> str:
     if _is_valid_username_candidate(text):
         return f"@{text}"
     return "—"
+
+
+def _contains_bot_marker(value: str) -> bool:
+    text = _compact(value).lower()
+    if not text:
+        return False
+    return bool(BOT_TEXT_RE.search(text))
+
+
+def _is_probable_bot_member(member: dict[str, str]) -> bool:
+    username = _normalize_username(str(member.get("username") or ""))
+    if username != "—" and username.lower().endswith("bot"):
+        return True
+    if _contains_bot_marker(str(member.get("status") or "")):
+        return True
+    if _contains_bot_marker(str(member.get("role") or "")):
+        return True
+    return _contains_bot_marker(str(member.get("name") or ""))
 
 
 def _username_from_tg_url(url: str) -> str:
@@ -1435,6 +1483,82 @@ def _soft_confirm_helper_target_route(
     if normalized_name and current_title and not _name_match(normalized_name, current_title):
         return False
     return True
+
+
+def _trace_token(value: str, *, limit: int = 80) -> str:
+    text = _compact(str(value or ""))
+    if not text:
+        return "—"
+    text = text.replace(" ", "_")
+    return text[:limit]
+
+
+def _trace_helper_route_probe(
+    *,
+    server: str,
+    token: str,
+    client_id: str,
+    tab_id: int,
+    expected_peer_id: str,
+    expected_name: str,
+    timeout_sec: float,
+    step: str,
+) -> None:
+    if not CHAT_MENTION_TRACE:
+        return
+
+    started_at = time.time()
+    target_peer_id = str(expected_peer_id or "").strip()
+    target_name = _compact(expected_name)
+    read_timeout_sec = min(max(float(timeout_sec), 0.3), 0.8)
+
+    page_url = _get_page_url_best_effort(
+        server=server,
+        token=token,
+        client_id=client_id,
+        tab_id=tab_id,
+        timeout_sec=read_timeout_sec,
+    )
+    page_fragment = _dialog_fragment_from_url(page_url)
+
+    tab_url, tab_title = _get_tab_meta_best_effort(
+        server=server,
+        token=token,
+        client_id=client_id,
+        tab_id=tab_id,
+        timeout_sec=read_timeout_sec,
+    )
+    tab_fragment = _dialog_fragment_from_url(tab_url)
+
+    header_peer_id, header_title = _read_helper_header_identity(
+        server=server,
+        token=token,
+        client_id=client_id,
+        tab_id=tab_id,
+        timeout_sec=read_timeout_sec,
+    )
+
+    route_match = int(bool(target_peer_id and (page_fragment == target_peer_id or tab_fragment == target_peer_id)))
+    header_match = int(
+        bool(
+            (target_peer_id and header_peer_id == target_peer_id)
+            or (target_name and header_title and _name_match(target_name, header_title))
+        )
+    )
+    _mention_trace_step(
+        f"peer:{target_peer_id or '—'}",
+        step,
+        started_at,
+        tab_id=tab_id,
+        target=target_peer_id or "—",
+        page=page_fragment or "—",
+        tab=tab_fragment or "—",
+        tab_title=_trace_token(tab_title),
+        header_peer=header_peer_id or "—",
+        header_title=_trace_token(header_title),
+        route_match=route_match,
+        header_match=header_match,
+    )
 
 
 def _match_unique_member_peer_id_by_title(
@@ -2771,6 +2895,7 @@ def _collect_members_from_info(
                 if item.get("peer_id") in visible_peer_ids
                 and item.get("username") == "—"
                 and item.get("peer_id") not in deep_seen_peer_ids
+                and not _is_probable_bot_member(item)
             ]
             if deep_targets:
                 attempted, updated, opened_peer_ids = _enrich_usernames_deep(
@@ -3220,6 +3345,7 @@ def _collect_members_from_chat(
                         if item.get("peer_id") in visible_peer_ids
                         and item.get("username") == "—"
                         and item.get("peer_id") not in deep_seen_peer_ids
+                        and not _is_probable_bot_member(item)
                     ]
                     if chat_target_peer_id:
                         deep_targets = [item for item in deep_targets if str(item.get("peer_id") or "").strip() == chat_target_peer_id]
@@ -3267,6 +3393,7 @@ def _collect_members_from_chat(
                             and sticky_peer_id not in deep_seen_peer_ids
                             and matches_chat_target(sticky_target)
                             and not _discovery_peer_in_cooldown(discovery_state, sticky_peer_id)
+                            and not _is_probable_bot_member(sticky_target)
                         ):
                             sticky_username, sticky_outcome = _try_username_via_mention_action(
                                 server=server,
@@ -3501,7 +3628,11 @@ def _enrich_usernames_deep_chat(
     helper_session: dict[str, Any] | None = None,
 ) -> tuple[int, int, int, list[str]]:
     members_by_peer = {item["peer_id"]: item for item in members}
-    pending_peer_ids = [item["peer_id"] for item in members if item.get("username") == "—"]
+    pending_peer_ids = [
+        item["peer_id"]
+        for item in members
+        if item.get("username") == "—" and not _is_probable_bot_member(item)
+    ]
     username_to_peer: dict[str, str] = {}
     for item in members:
         u = str(item.get("username") or "").strip()
@@ -4381,6 +4512,19 @@ def _read_username_via_helper_tab(
     try:
         if time.time() >= helper_deadline:
             return "—", True
+        if CHAT_MENTION_TRACE:
+            remaining_probe = helper_deadline - time.time()
+            if remaining_probe > 0:
+                _trace_helper_route_probe(
+                    server=server,
+                    token=token,
+                    client_id=client_id,
+                    tab_id=helper_tab_id,
+                    expected_peer_id=peer_id,
+                    expected_name=expected_name,
+                    timeout_sec=min(0.6, max(remaining_probe, 0.3)),
+                    step="helper-route-probe-prewait",
+                )
         wait_identity_started_at = time.time()
         identity_confirmed = _wait_for_helper_target_identity(
             server=server,
@@ -4439,6 +4583,19 @@ def _read_username_via_helper_tab(
                     )
                     if helper_session_dict is not None and not restore_base_tab:
                         helper_session_dict["needs_base_restore"] = True
+                if CHAT_MENTION_TRACE:
+                    remaining_probe = helper_deadline - time.time()
+                    if remaining_probe > 0:
+                        _trace_helper_route_probe(
+                            server=server,
+                            token=token,
+                            client_id=client_id,
+                            tab_id=helper_tab_id,
+                            expected_peer_id=peer_id,
+                            expected_name=expected_name,
+                            timeout_sec=min(0.6, max(remaining_probe, 0.3)),
+                            step="helper-route-probe-soft",
+                        )
         identity_confirmed = identity_confirmed or route_soft_confirmed
         _mention_trace_step(
             f"peer:{peer_id}",
@@ -4449,6 +4606,19 @@ def _read_username_via_helper_tab(
             tab_id=helper_tab_id,
         )
         if not identity_confirmed:
+            if CHAT_MENTION_TRACE:
+                remaining_probe = helper_deadline - time.time()
+                if remaining_probe > 0:
+                    _trace_helper_route_probe(
+                        server=server,
+                        token=token,
+                        client_id=client_id,
+                        tab_id=helper_tab_id,
+                        expected_peer_id=peer_id,
+                        expected_name=expected_name,
+                        timeout_sec=min(0.6, max(remaining_probe, 0.3)),
+                        step="helper-route-probe-miss",
+                    )
             return "—", True
 
         prefer_profile_after_soft_route = bool(route_soft_confirmed and _username_from_tg_url(helper_url) == "—")
@@ -4619,7 +4789,11 @@ def _enrich_usernames_deep(
     members: list[dict[str, str]],
 ) -> tuple[int, int, list[str]]:
     members_by_peer = {item["peer_id"]: item for item in members}
-    pending_peer_ids = [item["peer_id"] for item in members if item.get("username") == "—"]
+    pending_peer_ids = [
+        item["peer_id"]
+        for item in members
+        if item.get("username") == "—" and not _is_probable_bot_member(item)
+    ]
     username_to_peer = {
         str(item.get("username") or "").strip().lower(): item["peer_id"]
         for item in members
@@ -4786,12 +4960,16 @@ def _parse_members(html_payload: str) -> list[dict[str, str]]:
 def _write_markdown(path: Path, members: list[dict[str, str]], group_url: str, source_mode: str) -> None:
     ts = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     lines: list[str] = []
-    lines.append("# Участники Telegram-группы")
+    history_authors_mode = "history-authors" in source_mode
+    lines.append("# Username из сообщений Telegram" if history_authors_mode else "# Участники Telegram-группы")
     lines.append("")
     lines.append(f"Источник: `{group_url}`")
     lines.append(f"Режим сбора: `{source_mode}`")
     lines.append(f"Дата выгрузки: {ts}")
-    lines.append(f"Количество участников в текущем видимом списке: **{len(members)}**")
+    if history_authors_mode:
+        lines.append(f"Количество уникальных username из сообщений: **{len(members)}**")
+    else:
+        lines.append(f"Количество участников в текущем видимом списке: **{len(members)}**")
     lines.append("")
     lines.append("| # | Имя | Username | Статус | Роль | Peer ID |")
     lines.append("|---|---|---|---|---|---|")
@@ -4813,10 +4991,12 @@ def _write_markdown(path: Path, members: list[dict[str, str]], group_url: str, s
     path.write_text("\n".join(lines), encoding="utf-8")
 
 
-def _collect_username_rows(members: list[dict[str, str]]) -> list[dict[str, str]]:
+def _collect_username_rows(members: list[dict[str, str]], *, include_bots: bool = False) -> list[dict[str, str]]:
     seen: set[str] = set()
     rows: list[dict[str, str]] = []
     for item in members:
+        if not include_bots and _is_probable_bot_member(item):
+            continue
         username = _normalize_username(str(item.get("username") or "").strip())
         if username == "—":
             continue
@@ -5043,6 +5223,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--archive-dir",
         default=str(DEFAULT_ARCHIVE_DIR),
         help=f"Каталог для архивных копий экспортов и индекса (default: {DEFAULT_ARCHIVE_DIR}).",
+    )
+    parser.add_argument(
+        "--include-bots",
+        action="store_true",
+        help="Не исключать bot-аккаунты из итогового списка @username.",
     )
     return parser
 
@@ -5368,7 +5553,15 @@ def main() -> int:
                 output_usernames_cleared_total=output_usernames_cleared,
             ),
         )
-        username_rows = _collect_username_rows(members)
+        username_rows = _collect_username_rows(members, include_bots=bool(args.include_bots))
+        if not args.include_bots:
+            skipped_bot_usernames = sum(
+                1
+                for item in members
+                if _normalize_username(str(item.get("username") or "").strip()) != "—" and _is_probable_bot_member(item)
+            )
+            if skipped_bot_usernames > 0:
+                print(f"INFO: filtered out {skipped_bot_usernames} bot username(s) from sidecars")
         username_sidecars = _write_username_sidecars(
             out_path,
             username_rows,

@@ -4,6 +4,7 @@
 Цель пакета: дать агенту один понятный вход, чтобы он мог быстро понять проект, текущее состояние и безопасно продолжить работу без повторного исследования с нуля.
 
 Сначала всегда читать repo-root файл `AGENT_START_HERE.md`, и только потом этот handoff-пакет.
+После завершения любой задачи агент обязан обновить repo-root handoff и зафиксировать, что сделано и что нужно делать дальше.
 
 ## Для Кого Этот Пакет
 - для ИИ-агентов, которые впервые заходят в репозиторий;
@@ -84,8 +85,23 @@ find /home/max/telegram_contact_batches/chat_-1002465948544/chains -maxdepth 2 -
 Главный текущий технический долг уже сместился в performance и resilience deep-path, а не в базовую функциональность.
 При этом новый реальный путь к `100 @username` теперь идёт через discovery-aware chain runs, а не через единичные ручные smoke-проходы.
 Новый свежий live-факт: control-plane timeout в hub уже тоже снят, и текущий limit теперь сидит внутри helper-heavy `chat collect`, а не в `force-navigate`.
+Новый операционный факт на 2026-04-29: GUI-слой теперь поддерживает multi-account запуск Telegram-сбора (`scripts/telegram_members_export_gui.sh` + `scripts/telegram_api_accounts.py`), включая ручной/авто выбор `client_id` и добавление новых API-аккаунтов без ручного редактирования env.
+Новый quality-факт на 2026-04-29: итоговые username-sidecar теперь по умолчанию исключают bot-аккаунты, deep-path не тратит runtime на bot-target, а для диагностики доступен override `--include-bots`.
+Новый UX-факт на 2026-04-29: GUI запускается в операторском порядке `пользователь (default/portable dir/portable zip) -> чат/группа -> папка и basename сохранения`, а `scripts/telegram_members_export_app.sh` теперь просто проксирует в этот же GUI-поток.
+Новый UX-факт v2 на 2026-04-29: GUI теперь single-window (одна форма) и умеет искать чат по названию, если URL недоступен у выбранного пользователя.
+Новый UX-факт v3 на 2026-04-29: добавлен явный user-registry (`~/.site-control-kit/telegram_users/registry.json`) и dropdown-выборы пользователей/чатов в GUI.
+Новый operator baseline на 2026-04-29: для portable/logged-in Telegram Desktop основной path теперь `GTK GUI -> tdata-history-authors`, где chat-list и export читаются из живой `tdata`-сессии, а не обязательно из Telegram Web.
+Новый live-факт v4 на 2026-04-29: history-only `tdata` path уже подтверждён на `BigpharmaMarket` (`34` уникальных `@username` при `5000` сообщениях) и на `-1001753733827` (`135` safe usernames при `5000` сообщениях с progress в GUI).
+Новый UX/live-факт на 2026-04-30: этот же GUI path теперь показывает отдельный progress panel и умеет штатно останавливать scan с partial result, поэтому длинный history-run больше не должен выглядеть как немой freeze.
+Новый live-факт v5 на 2026-04-30: X11 launcher уже отдаёт окну свободный min-size `46x46`, а реальный GTK smoke на `-1001753733827` прошёл по цепочке `connect -> 8 chats -> export -> stop -> partial save`; по пути найден и сразу закрыт runtime traceback `AttributeError ... _is_tdata_target`.
+Новый UX/live-факт v6 на 2026-04-30: full history-run теперь по умолчанию без export-timeout (`TELEGRAM_TDATA_EXPORT_TIMEOUT_SEC=0`), save-dialog открывается как отдельное окно `Куда сохранить Telegram export`, а error-path больше не маскируется под "завершено".
+Новый repo-rule на 2026-04-30: для этого проекта нельзя считать задачу закрытой без полного живого прохода user-facing сценария; если по пути находятся баги, неправильные шаги или UX-тупики, агент обязан дожать их в том же цикле.
 
 ## Текущий Telegram Sticky-Fact
+Для текущего пользовательского GUI-кейса это уже не первый path.
+Сначала следующий агент обязан проверить, можно ли продолжать через `tdata-history-authors`.
+Только если пользователь возвращается именно к web/bridge сбору или `tdata` недоступна, имеет смысл снова уходить в sticky/helper расследование ниже.
+
 Для Telegram username export следующий агент не должен снова искать координаты с нуля:
 - текущий рабочий path: `telegram_sticky_author` с `context_click=true`;
 - клик должен быть правой кнопкой по нижней прилипшей 34px иконке автора;
@@ -178,6 +194,15 @@ find /home/max/telegram_contact_batches/chat_-1002465948544/chains -maxdepth 2 -
     - но fresh runs `/tmp/tg_mention_probe_live_softroute2/chat_-1002465948544/runs/20260426T082107Z/run.json` и `/tmp/tg_mention_probe_live_softroute3/chat_-1002465948544/runs/20260426T082310Z/run.json` уже снова дали `helper-soft-route matched=0`;
     - значит текущий live blocker уже ещё уже: не пустой `RightColumn`, не helper session reuse, а нестабильная materialization helper-route target на live Telegram DOM;
     - лучший live ceiling по username всё ещё у `/tmp/tg_mention_probe_live/chat_-1002465948544/runs/20260426T060315Z/run.json` с `14` username.
+  - новый code-level fact на 2026-04-27:
+    - для следующего узкого шага добавлен route source-of-truth probe прямо в helper-path:
+    - `helper-route-probe-prewait`, `helper-route-probe-soft`, `helper-route-probe-miss`;
+    - каждый probe пишет `page fragment`, `stale tab fragment/title`, `helper header peer/title`, `route_match/header_match`;
+    - код: `_get_tab_meta_best_effort()`, `_trace_helper_route_probe()`.
+  - новый live-факт на 2026-04-27:
+    - run `/tmp/tg_route_probe_live/chat_-1002465948544/runs/20260427T063636Z/run.json` упал до helper-stage с `get_html ... expired`;
+    - в `/api/clients` оба Telegram clients (`client-601f...`, `client-83e1...`) были `online=false`;
+    - значит новый probe уже подтверждён тестами, но полноценная live-валидация этого probe требует активного online bridge client/tab.
 - explicit chat-dir `identity_history.json` больше не должен считаться источником истины, если archive state свежее: loader теперь предпочитает newer `updated_at` и только добирает missing non-conflicting записи;
 - chat parser больше не имеет права брать `@username` из текста сообщения, только из author/header block;
 - helper-tab теперь обязан подтвердить ожидаемый `peer_id` или имя перед чтением username, иначе возвращает `—`;

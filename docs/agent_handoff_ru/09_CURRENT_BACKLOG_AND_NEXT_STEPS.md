@@ -1,8 +1,52 @@
 # Current Backlog And Next Steps
 
+## Обновление 2026-04-30
+- Для текущего GUI/tdata кейса закрыт следующий UX-кусок:
+  - progress теперь виден не только в текстовом логе, но и в отдельном panel-блоке;
+  - stop-button теперь штатно останавливает helper и возвращает partial result.
+- Закрыт новый окно/resize дефект:
+  - длинные chat-title больше не должны блокировать уменьшение GTK-окна;
+  - live X11 verify уже подтвердил normal resize hints (`min-size 46x46`).
+- Закрыт новый runtime-дефект в tdata GUI path:
+  - первый живой smoke поймал `AttributeError ... _is_tdata_target` после загрузки чатов;
+  - fix уже внесён, повторный smoke завершился без traceback.
+- Закрыт дефолтный export-timeout:
+  - для полного history-run `TELEGRAM_TDATA_EXPORT_TIMEOUT_SEC` теперь по умолчанию `0`, то есть без лимита.
+- Закрыт save-dialog баг:
+  - `Выбрать .md файл` переведён на `Gtk.FileChooserDialog`;
+  - live X11 probe подтвердил появление окна `Куда сохранить Telegram export`.
+- Что уже подтверждено live:
+  - direct helper stop на `-1001753733827` после `timeout 12s` -> `history_messages_scanned=600`, `42` usernames, `interrupted=true`;
+  - backend cancel probe после `7s` -> `history_messages_scanned=500`, `rows=35`, `interrupted=true`.
+  - GTK smoke через само окно на `DISPLAY=:0` -> `8` чатов, выбран `-1001753733827`, stop после первого progress, partial result `history_messages_scanned=300`, `usernames_found=30`, `safe_count=30`.
+- Практический следующий шаг для нового агента:
+  - делать уже не короткий smoke, а полный history-run на целевом чате через GTK GUI рядом с пользователем;
+  - проверить, устраивает ли пользователя частота progress updates, формат partial-result при stop и новый save-dialog;
+  - если пользователь всё ещё жалуется на окно, проверять уже manual drag/snap поведение на его экране, а не старый min-size баг;
+  - если нужно более частое подтверждение "скан жив" даже после нового default `TELEGRAM_TDATA_PROGRESS_EVERY=250`, отдельно уменьшать этот параметр, не ломая full-history default и не возвращаясь в старый bridge/helper P0 без причины.
+
+## Обновление 2026-04-29 (добавочно)
+- Новый operator-priority для текущего пользовательского кейса:
+  - P0 сейчас не старый helper-route/source-of-truth для bridge path;
+  - P0 сейчас это удержание и live-верификация `tdata-history-authors` path в GTK GUI.
+- Что уже подтверждено:
+  - `BigpharmaMarket` (`-1001461811598`) при `history-limit=5000` -> `34` уникальных `@username`, включая `@EgorTuchkov`;
+  - `-1001753733827` при `history-limit=5000` -> `135` safe usernames с progress-логом в GUI.
+- Практический следующий шаг для нового агента:
+  - делать полный history-run (`TELEGRAM_TDATA_HISTORY_LIMIT=0`) на пользовательском целевом чате;
+  - если пользователь жалуется на "зависло", сначала проверять progress и только потом увеличивать `TELEGRAM_TDATA_EXPORT_TIMEOUT_SEC`;
+  - после полного прогона зафиксировать `safe_count`, путь к `.md`, `*_usernames.*` и любые наблюдения по времени выполнения в `CODEX_STATE.md`.
+- Закрыт отдельный продуктовый критерий по quality-output:
+  - bot-аккаунты теперь отфильтровываются из итоговых `@username` sidecar по умолчанию;
+  - deep-path не тратит runtime на bot-target;
+  - добавлен override `--include-bots` для диагностических запусков.
+- P0 по helper-route/source-of-truth остаётся прежним:
+  - нужен короткий live trace-run на реально online bridge client/tab;
+  - затем выбор дополнительного стабильного сигнала для прохода к `.MiddleHeader .ChatInfo` без cross-peer misbind.
+
 ## Следующий Приоритет P0
 ### Добор Username Через Более Агрессивный Helper/Discovery Path
-Статус на 2026-04-26:
+Статус на 2026-04-27:
 - control-plane timeout уже снят:
   - stale `tab_id=997919930` больше не нужно дожимать;
   - `webcontrol/store.py` уже pruning-ит terminal command history;
@@ -107,11 +151,16 @@
   - не чинить снова shell/session/open-tab;
   - не тратить цикл на старый `helper-page-url` waste, он уже подрезан;
   - разбираться именно с тем, почему target helper-route на live DOM то materialize-ится, то нет.
-- следующий логический ход:
-  - диагностировать live helper-route source-of-truth сразу после `navigate`/`activate`:
-    - сравнить `get_page_url`, stale `tab_url`, tab title и helper header identity для одного и того же peer в одном коротком probe;
-    - понять, можно ли безопасно принять ещё один route/title signal раньше, не открывая cross-peer misbind;
-  - только после стабилизации этого source-of-truth снова дожимать `.MiddleHeader .ChatInfo` profile path до реального `@username`.
+- следующий логический ход (обновлено на 2026-04-27):
+  - code-level шаг source-of-truth уже внедрён:
+    - в trace добавлены `helper-route-probe-prewait`, `helper-route-probe-soft`, `helper-route-probe-miss`;
+    - probe сравнивает `get_page_url`, stale `tab_url`+title и helper header identity в одном peer-cycle;
+  - но live-подтверждение этого probe пока заблокировано средой:
+    - run `/tmp/tg_route_probe_live/chat_-1002465948544/runs/20260427T063636Z/run.json` упал ранним `get_html ... expired`;
+    - `/api/clients` показывал Telegram clients в `online=false`;
+  - следующий практический шаг:
+    - поднять online bridge client/tab и повторить короткий trace-run;
+    - по новому probe выбрать безопасный дополнительный signal для стабильного прохода к `.MiddleHeader .ChatInfo` без cross-peer misbind.
 - более старый статус на 2026-04-25 для контекста:
 - sticky-author click-path уже внедрён: правый клик попадает в нижнюю 34px иконку автора через `telegram_sticky_author`, live probe дал `source=point`, `context_clicked=true`;
 - sticky-author mention сейчас упирается не в координаты, а в отсутствие `Mention` в Telegram menu (`menu_missing`), после чего exporter уже запускает sticky helper fallback;
@@ -234,6 +283,10 @@
 ## Следующий Приоритет P2
 ### Единый User-Facing Control Layer
 Сейчас shell/GUI уже понимают profile presets.
+На 2026-04-29 здесь уже есть новый слой:
+- `scripts/telegram_members_export_gui.sh` получил multi-account режим (saved API accounts + auto/manual `client_id`);
+- `scripts/telegram_api_accounts.py` хранит реестр аккаунтов и default routing;
+- `run_chat_export_once.sh` поддерживает target override (`client_id`, `tab_id`) для GUI/manual запусков.
 Но дальше можно сделать ещё лучше:
 - унифицировать user prompts;
 - показывать summary по profile effect;

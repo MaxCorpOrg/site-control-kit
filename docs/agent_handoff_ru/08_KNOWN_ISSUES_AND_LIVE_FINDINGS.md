@@ -1,6 +1,47 @@
 # Known Issues And Live Findings
 
 ## Самый Важный Актуальный Live-Факт
+Для текущего пользовательского сценария новый актуальный live-факт уже другой:
+- основной рабочий path сейчас `GTK GUI + tdata-history-authors`, а не старый bridge-heavy helper deep path;
+- живая сессия для slot `1` подтверждена по `/home/max/telegram-api-collector/tdata_import/tdata`;
+- `BigpharmaMarket` (`-1001461811598`) при `history-limit=5000` дал `34` уникальных `@username`, включая `@EgorTuchkov`;
+- `-1001753733827` при `history-limit=5000` дал `135` safe usernames и показал живой progress в GUI (`1000 -> 53`, `2000 -> 75`, `3000 -> 101`, `4000 -> 123`, `5000 -> 135`);
+- новый live/UX verify на 2026-04-30 для того же чата `-1001753733827`:
+  - helper теперь сразу пишет `PROGRESS ... messages=0 usernames=0 stage=start`, а не молчит десятки секунд;
+  - базовый progress default снижен до `250` сообщений, чтобы счётчики начинали двигаться заметно раньше;
+  - direct helper probe с внешним `timeout 12s` завершился partial payload `history_messages_scanned=600`, `42` usernames, `interrupted=true`;
+  - backend cancel probe через GUI-style controller после `7s` вернул partial payload `history_messages_scanned=500`, `rows=35`, `interrupted=true`;
+  - значит новый operator-fact уже такой: stop-path для long history-scan рабочий и отдаёт частичный результат вместо немого обрыва.
+- новый GUI-fact на 2026-04-30:
+  - длинные названия чатов больше не должны делать окно практически нерегулируемым;
+  - в коде это закрыто через `resizable` окно и wrap/ellipsis для длинных title-строк;
+  - live X11 verify уже подтвердил normal resize hints: `WM_NORMAL_HINTS -> minimum size 46 by 46`, `_NET_WM_ACTION_RESIZE` присутствует.
+- новый live GTK smoke на 2026-04-30 для того же чата `-1001753733827`:
+  - GUI через `DISPLAY=:0` подключился по `tdata` и загрузил `8` чатов;
+  - progress дошёл до `250` сообщений / `27` usernames, после чего stop был принят штатно;
+  - финальный partial result: `history_messages_scanned=300`, `usernames_found=30`, `safe_count=30`;
+  - артефакты: `/tmp/telegram_gui_smoke_export.md`, `/tmp/telegram_gui_smoke_export_usernames.txt`, `/home/max/.site-control-kit/telegram_workspace/logs/export_run_20260430T094917Z.log`.
+- новый save-dialog fact на 2026-04-30:
+  - `Gtk.FileChooserNative` заменён на `Gtk.FileChooserDialog`;
+  - live X11 probe увидел окно `Куда сохранить Telegram export`, значит chooser-path сейчас открывается до уровня реального видимого окна.
+- новый timeout fact на 2026-04-30:
+  - для полного history-run больше нет дефолтного лимита `1800s`;
+  - `TELEGRAM_TDATA_EXPORT_TIMEOUT_SEC=0` теперь трактуется как unlimited default;
+  - если пользователь сам задаёт timeout, GUI явно сообщает про "настроенный лимит".
+- новый runtime-fact этого же smoke:
+  - первый прогон поймал `AttributeError: 'TelegramMembersExportWindow' object has no attribute '_is_tdata_target'` в `_handle_chats_loaded`;
+  - fix уже внесён, добавлена регрессия в `tests/test_telegram_members_export_gui.py`, повторный smoke прошёл без traceback.
+- old GUI freeze root cause для этого path закрыт:
+  - `tdata`-режим больше не auto-launch'ит внешний portable `Telegram`, который мутировал импортированную session;
+  - history-export больше не рвётся по жёсткому `180s` timeout.
+- текущий residual risk для operator path:
+  - perception of "зависло" теперь чаще означает долгий history scan, а не deadlock;
+  - первым делом нужно смотреть, двигаются ли progress-panel и строки `PROGRESS ...`;
+  - если пользователь всё ещё недоволен поведением окна, воспроизводить уже не min-size bug, а только manual drag/snap глазами на его экране;
+  - если появится новый save-chooser баг, расследовать уже не старый native-portal path, а текущий `Gtk.FileChooserDialog` flow;
+  - в live-логе helper могут всплывать transient `MsgidDecreaseRetryError`; если после них счётчики растут дальше, это не отдельный freeze root cause.
+
+## Исторический Live-Факт По Старому Bridge/Helper Path
 Последний реальный bottleneck теперь уже не в hub control-plane и не до `force-navigate`.
 Он уже сместился внутрь helper-heavy `chat collect`:
 - forced stale `tab_id=997919930` уже не актуален; после relaunch живой tab стал `997920139`;
@@ -107,6 +148,27 @@
   - не пустой profile shell;
   - а нестабильная materialization helper-route target на live Telegram DOM;
   - soft-route fallback уже умеет иногда провести peer на одну стадию дальше, но пока не стабильно и без username-yield.
+- Новый code/live-факт на 2026-04-27:
+  - в exporter добавлен route source-of-truth trace probe:
+    - `helper-route-probe-prewait`
+    - `helper-route-probe-soft`
+    - `helper-route-probe-miss`
+  - probe логирует четыре конкурирующих сигнала для одного helper peer:
+    - `get_page_url` fragment
+    - stale `tab_url` fragment
+    - stale `tab title`
+    - helper header `peer_id/title`
+  - плюс итоговые индикаторы `route_match/header_match`.
+- Текущее ограничение live-валидации этого шага:
+  - run `/tmp/tg_route_probe_live/chat_-1002465948544/runs/20260427T063636Z/run.json` завершился ранним `get_html ... expired`;
+  - в `/api/clients` Telegram bridge clients (`client-601f...`, `client-83e1...`) были `online=false`;
+  - поэтому новый probe подтверждён unit/regression слоем, но не подтверждён полным live helper-stage trace на online client.
+
+Новый эксплуатационный факт на 2026-04-29:
+- для ручной/автоматической смены аккаунтов и клиентов больше не нужен отдельный shell-хак:
+  - `scripts/telegram_members_export_gui.sh` теперь умеет выбирать `auto/manual` `client_id`;
+  - можно добавлять/хранить API-аккаунты через `scripts/telegram_api_accounts.py`;
+  - `run_chat_export_once.sh` принимает target overrides (`client_id`, `tab_id`) и валидирует target client до запуска экспорта.
 
 Новый live-факт на 2026-04-25:
 - discovery state стал persistent и полезным между run, а не просто формальным файлом:

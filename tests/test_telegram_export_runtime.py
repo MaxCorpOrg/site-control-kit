@@ -175,6 +175,39 @@ class TelegramExportRuntimeTests(unittest.TestCase):
         self.assertEqual(stats["history_prefill_conflicts"], 0)
         self.assertEqual(stats["deep_attempted"], 0)
 
+    def test_collect_members_from_chat_skips_bot_targets_in_deep(self) -> None:
+        bot_member = {
+            "peer_id": "444",
+            "name": "Notify Bot",
+            "username": "—",
+            "status": "bot",
+            "role": "—",
+        }
+
+        with (
+            patch.object(self.mod, "_send_get_html", return_value="h0"),
+            patch.object(self.mod, "_parse_chat_members", return_value=[bot_member]),
+            patch.object(self.mod, "_read_sticky_chat_author_member", return_value=None),
+            patch.object(self.mod, "_enrich_usernames_deep_chat", return_value=(1, 1, 1, ["444"])) as mock_deep,
+            patch.object(self.mod, "_scroll_chat_up", return_value=False),
+        ):
+            members, stats = self.mod._collect_members_from_chat(
+                server="http://127.0.0.1:8765",
+                token="token",
+                client_id="client-1",
+                tab_id=1,
+                timeout_sec=5,
+                scroll_steps=0,
+                group_url="https://web.telegram.org/a/#-1002465948544",
+                deep_usernames=True,
+                chat_deep_limit=12,
+                max_runtime_sec=60,
+            )
+
+        mock_deep.assert_not_called()
+        self.assertEqual(len(members), 1)
+        self.assertEqual(stats["deep_attempted"], 0)
+
     def test_collect_members_from_chat_uses_sticky_author_mention_before_helper_deep(self) -> None:
         sticky_member = {
             "peer_id": "8055002493",
@@ -1449,6 +1482,92 @@ class TelegramExportRuntimeTests(unittest.TestCase):
         self.assertEqual(len(seen_timeouts), 1)
         self.assertGreaterEqual(seen_timeouts[0], 0.3)
         self.assertLessEqual(seen_timeouts[0], 0.35)
+
+    def test_get_tab_meta_best_effort_reads_url_and_title(self) -> None:
+        with patch.object(
+            self.mod,
+            "_http_json",
+            return_value={
+                "clients": [
+                    {
+                        "client_id": "client-1",
+                        "tabs": [
+                            {"id": 77, "url": "https://web.telegram.org/a/#6964266260", "title": "Evgeniy | Telegram"},
+                        ],
+                    }
+                ]
+            },
+        ):
+            tab_url, tab_title = self.mod._get_tab_meta_best_effort(
+                server="http://127.0.0.1:8765",
+                token="token",
+                client_id="client-1",
+                tab_id=77,
+                timeout_sec=0.4,
+            )
+
+        self.assertEqual(tab_url, "https://web.telegram.org/a/#6964266260")
+        self.assertEqual(tab_title, "Evgeniy | Telegram")
+
+    def test_trace_helper_route_probe_skips_without_trace(self) -> None:
+        with (
+            patch.object(self.mod, "CHAT_MENTION_TRACE", False),
+            patch.object(self.mod, "_get_page_url_best_effort", side_effect=AssertionError("unexpected page read")),
+            patch.object(self.mod, "_get_tab_meta_best_effort", side_effect=AssertionError("unexpected tab read")),
+            patch.object(self.mod, "_read_helper_header_identity", side_effect=AssertionError("unexpected header read")),
+            patch.object(self.mod, "_mention_trace_step", side_effect=AssertionError("unexpected trace step")),
+        ):
+            self.mod._trace_helper_route_probe(
+                server="http://127.0.0.1:8765",
+                token="token",
+                client_id="client-1",
+                tab_id=77,
+                expected_peer_id="6964266260",
+                expected_name="Evgeniy",
+                timeout_sec=0.4,
+                step="helper-route-probe-prewait",
+            )
+
+    def test_trace_helper_route_probe_records_all_route_signals(self) -> None:
+        captured: dict[str, object] = {}
+
+        def fake_trace_step(username, step, started_at, **fields):
+            captured["username"] = username
+            captured["step"] = step
+            captured.update(fields)
+
+        with (
+            patch.object(self.mod, "CHAT_MENTION_TRACE", True),
+            patch.object(self.mod, "_get_page_url_best_effort", return_value="https://web.telegram.org/a/#6964266260"),
+            patch.object(
+                self.mod,
+                "_get_tab_meta_best_effort",
+                return_value=("https://web.telegram.org/a/#@plaguezonebot", "Plague Zone Bot"),
+            ),
+            patch.object(self.mod, "_read_helper_header_identity", return_value=("", "Evgeniy")),
+            patch.object(self.mod, "_mention_trace_step", side_effect=fake_trace_step),
+        ):
+            self.mod._trace_helper_route_probe(
+                server="http://127.0.0.1:8765",
+                token="token",
+                client_id="client-1",
+                tab_id=77,
+                expected_peer_id="6964266260",
+                expected_name="Evgeniy",
+                timeout_sec=0.4,
+                step="helper-route-probe-prewait",
+            )
+
+        self.assertEqual(captured["username"], "peer:6964266260")
+        self.assertEqual(captured["step"], "helper-route-probe-prewait")
+        self.assertEqual(captured["target"], "6964266260")
+        self.assertEqual(captured["page"], "6964266260")
+        self.assertEqual(captured["tab"], "@plaguezonebot")
+        self.assertEqual(captured["tab_title"], "Plague_Zone_Bot")
+        self.assertEqual(captured["header_peer"], "—")
+        self.assertEqual(captured["header_title"], "Evgeniy")
+        self.assertEqual(captured["route_match"], 1)
+        self.assertEqual(captured["header_match"], 1)
 
     def test_wait_for_current_opened_identity_uses_peer_attribute_fallback(self) -> None:
         with (

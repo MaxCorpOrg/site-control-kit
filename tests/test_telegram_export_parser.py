@@ -214,6 +214,25 @@ class TelegramExportParserTests(unittest.TestCase):
         self.assertEqual(self.mod._normalize_username_from_mention_input("other_user"), "@other_user")
         self.assertEqual(self.mod._normalize_username_from_mention_input("1291639730"), "—")
 
+    def test_collect_username_rows_excludes_bots_by_default(self) -> None:
+        rows = self.mod._collect_username_rows(
+            [
+                {"peer_id": "1", "name": "Human", "username": "@human_user", "status": "online", "role": "—"},
+                {"peer_id": "2", "name": "Alert Bot", "username": "@alerthelperbot", "status": "bot", "role": "—"},
+            ]
+        )
+        self.assertEqual([row["username"] for row in rows], ["@human_user"])
+
+    def test_collect_username_rows_can_include_bots(self) -> None:
+        rows = self.mod._collect_username_rows(
+            [
+                {"peer_id": "1", "name": "Human", "username": "@human_user", "status": "online", "role": "—"},
+                {"peer_id": "2", "name": "Alert Bot", "username": "@alerthelperbot", "status": "bot", "role": "—"},
+            ],
+            include_bots=True,
+        )
+        self.assertEqual([row["username"] for row in rows], ["@human_user", "@alerthelperbot"])
+
     def test_chat_peer_anchor_selectors_include_current_tg_web_avatar(self) -> None:
         selectors = self.mod._chat_peer_anchor_selectors("1291639730")
         self.assertIn('.sender-group-container .Avatar.interactive[data-peer-id="1291639730"]', selectors)
@@ -361,6 +380,7 @@ class TelegramExportParserTests(unittest.TestCase):
         parser = self.mod.build_parser()
         args = parser.parse_args([])
         self.assertEqual(args.source, "both")
+        self.assertFalse(args.include_bots)
 
 
 if __name__ == "__main__":

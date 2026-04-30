@@ -260,8 +260,32 @@ GUI-экспорт:
 
 ```bash
 cd /home/max/site-control-kit
-./scripts/telegram_members_export_app.sh
+./scripts/telegram_members_export_gui.sh
 ```
+
+Что умеет GUI теперь:
+- отдельное GTK-приложение вместо `zenity`-формы;
+- единый Telegram workspace: `~/.site-control-kit/telegram_workspace`;
+- реестр пользователей (имя + профиль + API token): `~/.site-control-kit/telegram_workspace/registry/users.json`;
+- слоты пользователей `1..10`: `~/.site-control-kit/telegram_workspace/accounts/<N>/`:
+  - `profile/` (данные профиля, включая `tdata`/portable browser data),
+  - `imports/` (zip-архивы профилей),
+  - `keys/` (`api_token.txt`, `api_id.txt`, `api_hash.txt`);
+- в списке профилей показываются только реальные профили/zip, пустые auto-slots больше не засоряют UI;
+- если в выбранном профиле найден `tdata` или matching `tdata-*.zip`, GUI сначала ищет живую Telegram Desktop session через API, включая импортированный portable `tdata`, без экрана авторизации;
+- в `tdata`-режиме GUI не должен запускать внешний portable Telegram автоматически: сбор и список чатов идут напрямую через API/helper, чтобы не ломать импортированную сессию;
+- в GUI `tdata`-экспорт теперь идёт по авторам сообщений из chat history (`history-only`), а не по общему списку `participants`;
+- в `history-only` path фильтруются bots, non-user sender'ы и записи без валидного `@username`;
+- глубина history настраивается через `TELEGRAM_TDATA_HISTORY_LIMIT` (`0` по умолчанию = весь доступный history), шаг progress через `TELEGRAM_TDATA_PROGRESS_EVERY`;
+- timeout для helper тоже настраивается:
+  - `TELEGRAM_TDATA_LIST_TIMEOUT_SEC` для чтения списка чатов;
+  - `TELEGRAM_TDATA_EXPORT_TIMEOUT_SEC` для длинного history-export;
+- progress helper теперь попадает в live-log GUI строками вида `PROGRESS chat=... messages=... usernames=...`;
+- если `tdata` недоступен, GUI падает обратно на старый Telegram Web path;
+- список чатов и групп показывается внутри приложения;
+- выбранный чат можно открыть прямо в Telegram из GUI перед запуском;
+- итоговый `.md` выбирается через системный `Save As` диалог: там задаются и папка, и имя файла;
+- экспорт принудительно открывает выбранный чат перед сбором, поэтому не требует заранее открытого URL.
 
 Быстрый сбор именно `@username`, встречающихся в chat history/mentions:
 
@@ -277,6 +301,12 @@ python3 scripts/export_telegram_chat_mentions.py --target-count 40
 ```bash
 cd /home/max/site-control-kit
 ./scripts/run_chat_export_once.sh "$SITECTL_TOKEN"
+```
+
+Принудительный таргет на конкретный клиент/вкладку:
+
+```bash
+./scripts/run_chat_export_once.sh "$SITECTL_TOKEN" "/tmp/chat_export.md" "https://web.telegram.org/a/#-1002465948544" 20 10 12 180 mention 0 "client-REPLACE_ME" "123456789"
 ```
 
 Важно:

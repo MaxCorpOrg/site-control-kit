@@ -1,12 +1,284 @@
 # Перечень изменений (русская версия)
 
-Дата фиксации состояния: **26 апреля 2026**.
+Дата фиксации состояния: **30 апреля 2026**.
 
 Этот документ описывает, что именно реализовано в `site-control-kit`, какие проблемы закрыты и где находятся ключевые файлы.
 
-## 0. Актуализация состояния на 26 апреля 2026
+## 0. Актуализация состояния на 27 апреля 2026
 
-### 0.0 Telegram helper soft-route fallback и новый live диагноз
+### 0.0 Progress panel + stop control для `tdata` history-scan (30 апреля 2026)
+- Дополнительно починен resize UX:
+  - длинные названия чатов больше не должны фиксировать окно на слишком большой ширине;
+  - `scripts/telegram_members_export_gui.py` теперь явно держит окно `resizable`, верхний layout обёрнут в `Gtk.ScrolledWindow`, а длинные заголовки сжимаются через wrap/ellipsis;
+  - live X11 verify подтвердил новый min-size окна: `46x46`.
+- Обновлён `scripts/telegram_members_export_gui.py`:
+  - добавлен отдельный блок прогресса сканирования в GTK GUI;
+  - показываются счётчики `сообщений`, `@username`, elapsed time и `last update`;
+  - добавлена кнопка `Остановить сбор`;
+  - закрыт runtime-баг `AttributeError ... _is_tdata_target` в tdata callback после загрузки чатов;
+  - `Выбрать .md файл` переведён на `Gtk.FileChooserDialog`;
+  - ошибочный финальный статус `Сканирование истории завершено` после export-error заменён на отдельный error-state.
+- Обновлён `scripts/telegram_tdata_helper.py`:
+  - helper сразу пишет стартовый `PROGRESS ... messages=0 usernames=0 stage=start`;
+  - по `SIGTERM` helper завершает текущий проход и отдаёт partial payload с `interrupted=1`.
+- Обновлены defaults progress:
+  - `scripts/telegram_members_export_gui.py` теперь по умолчанию запускает history-scan с `TELEGRAM_TDATA_PROGRESS_EVERY=250`;
+  - `scripts/telegram_tdata_helper.py export-chat` тоже использует default `--progress-every 250`.
+- Обновлён timeout contract:
+  - `TELEGRAM_TDATA_EXPORT_TIMEOUT_SEC=0` теперь означает unlimited и это новый default для полного history-run;
+  - timeout-ошибка теперь объясняет, что limit был именно настроен вручную.
+- Практический эффект:
+  - длинный history-scan больше не выглядит как немой freeze;
+  - оператор может остановить scan без потери уже собранного partial результата.
+- Зафиксировано новое правило repo-workflow:
+  - задача внутри `site-control-kit` не считается завершённой без полного живого прохода изменённого user-facing сценария и устранения найденных ошибок по основному пути.
+- Добавлен coverage:
+  - `tests/test_telegram_tdata_helper.py`
+  - `tests/test_telegram_members_export_gui.py`
+- Проверено:
+  - `python3 -m py_compile scripts/telegram_members_export_gui.py scripts/telegram_tdata_helper.py tests/test_telegram_members_export_gui.py tests/test_telegram_tdata_helper.py`
+  - `PYTHONPATH=/home/max/site-control-kit python3 -m unittest tests.test_telegram_members_export_gui tests.test_telegram_tdata_helper -v`
+  - live probes на `-1001753733827`:
+    - backend cancel probe -> partial payload `history_messages_scanned=500`, `rows=35`, `interrupted=true`;
+    - direct helper timeout probe -> partial payload `history_messages_scanned=600`, `42` usernames, `interrupted=true`.
+  - live GTK smoke на `-1001753733827`:
+    - загрузка `8` чатов через `tdata`;
+    - stop после первого progress;
+    - partial result `history_messages_scanned=300`, `usernames_found=30`, `safe_count=30`;
+    - повторный smoke после фикса прошёл без traceback.
+  - live chooser probe:
+    - появился X11 dialog `Куда сохранить Telegram export` после вызова `_choose_output_file()`.
+
+### 0.0 Централизация Telegram workspace + слоты 1..10 (29 апреля 2026)
+- Добавлен `scripts/telegram_workspace_layout.py`:
+  - единый корень: `~/.site-control-kit/telegram_workspace`;
+  - автоматическое создание структуры:
+    - `registry/users.json`,
+    - `profiles/default`,
+    - `cache/unpacked_profiles`,
+    - `accounts/1..10/{profile,imports,keys}`.
+- Обновлён `scripts/telegram_members_export_gui.sh`:
+  - lock-файл от параллельного запуска GUI;
+  - lazy browser start (браузер стартует только если нет готового bridge client);
+  - автопрофили читаются из `accounts/*/profile` и `accounts/*/imports/*.zip`.
+- Локальная миграция:
+  - `/home/max/site-control-kit/TG_CONTACT` перенесён в `accounts/1/profile`.
+- Добавлен coverage:
+  - `tests/test_telegram_workspace_layout.py`.
+
+### 0.0 User registry + dropdown users/chats (29 апреля 2026)
+- Добавлен `scripts/telegram_user_registry.py`:
+  - отдельное пространство для пользователей Telegram в `~/.site-control-kit/telegram_workspace/registry/users.json`;
+  - хранит `name`, `profile` (папка или zip), `token`, `default_user`;
+  - команды: `list`, `add`, `remove`, `set-default`, `resolve`.
+- Пересобран `scripts/telegram_members_export_gui.sh`:
+  - выбор пользователя из выпадающего списка;
+  - добавление пользователя прямо из GUI;
+  - выбор чата/группы из выпадающего списка открытых Telegram tabs выбранного пользователя;
+  - fallback: если URL нет, можно ввести название (например `BigpharmaMarket`) и получить resolve по title.
+- Добавлен coverage:
+  - `tests/test_telegram_user_registry.py`.
+
+### 0.0 Single-window GUI + поиск чата по названию (29 апреля 2026)
+- `scripts/telegram_members_export_gui.sh` переписан в режим одного окна:
+  - единая форма с полями: пользователь (profile dir/zip), чат/группа (URL или название), папка сохранения, имя файла;
+  - убран каскад лишних операторских шагов (несколько списков account/client).
+- Добавлен title-based resolve чата:
+  - если в поле чата не URL, GUI ищет подходящий Telegram tab по `title` у выбранного пользователя (и затем по всем клиентам);
+  - это закрывает кейс, когда в чате нет явного адреса и оператор знает только название (например `BigpharmaMarket`).
+- Добавлен автоматический flow после `Start`:
+  - поднимается браузер из выбранного профиля;
+  - автоматически выбирается лучший `client_id`;
+  - запускается `run_chat_export_once.sh` и затем `safe snapshot`.
+
+### 0.1 GTK GUI + чат-лист из Telegram Web (29 апреля 2026)
+- `scripts/telegram_members_export_gui.sh` и `scripts/telegram_members_export_app.sh` теперь запускают отдельное GTK-приложение `scripts/telegram_members_export_gui.py`.
+- Новый GUI работает по фактическому операторскому сценарию:
+  - выбор профиля только из реальных записей; пустые workspace slots больше не попадают в список пользователей;
+  - список чатов/групп читается прямо из левой колонки Telegram Web и показывается в приложении;
+  - итоговый `*.md` выбирается через системный `Save As` диалог, а не через ручной ввод пути;
+  - перед экспортом выбранный чат принудительно открывается через `--force-navigate`, поэтому заранее искать/вставлять URL не нужно.
+- Добавлен coverage:
+  - `tests/test_telegram_members_export_gui.py`;
+  - `tests/test_telegram_workspace_layout.py` расширен проверкой, что пустые профили скрываются.
+
+### 0.2 GUI chat-list retry + online-only client selection (29 апреля 2026)
+- Исправлен дефект, при котором GUI мог считать старый офлайн bridge-клиент «подключённым» и поэтому не показывал список чатов.
+- Новый порядок:
+  - для GUI принимаются только online Telegram clients;
+  - после `Подключить Telegram` chat-list запускается автоматически;
+  - загрузка списка чатов ждёт появления левой колонки Telegram Web и делает retry, если первый ответ пустой.
+- Добавлен regression coverage:
+  - `tests/test_telegram_members_export_gui.py` проверяет, что offline client игнорируется и пустой первый payload по чатам корректно ретраится.
+
+### 0.3 Direct CDP fallback для branded Chrome (29 апреля 2026)
+- Закрыт кейс, когда GUI писал «не удаётся подключить к телеграмму», потому что в выбранном `google-chrome` профиле не был установлен `Site Control Bridge`.
+- Новый порядок работы GUI:
+  - сначала по-прежнему пробуется старый bridge/hub path;
+  - если живого bridge-client нет, GUI автоматически поднимает тот же browser profile с `--remote-debugging-port`;
+  - новый helper `scripts/telegram_cdp_helper.js` читает список чатов, открывает выбранный чат и делает простой `cdp-simple` export напрямую через Chrome DevTools Protocol.
+- Практический эффект:
+  - branded `google-chrome` больше не является стоп-фактором для самого GUI-подключения;
+  - оператору не нужно отдельно руками ставить unpacked extension только ради того, чтобы увидеть список чатов и запустить базовый сбор.
+- Добавлен coverage:
+  - `tests/test_telegram_members_export_gui.py` проверяет CDP chat-list path и merge `mentions -> synthetic rows`.
+- Проверено:
+  - `node --check scripts/telegram_cdp_helper.js`
+  - `PYTHONPATH=/home/max/site-control-kit python3 -m unittest tests.test_telegram_members_export_gui tests.test_telegram_workspace_layout tests.test_telegram_export_parser tests.test_telegram_user_registry -v`
+  - smoke: `telegram_cdp_helper.js status --port <temp-port>` на временном Chrome CDP browser -> OK
+
+### 0.4 Telegram Desktop tdata backend для portable-сессий (29 апреля 2026)
+- Закрыт кейс, когда GUI запускал Telegram Web и попадал в окно авторизации, хотя у пользователя уже была живая portable `tdata`-сессия.
+- Новый порядок:
+  - если в `accounts/<N>/profile` найден `tdata`/matching `tdata-*.zip`, GUI сначала использует backend `tdata-api`, а не browser profile;
+  - новый helper `scripts/telegram_tdata_helper.py` запускается через `/home/max/telegram-api-collector/.venv/bin/python` и читает dialogs/usernames напрямую из Telegram Desktop session;
+  - список чатов теперь может появляться вообще без Telegram Web и без bridge extension;
+  - export path строит тот же `.md`, `*_usernames.*` и `safe snapshot`, но данные приходят из `participants + history`.
+- Уточнение по live-path:
+  - для текущего slot `1` рабочей оказалась не распакованная папка `accounts/1/profile/tdata-20260428T125500Z-3-001/tdata`, а импортированная session `~/telegram-api-collector/tdata_import/tdata`;
+  - GUI теперь сверяет сигнатуру `tdata-*.zip` и предпочитает этот живой импорт вместо нерабочей локальной копии, чтобы не сваливаться обратно в окно авторизации.
+- Дополнительный фикс live-зависания:
+  - в `tdata`-режиме GUI больше не auto-launch'ит внешний `Telegram` на том же `tdata_import`, потому что этот запуск портил импортированную сессию для `opentele`;
+  - кнопка открытия чата в `tdata`-режиме теперь не гоняет portable runtime, а сам export идёт напрямую через MTProto helper;
+  - при ошибке export action log теперь пишет `run_failed ...`, чтобы не оставлять немой freeze.
+- Дополнительный фикс полноты сбора:
+  - `scripts/telegram_tdata_helper.py export-chat` получил режим `--source history`;
+  - для history-сбора helper теперь:
+    - читает авторов сообщений через `iter_messages`, а не через `participants`;
+    - догружает sender через `get_entity(sender_id)`, если `msg.sender` пустой;
+    - фильтрует bots и non-user sender'ов;
+    - сохраняет только валидные `@username`, без строк без username.
+  - GUI `tdata`-экспорт теперь использует именно `history-only` path и по умолчанию берёт `TELEGRAM_TDATA_HISTORY_LIMIT=0` (весь доступный history).
+  - Live smoke на `BigpharmaMarket`:
+    - helper `--source history --history-limit 5000` -> `34` уникальных `@username`;
+    - GUI/backend smoke с `TELEGRAM_TDATA_HISTORY_LIMIT=5000` -> `safe_count=34`, markdown начинается с `Username из сообщений Telegram`.
+- Дополнительный фикс длительного export-timeout:
+  - GUI-wrapper больше не использует жёсткий `timeout=180` вокруг `telegram_tdata_helper.py export-chat`;
+  - теперь helper запускается через `Popen`, stderr progress читается на лету и попадает в live-log окна;
+  - новые env-параметры:
+    - `TELEGRAM_TDATA_LIST_TIMEOUT_SEC` (`30` по умолчанию)
+    - `TELEGRAM_TDATA_EXPORT_TIMEOUT_SEC` (`1800` по умолчанию)
+    - `TELEGRAM_TDATA_PROGRESS_EVERY` (`250` по умолчанию)
+  - live smoke на `-1001753733827` при `TELEGRAM_TDATA_HISTORY_LIMIT=5000` завершился успешно и показал рост usernames прямо по progress-строкам до `135`.
+- Дополнительно:
+  - GUI best-effort ищет portable binary вроде `~/Загрузки/Telegram Desktop/e/Telegram`;
+  - если у binary нет execute-bit, GUI сам добавляет его и запускает Telegram с `-workdir <portable-data-root>`.
+- Live проверка на текущем slot 1:
+  - helper `list-chats` вернул `8` dialogs, включая `Чат BigpharmaMarket`;
+  - helper `export-chat` по `-1001461811598` вернул usernames из `participants` и `history`;
+  - backend smoke `_run_export_via_tdata()` собрал markdown на `43` rows и `34` safe usernames.
+- Добавлен coverage:
+  - `tests/test_telegram_members_export_gui.py` проверяет `normalize_tdata_chat_options()` и `resolve_tdata_dir()`.
+
+### 0.5 History-only `@username` из окна сообщений для `tdata`-экспорта (29 апреля 2026)
+- Продуктовый source-of-truth для portable `tdata` path переведён на авторов сообщений, а не на список участников.
+- Обновлён `scripts/telegram_tdata_helper.py`:
+  - добавлен `export-chat --source history`;
+  - `msg.sender` при необходимости добирается через `get_entity(sender_id)`;
+  - невалидные и числовые псевдо-username отсекаются;
+  - bot/non-user sender'ы не попадают в итоговый набор;
+  - добавлены progress-строки через `--progress-every`.
+- Обновлён `scripts/telegram_members_export_gui.py`:
+  - `tdata`-экспорт запускает helper именно как history-only path;
+  - default `TELEGRAM_TDATA_HISTORY_LIMIT=0` означает весь доступный history.
+- Обновлён `scripts/export_telegram_members_non_pii.py`:
+  - markdown для этого режима теперь пишет `# Username из сообщений Telegram`.
+- Live baseline:
+  - `BigpharmaMarket` (`-1001461811598`) при `--history-limit 5000` -> `34` уникальных `@username`, включая `@EgorTuchkov`.
+- Добавлен coverage:
+  - `tests/test_telegram_tdata_helper.py`
+  - `tests/test_telegram_members_export_gui.py`
+
+### 0.6 Timeout/progress fix для длинного `tdata` history-export (29 апреля 2026)
+- Закрыт live-дефект, когда GUI обрывал history-export ровно через `180s`.
+- Новый порядок:
+  - helper больше не запускается через `subprocess.run(... timeout=180)`;
+  - используется `Popen` + streaming stderr, поэтому progress попадает в live-log GUI;
+  - добавлены env-параметры:
+    - `TELEGRAM_TDATA_LIST_TIMEOUT_SEC`
+    - `TELEGRAM_TDATA_EXPORT_TIMEOUT_SEC`
+    - `TELEGRAM_TDATA_PROGRESS_EVERY`
+- Live verify:
+  - чат `-1001753733827` при `TELEGRAM_TDATA_HISTORY_LIMIT=5000` завершился успешно;
+  - progress вырос по шагам `1000 -> 53`, `2000 -> 75`, `3000 -> 101`, `4000 -> 123`, `5000 -> 135`;
+  - итоговый `safe_count=135`.
+- Проверено:
+  - `PYTHONPATH=/home/max/site-control-kit python3 -m unittest tests.test_telegram_members_export_gui tests.test_telegram_tdata_helper -v`
+  - `python3 -m py_compile scripts/telegram_tdata_helper.py scripts/telegram_members_export_gui.py scripts/export_telegram_members_non_pii.py`
+
+### 0.0 GUI-поток под portable-пользователя и путь сохранения @username (29 апреля 2026)
+- Пересобран `scripts/telegram_members_export_gui.sh` под операторский сценарий:
+  - выбор пользователя: `default` профиль, папка portable-профиля или `.zip` portable-профиля;
+  - `.zip` автоматически распаковывается в `~/.site-control-kit/telegram_workspace/cache/unpacked_profiles/*` и используется как `SITECTL_BROWSER_PROFILE`;
+  - GUI сам пытается поднять Telegram-клиент из выбранного профиля и дождаться bridge client;
+  - чат/группу можно выбрать из открытых Telegram tabs или ввести URL вручную;
+  - путь сохранения задаётся как папка + basename, затем exporter пишет `*.md` и `*_usernames.txt/json` в эту папку.
+- `scripts/telegram_members_export_app.sh` превращён в thin-wrapper, который запускает новый `telegram_members_export_gui.sh`.
+- Проверено:
+  - `bash -n scripts/telegram_members_export_gui.sh scripts/telegram_members_export_app.sh scripts/run_chat_export_once.sh`
+
+### 0.0 Bot-фильтр в Telegram username sidecars (29 апреля 2026)
+- Обновлён `scripts/export_telegram_members_non_pii.py`:
+  - добавлен детектор bot-профилей по полям `username/status/role/name`;
+  - deep username enrichment (chat/info/helper) теперь не запускается для bot-target;
+  - итоговые sidecar `*_usernames.txt/json` по умолчанию исключают bot-username;
+  - добавлен явный override: `--include-bots`.
+- Добавлен coverage:
+  - `tests/test_telegram_export_parser.py`:
+    - bot-username отфильтровывается по умолчанию;
+    - при `include_bots=True` bot-username возвращается;
+    - parser default подтверждён: `include_bots=False`.
+  - `tests/test_telegram_export_runtime.py`:
+    - chat deep path не вызывает `_enrich_usernames_deep_chat` для bot-target.
+- Проверено:
+  - `python3 -m py_compile scripts/export_telegram_members_non_pii.py tests/test_telegram_export_parser.py tests/test_telegram_export_runtime.py`
+  - `PYTHONPATH=/home/max/site-control-kit python3 -m unittest tests.test_telegram_export_parser tests.test_telegram_export_runtime tests.test_telegram_api_accounts tests.test_telegram_client_selection` -> `92 tests OK`
+  - `PYTHONPATH=/home/max/site-control-kit python3 -m unittest discover -s tests -p 'test_*.py'` -> `169 tests OK`.
+
+### 0.0 Multi-account GUI для Telegram экспорта (29 апреля 2026)
+- Добавлен `scripts/telegram_api_accounts.py`:
+  - хранение API-аккаунтов для Telegram export (`name`, `token`, optional `client_id`, `default_account`);
+  - команды: `list`, `add`, `remove`, `set-default`, `resolve`;
+  - registry path по умолчанию: `~/.site-control-kit/telegram_workspace/registry/api_accounts.json`.
+- Пересобран `scripts/telegram_members_export_gui.sh`:
+  - выбор token-источника (`auto` / saved API account);
+  - добавление нового API-аккаунта из GUI (без правки shell/env вручную);
+  - ручной/авто выбор `client_id` перед запуском;
+  - запуск экспортёра с передачей выбранного `client_id`.
+- Обновлён `scripts/run_chat_export_once.sh`:
+  - добавлены optional overrides:
+    - arg10 `client_id`
+    - arg11 `tab_id`
+  - добавлена валидация target client в `/api/clients`;
+  - при наличии override runner передаёт `--client-id`/`--tab-id` в `export_telegram_members_non_pii.py`.
+- Добавлен coverage:
+  - `tests/test_telegram_api_accounts.py` (`3 tests OK`).
+- Проверено:
+  - `bash -n scripts/run_chat_export_once.sh scripts/telegram_members_export_gui.sh`
+  - `python3 -m py_compile scripts/telegram_api_accounts.py`
+  - `PYTHONPATH=/home/max/site-control-kit python3 -m unittest discover -s tests -p 'test_*.py'` -> `166 tests OK`.
+
+### 0.0 Helper route source-of-truth probes (27 апреля 2026)
+- В `scripts/export_telegram_members_non_pii.py` добавлены инструменты диагностики source-of-truth для helper-route после `navigate/activate`:
+  - `_get_tab_meta_best_effort()` (stale `tab_url` + `tab title` из `/api/clients`);
+  - `_trace_helper_route_probe()` (единый trace snapshot по `get_page_url`, stale tab meta и helper header identity).
+- В trace добавлены новые стадии:
+  - `helper-route-probe-prewait`
+  - `helper-route-probe-soft`
+  - `helper-route-probe-miss`
+- В `tests/test_telegram_export_runtime.py` добавлены регрессии:
+  - чтение `url/title` через `_get_tab_meta_best_effort()`;
+  - no-op probe при выключенном `TELEGRAM_CHAT_MENTION_TRACE`;
+  - корректный snapshot всех route-сигналов при включённом trace.
+- Проверено:
+  - `python3 -m py_compile scripts/export_telegram_members_non_pii.py tests/test_telegram_export_runtime.py`
+  - `PYTHONPATH=/home/max/site-control-kit python3 -m unittest tests.test_telegram_export_runtime` -> `64 tests OK`
+  - `PYTHONPATH=/home/max/site-control-kit python3 -m unittest discover -s tests -p 'test_*.py'` -> `163 tests OK`
+- Текущий live факт:
+  - probe-run `/tmp/tg_route_probe_live/chat_-1002465948544/runs/20260427T063636Z/run.json` упал на раннем `get_html` (`command_status=expired`);
+  - по `/api/clients` оба Telegram bridge clients сейчас `online=false`, поэтому полный live helper-stage trace на новом probe пока не подтверждён.
+
+### 0.1 Telegram helper soft-route fallback и новый live диагноз
 - В `scripts/export_telegram_members_non_pii.py` добавлен `_soft_confirm_helper_target_route()`:
   - он даёт late soft-accept по helper-route только если нет conflicting header/title;
   - после `soft=1` helper делает короткий deadline-aware foreground kick;
