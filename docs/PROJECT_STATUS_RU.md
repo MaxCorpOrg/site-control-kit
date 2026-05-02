@@ -1,6 +1,6 @@
 # Project Status RU
 
-Последнее обновление: 2026-04-26
+Последнее обновление: 2026-05-02
 
 Этот файл нужен как точка входа для любого нового чата и любого нового агента.
 Перед новой задачей его нужно прочитать целиком.
@@ -61,6 +61,48 @@
   - ошибки Python-команд теперь показываются через `zenity`, а не роняют wrapper молча;
   - executor GUI теперь покрывает `inspect-chat`, `open-chat`, `add-contact dry/prepare/live`;
   - live-режим GUI умеет спросить auto-verification before/after и delay перед повторной after-проверкой.
+- Invite Executor теперь умеет привязывать Desktop portable actor к execution config:
+  - `portable_actor.profile_name`;
+  - `portable_actor.profile_dir`;
+  - `portable_actor.account_username`;
+  - `portable_actor.account_label`.
+- Добавлена команда `ensure-portable`, которая проверяет Telegram Desktop portable-профиль перед Desktop-assisted invite-flow и при необходимости может запустить его через `telegram_portable.py launch`.
+- Добавлена команда `prepare-next`:
+  - проверяет portable actor;
+  - при необходимости запускает профиль;
+  - добавляет или выбирает одного consented пользователя;
+  - переводит `new -> checked`;
+  - создаёт `execution_plan.json`;
+  - по умолчанию резервирует пользователя в `invite_link_created`.
+- Добавлена команда `desktop-send-link`:
+  - работает только по одному consented пользователю из `invite_state.json`;
+  - по умолчанию принимает статусы `invite_link_created`/`checked`;
+  - открывает DM через Telegram Desktop portable actor по `tg://resolve?domain=<username>`;
+  - печатает ASCII invite link через X11 typing helper;
+  - реально нажимает Enter только с явным `--confirm-send`;
+  - переводит пользователя в `sent` только при `--record-result` после успешного `--confirm-send`.
+- Добавлена команда `desktop-open-add-members`:
+  - это first-cut no-API Desktop UI path через Telegram Desktop portable;
+  - использует `tg://resolve?domain=<handle>` для открытия группы;
+  - читает `log-diagnose` перед шагом `Add Members`;
+  - открывает `Info` и `Add members` через AT-SPI accessibility primitives вместо Telegram API;
+  - может ввести username в right-side search field только если этот field реально найден, иначе останавливается до ввода.
+- Добавлена команда `desktop-add-contact-profile`:
+  - открывает `tg://resolve?domain=<username>&profile` для одного consented пользователя;
+  - делает no-API click-path `Add to contacts -> Done` по настраиваемым ratio;
+  - пишет step-by-step `execution_record.json` и PNG-скриншоты (`before/after/verify`) в `executions/<id>/`.
+- По состоянию на `2026-05-02` desktop-path `поиск -> профиль -> Add to contacts -> Done` подтверждён на portable actor `AK` для `@super_pavlik`:
+  - исправлен выбор точного search result через `search_result_index`;
+  - добавлен exact username guard в profile overlay перед `Add to contacts`;
+  - submit `Готово` теперь считается от `dialog`-геометрии, а не от слепой точки под модалкой;
+  - clipboard paste после ввода `Имя/Фамилия` теперь схлопывает выделение `End`, чтобы следующий клик не тратился на снятие selection.
+- Executor GUI получил действия `ensure-portable` и `prepare-next`.
+- Executor GUI получил действия `desktop-send dry` и `desktop-send live`.
+- Текущий job `chat_Zhirotop_shop` привязан к portable actor:
+  - profile: `AK`;
+  - dir: `/home/max/TelegramPortableAK`;
+  - account: `@M_a_g_g_i_e`;
+  - target: `https://t.me/Zhirotop_shop`.
 - Для следующего чата зафиксирован отдельный copy-paste prompt:
   - `tools/telegram_invite_manager/NEXT_CHAT_AGENT_PROMPT_RU.md`
   - он задаёт новому агенту стартовую точку, границы редактирования и обязательный порядок чтения.
@@ -76,6 +118,21 @@
   - безопасно переимпортировать тот же профиль только если его процесс не запущен;
   - сразу запустить профиль и вернуть `pid/log_path`;
   - писать `portable-profile.json` с metadata по профилю.
+- Helper теперь умеет:
+  - принимать существующий legacy portable-профиль через `adopt` без переимпорта `tdata`;
+  - показывать `status` по профилю, включая `pid` и X11-окна;
+  - показывать `list` portable-профилей под `output-root`;
+  - запускать существующий профиль по `--profile-dir`;
+  - открывать `tg://...` URI через `open-uri`;
+  - печатать ASCII-текст в окно portable-профиля через `type-text`;
+  - отправлять X11 key chords через `press-keys`;
+  - разбирать `TelegramForcePortable/log.txt` через `log-diagnose`;
+  - кликать по окну по относительным координатам через `window-click`;
+  - снимать PNG текущего Telegram X11-окна через `window-screenshot`;
+  - читать AT-SPI accessibility-узлы через `accessibility-dump`;
+  - фильтровать accessibility-узлы по state (`focused`, `editable`, `showing`);
+  - кликать по доступным Telegram Desktop controls через `accessibility-click`;
+  - вводить ASCII-текст в accessibility-selected field через `accessibility-type-text`.
 
 ### Безопасность данных Telegram
 - Введены `identity_history.json`, `review.txt`, `conflicts.json` и quarantine-логика.
@@ -142,7 +199,80 @@
   - при открытии такой страницы расширение вызывает `chrome.runtime.reload()` само.
 
 ## Проверено
-- Полный unit-набор сейчас зелёный: `143/143`.
+- После добавления `desktop-add-contact-profile` полный unit-набор снова зелёный: `167/167`.
+- Полный unit-набор сейчас зелёный: `165/165`.
+- После добавления `desktop-send-link` полный unit-набор зелёный: `159/159`.
+- `py_compile` зелёный для `scripts/telegram_portable.py`, `scripts/telegram_invite_manager.py`, `scripts/telegram_invite_executor.py`.
+- `bash -n` зелёный для Telegram GUI/wrapper скриптов invite/portable контура.
+- `git diff --check` зелёный.
+- Live smoke новой команды `desktop-add-contact-profile` на actor `@S_e_r_a_p_h_i_na` (`AK2`) выполнен:
+  - job: `/home/max/telegram_invite_jobs/chat_Zhirotop_shop_AK2`;
+  - execution record: `/home/max/telegram_invite_jobs/chat_Zhirotop_shop_AK2/executions/20260427T131700Z/execution_record.json`;
+  - скриншоты: `desktop_add_contact_profile_before.png`, `desktop_add_contact_profile_after_actions.png`, `desktop_add_contact_profile_verify.png`;
+  - факт: шаги `open profile -> click add -> click done -> reopen profile` выполнены кодом; автоматический strong-signal подтверждения сохранения контакта пока не зафиксирован.
+- Новый live smoke `prepare-add-contact-profile` на actor `AK` (`/home/max/TelegramPortableAK`) для `@super_pavlik` на `2026-05-02` завершился успешной верификацией контакта:
+  - run: `~/.local/share/telegram-sandbox-activity-runner/runs/20260502T064226-de0a009a/`;
+  - итоговый submit-click: `dialog_submit_click = {x_ratio: 0.5576, y_ratio: 0.7611}`;
+  - verify state: `ui_verify_contact_present`;
+  - в profile verify видны `EDIT CONTACT` и `DELETE CONTACT`, а `ADD CONTACT` исчез.
+- `desktop-send-link --dry-run` smoke на текущем job `chat_Zhirotop_shop` подтверждён:
+  - actor: `@M_a_g_g_i_e`;
+  - profile dir: `/home/max/TelegramPortableAK`;
+  - window: `0x0460002e`;
+  - username: `@kamaz_master1`;
+  - URI: `tg://resolve?domain=kamaz_master1`;
+  - message: `https://t.me/Zhirotop_shop`;
+  - отправки не было, state не менялся;
+  - execution record: `/home/max/telegram_invite_jobs/chat_Zhirotop_shop/executions/20260426T074654Z/execution_record.json`.
+- Live one-by-one Desktop send для `@M_a_g_g_i_e -> https://t.me/Zhirotop_shop` выполнен `2026-04-26` после явного подтверждения consent для списка из 29 usernames:
+  - job: `/home/max/telegram_invite_jobs/chat_Zhirotop_shop`;
+  - preflight summary: `/tmp/tg_invite_desktop_preflight_20260426T075806Z.tsv`;
+  - live summary: `/tmp/tg_invite_desktop_live_20260426T075842Z.tsv`;
+  - все 29 новых пользователей прошли `prepare-next` и dry-run;
+  - все 29 live execution records завершились `outcome=sent`, `target_status=sent`;
+  - итоговый state: `sent=29`, `requested=2`;
+  - первый live record: `/home/max/telegram_invite_jobs/chat_Zhirotop_shop/executions/20260426T075842Z/execution_record.json`;
+  - последний live record: `/home/max/telegram_invite_jobs/chat_Zhirotop_shop/executions/20260426T080413Z/execution_record.json`.
+- `log-diagnose` на текущем portable actor `@M_a_g_g_i_e` подтвердил Telegram-side ошибки в `TelegramForcePortable/log.txt`:
+  - `PEER_FLOOD`;
+  - `PEER_ID_INVALID`;
+  - это значит, что внутренний лог пригоден для stop-signal/диагностики, но сам по себе не заменяет командный слой `Add Members`.
+- Новый no-API portable accessibility layer подтверждён live safe-smoke на текущем actor `@M_a_g_g_i_e`:
+  - accessibility dump для `Info`:
+    - `/tmp/tg_portable_accessibility_info_20260426.json`
+  - accessibility dump для `Add members`:
+    - `/tmp/tg_portable_accessibility_add_members_20260426.json`
+  - dry-run executor orchestration:
+    - `/tmp/tg_desktop_open_add_members_dry_20260426.json`
+  - факты:
+    - `Info` виден как AT-SPI `push button` с screen extents;
+    - `Add members` виден в accessibility tree как `push button`, но у самого узла пока `0x0` extents, поэтому helper использует ancestor-based click fallback;
+    - `desktop-open-add-members --dry-run` уже встроен в invite execution flow и использует `tg://resolve?domain=Zhirotop_shop`.
+- Новый no-API keyboard слой для Telegram Desktop подтверждён live на текущем actor `@M_a_g_g_i_e`:
+  - helper получил команду `press-keys`;
+  - исправлен реальный баг в `_send_x11_key_sequence`, из-за которого X11 key path был фактически пустым;
+  - live artifacts:
+    - `/tmp/tg_portable_keyboard_20260426/press_ctrl_f.json`
+    - `/tmp/tg_portable_keyboard_20260426/press_escape_after_ctrl_f.json`
+  - факты:
+    - `Control_L+f` стабильно переводит Telegram Desktop в search layout без клика по правому header;
+    - `Escape` возвращает layout обратно в обычный chat view;
+    - keyboard-path теперь можно использовать как отдельный no-API fallback для дальнейшего direct-add исследования.
+- Для no-API Desktop path добавлены state-aware accessibility dump и Telegram-only screenshot helper:
+  - `accessibility-dump` теперь умеет `--state focused`;
+  - helper получил команду `window-screenshot`, которая снимает PNG по X11 `window_id`, а не bbox активного экрана;
+  - live artifacts:
+    - `/tmp/tg_portable_focus_20260426/summary.json`
+    - `/tmp/tg_portable_focus_cycle_20260426/summary.json`
+    - `/tmp/tg_portable_tabwalk_20260426/summary.json`
+    - `/tmp/tg_portable_click_screens_20260426/summary.json`
+  - факты:
+    - текущий keyboard focus в Telegram ходит в основном между левым global `Search` и `Write a message...`, а не уходит в правый header/sidebar;
+    - `Search messages` accessibility-click на текущем окне визуально не меняет layout;
+    - `Info` и `Chat menu` accessibility-click стабильно открывают pinned messages overlay, а не group info sidebar.
+- После добавления `press-keys`, state-aware dump, `window-screenshot` и live click/focus smoke полный unit-набор снова зелёный: `165/165`; `git diff --check` зелёный.
+- После добавления `prepare-next` полный unit-набор снова зелёный: `148/148`.
+- После добавления portable actor / ensure-portable полный unit-набор был зелёный: `146/146`.
 - После добавления root-entry onboarding-файла полный unit-набор снова зелёный: `143/143`.
 - После расширения `AGENTS.md` до полной capability-map полный unit-набор снова зелёный: `143/143`.
 - После добавления Invite Manager полный unit-набор был зелёный: `117/117`.
@@ -267,9 +397,34 @@
 - Новый `telegram_portable.py` покрыт unit-тестами:
   - `tests/test_telegram_portable.py`
   - `5/5 OK`
+- После добавления `adopt/status/list` и portable actor точечные тесты зелёные:
+  - `tests.test_telegram_portable`
+  - `tests.test_telegram_invite_executor`
+  - `25/25 OK`
 - Для helper'а пройдены:
   - `python3 -m py_compile scripts/telegram_portable.py`
   - `bash -n scripts/telegram_portable_gui.sh`
+- Текущий live portable actor принят в управление:
+  - metadata:
+    - `/home/max/TelegramPortableAK/portable-profile.json`
+  - ensure artifact:
+    - `/tmp/tg_invite_portable_actor_20260426.json`
+  - факты:
+    - `profile_name = AK`;
+    - `account.username = @M_a_g_g_i_e`;
+    - `running = true`;
+    - `pid = 10413`;
+    - X11 window `0x0460002e`;
+    - окно Telegram Desktop открыто на `Жиротоп Shop`.
+- Dry-run `prepare-next` на текущем job подтвердил быстрый pipeline и корректный empty-queue guard:
+  - job:
+    - `/home/max/telegram_invite_jobs/chat_Zhirotop_shop`
+  - artifact:
+    - `/tmp/tg_invite_prepare_next_20260426.json`
+  - факт:
+    - portable actor `@M_a_g_g_i_e` проверен;
+    - команда вернула `status = no_candidates`, потому что текущие 2 пользователя уже `requested`;
+    - новых `new/checked` пользователей сейчас нет.
 - Live smoke нового Telegram portable helper подтверждён:
   - import artifact:
     - `/tmp/tg_portable_smoke_import.json`
@@ -443,13 +598,17 @@
 
 ### 0. Invite execution пока operator-assisted
 Теперь кроме manager/state слоя есть и execution-слой, но он пока безопасно ограничен:
-- configure/plan/open-chat/inspect-chat/add-contact/record/report;
+- configure/plan/open-chat/inspect-chat/add-contact/desktop-add-contact-profile/record/report;
+- portable actor / ensure-portable для Telegram Desktop portable executor identity;
+- prepare-next для быстрого one-user queue/plan/reserve pipeline;
 - `open-chat` уже использует `site-control`;
 - `add-contact` теперь сам пишет verification evidence before/after и умеет подтверждать `joined` по видимому member list;
 - actual Telegram invite action по-прежнему остаётся за оператором.
+- Для `desktop-add-contact-profile` пока нет стабильного machine-check сигнала "контакт точно сохранён" на всех UI-вариантах профиля Telegram Desktop (modal/full-profile), поэтому результат остаётся operator-verified.
 
 Это осознанно:
 - сначала собран надёжный state/reporting/execution каркас;
+- теперь зафиксирован Desktop actor `@M_a_g_g_i_e` для `Zhirotop_shop`;
 - только потом можно делать живой `invite link / join request` orchestration path.
 
 ### 1. Deep mention уже рабочий, но остаётся неоднородным
@@ -473,11 +632,17 @@
 - повторный live smoke `fast` vs `deep`.
 
 ### Для Invite Manager
+- текущий Desktop actor для `Zhirotop_shop` проверяется через `ensure-portable`, а `desktop-send-link` уже закрывает безопасный one-user dry/live path через Telegram Desktop portable;
+- live-отправка всё ещё требует явного `--confirm-send` и consented username; текущая очередь `chat_Zhirotop_shop` пуста для `checked/new`, оба известных пользователя уже `requested`;
+- основной рабочий поток для direct add остаётся через `site-control-kit` / Telegram Web (`open-chat -> inspect-chat -> add-contact`), а Desktop no-API path пока не должен заменять его как primary flow;
+- no-API path для Desktop начат через AT-SPI accessibility layer, но финальный direct-add ещё не закрыт end-to-end;
+- если возвращаться к Desktop-треку позже, сначала нужно стабилизировать вход в реальный `Add Members` search sheet без ручного угадывания hitpoint;
 - вынести подтверждение вступления за пределы текущего видимого member list, если нужный peer не попал в правую панель сразу;
 - по возможности привязать это подтверждение к отдельному Telegram-visible signal, а не только к общему `member_count`;
 - довести безопасный orchestration path через invite links / join requests;
+- следующий Desktop-specific шаг: после добавления нового consented username выполнить `prepare-next`, затем `desktop-send-link --dry-run`, и только по явному операторскому решению `desktop-send-link --confirm-send --record-result`;
 - не делать принудительное массовое добавление пользователей;
-- при первом live-шаге обязательно сохранять `run.json`/`log` аналогично существующим Telegram артефактам.
+- при первом live-шаге обязательно сохранять execution record и зафиксировать его в этом status-файле.
 
 ### 3. Reload helper стал рабочим, но fallback-кнопка ещё зависит от геометрии
 Основной stale-runtime блок снят через self-reload страницы расширения.
@@ -506,6 +671,53 @@
 `export_telegram_members_non_pii.py` всё ещё перегружен ответственностями и требует модульного разделения.
 
 ## Последний Подтверждённый Полезный Результат
+- Для invite/portable трека подтверждён actor binding:
+  - `chat_Zhirotop_shop` теперь хранит `portable_actor` для `@M_a_g_g_i_e`;
+  - `/home/max/TelegramPortableAK` принят в управление через `telegram_portable.py adopt`;
+  - `ensure-portable` подтвердил live process/window:
+    - `/tmp/tg_invite_portable_actor_20260426.json`.
+- Для invite/portable трека подтверждён `desktop-send-link --dry-run`:
+  - actor: `@M_a_g_g_i_e`;
+  - username: `@kamaz_master1`;
+  - execution record: `/home/max/telegram_invite_jobs/chat_Zhirotop_shop/executions/20260426T074654Z/execution_record.json`;
+  - отправки не было, state не менялся.
+- Для invite/portable трека подтверждён live smoke `desktop-add-contact-profile` на `AK2`:
+  - actor: `@S_e_r_a_p_h_i_na`;
+  - username: `@bulan04`;
+  - execution record: `/home/max/telegram_invite_jobs/chat_Zhirotop_shop_AK2/executions/20260427T131700Z/execution_record.json`;
+  - факт: full flow отработал кодом с evidence-скриншотами, но итог "contact saved" пока подтверждается только визуально оператором.
+- Для live invite-link рассылки подтверждён one-by-one Desktop flow:
+  - actor: `@M_a_g_g_i_e`;
+  - target chat: `https://t.me/Zhirotop_shop`;
+  - 29 consented usernames из списка оператора получили live execution records со статусом `sent`;
+  - итоговый state job: `sent=29`, `requested=2`;
+  - summary: `/tmp/tg_invite_desktop_live_20260426T075842Z.tsv`.
+- Для no-API Desktop path подтверждён live accessibility слой на текущем actor:
+  - `/tmp/tg_portable_accessibility_info_20260426.json`
+  - `/tmp/tg_portable_accessibility_add_members_20260426.json`
+  - `/tmp/tg_desktop_open_add_members_dry_20260426.json`
+  - факт: Telegram Desktop на Linux отдаёт `Info` и `Add members` в AT-SPI tree, поэтому следующий direct-add шаг можно делать через код без Telegram API и без blind координат как основного метода.
+- Для no-API Desktop path подтверждён и отдельный keyboard fallback:
+  - `/tmp/tg_portable_keyboard_20260426/press_ctrl_f.json`
+  - `/tmp/tg_portable_keyboard_20260426/press_escape_after_ctrl_f.json`
+  - факт: `press-keys` теперь реально меняет Telegram Desktop layout (`Ctrl+F` открывает search, `Escape` закрывает), значит следующий no-API шаг можно строить не только через click-path, но и через shortcut/focus navigation.
+- Для no-API Desktop path подтверждён Telegram-only screenshot helper и click validation:
+  - `/tmp/tg_portable_click_screens_20260426/baseline.png`
+  - `/tmp/tg_portable_click_screens_20260426/search_messages_click.png`
+  - `/tmp/tg_portable_click_screens_20260426/info_click.png`
+  - `/tmp/tg_portable_click_screens_20260426/summary.json`
+  - факт: `Search messages` accessibility-click на текущем окне визуально ничего не открывает, а `Info` / `Chat menu` воспроизводимо открывают `77 pinned messages`; значит следующий поиск входа в `Add members` нужно вести по другому control-path.
+- Для нового `AK` portable-only add-contact path подтверждён username-safe desktop route:
+  - поиск `@super_pavlik` открывается по `search_result_index = 2`, а не по первому похожему каналу;
+  - клик по заголовку чата (`window-click` на header area) стабильно открывает profile overlay с `ДОБАВИТЬ КОНТАКТ`;
+  - AT-SPI на profile overlay реально отдаёт exact username label `@super_pavlik`, поэтому tool теперь может делать post-open guard "ввели один username -> в профиле видим тот же exact username";
+  - локальные regression checks после этого зелёные:
+    - `python3 -m py_compile /home/max/site-control-kit/scripts/telegram_portable.py`;
+    - `python3 -m unittest /home/max/site-control-kit/tests/test_telegram_portable.py`;
+  - live evidence:
+    - `~/.local/share/telegram-sandbox-activity-runner/runs/20260502T054306-8c3daf4f/`;
+  - остаточный gap:
+    - exact username verification уже проходит, но автоматический клик по `ДОБАВИТЬ КОНТАКТ` в этом path всё ещё не переводит экран в stable `Новый контакт -> Готово`, поэтому последний submit-step пока остаётся недобитым.
 - Живой no-history run на новом runtime подтвердил, что основной export path уже собирает новые `@username` без помощи `identity_history.json` и обрабатывает несколько peer в одном deep-step.
 - Артефакты проверки:
   - `/tmp/tg_live_batch_boost3.7ErTfD/snapshot.md`
@@ -517,11 +729,13 @@
   - это значит, что mention/deep снова приносит новые реальные username, а не только восстанавливает старые знания из истории, и делает это батчем, а не по одному peer.
 
 ## Следующий Приоритет
-1. Снизить runtime-затраты discovery относительно deep, чтобы multi-peer deep чаще успевал проходить следующий слой visible peer.
-2. Поднять приоритеты deep-target'ов: раньше брать тех peer, у кого вероятность успешного `Mention` выше.
-3. Разделить browser capability/runtime compatibility и Telegram export concerns в отдельные модули/слои.
-4. Отделить понятие `best-known latest` от `most-recent run` в UI и документации, если пользователю важно видеть именно последний прогон как основной артефакт.
-5. Декомпозировать `export_telegram_members_non_pii.py` на модули.
+1. Для Invite/Desktop: держать основным рабочим путём `site-control-kit` / Telegram Web flow (`open-chat -> inspect-chat -> add-contact`) и не подменять его Desktop-guessing path.
+2. Для Invite/Desktop: обобщить успешный `desktop-add-contact-profile` smoke с `AK/@super_pavlik` на другие профили и UI-варианты Telegram Desktop, чтобы submit больше не требовал ручной докалибровки по каждому кейсу.
+3. Снизить runtime-затраты discovery относительно deep, чтобы multi-peer deep чаще успевал проходить следующий слой visible peer.
+4. Поднять приоритеты deep-target'ов: раньше брать тех peer, у кого вероятность успешного `Mention` выше.
+5. Разделить browser capability/runtime compatibility и Telegram export concerns в отдельные модули/слои.
+6. Отделить понятие `best-known latest` от `most-recent run` в UI и документации, если пользователю важно видеть именно последний прогон как основной артефакт.
+7. Декомпозировать `export_telegram_members_non_pii.py` на модули.
 
 ## Как Продолжать Следующему Агенту
 1. Прочитать `AGENTS.md`.
