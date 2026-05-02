@@ -44,6 +44,7 @@
 - `START_HERE_AGENT_RU.md`
 - `docs/PROJECT_WORKFLOW_RU.md`
 - `docs/PROJECT_STATUS_RU.md`
+- если задача вообще про текущий Telegram control center / session-runner / portable panel, взять готовый prompt из `tools/telegram/NEXT_CHAT_AGENT_PROMPT_RU.md`
 - если задача про Telegram Invite Manager / Executor, взять готовый prompt из `tools/telegram/invite_manager/NEXT_CHAT_AGENT_PROMPT_RU.md`
 - при необходимости `docs/ARCHITECTURE.md`, `docs/API.md`, `docs/EXTENSION.md`
 

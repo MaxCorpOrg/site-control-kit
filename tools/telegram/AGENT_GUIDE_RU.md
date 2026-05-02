@@ -6,7 +6,8 @@
 
 1. `/home/max/site-control-kit/AGENTS.md`
 2. `/home/max/site-control-kit/docs/PROJECT_STATUS_RU.md`
-3. `/home/max/site-control-kit/tools/telegram/README_RU.md`
+3. `/home/max/site-control-kit/tools/telegram/NEXT_CHAT_AGENT_PROMPT_RU.md`
+4. `/home/max/site-control-kit/tools/telegram/README_RU.md`
 
 Потом открыть нужную ветку:
 - export: `tools/telegram/export/README_RU.md`

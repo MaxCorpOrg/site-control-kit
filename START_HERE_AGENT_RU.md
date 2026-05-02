@@ -48,7 +48,7 @@
 12. если задача про Telegram roadmap/export: `docs/TELEGRAM_CLIENT_ROADMAP_RU.md`
 13. если задача про Linux Telegram Desktop profile из `tdata.zip`: `docs/TELEGRAM_PORTABLE_RU.md`
 14. если задача про Telegram control center или подключение новых инструментов: `tools/telegram/platform/README_RU.md` и `tools/telegram/platform/AGENT_GUIDE_RU.md`
-15. если задача вообще про Telegram operator layer: `tools/telegram/README_RU.md` и `tools/telegram/AGENT_GUIDE_RU.md`
+15. если задача вообще про Telegram operator layer: `tools/telegram/NEXT_CHAT_AGENT_PROMPT_RU.md`, потом `tools/telegram/README_RU.md` и `tools/telegram/AGENT_GUIDE_RU.md`
 
 ## Что Нужно Понять До Любых Правок
 До правок ты обязан ответить себе на четыре вопроса:
@@ -73,7 +73,7 @@ git log --oneline -n 15
 - Telegram invite: `docs/TELEGRAM_INVITE_MANAGER_RU.md` и `docs/TELEGRAM_INVITE_EXECUTOR_RU.md`
 - Telegram Desktop portable: `docs/TELEGRAM_PORTABLE_RU.md`
 - Telegram control center: `tools/telegram/platform/README_RU.md`, `tools/telegram/platform/registry/tools.json`, manifests подключённых инструментов
-- Telegram tools hub: `tools/telegram/README_RU.md`
+- Telegram tools hub: `tools/telegram/NEXT_CHAT_AGENT_PROMPT_RU.md` и `tools/telegram/README_RU.md`
 
 ## Как Правильно Продолжать Работу
 Правильная модель такая:

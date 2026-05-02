@@ -139,6 +139,7 @@
   - `tool_platform/catalog.py`
   - `tool_platform/cli.py`
   - `tool_platform/gui.py`
+  - `tools/telegram/NEXT_CHAT_AGENT_PROMPT_RU.md`
   - `tools/telegram/README_RU.md`
   - `tools/telegram/AGENT_GUIDE_RU.md`
   - `tools/telegram/platform/*`
@@ -170,6 +171,7 @@
   - отдельные инструменты живут сами по себе;
   - общая панель читает manifests и orchestration metadata;
   - session-runner виден из Telegram-хаба как отдельная единица, даже если runtime остаётся в standalone repo.
+  - для нового агента теперь есть отдельная точка входа `tools/telegram/NEXT_CHAT_AGENT_PROMPT_RU.md`, зафиксированная именно на текущем checkpoint.
 
 ### Безопасность данных Telegram
 - Введены `identity_history.json`, `review.txt`, `conflicts.json` и quarantine-логика.
@@ -819,10 +821,11 @@
 2. Прочитать `docs/PROJECT_WORKFLOW_RU.md`.
 3. Прочитать этот файл полностью.
 4. Проверить `git status --short --branch` и `git log --oneline -n 15`.
-5. Если задача про Telegram username, сначала открыть:
+5. Если задача относится к текущему Telegram control center, начать с `tools/telegram/NEXT_CHAT_AGENT_PROMPT_RU.md`.
+6. Если задача про Telegram username, сначала открыть:
    - `latest_full.md`
    - `latest_safe.md`
    - последний `run.json`
    - последний `export.log`
    - `identity_history.json`
-6. Только потом делать правки.
+7. Только потом делать правки.

@@ -18,6 +18,7 @@ cd /home/max/site-control-kit/tools/telegram
 ```
 
 Потом:
+- `NEXT_CHAT_AGENT_PROMPT_RU.md`
 - `platform/README_RU.md`
 - `invite_manager/README.md`
 - `portable_helper/README_RU.md`
@@ -61,3 +62,11 @@ cd /home/max/site-control-kit/tools/telegram
 
 `tools/telegram/` — это операторский и агентский хаб.
 Backend-код по-прежнему может жить в `scripts/`, `tool_platform/` и других проектных слоях, но видимые входные точки Telegram теперь собраны в одном месте.
+
+## Точка Входа Для Следующего Агента
+
+Если нужно продолжить работу ровно с текущего checkpoint, начинать нужно с:
+
+- `tools/telegram/NEXT_CHAT_AGENT_PROMPT_RU.md`
+
+Это не общая справка по проекту, а зафиксированная точка продолжения именно с текущего состояния Telegram control center.
