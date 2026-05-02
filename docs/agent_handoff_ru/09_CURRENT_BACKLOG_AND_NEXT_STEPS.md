@@ -55,19 +55,20 @@
 - `tool_platform/catalog.py`;
 - `tool_platform/cli.py`;
 - `tool_platform/gui.py`;
-- manifests для встроенного `telegram_invite_manager` и внешнего `telegram-portable-session-tool`.
+- manifests для встроенных Telegram workflow и visible wrapper `telegram_session_runner`.
 
 Следующий шаг для этого трека:
 1. подключать новые инструменты через manifests, а не через хардкод GUI;
-2. добавить tool-specific widgets поверх общего catalog там, где это реально помогает оператору;
-3. показывать health/status summaries и последние артефакты прямо в control panel;
-4. не смешивать business-логику отдельных инструментов с platform-слоем.
+2. держать панель простой и profile-first, без разрастания в отдельные экраны под каждый tool;
+3. подставлять выбранный portable-профиль в session/invite workflow без ручного копирования путей;
+4. показывать health/status summaries и последние артефакты прямо в control panel;
+5. не смешивать business-логику отдельных инструментов с platform-слоем.
 
 ## Следующий Приоритет P3
 ### Action-Specific Dashboards
 Теперь общий catalog уже есть.
 Дальше можно делать следующий слой:
-- для некоторых инструментов показывать готовые формы поверх manifest actions;
+- не плодить лишние формы, а добавлять только те shortcut-элементы, которые реально убирают ручной ввод;
 - выводить последние run/job артефакты;
 - делать richer operator summary без потери standalone-режима.
 

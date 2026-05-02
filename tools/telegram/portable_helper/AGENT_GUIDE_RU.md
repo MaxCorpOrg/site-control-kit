@@ -21,5 +21,4 @@
 
 - не держать тут consent/state логику invite flow;
 - не превращать helper в массовый action-runner;
-- если задача уже на invite/session уровне, сначала смотреть `invite_manager` или внешний `telegram-portable-session-tool`.
-
+- если задача уже на invite/session уровне, сначала смотреть `invite_manager` или `tools/telegram/session_runner/`.

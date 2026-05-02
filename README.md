@@ -6,7 +6,7 @@
 - Локальный HTTP-хаб управления (`webcontrol`) с очередью команд и сохранением состояния.
 - CLI (`sitectl` / `python3 -m webcontrol`) для отправки команд и диагностики.
 - Расширение браузера (Manifest V3) для выполнения команд в реальных вкладках.
-- Registry-driven unified tool platform для отдельных operator tools и GUI control panel.
+- Telegram registry-driven control center для operator workflows и GUI panel.
 - Подробная документация для пользователя и ИИ-агентов сопровождения.
 
 ## Быстрый Вход В Браузерный Контур
@@ -57,6 +57,7 @@ browser.cmd open https://example.com
 - `tools/telegram/invite_manager/`
 - `tools/telegram/portable_helper/`
 - `tools/telegram/export/`
+- `tools/telegram/session_runner/`
 
 Это не переносит весь backend-код из `scripts/`, но даёт одну понятную Telegram-точку входа для оператора и агента.
 
@@ -254,9 +255,9 @@ cd /home/max/site-control-kit/tools/telegram/invite_manager
 `run.json` теперь дублирует ключевую телеметрию экспортёра: `unique_members`, `members_with_username`, `chat_scroll_steps_done`, `chat_jump_scrolls_done`, `deep_updated_total`, `history_backfilled_total`, `output_usernames_cleared_total`, `chat_deep_priority_rounds`, `chat_deep_yield_stop`, а полный сырой payload лежит в `export_stats.json`.
 Также в `run.json` есть признаки продвижения/сохранения latest-снимков: `latest_full_promoted`, `latest_safe_promoted`, `latest_full_best_source`, `latest_safe_best_source`.
 
-## Unified Tool Platform
+## Telegram Control Center
 
-Теперь в проекте есть отдельный registry-driven control layer:
+Теперь в проекте есть отдельный registry-driven Telegram control layer:
 
 - [tools/telegram/README_RU.md](tools/telegram/README_RU.md)
 - [tools/telegram/platform/README_RU.md](tools/telegram/platform/README_RU.md)
@@ -267,13 +268,13 @@ cd /home/max/site-control-kit/tools/telegram/invite_manager
 
 Он нужен для двух целей одновременно:
 - сохранять инструменты отдельными единицами;
-- подключать их в единую графическую панель управления.
+- подключать их в одну простую Telegram-панель управления.
 
 Сейчас в registry уже подключены:
 - `telegram_invite_manager` из текущего репозитория;
 - `telegram_portable_helper` из текущего репозитория;
 - `telegram_export` из текущего репозитория;
-- `/home/max/telegram-portable-session-tool` как отдельный standalone-репозиторий.
+- `telegram_session_runner` как visible wrapper вокруг `/home/max/telegram-portable-session-tool`.
 
 Быстрый вход:
 
@@ -285,13 +286,20 @@ cd /home/max/site-control-kit/tools/telegram/platform
 ./bin/tool-platform show-tool --tool-id telegram_invite_manager
 ./bin/tool-platform show-tool --tool-id telegram_portable_helper
 ./bin/tool-platform show-tool --tool-id telegram_export
-./bin/tool-platform show-tool --tool-id telegram_portable_session_tool
+./bin/tool-platform show-tool --tool-id telegram_session_runner
 ./bin/tool-platform-panel
 ```
 
 Новый инструмент добавляется не через хардкод GUI, а через:
 1. собственный `tool_manifest.json`;
 2. запись в `tools/telegram/platform/registry/tools.json`.
+
+Панель сейчас уже умеет:
+- выбирать существующий Telegram portable-профиль из dropdown;
+- показывать статус выбранного пользователя;
+- импортировать нового пользователя по `tdata.zip`;
+- принимать в управление уже существующую portable-папку;
+- показывать компактный список Telegram workflow и их actions.
 
 ## Telegram Desktop Portable на Linux
 

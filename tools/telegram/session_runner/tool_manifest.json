@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "tool_id": "telegram_session_runner",
+  "display_name": "Telegram Session Runner",
+  "description": "Visible site-control-kit wrapper around the standalone Telegram Desktop portable session runner.",
+  "kind": "visible_tool_wrapper",
+  "standalone": true,
+  "root_dir": ".",
+  "docs": [
+    {
+      "doc_id": "readme",
+      "label": "Session Runner README",
+      "path": "README_RU.md"
+    },
+    {
+      "doc_id": "agent_guide",
+      "label": "Session Runner Agent Guide",
+      "path": "AGENT_GUIDE_RU.md"
+    },
+    {
+      "doc_id": "standalone_readme",
+      "label": "Standalone README",
+      "path": "/home/max/telegram-portable-session-tool/README_RU.md"
+    }
+  ],
+  "actions": [
+    {
+      "action_id": "session_help",
+      "label": "Session CLI Help",
+      "description": "Показать help для standalone session-runner CLI.",
+      "argv": [
+        "./bin/telegram-session-runner",
+        "--help"
+      ],
+      "workdir": "."
+    },
+    {
+      "action_id": "sync_preview_example",
+      "label": "Sync Preview Example",
+      "description": "Показать merged targets на example config standalone session-runner.",
+      "argv": [
+        "./bin/telegram-session-runner",
+        "sync-preview",
+        "--config",
+        "/home/max/telegram-portable-session-tool/examples/session.example.json"
+      ],
+      "workdir": "."
+    }
+  ],
+  "capabilities": [
+    "telegram_desktop_portable",
+    "random_walk",
+    "controlled_auto_send",
+    "visible_wrapper"
+  ],
+  "tags": [
+    "telegram",
+    "session",
+    "portable",
+    "wrapper"
+  ],
+  "artifacts": {
+    "standalone_repo": "/home/max/telegram-portable-session-tool",
+    "default_runs_dir": "/home/max/telegram-portable-session-tool/runs"
+  }
+}

@@ -83,6 +83,8 @@ class TelegramPortableTests(unittest.TestCase):
                     download_url=self.mod.DEFAULT_TELEGRAM_LINUX_URL,
                     refresh_runtime=False,
                     launch=False,
+                    account_username="@M_a_g_g_i_e",
+                    account_label="Maggie",
                 ),
             )
 
@@ -97,6 +99,8 @@ class TelegramPortableTests(unittest.TestCase):
             metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
             self.assertEqual(metadata["runtime"]["source"], "archive")
             self.assertEqual(metadata["source_zip"], str(zip_path))
+            self.assertEqual(metadata["account"]["username"], "@M_a_g_g_i_e")
+            self.assertEqual(metadata["account"]["label"], "Maggie")
 
     def test_import_zip_replaces_existing_tdata(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -121,6 +125,8 @@ class TelegramPortableTests(unittest.TestCase):
                     download_url=self.mod.DEFAULT_TELEGRAM_LINUX_URL,
                     refresh_runtime=False,
                     launch=False,
+                    account_username="@M_a_g_g_i_e",
+                    account_label="Maggie",
                 ),
             )
 
@@ -135,6 +141,8 @@ class TelegramPortableTests(unittest.TestCase):
                     download_url=self.mod.DEFAULT_TELEGRAM_LINUX_URL,
                     refresh_runtime=False,
                     launch=False,
+                    account_username=None,
+                    account_label=None,
                 ),
             )
 
@@ -142,6 +150,9 @@ class TelegramPortableTests(unittest.TestCase):
             self.assertEqual(payload["mode"], "updated")
             self.assertEqual((profile_dir / "TelegramForcePortable" / "tdata" / "key_datas").read_text(encoding="utf-8"), "beta")
             self.assertEqual(payload["runtime"]["source"], "cache")
+            metadata = json.loads((profile_dir / "portable-profile.json").read_text(encoding="utf-8"))
+            self.assertEqual(metadata["account"]["username"], "@M_a_g_g_i_e")
+            self.assertEqual(metadata["account"]["label"], "Maggie")
 
     def test_launch_command_reports_already_running(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

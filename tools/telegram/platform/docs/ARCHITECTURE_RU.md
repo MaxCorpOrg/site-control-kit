@@ -19,7 +19,7 @@
 
 Примеры:
 - `tools/telegram/invite_manager`
-- `/home/max/telegram-portable-session-tool`
+- `tools/telegram/session_runner`
 
 ### 2. Manifest
 
@@ -59,7 +59,8 @@ Registry может ссылаться и на локальные manifests, и 
 `tool_platform/gui.py`:
 - показывает зарегистрированные инструменты;
 - отображает docs, actions и capability tags;
-- не знает заранее, какие именно Telegram-инструменты в систему подключены.
+- даёт profile-first управление portable-пользователями;
+- не знает заранее, какие именно Telegram workflow в систему подключены.
 
 ## Ключевой Принцип
 
@@ -77,9 +78,8 @@ new tool
 ## Почему Это Подходит Для Текущей Задачи
 
 Пользователь хотел одновременно:
-- оставить `telegram-portable-session-tool` отдельным инструментом;
+- оставить `telegram-portable-session-tool` отдельным runtime-инструментом;
 - использовать уже существующий `telegram_invite_manager`;
-- получить общую панель управления.
+- получить общую Telegram-панель управления.
 
 Manifest + registry слой решает именно эту задачу.
-

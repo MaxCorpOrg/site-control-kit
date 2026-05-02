@@ -21,7 +21,7 @@ from .catalog import (
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="tool-platform",
-        description="Unified registry-driven control layer for standalone and embedded tools.",
+        description="Registry-driven Telegram control layer for embedded and standalone workflows.",
     )
     parser.add_argument(
         "--registry",
@@ -175,4 +175,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

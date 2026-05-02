@@ -161,14 +161,15 @@ DOM-команды:
 - `dist/` — операторские артефакты, скриншоты, собранный zip расширения и следы упаковочных/ручных smoke-сценариев.
 
 ### 9. Unified tool platform
-Проект теперь умеет держать отдельные инструменты как самостоятельные единицы и одновременно подключать их в общий control layer.
+Проект теперь умеет держать отдельные Telegram workflow как самостоятельные единицы и одновременно подключать их в общий control layer.
 
 Сейчас этот слой уже умеет:
 - читать manifests подключённых инструментов;
-- держать registry embedded и external tools;
+- держать registry embedded tools и visible wrappers;
 - показывать единый catalog через CLI;
 - открывать Tkinter GUI panel без жёсткого хардкода конкретного Telegram-инструмента;
-- подключать внутренние `telegram_invite_manager`, `telegram_portable_helper`, `telegram_export` и внешний `/home/max/telegram-portable-session-tool`.
+- давать profile-first Telegram-панель с dropdown выбора portable-пользователя и импортом по `tdata.zip`;
+- подключать внутренние `telegram_invite_manager`, `telegram_portable_helper`, `telegram_export` и visible wrapper `tools/telegram/session_runner/`.
 
 Основные файлы:
 - `tool_platform/catalog.py`

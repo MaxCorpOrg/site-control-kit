@@ -4,9 +4,16 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from tool_platform.catalog import find_action, find_tool, load_catalog
 from tool_platform.cli import execute_action
+from tool_platform.telegram_profiles import (
+    adopt_existing_profile,
+    format_profile_label,
+    import_tdata_profile,
+    list_portable_profiles,
+)
 
 
 class ToolPlatformCatalogTests(unittest.TestCase):
@@ -170,6 +177,82 @@ class ToolPlatformCatalogTests(unittest.TestCase):
 
             self.assertEqual(result["status"], "dry_run")
             self.assertIn("echo hello", result["command"])
+
+    def test_format_profile_label_prefers_account_label_and_running_state(self) -> None:
+        self.assertEqual(
+            format_profile_label(
+                {
+                    "profile_name": "AK",
+                    "account": {
+                        "label": "@M_a_g_g_i_e",
+                    },
+                    "running": True,
+                }
+            ),
+            "@M_a_g_g_i_e (AK) [running]",
+        )
+
+    def test_list_portable_profiles_sorts_running_first(self) -> None:
+        completed = mock.Mock(
+            returncode=0,
+            stdout=json.dumps(
+                {
+                    "profiles": [
+                        {"profile_name": "B", "running": False},
+                        {"profile_name": "A", "running": True},
+                    ]
+                }
+            ),
+            stderr="",
+        )
+        with mock.patch("tool_platform.telegram_profiles.subprocess.run", return_value=completed):
+            profiles = list_portable_profiles("/tmp/profiles")
+
+        self.assertEqual([item["profile_name"] for item in profiles], ["A", "B"])
+
+    def test_import_tdata_profile_passes_account_arguments(self) -> None:
+        completed = mock.Mock(
+            returncode=0,
+            stdout=json.dumps({"status": "completed", "profile_dir": "/tmp/TelegramPortable-AK"}),
+            stderr="",
+        )
+        with mock.patch("tool_platform.telegram_profiles.subprocess.run", return_value=completed) as run_mock:
+            result = import_tdata_profile(
+                zip_path="/tmp/ak.zip",
+                output_root="/tmp",
+                profile_name="AK",
+                account_username="@M_a_g_g_i_e",
+                account_label="Maggie",
+                launch=True,
+            )
+
+        argv = run_mock.call_args.args[0]
+        self.assertIn("--account-username", argv)
+        self.assertIn("--account-label", argv)
+        self.assertIn("--launch", argv)
+        self.assertEqual(result["status"], "completed")
+
+    def test_adopt_existing_profile_passes_optional_account_fields(self) -> None:
+        completed = mock.Mock(
+            returncode=0,
+            stdout=json.dumps({"status": "completed", "profile_dir": "/tmp/TelegramPortableAK"}),
+            stderr="",
+        )
+        with mock.patch("tool_platform.telegram_profiles.subprocess.run", return_value=completed) as run_mock:
+            adopt_existing_profile(
+                profile_dir="/tmp/TelegramPortableAK",
+                profile_name="AK",
+                account_username="@M_a_g_g_i_e",
+                account_label="Maggie",
+            )
+
+        argv = run_mock.call_args.args[0]
+        self.assertEqual(
+            argv[1],
+            str((Path(__file__).resolve().parents[1] / "scripts" / "telegram_portable.py")),
+        )
+        self.assertIn("--account-username", argv)
+        self.assertIn("--account-label", argv)
 
 
 if __name__ == "__main__":

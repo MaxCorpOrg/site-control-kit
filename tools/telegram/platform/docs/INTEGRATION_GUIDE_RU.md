@@ -46,7 +46,7 @@
 }
 ```
 
-Для отдельного внешнего репозитория допустим absolute path.
+Для отдельного runtime-репозитория допустим absolute path, но предпочтительнее visible wrapper внутри `tools/telegram/`, если инструмент должен быть виден оператору рядом с остальными Telegram workflow.
 
 ### Шаг 3. Проверить platform layer
 
@@ -71,9 +71,9 @@ cd /home/max/site-control-kit/tools/telegram/platform
 
 - `tools/telegram/invite_manager/tool_manifest.json`
 
-### External Standalone Tool
+### Visible Wrapper Around Standalone Tool
 
-- `/home/max/telegram-portable-session-tool/tool_manifest.json`
+- `tools/telegram/session_runner/tool_manifest.json`
 
 ## Как Думать О Масштабировании
 
@@ -81,4 +81,3 @@ cd /home/max/site-control-kit/tools/telegram/platform
 - собственная папка или репозиторий;
 - свой manifest;
 - одна запись в registry.
-

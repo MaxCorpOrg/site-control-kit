@@ -1,23 +1,23 @@
-# Tool Platform
+# Telegram Control Center
 
-Видимая папка unified platform внутри `site-control-kit`.
+Видимая папка Telegram control center внутри `site-control-kit`.
 
-Эта платформа не заменяет существующие инструменты.
-Её задача другая:
+Этот слой не заменяет существующие инструменты.
+Его задача другая:
 - держать registry подключённых инструментов;
-- уметь подключать и embedded-модули из `site-control-kit`, и внешние standalone-репозитории;
-- давать общую точку входа для оператора и агента;
-- открывать графическую control panel без ручной склейки каждого нового инструмента.
+- давать одну простую Telegram-точку входа для оператора и агента;
+- открывать графическую panel без раздувания в сложные tool-specific экраны;
+- позволять выбирать пользователя из списка portable-профилей и добавлять новых по `tdata.zip`.
 
 ## Что Уже Подключено
 
 - `telegram_invite_manager` из текущего репозитория;
 - `telegram_portable_helper` как low-level embedded helper;
 - `telegram_export` как embedded export pipeline;
-- `telegram_portable_session_tool` как отдельный внешний репозиторий `/home/max/telegram-portable-session-tool`.
+- `telegram_session_runner` как visible wrapper вокруг `/home/max/telegram-portable-session-tool`.
 
-Оба инструмента продолжают жить как отдельные единицы.
-Платформа только регистрирует их manifests и показывает единый catalog.
+Все workflow продолжают жить как отдельные единицы.
+Control center только регистрирует manifests и даёт общую Telegram-панель.
 
 ## Структура
 
@@ -38,9 +38,17 @@ cd /home/max/site-control-kit/tools/telegram/platform
 ./bin/tool-platform show-tool --tool-id telegram_invite_manager
 ./bin/tool-platform show-tool --tool-id telegram_portable_helper
 ./bin/tool-platform show-tool --tool-id telegram_export
-./bin/tool-platform show-tool --tool-id telegram_portable_session_tool
+./bin/tool-platform show-tool --tool-id telegram_session_runner
 ./bin/tool-platform-panel
 ```
+
+Что умеет панель сейчас:
+- показывает список уже существующих Telegram portable-пользователей;
+- даёт выбрать нужного пользователя из dropdown;
+- показывает статус выбранного профиля;
+- умеет импортировать новый профиль по `tdata.zip`;
+- умеет принять в управление уже существующую portable-папку;
+- справа оставляет компактный список Telegram workflow и их actions.
 
 ## Что Даёт Registry
 
@@ -59,5 +67,5 @@ cd /home/max/site-control-kit/tools/telegram/platform
 
 ## Граница
 
-Этот слой не должен превращаться в новую бизнес-логику Telegram.
-Он остаётся orchestration/catalog слоем поверх уже существующих отдельных инструментов.
+Этот слой не должен превращаться в место, где живёт runtime конкретного Telegram workflow.
+Он остаётся orchestration/catalog слоем плюс простой profile-first panel поверх уже существующих инструментов.

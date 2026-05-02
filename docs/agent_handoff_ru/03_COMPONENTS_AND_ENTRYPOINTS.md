@@ -138,6 +138,7 @@ CLI unified platform.
 Tkinter graphical control panel.
 Делает:
 - единый каталог инструментов;
+- profile-first управление Telegram portable-пользователями;
 - показ docs, actions, artifacts и capability tags;
 - запуск безопасных зарегистрированных actions без хардкода конкретного инструмента.
 

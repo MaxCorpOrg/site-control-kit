@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SESSION_REPO="/home/max/telegram-portable-session-tool"
+
+if [[ ! -d "$SESSION_REPO" ]]; then
+  echo "Session runner repo not found: $SESSION_REPO" >&2
+  exit 1
+fi
+
+cd "$SESSION_REPO"
+exec python3 -m telegram_portable_session_tool.cli "$@"

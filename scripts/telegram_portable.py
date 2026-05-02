@@ -1703,6 +1703,8 @@ def import_zip(
     download_url: str,
     refresh_runtime: bool,
     launch_after_import: bool,
+    account_username: str | None,
+    account_label: str | None,
 ) -> dict[str, Any]:
     zip_path = zip_path.expanduser().resolve()
     if not zip_path.is_file():
@@ -1711,6 +1713,7 @@ def import_zip(
     safe_profile_name = sanitize_profile_name(profile_name)
     target_dir = profile_dir_for(output_root, safe_profile_name)
     target_existed = target_dir.exists()
+    existing_metadata = read_profile_metadata(target_dir) if target_existed else {}
     if target_existed:
         running_pids = find_running_pids(target_dir / "Telegram")
         if running_pids:
@@ -1756,6 +1759,20 @@ def import_zip(
             "source": str(runtime_info["source"]),
         },
     }
+    existing_account = (
+        existing_metadata.get("account")
+        if isinstance(existing_metadata.get("account"), dict)
+        else {}
+    )
+    account: dict[str, Any] = {}
+    if existing_account:
+        account.update(existing_account)
+    if account_username:
+        account["username"] = str(account_username).strip()
+    if account_label:
+        account["label"] = str(account_label).strip()
+    if account:
+        metadata["account"] = account
     metadata_path = write_profile_metadata(target_dir, metadata)
 
     launch_result = {"status": "not_requested"}
@@ -1788,6 +1805,8 @@ def command_import_zip(args: argparse.Namespace) -> int:
         download_url=args.download_url,
         refresh_runtime=bool(args.refresh_runtime),
         launch_after_import=bool(args.launch),
+        account_username=getattr(args, "account_username", None),
+        account_label=getattr(args, "account_label", None),
     )
     _print_json(payload)
     return 0
@@ -1982,6 +2001,8 @@ def build_parser() -> argparse.ArgumentParser:
     import_parser.add_argument("--download-url", default=DEFAULT_TELEGRAM_LINUX_URL)
     import_parser.add_argument("--refresh-runtime", action="store_true", help="Re-download or re-import the runtime into the cache.")
     import_parser.add_argument("--launch", action="store_true", help="Launch the imported portable profile after extracting it.")
+    import_parser.add_argument("--account-username", help="Optional Telegram account username to save into portable-profile metadata.")
+    import_parser.add_argument("--account-label", help="Optional human label for the imported Telegram account.")
     import_parser.set_defaults(func=command_import_zip)
 
     launch_parser = subparsers.add_parser("launch", help="Launch an existing Telegram portable profile.")

@@ -159,7 +159,7 @@ def load_catalog(registry_path: str | Path = DEFAULT_REGISTRY_PATH) -> ToolCatal
         )
     catalog = ToolCatalog(
         registry_path=resolved_registry_path,
-        platform_name=str(payload.get("platform_name", "Tool Platform")),
+        platform_name=str(payload.get("platform_name", "Telegram Control Center")),
         tools=tuple(tools),
     )
     validate_catalog(catalog)

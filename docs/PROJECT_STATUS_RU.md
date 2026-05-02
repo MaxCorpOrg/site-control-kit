@@ -144,26 +144,32 @@
   - `tools/telegram/platform/*`
   - `tools/telegram/export/*`
   - `tools/telegram/portable_helper/*`
+  - `tools/telegram/session_runner/*`
 - Платформа уже умеет:
-  - подключать embedded и external инструменты через `tool_manifest.json`;
+  - подключать embedded инструменты и visible wrappers через `tool_manifest.json`;
   - валидировать registry;
   - показывать единый catalog через CLI;
   - открывать Tkinter control panel с docs, actions и artifacts;
-  - не хардкодить список Telegram-инструментов в GUI.
+  - не хардкодить список Telegram-инструментов в GUI;
+  - показывать portable-пользователей в dropdown;
+  - импортировать нового пользователя по `tdata.zip`;
+  - принимать в управление уже существующую portable-папку через adopt прямо из панели.
 - Отдельно собран новый видимый Telegram tools hub:
   - `tools/telegram/`
   - `platform/`
   - `invite_manager/`
   - `portable_helper/`
+  - `session_runner/`
   - `export/`
 - В registry уже подключены:
   - `tools/telegram/invite_manager/tool_manifest.json`;
   - `tools/telegram/portable_helper/tool_manifest.json`;
   - `tools/telegram/export/tool_manifest.json`;
-  - `/home/max/telegram-portable-session-tool/tool_manifest.json`.
+  - `tools/telegram/session_runner/tool_manifest.json`.
 - Это зафиксировало новый рабочий контракт:
   - отдельные инструменты живут сами по себе;
-  - общая панель только читает manifests и orchestration metadata.
+  - общая панель читает manifests и orchestration metadata;
+  - session-runner виден из Telegram-хаба как отдельная единица, даже если runtime остаётся в standalone repo.
 
 ### Безопасность данных Telegram
 - Введены `identity_history.json`, `review.txt`, `conflicts.json` и quarantine-логика.
@@ -232,15 +238,15 @@
 ## Проверено
 - Для нового unified tool platform зелёные:
   - `PYTHONPATH="$PWD" python3 -m unittest discover -s tests -p 'test_*.py'`
-  - `python3 -m py_compile tool_platform/*.py scripts/telegram_invite_executor.py`
-  - `bash -n tools/telegram/platform/bin/tool-platform tools/telegram/platform/bin/tool-platform-panel tools/telegram/invite_manager/bin/telegram-invite-manager tools/telegram/invite_manager/bin/telegram-invite-executor tools/telegram/portable_helper/bin/telegram-portable tools/telegram/portable_helper/bin/telegram-portable-gui tools/telegram/export/bin/telegram-exporter tools/telegram/export/bin/telegram-export-chain tools/telegram/export/bin/telegram-export-batch scripts/telegram_invite_executor_gui.sh`
+  - `python3 -m py_compile tool_platform/*.py scripts/telegram_invite_executor.py scripts/telegram_portable.py`
+  - `bash -n tools/telegram/platform/bin/tool-platform tools/telegram/platform/bin/tool-platform-panel tools/telegram/invite_manager/bin/telegram-invite-manager tools/telegram/invite_manager/bin/telegram-invite-executor tools/telegram/portable_helper/bin/telegram-portable tools/telegram/portable_helper/bin/telegram-portable-gui tools/telegram/export/bin/telegram-exporter tools/telegram/export/bin/telegram-export-chain tools/telegram/export/bin/telegram-export-batch tools/telegram/session_runner/bin/telegram-session-runner scripts/telegram_invite_executor_gui.sh`
   - `./tools/telegram/platform/bin/tool-platform validate-registry`
   - `./tools/telegram/platform/bin/tool-platform list-tools`
 - Registry подтвердил подключение двух инструментов:
   - embedded `telegram_invite_manager`;
   - embedded `telegram_portable_helper`;
   - embedded `telegram_export`;
-  - external `telegram_portable_session_tool`.
+  - visible wrapper `telegram_session_runner`.
 - После добавления `desktop-add-contact-profile` полный unit-набор снова зелёный: `167/167`.
 - Полный unit-набор сейчас зелёный: `165/165`.
 - После добавления `desktop-send-link` полный unit-набор зелёный: `159/159`.
@@ -666,13 +672,13 @@
 
 Следующий резерв уже не в починке path, а в общем балансе runtime между discovery и deep на длинных прогонах.
 
-### 3. Unified tool platform пока остаётся catalog/action слоем
-Новая панель уже умеет подключать отдельные инструменты и показывать их manifests.
-Но она пока не даёт полноценные tool-specific forms и не показывает rich live summaries по job/run артефактам.
+### 3. Telegram control center уже стал profile-first, но ещё не знает workflow context
+Новая панель уже умеет выбирать portable-пользователя из dropdown, импортировать его по `tdata.zip` и принимать в управление существующие папки.
+Но она пока ещё не подставляет выбранный профиль прямо в команды invite/session/export и не показывает rich live summaries по job/run артефактам.
 
 Это нормально для первого шага:
 - сначала нужен стабильный manifest/registry contract;
-- потом можно делать richer dashboards поверх него.
+- потом можно добавлять profile-aware shortcuts и summaries поверх него.
 
 ## Следующий Приоритет
 
@@ -697,7 +703,8 @@
 ### Для Unified Tool Platform
 - держать registry-driven слой тонким и не переносить туда Telegram-specific business logic;
 - подключать новые инструменты через `tool_manifest.json`, а не через ручную прошивку в GUI;
-- следующим шагом можно добавить tool-specific forms и summaries для последних job/run artifacts.
+- следующим шагом подставлять выбранный portable-профиль в запуск session/invite workflow без ручного копирования пути;
+- потом показывать summaries для последних job/run artifacts без разрастания панели в сложный конструктор экранов.
 
 ### 4. Reload helper стал рабочим, но fallback-кнопка ещё зависит от геометрии
 Основной stale-runtime блок снят через self-reload страницы расширения.
@@ -781,11 +788,12 @@
     - `/home/max/site-control-kit/tools/telegram/invite_manager/tool_manifest.json`;
     - `/home/max/site-control-kit/tools/telegram/portable_helper/tool_manifest.json`;
     - `/home/max/site-control-kit/tools/telegram/export/tool_manifest.json`;
-    - `/home/max/telegram-portable-session-tool/tool_manifest.json`;
+    - `/home/max/site-control-kit/tools/telegram/session_runner/tool_manifest.json`;
   - факт:
-    - отдельный `telegram-portable-session-tool` остался standalone-репозиторием;
-    - встроенные `telegram_invite_manager`, `telegram_portable_helper` и `telegram_export` собраны в `tools/telegram/`;
-    - общая панель теперь видит все эти инструменты как единый catalog.
+    - отдельный `telegram-portable-session-tool` остался standalone-репозиторием, но теперь виден через `tools/telegram/session_runner/`;
+    - встроенные `telegram_invite_manager`, `telegram_portable_helper`, `telegram_export` и visible wrapper `telegram_session_runner` собраны в `tools/telegram/`;
+    - общая панель теперь видит все эти workflow как единый Telegram catalog;
+    - панель уже умеет выбирать пользователя из списка portable-профилей и добавлять нового по `tdata.zip`.
 - Живой no-history run на новом runtime подтвердил, что основной export path уже собирает новые `@username` без помощи `identity_history.json` и обрабатывает несколько peer в одном deep-step.
 - Артефакты проверки:
   - `/tmp/tg_live_batch_boost3.7ErTfD/snapshot.md`
@@ -804,7 +812,7 @@
 5. Разделить browser capability/runtime compatibility и Telegram export concerns в отдельные модули/слои.
 6. Отделить понятие `best-known latest` от `most-recent run` в UI и документации, если пользователю важно видеть именно последний прогон как основной артефакт.
 7. Декомпозировать `export_telegram_members_non_pii.py` на модули.
-8. Для unified tool platform поверх общего catalog добавить richer dashboards, если оператору понадобятся отдельные формы и live artifact summaries.
+8. Для Telegram control center добавить profile-aware shortcuts и richer artifact summaries, если оператору понадобятся live status без ручного копирования путей.
 
 ## Как Продолжать Следующему Агенту
 1. Прочитать `AGENTS.md`.
