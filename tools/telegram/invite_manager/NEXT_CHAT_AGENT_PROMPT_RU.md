@@ -21,15 +21,15 @@
    - /home/max/site-control-kit/docs/PROJECT_STATUS_RU.md
    - /home/max/site-control-kit/docs/TELEGRAM_INVITE_MANAGER_RU.md
    - /home/max/site-control-kit/docs/TELEGRAM_INVITE_EXECUTOR_RU.md
-   - /home/max/site-control-kit/tools/telegram_invite_manager/README.md
-   - /home/max/site-control-kit/tools/telegram_invite_manager/AGENT_GUIDE_RU.md
-   - /home/max/site-control-kit/tools/telegram_invite_manager/ONE_USER_FLOW_RU.md
+   - /home/max/site-control-kit/tools/telegram/invite_manager/README.md
+   - /home/max/site-control-kit/tools/telegram/invite_manager/AGENT_GUIDE_RU.md
+   - /home/max/site-control-kit/tools/telegram/invite_manager/ONE_USER_FLOW_RU.md
    - /home/max/site-control-kit/docs/agent_handoff_ru/00_START_HERE.md
    - затем handoff-пакет по номерам до 10 включительно
 
 Что где лежит:
 - Код проекта: /home/max/site-control-kit
-- Видимая папка invite-инструмента: /home/max/site-control-kit/tools/telegram_invite_manager
+- Видимая папка invite-инструмента: /home/max/site-control-kit/tools/telegram/invite_manager
 - Основной код invite-инструмента:
   - /home/max/site-control-kit/scripts/telegram_invite_manager.py
   - /home/max/site-control-kit/scripts/telegram_invite_executor.py
@@ -51,7 +51,7 @@
   - docs/TELEGRAM_INVITE_EXECUTOR_RU.md
   - docs/PROJECT_STATUS_RU.md
   - docs/agent_handoff_ru/*
-  - tools/telegram_invite_manager/*
+  - tools/telegram/invite_manager/*
 - Не трогай без явной необходимости:
   - /home/max/.site-control-kit
   - /home/max/.cache/site-control-kit
@@ -103,7 +103,7 @@
 
 Обязательные проверки после правок:
 - python3 -m py_compile scripts/telegram_invite_manager.py scripts/telegram_invite_executor.py
-- bash -n scripts/telegram_invite_manager_gui.sh scripts/telegram_invite_executor_gui.sh scripts/telegram_invite_gui_common.sh tools/telegram_invite_manager/bin/telegram-invite-manager tools/telegram_invite_manager/bin/telegram-invite-executor tools/telegram_invite_manager/bin/gui-manager tools/telegram_invite_manager/bin/gui-executor
+- bash -n scripts/telegram_invite_manager_gui.sh scripts/telegram_invite_executor_gui.sh scripts/telegram_invite_gui_common.sh tools/telegram/invite_manager/bin/telegram-invite-manager tools/telegram/invite_manager/bin/telegram-invite-executor tools/telegram/invite_manager/bin/gui-manager tools/telegram/invite_manager/bin/gui-executor
 - PYTHONPATH="$PWD" python3 -m unittest discover -s tests -p 'test_*.py'
 
 Если задача упирается в live browser bridge:

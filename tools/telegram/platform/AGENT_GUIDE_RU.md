@@ -4,7 +4,7 @@
 
 ## Что Это За Слой
 
-`tools/tool_platform` — это registry-driven control layer для локальных operator tools.
+`tools/telegram/platform` — это registry-driven control layer для локальных operator tools.
 
 Он нужен, чтобы:
 - отдельные инструменты оставались самостоятельными;
@@ -43,5 +43,5 @@
 Если появится ещё один локальный инструмент, правильный путь:
 - сохранить его как отдельную единицу;
 - дать ему свой manifest;
-- зарегистрировать его в `tools/tool_platform/registry/tools.json`.
+- зарегистрировать его в `tools/telegram/platform/registry/tools.json`.
 

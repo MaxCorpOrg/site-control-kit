@@ -38,8 +38,8 @@ PYTHONPATH="$PWD" python3 -m webcontrol browser tabs
 Перед invite-правками прочитать:
 
 ```bash
-sed -n '1,260p' tools/telegram_invite_manager/AGENT_GUIDE_RU.md
-sed -n '1,260p' tools/telegram_invite_manager/ONE_USER_FLOW_RU.md
+sed -n '1,260p' tools/telegram/invite_manager/AGENT_GUIDE_RU.md
+sed -n '1,260p' tools/telegram/invite_manager/ONE_USER_FLOW_RU.md
 sed -n '1,260p' docs/TELEGRAM_INVITE_EXECUTOR_RU.md
 ```
 

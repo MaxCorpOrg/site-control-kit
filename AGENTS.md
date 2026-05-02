@@ -138,7 +138,7 @@ DOM-команды:
 - `scripts/telegram_invite_executor.py`
 - `scripts/telegram_invite_executor_gui.sh`
 - `scripts/telegram_invite_gui_common.sh`
-- `tools/telegram_invite_manager/*`
+- `tools/telegram/invite_manager/*`
 
 ### 7. Telegram Desktop portable stack
 Проект уже умеет:
@@ -152,6 +152,7 @@ DOM-команды:
 - `scripts/telegram_portable.py`
 - `scripts/telegram_portable_gui.sh`
 - `docs/TELEGRAM_PORTABLE_RU.md`
+- `tools/telegram/portable_helper/*`
 
 ### 8. Дополнительные прикладные утилиты
 В проекте есть и более узкие вспомогательные инструменты:
@@ -167,14 +168,15 @@ DOM-команды:
 - держать registry embedded и external tools;
 - показывать единый catalog через CLI;
 - открывать Tkinter GUI panel без жёсткого хардкода конкретного Telegram-инструмента;
-- подключать как внутренний `telegram_invite_manager`, так и внешний `/home/max/telegram-portable-session-tool`.
+- подключать внутренние `telegram_invite_manager`, `telegram_portable_helper`, `telegram_export` и внешний `/home/max/telegram-portable-session-tool`.
 
 Основные файлы:
 - `tool_platform/catalog.py`
 - `tool_platform/cli.py`
 - `tool_platform/gui.py`
-- `tools/tool_platform/*`
-- `tools/telegram_invite_manager/tool_manifest.json`
+- `tools/telegram/*`
+- `tools/telegram/platform/*`
+- `tools/telegram/invite_manager/tool_manifest.json`
 
 ### 10. Документация и operator knowledge base
 Помимо кода, в проекте уже есть рабочая база знаний, по которой агент должен быстро понять нужный контур:
@@ -216,16 +218,16 @@ DOM-команды:
   сначала смотреть `browser x11-click`, `browser x11-keys`, `scripts/reload_bridge_extension.sh`.
 
 - Telegram usernames export / chain / safe snapshots / deep-path:
-  идти в экспортёрный стек, а не в invite/portable code.
+  идти в экспортёрный стек и видимую папку `tools/telegram/export/`, а не в invite/portable code.
 
 - Consent-based Telegram invite execution:
-  идти в `telegram_invite_manager.py` и `telegram_invite_executor.py`, а не в экспортёр.
+  идти в `telegram_invite_manager.py`, `telegram_invite_executor.py` и `tools/telegram/invite_manager/`, а не в экспортёр.
 
 - Linux Telegram Desktop из `tdata.zip`:
-  идти в `telegram_portable.py`, а не в browser bridge или Telegram Web code.
+  идти в `telegram_portable.py` и `tools/telegram/portable_helper/`, а не в browser bridge или Telegram Web code.
 
 - Unified tool platform / graphical control panel / manifests:
-  идти в `tool_platform/*.py`, `tools/tool_platform/*` и `tool_manifest.json` соответствующего инструмента, а не вшивать новый модуль прямо в существующий GUI.
+  идти в `tool_platform/*.py`, `tools/telegram/platform/*`, `tools/telegram/*` и `tool_manifest.json` соответствующего инструмента, а не вшивать новый модуль прямо в существующий GUI.
 
 - Визуальное наблюдение и ручной browser recovery:
   смотреть `start_browser_novnc.sh` / `stop_browser_novnc.sh`.
@@ -254,7 +256,8 @@ DOM-команды:
 11. `docs/EXTENSION.md` — где реализованы background- и DOM-команды.
 12. Для Telegram-задач дополнительно: `docs/TELEGRAM_CLIENT_ROADMAP_RU.md`.
 13. Для задач про Linux Telegram Desktop portable-профили и `tdata.zip` дополнительно: `docs/TELEGRAM_PORTABLE_RU.md`.
-14. Для задач про unified tool platform дополнительно: `tools/tool_platform/README_RU.md` и `tools/tool_platform/AGENT_GUIDE_RU.md`.
+14. Для задач про unified tool platform дополнительно: `tools/telegram/platform/README_RU.md` и `tools/telegram/platform/AGENT_GUIDE_RU.md`.
+15. Для Telegram-operator структуры в целом дополнительно: `tools/telegram/README_RU.md` и `tools/telegram/AGENT_GUIDE_RU.md`.
 
 Запрещено начинать изменения в коде, не просмотрев `docs/PROJECT_STATUS_RU.md`. Этот файл нужен, чтобы новый чат или новый агент не дублировал уже закрытые задачи и видел текущие дыры.
 
@@ -383,7 +386,8 @@ DOM-команды:
 - `extension/content.js` — DOM-команды, чтение страницы, click/fill/wait/text/html/js.
 - `scripts/*.cmd`, `scripts/*.ps1` — Windows-вход и удобство использования.
 - `tool_platform/*.py` — registry, manifest loader, unified CLI и GUI control panel.
-- `tools/tool_platform/*` — видимая папка platform-layer, registry и документация.
+- `tools/telegram/*` — единый видимый Telegram tools hub.
+- `tools/telegram/platform/*` — видимая папка platform-layer, registry и документация.
 
 ## Инварианты
 - Хаб — единственный источник правды по клиентам, очередям и результатам.

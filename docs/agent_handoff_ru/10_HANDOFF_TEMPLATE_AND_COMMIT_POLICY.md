@@ -51,6 +51,6 @@
 - потом пройти по всему пакету по номерам
 
 Если задача именно по Telegram Invite Manager / Executor, можно сразу дать агенту готовый prompt:
-- `tools/telegram_invite_manager/NEXT_CHAT_AGENT_PROMPT_RU.md`
+- `tools/telegram/invite_manager/NEXT_CHAT_AGENT_PROMPT_RU.md`
 
 Это даёт будущему агенту предсказуемый onboarding без восстановления контекста по кускам.

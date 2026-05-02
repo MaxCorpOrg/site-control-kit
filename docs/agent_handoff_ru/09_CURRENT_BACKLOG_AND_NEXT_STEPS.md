@@ -51,7 +51,7 @@
 ## Отдельный Трек: Unified Tool Platform
 
 Первый registry-driven control layer теперь уже существует:
-- `tools/tool_platform/registry/tools.json`;
+- `tools/telegram/platform/registry/tools.json`;
 - `tool_platform/catalog.py`;
 - `tool_platform/cli.py`;
 - `tool_platform/gui.py`;

@@ -25,11 +25,11 @@
 
 ### Telegram Invite Manager
 - Добавлена видимая папка инструмента:
-  - `tools/telegram_invite_manager/`
-  - `tools/telegram_invite_manager/AGENT_GUIDE_RU.md`
-  - `tools/telegram_invite_manager/ONE_USER_FLOW_RU.md`
-  - `tools/telegram_invite_manager/NEXT_CHAT_AGENT_PROMPT_RU.md`
-  - `tools/telegram_invite_manager/bin/*`
+  - `tools/telegram/invite_manager/`
+  - `tools/telegram/invite_manager/AGENT_GUIDE_RU.md`
+  - `tools/telegram/invite_manager/ONE_USER_FLOW_RU.md`
+  - `tools/telegram/invite_manager/NEXT_CHAT_AGENT_PROMPT_RU.md`
+  - `tools/telegram/invite_manager/bin/*`
 - Добавлен новый безопасный инструмент `scripts/telegram_invite_manager.py`.
 - Он не делает массовый инвайт и не обходит лимиты Telegram.
 - На текущем этапе это stateful manager для consent-based invite workflow:
@@ -104,7 +104,7 @@
   - account: `@M_a_g_g_i_e`;
   - target: `https://t.me/Zhirotop_shop`.
 - Для следующего чата зафиксирован отдельный copy-paste prompt:
-  - `tools/telegram_invite_manager/NEXT_CHAT_AGENT_PROMPT_RU.md`
+  - `tools/telegram/invite_manager/NEXT_CHAT_AGENT_PROMPT_RU.md`
   - он задаёт новому агенту стартовую точку, границы редактирования и обязательный порядок чтения.
 
 ### Telegram Desktop portable helper
@@ -139,15 +139,27 @@
   - `tool_platform/catalog.py`
   - `tool_platform/cli.py`
   - `tool_platform/gui.py`
-  - `tools/tool_platform/*`
+  - `tools/telegram/README_RU.md`
+  - `tools/telegram/AGENT_GUIDE_RU.md`
+  - `tools/telegram/platform/*`
+  - `tools/telegram/export/*`
+  - `tools/telegram/portable_helper/*`
 - Платформа уже умеет:
   - подключать embedded и external инструменты через `tool_manifest.json`;
   - валидировать registry;
   - показывать единый catalog через CLI;
   - открывать Tkinter control panel с docs, actions и artifacts;
   - не хардкодить список Telegram-инструментов в GUI.
+- Отдельно собран новый видимый Telegram tools hub:
+  - `tools/telegram/`
+  - `platform/`
+  - `invite_manager/`
+  - `portable_helper/`
+  - `export/`
 - В registry уже подключены:
-  - `tools/telegram_invite_manager/tool_manifest.json`;
+  - `tools/telegram/invite_manager/tool_manifest.json`;
+  - `tools/telegram/portable_helper/tool_manifest.json`;
+  - `tools/telegram/export/tool_manifest.json`;
   - `/home/max/telegram-portable-session-tool/tool_manifest.json`.
 - Это зафиксировало новый рабочий контракт:
   - отдельные инструменты живут сами по себе;
@@ -221,11 +233,13 @@
 - Для нового unified tool platform зелёные:
   - `PYTHONPATH="$PWD" python3 -m unittest discover -s tests -p 'test_*.py'`
   - `python3 -m py_compile tool_platform/*.py scripts/telegram_invite_executor.py`
-  - `bash -n tools/tool_platform/bin/tool-platform tools/tool_platform/bin/tool-platform-panel scripts/telegram_invite_executor_gui.sh`
-  - `./tools/tool_platform/bin/tool-platform validate-registry`
-  - `./tools/tool_platform/bin/tool-platform list-tools`
+  - `bash -n tools/telegram/platform/bin/tool-platform tools/telegram/platform/bin/tool-platform-panel tools/telegram/invite_manager/bin/telegram-invite-manager tools/telegram/invite_manager/bin/telegram-invite-executor tools/telegram/portable_helper/bin/telegram-portable tools/telegram/portable_helper/bin/telegram-portable-gui tools/telegram/export/bin/telegram-exporter tools/telegram/export/bin/telegram-export-chain tools/telegram/export/bin/telegram-export-batch scripts/telegram_invite_executor_gui.sh`
+  - `./tools/telegram/platform/bin/tool-platform validate-registry`
+  - `./tools/telegram/platform/bin/tool-platform list-tools`
 - Registry подтвердил подключение двух инструментов:
   - embedded `telegram_invite_manager`;
+  - embedded `telegram_portable_helper`;
+  - embedded `telegram_export`;
   - external `telegram_portable_session_tool`.
 - После добавления `desktop-add-contact-profile` полный unit-набор снова зелёный: `167/167`.
 - Полный unit-набор сейчас зелёный: `165/165`.
@@ -760,16 +774,18 @@
   - остаточный gap:
     - exact username verification уже проходит, но автоматический клик по `ДОБАВИТЬ КОНТАКТ` в этом path всё ещё не переводит экран в stable `Новый контакт -> Готово`, поэтому последний submit-step пока остаётся недобитым.
 - Для unified tool platform подтверждён первый рабочий orchestration layer:
-  - registry: `/home/max/site-control-kit/tools/tool_platform/registry/tools.json`;
-  - CLI: `./tools/tool_platform/bin/tool-platform validate-registry`;
-  - GUI entrypoint: `./tools/tool_platform/bin/tool-platform-panel`;
+  - registry: `/home/max/site-control-kit/tools/telegram/platform/registry/tools.json`;
+  - CLI: `./tools/telegram/platform/bin/tool-platform validate-registry`;
+  - GUI entrypoint: `./tools/telegram/platform/bin/tool-platform-panel`;
   - подключённые manifests:
-    - `/home/max/site-control-kit/tools/telegram_invite_manager/tool_manifest.json`;
+    - `/home/max/site-control-kit/tools/telegram/invite_manager/tool_manifest.json`;
+    - `/home/max/site-control-kit/tools/telegram/portable_helper/tool_manifest.json`;
+    - `/home/max/site-control-kit/tools/telegram/export/tool_manifest.json`;
     - `/home/max/telegram-portable-session-tool/tool_manifest.json`;
   - факт:
     - отдельный `telegram-portable-session-tool` остался standalone-репозиторием;
-    - встроенный `telegram_invite_manager` остался внутренним инструментом `site-control-kit`;
-    - общая панель теперь видит оба как единый catalog.
+    - встроенные `telegram_invite_manager`, `telegram_portable_helper` и `telegram_export` собраны в `tools/telegram/`;
+    - общая панель теперь видит все эти инструменты как единый catalog.
 - Живой no-history run на новом runtime подтвердил, что основной export path уже собирает новые `@username` без помощи `identity_history.json` и обрабатывает несколько peer в одном deep-step.
 - Артефакты проверки:
   - `/tmp/tg_live_batch_boost3.7ErTfD/snapshot.md`

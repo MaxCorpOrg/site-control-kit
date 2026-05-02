@@ -19,9 +19,10 @@
 - `scripts/telegram_invite_executor_gui.sh`
 - `tests/test_telegram_invite_manager.py`
 - `tests/test_telegram_invite_executor.py`
-- `tools/telegram_invite_manager/tool_manifest.json`
+- `tools/telegram/invite_manager/tool_manifest.json`
 
-Инструмент теперь подключён и в unified tool platform через этот manifest, но продолжает жить как отдельная видимая единица внутри `tools/telegram_invite_manager/`.
+Инструмент теперь подключён и в unified tool platform через этот manifest, но продолжает жить как отдельная видимая единица внутри `tools/telegram/invite_manager/`.
+Общий Telegram-хаб для оператора теперь начинается с `tools/telegram/README_RU.md`.
 
 ## Где Хранится Состояние
 По умолчанию job-каталоги лежат в:

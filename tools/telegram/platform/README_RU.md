@@ -12,6 +12,8 @@
 ## Что Уже Подключено
 
 - `telegram_invite_manager` из текущего репозитория;
+- `telegram_portable_helper` как low-level embedded helper;
+- `telegram_export` как embedded export pipeline;
 - `telegram_portable_session_tool` как отдельный внешний репозиторий `/home/max/telegram-portable-session-tool`.
 
 Оба инструмента продолжают жить как отдельные единицы.
@@ -29,11 +31,13 @@
 ## Быстрый Старт
 
 ```bash
-cd /home/max/site-control-kit/tools/tool_platform
+cd /home/max/site-control-kit/tools/telegram/platform
 
 ./bin/tool-platform validate-registry
 ./bin/tool-platform list-tools
 ./bin/tool-platform show-tool --tool-id telegram_invite_manager
+./bin/tool-platform show-tool --tool-id telegram_portable_helper
+./bin/tool-platform show-tool --tool-id telegram_export
 ./bin/tool-platform show-tool --tool-id telegram_portable_session_tool
 ./bin/tool-platform-panel
 ```
@@ -57,4 +61,3 @@ cd /home/max/site-control-kit/tools/tool_platform
 
 Этот слой не должен превращаться в новую бизнес-логику Telegram.
 Он остаётся orchestration/catalog слоем поверх уже существующих отдельных инструментов.
-

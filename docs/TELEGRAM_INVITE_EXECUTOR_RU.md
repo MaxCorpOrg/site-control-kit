@@ -16,7 +16,8 @@
 - `scripts/telegram_invite_executor_gui.sh`
 - `tests/test_telegram_invite_executor.py`
 
-Видимый operator entrypoint по-прежнему живёт в `tools/telegram_invite_manager/`, а подключение в unified panel идёт через `tools/telegram_invite_manager/tool_manifest.json`, без переноса самого executor-кода в platform-layer.
+Видимый operator entrypoint по-прежнему живёт в `tools/telegram/invite_manager/`, а подключение в unified panel идёт через `tools/telegram/invite_manager/tool_manifest.json`, без переноса самого executor-кода в platform-layer.
+Общий Telegram operator hub теперь живёт в `tools/telegram/`.
 
 ## Как Он Связан С Invite Manager
 `Invite Manager` остаётся источником истины по пользователям и статусам:

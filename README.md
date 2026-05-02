@@ -46,6 +46,20 @@ browser.cmd open https://example.com
 - Управлять несколькими клиентами (браузерами) через `client_id`.
 - Выгружать `@username` из Telegram-чата и сохранять только новые контакты батчами.
 
+## Telegram Tools Hub
+
+Все видимые Telegram entrypoints теперь собраны в:
+
+- [tools/telegram/README_RU.md](tools/telegram/README_RU.md)
+
+Внутри хаба:
+- `tools/telegram/platform/`
+- `tools/telegram/invite_manager/`
+- `tools/telegram/portable_helper/`
+- `tools/telegram/export/`
+
+Это не переносит весь backend-код из `scripts/`, но даёт одну понятную Telegram-точку входа для оператора и агента.
+
 ## Telegram: батчи новых контактов
 
 Для сценария "каждый запуск = новый файл только с новыми `@username`" есть скрипт:
@@ -125,7 +139,8 @@ cd /home/max/site-control-kit
 
 Для аккуратной работы с пользователями, которые уже дали согласие на вступление в чат, добавлен отдельный manager/state слой:
 
-- `tools/telegram_invite_manager/`
+- `tools/telegram/README_RU.md`
+- `tools/telegram/invite_manager/`
 - `scripts/telegram_invite_manager.py`
 - `scripts/telegram_invite_manager_gui.sh`
 - `scripts/telegram_invite_executor.py`
@@ -231,7 +246,7 @@ python3 scripts/telegram_invite_executor.py open-chat \
 Видимый вход в инструмент:
 
 ```bash
-cd /home/max/site-control-kit/tools/telegram_invite_manager
+cd /home/max/site-control-kit/tools/telegram/invite_manager
 ./bin/telegram-invite-manager --help
 ./bin/telegram-invite-executor --help
 ```
@@ -243,8 +258,9 @@ cd /home/max/site-control-kit/tools/telegram_invite_manager
 
 Теперь в проекте есть отдельный registry-driven control layer:
 
-- [tools/tool_platform/README_RU.md](tools/tool_platform/README_RU.md)
-- [tools/tool_platform/AGENT_GUIDE_RU.md](tools/tool_platform/AGENT_GUIDE_RU.md)
+- [tools/telegram/README_RU.md](tools/telegram/README_RU.md)
+- [tools/telegram/platform/README_RU.md](tools/telegram/platform/README_RU.md)
+- [tools/telegram/platform/AGENT_GUIDE_RU.md](tools/telegram/platform/AGENT_GUIDE_RU.md)
 - `tool_platform/catalog.py`
 - `tool_platform/cli.py`
 - `tool_platform/gui.py`
@@ -255,23 +271,27 @@ cd /home/max/site-control-kit/tools/telegram_invite_manager
 
 Сейчас в registry уже подключены:
 - `telegram_invite_manager` из текущего репозитория;
+- `telegram_portable_helper` из текущего репозитория;
+- `telegram_export` из текущего репозитория;
 - `/home/max/telegram-portable-session-tool` как отдельный standalone-репозиторий.
 
 Быстрый вход:
 
 ```bash
-cd /home/max/site-control-kit/tools/tool_platform
+cd /home/max/site-control-kit/tools/telegram/platform
 
 ./bin/tool-platform validate-registry
 ./bin/tool-platform list-tools
 ./bin/tool-platform show-tool --tool-id telegram_invite_manager
+./bin/tool-platform show-tool --tool-id telegram_portable_helper
+./bin/tool-platform show-tool --tool-id telegram_export
 ./bin/tool-platform show-tool --tool-id telegram_portable_session_tool
 ./bin/tool-platform-panel
 ```
 
 Новый инструмент добавляется не через хардкод GUI, а через:
 1. собственный `tool_manifest.json`;
-2. запись в `tools/tool_platform/registry/tools.json`.
+2. запись в `tools/telegram/platform/registry/tools.json`.
 
 ## Telegram Desktop Portable на Linux
 

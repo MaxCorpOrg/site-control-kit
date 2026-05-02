@@ -18,13 +18,13 @@
 
 ```text
 tool_manifest.json
-../tool_platform/registry/tools.json
+../platform/registry/tools.json
 ```
 
 То есть `telegram_invite_manager` остаётся отдельным инструментом, но уже виден и в общей панели:
 
 ```bash
-cd /home/max/site-control-kit/tools/tool_platform
+cd /home/max/site-control-kit/tools/telegram/platform
 ./bin/tool-platform show-tool --tool-id telegram_invite_manager
 ./bin/tool-platform-panel
 ```
@@ -32,7 +32,7 @@ cd /home/max/site-control-kit/tools/tool_platform
 ## Быстрый Старт
 
 ```bash
-cd /home/max/site-control-kit/tools/telegram_invite_manager
+cd /home/max/site-control-kit/tools/telegram/invite_manager
 
 ./bin/telegram-invite-manager --help
 ./bin/telegram-invite-executor --help
@@ -55,7 +55,7 @@ ONE_USER_FLOW_RU.md
 Короткий пример:
 
 ```bash
-cd /home/max/site-control-kit/tools/telegram_invite_manager
+cd /home/max/site-control-kit/tools/telegram/invite_manager
 
 ./bin/telegram-invite-manager add-user \
   --job-dir "/home/max/telegram_invite_jobs/chat_-2465948544" \
@@ -70,7 +70,7 @@ Executor теперь умеет отдельный однопользовате
 Финальное действие защищено флагом `--confirm-add`.
 
 ```bash
-cd /home/max/site-control-kit/tools/telegram_invite_manager
+cd /home/max/site-control-kit/tools/telegram/invite_manager
 
 ./bin/telegram-invite-executor add-contact \
   --job-dir "/home/max/telegram_invite_jobs/chat_Zhirotop_shop" \
@@ -160,9 +160,9 @@ NEXT_CHAT_AGENT_PROMPT_RU.md
 
 Потом смотреть:
 - `ONE_USER_FLOW_RU.md`
-- `../../docs/TELEGRAM_INVITE_MANAGER_RU.md`
-- `../../docs/TELEGRAM_INVITE_EXECUTOR_RU.md`
-- `../../docs/PROJECT_STATUS_RU.md`
+- `../../../docs/TELEGRAM_INVITE_MANAGER_RU.md`
+- `../../../docs/TELEGRAM_INVITE_EXECUTOR_RU.md`
+- `../../../docs/PROJECT_STATUS_RU.md`
 
 ## Где Лежат Данные
 

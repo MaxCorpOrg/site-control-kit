@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "tool_id": "telegram_export",
+  "display_name": "Telegram Export",
+  "description": "Telegram Web export pipeline with discovery state, deep username extraction, safe snapshots and chain runner.",
+  "kind": "embedded_tool",
+  "standalone": false,
+  "root_dir": ".",
+  "docs": [
+    {
+      "doc_id": "readme",
+      "label": "Export README",
+      "path": "README_RU.md"
+    },
+    {
+      "doc_id": "agent_guide",
+      "label": "Export Agent Guide",
+      "path": "AGENT_GUIDE_RU.md"
+    },
+    {
+      "doc_id": "roadmap",
+      "label": "Telegram Client Roadmap",
+      "path": "../../../docs/TELEGRAM_CLIENT_ROADMAP_RU.md"
+    }
+  ],
+  "actions": [
+    {
+      "action_id": "exporter_help",
+      "label": "Exporter Help",
+      "description": "Показать help основного export CLI.",
+      "argv": [
+        "./bin/telegram-exporter",
+        "--help"
+      ],
+      "workdir": "."
+    },
+    {
+      "action_id": "chain_help",
+      "label": "Chain Runner Help",
+      "description": "Показать help chain-runner.",
+      "argv": [
+        "./bin/telegram-export-chain",
+        "--help"
+      ],
+      "workdir": "."
+    }
+  ],
+  "capabilities": [
+    "telegram_web",
+    "username_export",
+    "safe_snapshots",
+    "chain_runner"
+  ],
+  "tags": [
+    "telegram",
+    "export",
+    "web",
+    "embedded"
+  ],
+  "artifacts": {
+    "default_output_root": "/home/max/telegram_contact_batches"
+  }
+}

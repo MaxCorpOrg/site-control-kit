@@ -25,12 +25,12 @@
     {
       "doc_id": "manager_doc",
       "label": "Invite Manager Doc",
-      "path": "../../docs/TELEGRAM_INVITE_MANAGER_RU.md"
+      "path": "../../../docs/TELEGRAM_INVITE_MANAGER_RU.md"
     },
     {
       "doc_id": "executor_doc",
       "label": "Invite Executor Doc",
-      "path": "../../docs/TELEGRAM_INVITE_EXECUTOR_RU.md"
+      "path": "../../../docs/TELEGRAM_INVITE_EXECUTOR_RU.md"
     }
   ],
   "actions": [
@@ -71,4 +71,3 @@
     "job_root": "/home/max/telegram_invite_jobs"
   }
 }
-

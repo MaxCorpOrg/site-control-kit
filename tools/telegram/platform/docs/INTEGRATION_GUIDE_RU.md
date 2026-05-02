@@ -51,7 +51,7 @@
 ### Шаг 3. Проверить platform layer
 
 ```bash
-cd /home/max/site-control-kit/tools/tool_platform
+cd /home/max/site-control-kit/tools/telegram/platform
 
 ./bin/tool-platform validate-registry
 ./bin/tool-platform list-tools
@@ -69,7 +69,7 @@ cd /home/max/site-control-kit/tools/tool_platform
 
 ### Embedded Tool
 
-- `tools/telegram_invite_manager/tool_manifest.json`
+- `tools/telegram/invite_manager/tool_manifest.json`
 
 ### External Standalone Tool
 

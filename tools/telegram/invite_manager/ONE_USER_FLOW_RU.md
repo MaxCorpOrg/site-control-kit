@@ -20,7 +20,7 @@ PORTABLE_ACCOUNT="@M_a_g_g_i_e"
 ## 1. Добавить Одного Пользователя
 
 ```bash
-cd /home/max/site-control-kit/tools/telegram_invite_manager
+cd /home/max/site-control-kit/tools/telegram/invite_manager
 
 ./bin/telegram-invite-manager add-user \
   --job-dir "$JOB_DIR" \
@@ -329,7 +329,7 @@ Job:
 Чтобы зафиксировать реальную отправку после ручного действия:
 
 ```bash
-cd /home/max/site-control-kit/tools/telegram_invite_manager
+cd /home/max/site-control-kit/tools/telegram/invite_manager
 
 ./bin/telegram-invite-executor record \
   --job-dir "/home/max/telegram_invite_jobs/chat_Zhirotop_shop" \

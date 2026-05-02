@@ -18,7 +18,7 @@
 - собственный CLI.
 
 Примеры:
-- `tools/telegram_invite_manager`
+- `tools/telegram/invite_manager`
 - `/home/max/telegram-portable-session-tool`
 
 ### 2. Manifest

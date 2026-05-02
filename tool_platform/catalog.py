@@ -9,7 +9,8 @@ from typing import Any
 DEFAULT_REGISTRY_PATH = (
     Path(__file__).resolve().parent.parent
     / "tools"
-    / "tool_platform"
+    / "telegram"
+    / "platform"
     / "registry"
     / "tools.json"
 )
@@ -234,4 +235,3 @@ def catalog_to_dict(catalog: ToolCatalog) -> dict[str, Any]:
             for tool in catalog.tools
         ],
     }
-

@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "platform_name": "Site Control Tool Platform",
+  "tools": [
+    {
+      "manifest_path": "../../invite_manager/tool_manifest.json",
+      "enabled": true,
+      "source_label": "embedded"
+    },
+    {
+      "manifest_path": "../../portable_helper/tool_manifest.json",
+      "enabled": true,
+      "source_label": "embedded"
+    },
+    {
+      "manifest_path": "../../export/tool_manifest.json",
+      "enabled": true,
+      "source_label": "embedded"
+    },
+    {
+      "manifest_path": "/home/max/telegram-portable-session-tool/tool_manifest.json",
+      "enabled": true,
+      "source_label": "external"
+    }
+  ]
+}

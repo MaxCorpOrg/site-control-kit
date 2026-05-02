@@ -167,7 +167,7 @@ PYTHONPATH="$PWD" python3 -m webcontrol clients
 ```
 4. Invite Manager:
 ```bash
-cd /home/max/site-control-kit/tools/telegram_invite_manager
+cd /home/max/site-control-kit/tools/telegram/invite_manager
 ./bin/telegram-invite-manager --help
 ./bin/telegram-invite-executor --help
 ```
@@ -181,7 +181,7 @@ python3 scripts/telegram_invite_manager.py init \
 
 6. Unified tool platform:
 ```bash
-cd /home/max/site-control-kit/tools/tool_platform
+cd /home/max/site-control-kit/tools/telegram/platform
 ./bin/tool-platform validate-registry
 ./bin/tool-platform list-tools
 ./bin/tool-platform-panel

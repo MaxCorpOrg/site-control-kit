@@ -15,11 +15,11 @@ cd /home/max/site-control-kit
 - `docs/PROJECT_STATUS_RU.md`
 - `docs/TELEGRAM_INVITE_MANAGER_RU.md`
 - `docs/TELEGRAM_INVITE_EXECUTOR_RU.md`
-- `tools/telegram_invite_manager/README.md`
-- `tools/telegram_invite_manager/tool_manifest.json`
-- `tools/tool_platform/README_RU.md`
-- `tools/telegram_invite_manager/NEXT_CHAT_AGENT_PROMPT_RU.md`
-- `tools/telegram_invite_manager/ONE_USER_FLOW_RU.md`
+- `tools/telegram/invite_manager/README.md`
+- `tools/telegram/invite_manager/tool_manifest.json`
+- `tools/telegram/platform/README_RU.md`
+- `tools/telegram/invite_manager/NEXT_CHAT_AGENT_PROMPT_RU.md`
+- `tools/telegram/invite_manager/ONE_USER_FLOW_RU.md`
 
 ## Что Уже Сделано
 
@@ -49,13 +49,13 @@ cd /home/max/site-control-kit
 Есть видимая папка инструмента:
 
 ```text
-tools/telegram_invite_manager/
+tools/telegram/invite_manager/
 ```
 
 Есть и platform contract:
 
 ```text
-tools/telegram_invite_manager/tool_manifest.json
+tools/telegram/invite_manager/tool_manifest.json
 ```
 
 Через него этот инструмент подключается в unified tool platform и не требует отдельного хардкода в panel.
@@ -63,7 +63,7 @@ tools/telegram_invite_manager/tool_manifest.json
 Есть отдельный copy-paste prompt для нового чата:
 
 ```text
-tools/telegram_invite_manager/NEXT_CHAT_AGENT_PROMPT_RU.md
+tools/telegram/invite_manager/NEXT_CHAT_AGENT_PROMPT_RU.md
 ```
 
 ## Как Работать С Одним Пользователем
@@ -84,7 +84,7 @@ tools/telegram_invite_manager/NEXT_CHAT_AGENT_PROMPT_RU.md
 Быстрый путь для текущего actor:
 
 ```bash
-./tools/telegram_invite_manager/bin/telegram-invite-executor prepare-next \
+./tools/telegram/invite_manager/bin/telegram-invite-executor prepare-next \
   --job-dir /home/max/telegram_invite_jobs/chat_Zhirotop_shop \
   --username "@USERNAME" \
   --consent yes \
@@ -96,7 +96,7 @@ tools/telegram_invite_manager/NEXT_CHAT_AGENT_PROMPT_RU.md
 После подготовки можно проверить Desktop-send dry-run:
 
 ```bash
-./tools/telegram_invite_manager/bin/telegram-invite-executor desktop-send-link \
+./tools/telegram/invite_manager/bin/telegram-invite-executor desktop-send-link \
   --job-dir /home/max/telegram_invite_jobs/chat_Zhirotop_shop \
   --username "@USERNAME" \
   --dry-run
@@ -135,8 +135,8 @@ python3 -m py_compile scripts/telegram_invite_manager.py scripts/telegram_invite
 
 ```bash
 bash -n scripts/telegram_invite_manager_gui.sh scripts/telegram_invite_executor_gui.sh \
-  tools/telegram_invite_manager/bin/telegram-invite-manager \
-  tools/telegram_invite_manager/bin/telegram-invite-executor
+  tools/telegram/invite_manager/bin/telegram-invite-manager \
+  tools/telegram/invite_manager/bin/telegram-invite-executor
 ```
 
 ## Что Нельзя Делать
@@ -252,7 +252,7 @@ https://t.me/Zhirotop_shop
 Финальная запись в state:
 
 ```bash
-./tools/telegram_invite_manager/bin/telegram-invite-executor record \
+./tools/telegram/invite_manager/bin/telegram-invite-executor record \
   --job-dir /home/max/telegram_invite_jobs/chat_Zhirotop_shop \
   --username @Kamaz_master1 \
   --status requested \
@@ -340,7 +340,7 @@ target chat: https://t.me/Zhirotop_shop
 Проверка:
 
 ```bash
-./tools/telegram_invite_manager/bin/telegram-invite-executor ensure-portable \
+./tools/telegram/invite_manager/bin/telegram-invite-executor ensure-portable \
   --job-dir /home/max/telegram_invite_jobs/chat_Zhirotop_shop
 ```
 

@@ -225,7 +225,10 @@ python3 scripts/telegram_portable.py window-screenshot \
 Если нужно увидеть и встроенные, и внешние Telegram-инструменты в одном месте, используйте registry-driven platform layer:
 
 ```bash
-cd /home/max/site-control-kit/tools/tool_platform
+cd /home/max/site-control-kit/tools/telegram
+
+cat README_RU.md
+cd /home/max/site-control-kit/tools/telegram/platform
 
 ./bin/tool-platform validate-registry
 ./bin/tool-platform list-tools
@@ -234,4 +237,6 @@ cd /home/max/site-control-kit/tools/tool_platform
 
 Сейчас эта панель уже подхватывает:
 - встроенный `telegram_invite_manager`;
+- встроенный `telegram_portable_helper`;
+- встроенный `telegram_export`;
 - внешний `/home/max/telegram-portable-session-tool`.

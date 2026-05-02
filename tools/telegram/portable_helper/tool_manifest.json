@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "tool_id": "telegram_portable_helper",
+  "display_name": "Telegram Portable Helper",
+  "description": "Low-level Linux Telegram Desktop portable helper with import, adopt, status, URI, X11 and accessibility primitives.",
+  "kind": "embedded_tool",
+  "standalone": false,
+  "root_dir": ".",
+  "docs": [
+    {
+      "doc_id": "readme",
+      "label": "Portable Helper README",
+      "path": "README_RU.md"
+    },
+    {
+      "doc_id": "agent_guide",
+      "label": "Portable Helper Agent Guide",
+      "path": "AGENT_GUIDE_RU.md"
+    },
+    {
+      "doc_id": "portable_doc",
+      "label": "Portable Doc",
+      "path": "../../../docs/TELEGRAM_PORTABLE_RU.md"
+    }
+  ],
+  "actions": [
+    {
+      "action_id": "portable_help",
+      "label": "Portable CLI Help",
+      "description": "Показать help low-level portable helper.",
+      "argv": [
+        "./bin/telegram-portable",
+        "--help"
+      ],
+      "workdir": "."
+    }
+  ],
+  "capabilities": [
+    "telegram_desktop_portable",
+    "x11_primitives",
+    "accessibility_primitives"
+  ],
+  "tags": [
+    "telegram",
+    "portable",
+    "desktop",
+    "embedded"
+  ],
+  "artifacts": {
+    "profiles_root_default": "/home/max"
+  }
+}
