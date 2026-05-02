@@ -97,6 +97,10 @@ class TelegramInviteExecutorTests(unittest.TestCase):
                     tab_id=0,
                     url_pattern="web.telegram.org/k/#-2465948544",
                     active=True,
+                    portable_profile_name="AK",
+                    portable_profile_dir="/home/max/TelegramPortableAK",
+                    account_username="@M_a_g_g_i_e",
+                    account_label="Maggie",
                 ),
             )
             self.assertEqual(rc, 0)
@@ -104,9 +108,13 @@ class TelegramInviteExecutorTests(unittest.TestCase):
             self.assertEqual(execution["invite_link"], "https://t.me/+safeLink")
             self.assertTrue(execution["requires_approval"])
             self.assertEqual(execution["browser_target"]["client_id"], "client-123")
+            self.assertEqual(execution["portable_actor"]["profile_name"], "AK")
+            self.assertEqual(execution["portable_actor"]["profile_dir"], "/home/max/TelegramPortableAK")
+            self.assertEqual(execution["portable_actor"]["account_username"], "@M_a_g_g_i_e")
 
             state = self.manager.load_state(job_dir)
             self.assertEqual(state["execution"]["note"], "operator flow")
+            self.assertEqual(state["execution"]["portable_actor"]["account_label"], "Maggie")
 
     def test_plan_creates_execution_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -215,6 +223,530 @@ class TelegramInviteExecutorTests(unittest.TestCase):
                 payload["command"],
                 ["python3", "-m", "webcontrol", "browser", "new-tab", "https://web.telegram.org/k/#@Zhirotop_shop"],
             )
+
+    def test_ensure_portable_reads_configured_actor(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            job_dir = Path(tmpdir) / "job"
+            self._seed_state(job_dir)
+            self._call_json(
+                self.executor.command_configure,
+                Namespace(
+                    job_dir=str(job_dir),
+                    invite_link=None,
+                    message_template=None,
+                    note=None,
+                    requires_approval=None,
+                    client_id=None,
+                    tab_id=None,
+                    url_pattern=None,
+                    active=None,
+                    portable_profile_name="AK",
+                    portable_profile_dir="/home/max/TelegramPortableAK",
+                    account_username="@M_a_g_g_i_e",
+                    account_label="Maggie",
+                ),
+            )
+
+            def fake_run(_repo_root, command):
+                payload = {
+                    "status": "completed",
+                    "running": True,
+                    "pids": [10413],
+                    "windows": [{"window_id": "0x0460002e", "title": "Жиротоп Shop"}],
+                }
+                return {
+                    "command": command,
+                    "returncode": 0,
+                    "stdout": json.dumps(payload),
+                    "stderr": "",
+                    "stdout_json": payload,
+                }
+
+            with mock.patch.object(self.executor, "_run_portable_json", side_effect=fake_run):
+                rc, payload = self._call_json(
+                    self.executor.command_ensure_portable,
+                    Namespace(
+                        job_dir=str(job_dir),
+                        portable_profile_name=None,
+                        portable_profile_dir=None,
+                        account_username=None,
+                        account_label=None,
+                        launch_if_needed=False,
+                    ),
+                )
+            self.assertEqual(rc, 0)
+            self.assertTrue(payload["running"])
+            self.assertEqual(payload["account_username"], "@M_a_g_g_i_e")
+            self.assertIn("--profile-dir", payload["status_result"]["command"])
+            self.assertEqual(payload["pids"], [10413])
+
+    def test_prepare_next_reserves_checked_user_after_portable_preflight(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            job_dir = Path(tmpdir) / "job"
+            self._seed_state(job_dir)
+            self._call_json(
+                self.executor.command_configure,
+                Namespace(
+                    job_dir=str(job_dir),
+                    invite_link="https://t.me/+safeLink",
+                    message_template="Привет! {invite_link}",
+                    note=None,
+                    requires_approval=False,
+                    client_id=None,
+                    tab_id=None,
+                    url_pattern=None,
+                    active=None,
+                    portable_profile_name="AK",
+                    portable_profile_dir="/home/max/TelegramPortableAK",
+                    account_username="@M_a_g_g_i_e",
+                    account_label="@M_a_g_g_i_e",
+                ),
+            )
+
+            def fake_portable(_repo_root, command):
+                payload = {"status": "completed", "running": True, "pids": [10413], "windows": [{"window_id": "0x1"}]}
+                return {"command": command, "returncode": 0, "stdout": json.dumps(payload), "stderr": "", "stdout_json": payload}
+
+            with mock.patch.object(self.executor, "_run_portable_json", side_effect=fake_portable):
+                rc, payload = self._call_json(
+                    self.executor.command_prepare_next,
+                    Namespace(
+                        job_dir=str(job_dir),
+                        username=None,
+                        consent="",
+                        display_name="",
+                        note="",
+                        source="prepare-next",
+                        statuses=["checked", "new"],
+                        execution_id="20260426T090000Z",
+                        launch_if_needed=False,
+                        reserve=True,
+                        dry_run=False,
+                    ),
+                )
+            self.assertEqual(rc, 0)
+            self.assertEqual(payload["selected_user"]["username"], "@alice_123")
+            self.assertEqual(payload["reserved"], 1)
+            self.assertTrue((Path(payload["execution_run_dir"]) / "execution_plan.json").exists())
+            state = self.manager.load_state(job_dir)
+            self.assertEqual(state["users"][0]["status"], "invite_link_created")
+
+    def test_prepare_next_adds_new_user_checks_and_reserves(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            job_dir = Path(tmpdir) / "job"
+            self._seed_state(job_dir)
+            state = self.manager.load_state(job_dir)
+            for row in state["users"]:
+                if row["status"] == "checked":
+                    row["status"] = "requested"
+            self.manager.save_state(job_dir, state)
+            self._call_json(
+                self.executor.command_configure,
+                Namespace(
+                    job_dir=str(job_dir),
+                    invite_link="https://t.me/+safeLink",
+                    message_template=None,
+                    note=None,
+                    requires_approval=False,
+                    client_id=None,
+                    tab_id=None,
+                    url_pattern=None,
+                    active=None,
+                    portable_profile_name="AK",
+                    portable_profile_dir="/home/max/TelegramPortableAK",
+                    account_username="@M_a_g_g_i_e",
+                    account_label="@M_a_g_g_i_e",
+                ),
+            )
+
+            def fake_portable(_repo_root, command):
+                payload = {"status": "completed", "running": True, "pids": [10413], "windows": []}
+                return {"command": command, "returncode": 0, "stdout": json.dumps(payload), "stderr": "", "stdout_json": payload}
+
+            with mock.patch.object(self.executor, "_run_portable_json", side_effect=fake_portable):
+                rc, payload = self._call_json(
+                    self.executor.command_prepare_next,
+                    Namespace(
+                        job_dir=str(job_dir),
+                        username="@fresh_user",
+                        consent="yes",
+                        display_name="Fresh",
+                        note="consented",
+                        source="manual",
+                        statuses=["checked", "new"],
+                        execution_id="20260426T090100Z",
+                        launch_if_needed=False,
+                        reserve=True,
+                        dry_run=False,
+                    ),
+                )
+            self.assertEqual(rc, 0)
+            self.assertEqual(payload["selected_user"]["username"], "@fresh_user")
+            self.assertTrue((Path(payload["manager_run_dir"]) / "invite_run.json").exists())
+            state = self.manager.load_state(job_dir)
+            created = next(row for row in state["users"] if row["username"] == "@fresh_user")
+            self.assertEqual(created["status"], "invite_link_created")
+
+    def test_desktop_send_link_dry_run_builds_portable_steps_without_state_update(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            job_dir = Path(tmpdir) / "job"
+            self._seed_state(job_dir)
+            self._call_json(
+                self.executor.command_configure,
+                Namespace(
+                    job_dir=str(job_dir),
+                    invite_link="https://t.me/Zhirotop_shop",
+                    message_template=None,
+                    note=None,
+                    requires_approval=True,
+                    client_id=None,
+                    tab_id=None,
+                    url_pattern=None,
+                    active=None,
+                    portable_profile_name="AK",
+                    portable_profile_dir="/home/max/TelegramPortableAK",
+                    account_username="@M_a_g_g_i_e",
+                    account_label="@M_a_g_g_i_e",
+                ),
+            )
+            calls: list[list[str]] = []
+
+            def fake_portable(_repo_root, command):
+                calls.append(list(command))
+                if "status" in command:
+                    payload = {
+                        "status": "completed",
+                        "running": True,
+                        "pids": [10413],
+                        "windows": [{"window_id": "0x0460002e"}],
+                    }
+                elif "open-uri" in command:
+                    payload = {"status": "dry_run", "command": command}
+                else:
+                    payload = {"status": "dry_run", "text_length": len("https://t.me/Zhirotop_shop")}
+                return {"command": command, "returncode": 0, "stdout": json.dumps(payload), "stderr": "", "stdout_json": payload}
+
+            with mock.patch.object(self.executor, "_run_portable_json", side_effect=fake_portable):
+                rc, payload = self._call_json(
+                    self.executor.command_desktop_send_link,
+                    Namespace(
+                        job_dir=str(job_dir),
+                        username="@alice_123",
+                        invite_link=None,
+                        message=None,
+                        statuses=["checked"],
+                        execution_id="20260426T100000Z",
+                        window_id="",
+                        open_wait=0,
+                        launch_if_needed=False,
+                        confirm_send=False,
+                        record_result=True,
+                        dry_run=True,
+                    ),
+                )
+            self.assertEqual(rc, 0)
+            self.assertEqual(payload["outcome"], "prepared")
+            self.assertIsNone(payload["record_update"])
+            self.assertIn("--dry-run", calls[1])
+            self.assertIn("--dry-run", calls[2])
+            self.assertNotIn("--press-enter", calls[2])
+            self.assertEqual(payload["uri"], "tg://resolve?domain=alice_123")
+            self.assertTrue((Path(payload["run_dir"]) / "execution_record.json").exists())
+            state = self.manager.load_state(job_dir)
+            self.assertEqual(state["users"][0]["status"], "checked")
+
+    def test_desktop_send_link_confirm_records_sent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            job_dir = Path(tmpdir) / "job"
+            self._seed_state(job_dir)
+            state = self.manager.load_state(job_dir)
+            state["users"][0]["status"] = "invite_link_created"
+            self.manager.save_state(job_dir, state)
+            self._call_json(
+                self.executor.command_configure,
+                Namespace(
+                    job_dir=str(job_dir),
+                    invite_link="https://t.me/Zhirotop_shop",
+                    message_template=None,
+                    note=None,
+                    requires_approval=True,
+                    client_id=None,
+                    tab_id=None,
+                    url_pattern=None,
+                    active=None,
+                    portable_profile_name="AK",
+                    portable_profile_dir="/home/max/TelegramPortableAK",
+                    account_username="@M_a_g_g_i_e",
+                    account_label="@M_a_g_g_i_e",
+                ),
+            )
+            calls: list[list[str]] = []
+
+            def fake_portable(_repo_root, command):
+                calls.append(list(command))
+                if "status" in command:
+                    payload = {
+                        "status": "completed",
+                        "running": True,
+                        "pids": [10413],
+                        "windows": [{"window_id": "0x0460002e"}],
+                    }
+                elif "open-uri" in command:
+                    payload = {"status": "opened", "pid": 10499, "command": command}
+                else:
+                    payload = {"status": "typed", "press_enter": True, "sequence_count": 27}
+                return {"command": command, "returncode": 0, "stdout": json.dumps(payload), "stderr": "", "stdout_json": payload}
+
+            with mock.patch.object(self.executor, "_run_portable_json", side_effect=fake_portable), mock.patch.object(
+                self.executor.time, "sleep"
+            ):
+                rc, payload = self._call_json(
+                    self.executor.command_desktop_send_link,
+                    Namespace(
+                        job_dir=str(job_dir),
+                        username="@alice_123",
+                        invite_link=None,
+                        message=None,
+                        statuses=["invite_link_created"],
+                        execution_id="20260426T100100Z",
+                        window_id="0x0460002e",
+                        open_wait=0,
+                        launch_if_needed=False,
+                        confirm_send=True,
+                        record_result=True,
+                        dry_run=False,
+                    ),
+                )
+            self.assertEqual(rc, 0)
+            self.assertEqual(payload["outcome"], "sent")
+            self.assertEqual(payload["target_status"], "sent")
+            self.assertIn("--press-enter", calls[2])
+            self.assertNotIn("--dry-run", calls[2])
+            state = self.manager.load_state(job_dir)
+            self.assertEqual(state["users"][0]["status"], "sent")
+
+    def test_telegram_public_chat_uri_uses_tg_resolve_for_public_handle(self) -> None:
+        self.assertEqual(
+            self.executor._telegram_public_chat_uri("https://t.me/Zhirotop_shop"),
+            "tg://resolve?domain=Zhirotop_shop",
+        )
+        self.assertEqual(self.executor._telegram_public_chat_uri("https://t.me/+privateInvite"), "")
+
+    def test_desktop_open_add_members_dry_run_builds_portable_ui_steps(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            job_dir = Path(tmpdir) / "job"
+            self._seed_state(job_dir)
+            state = self.manager.load_state(job_dir)
+            state["chat_url"] = "https://t.me/Zhirotop_shop"
+            state["users"][0]["status"] = "checked"
+            self.manager.save_state(job_dir, state)
+            self._call_json(
+                self.executor.command_configure,
+                Namespace(
+                    job_dir=str(job_dir),
+                    invite_link=None,
+                    message_template=None,
+                    note=None,
+                    requires_approval=True,
+                    client_id=None,
+                    tab_id=None,
+                    url_pattern=None,
+                    active=None,
+                    portable_profile_name="AK",
+                    portable_profile_dir="/home/max/TelegramPortableAK",
+                    account_username="@M_a_g_g_i_e",
+                    account_label="@M_a_g_g_i_e",
+                ),
+            )
+            calls: list[list[str]] = []
+
+            def fake_portable(_repo_root, command):
+                calls.append(list(command))
+                if "status" in command:
+                    payload = {"status": "completed", "running": True, "pids": [10413], "windows": [{"window_id": "0x0460002e"}]}
+                elif "log-diagnose" in command:
+                    payload = {"status": "completed", "alerts": []}
+                elif "accessibility-dump" in command:
+                    payload = {
+                        "status": "completed",
+                        "matches": [
+                            {
+                                "name": "Search",
+                                "role": "text",
+                                "visible": True,
+                                "extents": {"x": 2200, "y": 320, "width": 240, "height": 36},
+                                "resolved_extents": {"x": 2200, "y": 320, "width": 240, "height": 36},
+                                "relative_x_ratio": 0.7,
+                            }
+                        ],
+                    }
+                else:
+                    payload = {"status": "dry_run", "command": command}
+                return {"command": command, "returncode": 0, "stdout": json.dumps(payload), "stderr": "", "stdout_json": payload}
+
+            with mock.patch.object(self.executor, "_run_portable_json", side_effect=fake_portable):
+                rc, payload = self._call_json(
+                    self.executor.command_desktop_open_add_members,
+                    Namespace(
+                        job_dir=str(job_dir),
+                        username="@alice_123",
+                        search_query=None,
+                        group_uri=None,
+                        execution_id="20260426T120000Z",
+                        open_wait=0,
+                        panel_wait=0,
+                        search_wait=0,
+                        min_search_x=0,
+                        min_search_ratio=0.55,
+                        launch_if_needed=False,
+                        allow_alerts=False,
+                        type_search=True,
+                        clear_search=False,
+                        press_enter_after_search=False,
+                        dry_run=True,
+                    ),
+                )
+            self.assertEqual(rc, 0)
+            self.assertEqual(payload["outcome"], "search_typed")
+            self.assertEqual(payload["group_uri"], "tg://resolve?domain=Zhirotop_shop")
+            self.assertTrue(any("open-uri" in command for command in calls))
+            self.assertGreaterEqual(sum(1 for command in calls if "accessibility-click" in command), 2)
+            self.assertTrue(any("accessibility-dump" in command for command in calls))
+            self.assertTrue(any("accessibility-type-text" in command for command in calls))
+            self.assertTrue((Path(payload["run_dir"]) / "execution_record.json").exists())
+
+    def test_desktop_add_contact_profile_dry_run_builds_portable_steps(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            job_dir = Path(tmpdir) / "job"
+            self._seed_state(job_dir)
+            self._call_json(
+                self.executor.command_configure,
+                Namespace(
+                    job_dir=str(job_dir),
+                    invite_link=None,
+                    message_template=None,
+                    note=None,
+                    requires_approval=True,
+                    client_id=None,
+                    tab_id=None,
+                    url_pattern=None,
+                    active=None,
+                    portable_profile_name="AK2",
+                    portable_profile_dir="/home/max/TelegramPortable-AK2",
+                    account_username="@S_e_r_a_p_h_i_na",
+                    account_label="@S_e_r_a_p_h_i_na",
+                ),
+            )
+            calls: list[list[str]] = []
+
+            def fake_portable(_repo_root, command):
+                calls.append(list(command))
+                if "status" in command:
+                    payload = {"status": "completed", "running": True, "pids": [38744], "windows": [{"window_id": "0x04c0002e"}]}
+                elif "log-diagnose" in command:
+                    payload = {"status": "completed", "alerts": []}
+                else:
+                    payload = {"status": "dry_run", "command": command}
+                return {"command": command, "returncode": 0, "stdout": json.dumps(payload), "stderr": "", "stdout_json": payload}
+
+            with mock.patch.object(self.executor, "_run_portable_json", side_effect=fake_portable):
+                rc, payload = self._call_json(
+                    self.executor.command_desktop_add_contact_profile,
+                    Namespace(
+                        job_dir=str(job_dir),
+                        username="@alice_123",
+                        execution_id="20260427T130000Z",
+                        open_wait=0,
+                        after_add_wait=0,
+                        after_done_wait=0,
+                        verify_wait=0,
+                        add_click_x_ratio=0.394,
+                        add_click_y_ratio=0.397,
+                        done_click_x_ratio=0.565,
+                        done_click_y_ratio=0.715,
+                        done_click_repeat=1,
+                        last_name_text="",
+                        press_enter_after_last_name=False,
+                        launch_if_needed=False,
+                        verify_profile_reopen=True,
+                        confirm_add=True,
+                        dry_run=True,
+                    ),
+                )
+
+            self.assertEqual(rc, 0)
+            self.assertEqual(payload["outcome"], "dry_run")
+            self.assertTrue(any("open-uri" in command for command in calls))
+            self.assertGreaterEqual(sum(1 for command in calls if "window-click" in command), 2)
+            self.assertTrue(any("--dry-run" in command for command in calls if "open-uri" in command))
+            self.assertTrue((Path(payload["run_dir"]) / "execution_record.json").exists())
+
+    def test_desktop_add_contact_profile_live_writes_screenshots(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            job_dir = Path(tmpdir) / "job"
+            self._seed_state(job_dir)
+            self._call_json(
+                self.executor.command_configure,
+                Namespace(
+                    job_dir=str(job_dir),
+                    invite_link=None,
+                    message_template=None,
+                    note=None,
+                    requires_approval=True,
+                    client_id=None,
+                    tab_id=None,
+                    url_pattern=None,
+                    active=None,
+                    portable_profile_name="AK2",
+                    portable_profile_dir="/home/max/TelegramPortable-AK2",
+                    account_username="@S_e_r_a_p_h_i_na",
+                    account_label="@S_e_r_a_p_h_i_na",
+                ),
+            )
+
+            def fake_portable(_repo_root, command):
+                if "status" in command:
+                    payload = {"status": "completed", "running": True, "pids": [38744], "windows": [{"window_id": "0x04c0002e"}]}
+                elif "log-diagnose" in command:
+                    payload = {"status": "completed", "alerts": []}
+                elif "window-screenshot" in command:
+                    output_path = command[command.index("--output") + 1]
+                    payload = {"status": "completed", "output_path": output_path, "window_id": "0x04c0002e"}
+                else:
+                    payload = {"status": "completed"}
+                return {"command": command, "returncode": 0, "stdout": json.dumps(payload), "stderr": "", "stdout_json": payload}
+
+            with mock.patch.object(self.executor, "_run_portable_json", side_effect=fake_portable):
+                rc, payload = self._call_json(
+                    self.executor.command_desktop_add_contact_profile,
+                    Namespace(
+                        job_dir=str(job_dir),
+                        username="@alice_123",
+                        execution_id="20260427T130500Z",
+                        open_wait=0,
+                        after_add_wait=0,
+                        after_done_wait=0,
+                        verify_wait=0,
+                        add_click_x_ratio=0.394,
+                        add_click_y_ratio=0.397,
+                        done_click_x_ratio=0.565,
+                        done_click_y_ratio=0.715,
+                        done_click_repeat=1,
+                        last_name_text="",
+                        press_enter_after_last_name=False,
+                        launch_if_needed=False,
+                        verify_profile_reopen=True,
+                        confirm_add=True,
+                        dry_run=False,
+                    ),
+                )
+
+            self.assertEqual(rc, 0)
+            self.assertEqual(payload["outcome"], "contact_submit_clicked")
+            self.assertTrue(payload["screenshots"]["profile_before"].endswith("desktop_add_contact_profile_before.png"))
+            self.assertTrue(payload["screenshots"]["profile_after_actions"].endswith("desktop_add_contact_profile_after_actions.png"))
+            self.assertTrue(payload["screenshots"]["profile_verify"].endswith("desktop_add_contact_profile_verify.png"))
+            self.assertTrue((Path(payload["run_dir"]) / "execution_record.json").exists())
 
     def test_extract_member_count(self) -> None:
         count, count_text = self.executor._extract_member_count("Жиротоп Shop\n2 440 members, 153 online")

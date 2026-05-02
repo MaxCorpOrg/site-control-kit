@@ -6,6 +6,7 @@
 - Локальный HTTP-хаб управления (`webcontrol`) с очередью команд и сохранением состояния.
 - CLI (`sitectl` / `python3 -m webcontrol`) для отправки команд и диагностики.
 - Расширение браузера (Manifest V3) для выполнения команд в реальных вкладках.
+- Registry-driven unified tool platform для отдельных operator tools и GUI control panel.
 - Подробная документация для пользователя и ИИ-агентов сопровождения.
 
 ## Быстрый Вход В Браузерный Контур
@@ -145,6 +146,12 @@ cd /home/max/site-control-kit
 - хранение execution-config внутри `invite_state.json`;
 - `execution_plan.json` и execution-логи;
 - `open-chat` через `python3 -m webcontrol browser ...`;
+- `portable_actor` для привязки execution к Telegram Desktop portable-профилю;
+- `ensure-portable` для проверки, что нужный portable-аккаунт запущен перед Desktop-assisted шагом;
+- `prepare-next` как быстрый one-user pipeline: проверить actor, добавить/выбрать одного consented username, перевести `new -> checked`, создать план и зарезервировать пользователя;
+- `desktop-send-link` для одного consented пользователя: открыть DM через Telegram Desktop portable, вставить invite link и отправить только с явным `--confirm-send`;
+- `desktop-open-add-members` как no-API Desktop UI path: открыть `Info`, попробовать открыть `Add members` и, если появился правый search field, ввести туда username через accessibility/X11 primitives;
+- `telegram_portable.py press-keys` как отдельный no-API keyboard primitive для Telegram Desktop, когда shortcut/focus path стабильнее правого header-click;
 - запись операторских результатов обратно в state через `record`;
 - live `add-contact` с auto before/after `inspect-chat` verification, чтобы `joined` фиксировался только по росту `member_count` или другому отдельному подтверждению.
 
@@ -171,12 +178,50 @@ python3 scripts/telegram_invite_executor.py configure \
   --job-dir "/home/max/telegram_invite_jobs/chat_-2465948544" \
   --invite-link "https://t.me/+example" \
   --url-pattern "web.telegram.org/k/#-2465948544" \
+  --portable-profile-name "AK" \
+  --portable-profile-dir "/home/max/TelegramPortableAK" \
+  --account-username "@M_a_g_g_i_e" \
   --requires-approval
 
 python3 scripts/telegram_invite_executor.py plan \
   --job-dir "/home/max/telegram_invite_jobs/chat_-2465948544" \
   --limit 3 \
   --reserve
+
+python3 scripts/telegram_invite_executor.py ensure-portable \
+  --job-dir "/home/max/telegram_invite_jobs/chat_-2465948544"
+
+python3 scripts/telegram_invite_executor.py prepare-next \
+  --job-dir "/home/max/telegram_invite_jobs/chat_-2465948544" \
+  --username "@USERNAME" \
+  --consent yes \
+  --launch-if-needed
+
+python3 scripts/telegram_invite_executor.py desktop-send-link \
+  --job-dir "/home/max/telegram_invite_jobs/chat_-2465948544" \
+  --username "@USERNAME" \
+  --dry-run
+
+python3 scripts/telegram_invite_executor.py desktop-send-link \
+  --job-dir "/home/max/telegram_invite_jobs/chat_-2465948544" \
+  --username "@USERNAME" \
+  --confirm-send \
+  --record-result
+
+python3 scripts/telegram_invite_executor.py desktop-open-add-members \
+  --job-dir "/home/max/telegram_invite_jobs/chat_Zhirotop_shop" \
+  --username "@USERNAME" \
+  --no-type-search \
+  --dry-run
+
+python3 scripts/telegram_portable.py press-keys \
+  --profile-dir "/home/max/TelegramPortableAK" \
+  --sequence "Control_L+f" \
+  --dry-run
+
+python3 scripts/telegram_portable.py window-screenshot \
+  --profile-dir "/home/max/TelegramPortableAK" \
+  --output /tmp/tg_window.png
 
 python3 scripts/telegram_invite_executor.py open-chat \
   --job-dir "/home/max/telegram_invite_jobs/chat_-2465948544" \
@@ -193,6 +238,40 @@ cd /home/max/site-control-kit/tools/telegram_invite_manager
 
 `run.json` теперь дублирует ключевую телеметрию экспортёра: `unique_members`, `members_with_username`, `chat_scroll_steps_done`, `chat_jump_scrolls_done`, `deep_updated_total`, `history_backfilled_total`, `output_usernames_cleared_total`, `chat_deep_priority_rounds`, `chat_deep_yield_stop`, а полный сырой payload лежит в `export_stats.json`.
 Также в `run.json` есть признаки продвижения/сохранения latest-снимков: `latest_full_promoted`, `latest_safe_promoted`, `latest_full_best_source`, `latest_safe_best_source`.
+
+## Unified Tool Platform
+
+Теперь в проекте есть отдельный registry-driven control layer:
+
+- [tools/tool_platform/README_RU.md](tools/tool_platform/README_RU.md)
+- [tools/tool_platform/AGENT_GUIDE_RU.md](tools/tool_platform/AGENT_GUIDE_RU.md)
+- `tool_platform/catalog.py`
+- `tool_platform/cli.py`
+- `tool_platform/gui.py`
+
+Он нужен для двух целей одновременно:
+- сохранять инструменты отдельными единицами;
+- подключать их в единую графическую панель управления.
+
+Сейчас в registry уже подключены:
+- `telegram_invite_manager` из текущего репозитория;
+- `/home/max/telegram-portable-session-tool` как отдельный standalone-репозиторий.
+
+Быстрый вход:
+
+```bash
+cd /home/max/site-control-kit/tools/tool_platform
+
+./bin/tool-platform validate-registry
+./bin/tool-platform list-tools
+./bin/tool-platform show-tool --tool-id telegram_invite_manager
+./bin/tool-platform show-tool --tool-id telegram_portable_session_tool
+./bin/tool-platform-panel
+```
+
+Новый инструмент добавляется не через хардкод GUI, а через:
+1. собственный `tool_manifest.json`;
+2. запись в `tools/tool_platform/registry/tools.json`.
 
 ## Telegram Desktop Portable на Linux
 
@@ -221,6 +300,28 @@ python3 scripts/telegram_portable.py import-zip \
 ```bash
 cd /home/max/site-control-kit
 ./scripts/telegram_portable_gui.sh
+```
+
+Если portable-профиль уже существует и запущен, его можно принять в управление без переимпорта `tdata`:
+
+```bash
+python3 scripts/telegram_portable.py adopt \
+  --profile-dir "/home/max/TelegramPortableAK" \
+  --profile-name "AK" \
+  --account-username "@M_a_g_g_i_e"
+
+python3 scripts/telegram_portable.py status \
+  --profile-dir "/home/max/TelegramPortableAK"
+
+python3 scripts/telegram_portable.py log-diagnose \
+  --profile-dir "/home/max/TelegramPortableAK"
+
+python3 scripts/telegram_portable.py accessibility-dump \
+  --profile-dir "/home/max/TelegramPortableAK" \
+  --query "Info" \
+  --role "push button" \
+  --match-mode exact \
+  --visible-only
 ```
 
 Для офлайн-установки можно передать заранее скачанный архив Telegram Desktop:

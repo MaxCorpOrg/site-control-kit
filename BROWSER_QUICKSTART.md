@@ -162,3 +162,76 @@ python3 scripts/telegram_portable.py import-zip --zip "/path/to/tdata.zip" --pro
 cd /home/max/site-control-kit
 ./scripts/telegram_portable_gui.sh
 ```
+
+Если профиль уже существует, его можно принять в управление и проверить, что он запущен:
+
+```bash
+python3 scripts/telegram_portable.py adopt \
+  --profile-dir "/home/max/TelegramPortableAK" \
+  --profile-name "AK" \
+  --account-username "@M_a_g_g_i_e"
+
+python3 scripts/telegram_portable.py status \
+  --profile-dir "/home/max/TelegramPortableAK"
+
+python3 scripts/telegram_portable.py log-diagnose \
+  --profile-dir "/home/max/TelegramPortableAK"
+
+python3 scripts/telegram_portable.py accessibility-dump \
+  --profile-dir "/home/max/TelegramPortableAK" \
+  --query "Info" \
+  --role "push button" \
+  --match-mode exact \
+  --visible-only
+```
+
+Для consent-based invite-flow через этот portable-профиль используйте executor, а не ручную сборку команд:
+
+```bash
+python3 scripts/telegram_invite_executor.py ensure-portable \
+  --job-dir "/home/max/telegram_invite_jobs/chat_Zhirotop_shop"
+
+python3 scripts/telegram_invite_executor.py prepare-next \
+  --job-dir "/home/max/telegram_invite_jobs/chat_Zhirotop_shop" \
+  --username "@USERNAME" \
+  --consent yes \
+  --launch-if-needed
+
+python3 scripts/telegram_invite_executor.py desktop-send-link \
+  --job-dir "/home/max/telegram_invite_jobs/chat_Zhirotop_shop" \
+  --username "@USERNAME" \
+  --dry-run
+
+python3 scripts/telegram_invite_executor.py desktop-open-add-members \
+  --job-dir "/home/max/telegram_invite_jobs/chat_Zhirotop_shop" \
+  --username "@USERNAME" \
+  --no-type-search \
+  --dry-run
+
+python3 scripts/telegram_portable.py press-keys \
+  --profile-dir "/home/max/TelegramPortableAK" \
+  --sequence "Control_L+f" \
+  --dry-run
+
+python3 scripts/telegram_portable.py window-screenshot \
+  --profile-dir "/home/max/TelegramPortableAK" \
+  --output /tmp/tg_window.png
+```
+
+Реальная отправка через Telegram Desktop portable требует отдельного `--confirm-send`; запись статуса `sent` требует `--record-result`.
+
+## Unified Tool Platform
+
+Если нужно увидеть и встроенные, и внешние Telegram-инструменты в одном месте, используйте registry-driven platform layer:
+
+```bash
+cd /home/max/site-control-kit/tools/tool_platform
+
+./bin/tool-platform validate-registry
+./bin/tool-platform list-tools
+./bin/tool-platform-panel
+```
+
+Сейчас эта панель уже подхватывает:
+- встроенный `telegram_invite_manager`;
+- внешний `/home/max/telegram-portable-session-tool`.

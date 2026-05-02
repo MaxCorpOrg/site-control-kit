@@ -13,6 +13,8 @@ CHAT_URL="https://web.telegram.org/k/#-2465948544"
 JOB_DIR="/home/max/telegram_invite_jobs/chat_-2465948544"
 USERNAME="@USERNAME"
 INVITE_LINK="https://t.me/+INVITE_LINK"
+PORTABLE_PROFILE_DIR="/home/max/TelegramPortableAK"
+PORTABLE_ACCOUNT="@M_a_g_g_i_e"
 ```
 
 ## 1. Добавить Одного Пользователя
@@ -46,10 +48,39 @@ cd /home/max/site-control-kit/tools/telegram_invite_manager
   --job-dir "$JOB_DIR" \
   --invite-link "$INVITE_LINK" \
   --url-pattern "web.telegram.org/k/#-2465948544" \
+  --portable-profile-name "AK" \
+  --portable-profile-dir "$PORTABLE_PROFILE_DIR" \
+  --account-username "$PORTABLE_ACCOUNT" \
   --requires-approval
 ```
 
-## 4. Создать План На Одного
+## 4. Проверить Portable Actor
+
+Если invite-flow должен выполняться из Telegram Desktop portable-аккаунта, сначала проверьте профиль:
+
+```bash
+./bin/telegram-invite-executor ensure-portable \
+  --job-dir "$JOB_DIR"
+```
+
+Для текущего сценария `Zhirotop_shop` ожидается `account_username=@M_a_g_g_i_e`, `running=true` и окно Telegram Desktop с этим чатом.
+
+## 5. Создать План На Одного
+
+Быстрый путь для portable actor:
+
+```bash
+./bin/telegram-invite-executor prepare-next \
+  --job-dir "$JOB_DIR" \
+  --username "$USERNAME" \
+  --consent yes \
+  --launch-if-needed
+```
+
+Эта команда заменяет отдельные шаги `run -> ensure-portable -> plan --reserve` для одного пользователя.
+Если пользователь уже есть в state, `--username` можно не передавать: будет выбран следующий `checked/new`.
+
+Ручной путь остаётся ниже.
 
 ```bash
 ./bin/telegram-invite-executor plan \
@@ -65,7 +96,32 @@ cd /home/max/site-control-kit/tools/telegram_invite_manager
 $JOB_DIR/executions/<timestamp>/execution_plan.json
 ```
 
-## 5. Открыть Чат Через Site Control
+## 6. Отправить Invite Link Через Telegram Desktop Portable
+
+Сначала dry-run:
+
+```bash
+./bin/telegram-invite-executor desktop-send-link \
+  --job-dir "$JOB_DIR" \
+  --username "$USERNAME" \
+  --dry-run
+```
+
+Реальная one-user отправка:
+
+```bash
+./bin/telegram-invite-executor desktop-send-link \
+  --job-dir "$JOB_DIR" \
+  --username "$USERNAME" \
+  --confirm-send \
+  --record-result
+```
+
+Эта команда работает только с consented пользователем из state и по умолчанию принимает статусы `invite_link_created`/`checked`.
+Без `--confirm-send` Enter в Telegram Desktop не нажимается.
+После успешного `--confirm-send --record-result` пользователь переходит в `sent`.
+
+## 7. Открыть Чат Через Site Control
 
 Сначала dry-run:
 
@@ -82,7 +138,7 @@ $JOB_DIR/executions/<timestamp>/execution_plan.json
   --job-dir "$JOB_DIR"
 ```
 
-## 5A. Снять Текущий Счётчик Чата
+## 7A. Снять Текущий Счётчик Чата
 
 Если чат уже открыт в известной вкладке Telegram Web, можно штатно снять видимый счётчик участников:
 
@@ -101,7 +157,7 @@ $JOB_DIR/executions/<timestamp>/execution_plan.json
 - `visible_member_count`;
 - `visible_member_peers`.
 
-## 6. Записать Результат
+## 8. Записать Результат
 
 Если ссылка отправлена:
 
@@ -133,7 +189,7 @@ $JOB_DIR/executions/<timestamp>/execution_plan.json
   --reason joined_confirmed
 ```
 
-## 6A. Live Add Через `Add Members`
+## 8A. Live Add Через `Add Members`
 
 Этот путь использовать только для одного consented пользователя из `invite_state.json`.
 Он нужен для проверки реального UI Telegram Web, а не для массового инвайтинга.

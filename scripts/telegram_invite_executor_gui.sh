@@ -30,6 +30,10 @@ while true; do
       TRUE "configure" \
       FALSE "plan" \
       FALSE "inspect-chat" \
+      FALSE "ensure-portable" \
+      FALSE "prepare-next" \
+      FALSE "desktop-send dry" \
+      FALSE "desktop-send live" \
       FALSE "open-chat dry" \
       FALSE "open-chat" \
       FALSE "add-contact dry" \
@@ -37,7 +41,7 @@ while true; do
       FALSE "add-contact live" \
       FALSE "record" \
       FALSE "report" \
-      --height=460 \
+      --height=620 \
       --width=460
   )" || exit 0
 
@@ -51,6 +55,10 @@ while true; do
       client_id="$(zenity --entry --title="Client ID" --text="Client ID bridge (можно оставить пустым):" --entry-text="")" || continue
       tab_id="$(zenity --entry --title="Tab ID" --text="Tab ID (можно оставить пустым):" --entry-text="")" || continue
       url_pattern="$(zenity --entry --title="URL pattern" --text="URL pattern для поиска Telegram tab (можно оставить пустым):" --entry-text="web.telegram.org/k/#")" || continue
+      portable_profile_name="$(zenity --entry --title="Portable profile" --text="Имя Telegram Desktop portable-профиля (можно оставить пустым):" --entry-text="")" || continue
+      portable_profile_dir="$(zenity --entry --title="Portable profile dir" --text="Путь к portable-профилю Telegram Desktop (можно оставить пустым):" --entry-text="")" || continue
+      account_username="$(zenity --entry --title="Portable account" --text="Ожидаемый username аккаунта Telegram (можно оставить пустым):" --entry-text="")" || continue
+      account_label="$(zenity --entry --title="Portable account label" --text="Метка аккаунта или заголовок окна (можно оставить пустым):" --entry-text="")" || continue
       requires_approval="$(invite_gui_choose_yes_no "Approval mode" "Этот invite-flow подразумевает join request?" "yes" "no" "yes")" || continue
       active_mode="$(invite_gui_choose_yes_no "Active tab" "Предпочитать активную вкладку при неявном таргетинге?" "yes" "no" "yes")" || continue
       cmd=( "${EXECUTOR_SCRIPT}" configure --job-dir "${job_dir}" --invite-link "${invite_link}" --message-template "${message_template}" --note "${note}" )
@@ -62,6 +70,18 @@ while true; do
       fi
       if [[ -n "${url_pattern}" ]]; then
         cmd+=( --url-pattern "${url_pattern}" )
+      fi
+      if [[ -n "${portable_profile_name}" ]]; then
+        cmd+=( --portable-profile-name "${portable_profile_name}" )
+      fi
+      if [[ -n "${portable_profile_dir}" ]]; then
+        cmd+=( --portable-profile-dir "${portable_profile_dir}" )
+      fi
+      if [[ -n "${account_username}" ]]; then
+        cmd+=( --account-username "${account_username}" )
+      fi
+      if [[ -n "${account_label}" ]]; then
+        cmd+=( --account-label "${account_label}" )
       fi
       if [[ "${requires_approval}" == "yes" ]]; then
         cmd+=( --requires-approval )
@@ -95,6 +115,76 @@ while true; do
       fi
       if [[ "${skip_open}" == "yes" ]]; then
         cmd+=( --skip-open )
+      fi
+      ;;
+    ensure-portable)
+      portable_profile_name="$(zenity --entry --title="Portable profile" --text="Имя Telegram Desktop portable-профиля (можно оставить пустым и взять из config):" --entry-text="")" || continue
+      portable_profile_dir="$(zenity --entry --title="Portable profile dir" --text="Путь к portable-профилю (можно оставить пустым и взять из config):" --entry-text="")" || continue
+      launch_if_needed="$(invite_gui_choose_yes_no "Launch portable" "Запустить portable-профиль, если он не запущен?" "yes" "no" "no")" || continue
+      cmd=( "${EXECUTOR_SCRIPT}" ensure-portable --job-dir "${job_dir}" )
+      if [[ -n "${portable_profile_name}" ]]; then
+        cmd+=( --portable-profile-name "${portable_profile_name}" )
+      fi
+      if [[ -n "${portable_profile_dir}" ]]; then
+        cmd+=( --portable-profile-dir "${portable_profile_dir}" )
+      fi
+      if [[ "${launch_if_needed}" == "yes" ]]; then
+        cmd+=( --launch-if-needed )
+      fi
+      ;;
+    prepare-next)
+      username="$(zenity --entry --title="Username" --text="Username для немедленной подготовки (можно оставить пустым и взять следующего из очереди):" --entry-text="")" || continue
+      consent=""
+      display_name=""
+      note="prepare-next"
+      source_name="prepare-next"
+      if [[ -n "${username}" ]]; then
+        consent="$(invite_gui_choose_yes_no "Consent" "У пользователя есть явное согласие на invite-flow?" "yes" "no" "yes")" || continue
+        display_name="$(zenity --entry --title="Display name" --text="Display name (можно оставить пустым):" --entry-text="")" || continue
+        note="$(zenity --entry --title="Note" --text="Заметка:" --entry-text="prepare-next")" || continue
+        source_name="$(zenity --entry --title="Source" --text="Источник:" --entry-text="prepare-next")" || continue
+      fi
+      launch_if_needed="$(invite_gui_choose_yes_no "Launch portable" "Запустить portable-профиль, если он не запущен?" "yes" "no" "no")" || continue
+      reserve="$(invite_gui_choose_yes_no "Reserve plan" "Сразу резервировать пользователя в invite_link_created?" "yes" "no" "yes")" || continue
+      cmd=( "${EXECUTOR_SCRIPT}" prepare-next --job-dir "${job_dir}" --note "${note}" --source "${source_name}" )
+      if [[ -n "${username}" ]]; then
+        cmd+=( --username "${username}" --consent "${consent}" )
+      fi
+      if [[ -n "${display_name}" ]]; then
+        cmd+=( --display-name "${display_name}" )
+      fi
+      if [[ "${launch_if_needed}" == "yes" ]]; then
+        cmd+=( --launch-if-needed )
+      fi
+      if [[ "${reserve}" == "yes" ]]; then
+        cmd+=( --reserve )
+      else
+        cmd+=( --no-reserve )
+      fi
+      ;;
+    "desktop-send dry"|"desktop-send live")
+      username="$(zenity --entry --title="Username" --text="Введите username из invite_state.json:" --entry-text="@username")" || continue
+      message="$(zenity --entry --title="Message" --text="ASCII-сообщение (можно оставить пустым: будет отправлена invite link):" --entry-text="")" || continue
+      launch_if_needed="$(invite_gui_choose_yes_no "Launch portable" "Запустить portable-профиль, если он не запущен?" "yes" "no" "no")" || continue
+      cmd=( "${EXECUTOR_SCRIPT}" desktop-send-link --job-dir "${job_dir}" --username "${username}" )
+      if [[ -n "${message}" ]]; then
+        cmd+=( --message "${message}" )
+      fi
+      if [[ "${launch_if_needed}" == "yes" ]]; then
+        cmd+=( --launch-if-needed )
+      fi
+      if [[ "${action}" == "desktop-send dry" ]]; then
+        cmd+=( --dry-run )
+      else
+        confirm_send="$(invite_gui_choose_yes_no "Confirm send" "Реально нажать Enter и отправить invite link через Telegram Desktop portable?" "yes" "no" "no")" || continue
+        if [[ "${confirm_send}" != "yes" ]]; then
+          continue
+        fi
+        record_result="$(invite_gui_choose_yes_no "Record sent" "Если отправка прошла без ошибки, записать пользователя в статус sent?" "yes" "no" "yes")" || continue
+        cmd+=( --confirm-send )
+        if [[ "${record_result}" == "yes" ]]; then
+          cmd+=( --record-result )
+        fi
       fi
       ;;
     "open-chat dry")

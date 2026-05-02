@@ -134,6 +134,25 @@
   - кликать по доступным Telegram Desktop controls через `accessibility-click`;
   - вводить ASCII-текст в accessibility-selected field через `accessibility-type-text`.
 
+### Unified tool platform
+- Добавлен отдельный registry-driven platform layer:
+  - `tool_platform/catalog.py`
+  - `tool_platform/cli.py`
+  - `tool_platform/gui.py`
+  - `tools/tool_platform/*`
+- Платформа уже умеет:
+  - подключать embedded и external инструменты через `tool_manifest.json`;
+  - валидировать registry;
+  - показывать единый catalog через CLI;
+  - открывать Tkinter control panel с docs, actions и artifacts;
+  - не хардкодить список Telegram-инструментов в GUI.
+- В registry уже подключены:
+  - `tools/telegram_invite_manager/tool_manifest.json`;
+  - `/home/max/telegram-portable-session-tool/tool_manifest.json`.
+- Это зафиксировало новый рабочий контракт:
+  - отдельные инструменты живут сами по себе;
+  - общая панель только читает manifests и orchestration metadata.
+
 ### Безопасность данных Telegram
 - Введены `identity_history.json`, `review.txt`, `conflicts.json` и quarantine-логика.
 - Известные конфликты `peer_id <-> username` не должны попадать в numbered batch как безопасные данные.
@@ -199,6 +218,15 @@
   - при открытии такой страницы расширение вызывает `chrome.runtime.reload()` само.
 
 ## Проверено
+- Для нового unified tool platform зелёные:
+  - `PYTHONPATH="$PWD" python3 -m unittest discover -s tests -p 'test_*.py'`
+  - `python3 -m py_compile tool_platform/*.py scripts/telegram_invite_executor.py`
+  - `bash -n tools/tool_platform/bin/tool-platform tools/tool_platform/bin/tool-platform-panel scripts/telegram_invite_executor_gui.sh`
+  - `./tools/tool_platform/bin/tool-platform validate-registry`
+  - `./tools/tool_platform/bin/tool-platform list-tools`
+- Registry подтвердил подключение двух инструментов:
+  - embedded `telegram_invite_manager`;
+  - external `telegram_portable_session_tool`.
 - После добавления `desktop-add-contact-profile` полный unit-набор снова зелёный: `167/167`.
 - Полный unit-набор сейчас зелёный: `165/165`.
 - После добавления `desktop-send-link` полный unit-набор зелёный: `159/159`.
@@ -624,6 +652,14 @@
 
 Следующий резерв уже не в починке path, а в общем балансе runtime между discovery и deep на длинных прогонах.
 
+### 3. Unified tool platform пока остаётся catalog/action слоем
+Новая панель уже умеет подключать отдельные инструменты и показывать их manifests.
+Но она пока не даёт полноценные tool-specific forms и не показывает rich live summaries по job/run артефактам.
+
+Это нормально для первого шага:
+- сначала нужен стабильный manifest/registry contract;
+- потом можно делать richer dashboards поверх него.
+
 ## Следующий Приоритет
 
 ### Для Telegram export
@@ -644,7 +680,12 @@
 - не делать принудительное массовое добавление пользователей;
 - при первом live-шаге обязательно сохранять execution record и зафиксировать его в этом status-файле.
 
-### 3. Reload helper стал рабочим, но fallback-кнопка ещё зависит от геометрии
+### Для Unified Tool Platform
+- держать registry-driven слой тонким и не переносить туда Telegram-specific business logic;
+- подключать новые инструменты через `tool_manifest.json`, а не через ручную прошивку в GUI;
+- следующим шагом можно добавить tool-specific forms и summaries для последних job/run artifacts.
+
+### 4. Reload helper стал рабочим, но fallback-кнопка ещё зависит от геометрии
 Основной stale-runtime блок снят через self-reload страницы расширения.
 Что уже точно работает:
 - self-reload через `chrome-extension://.../options.html?action=reload-self`;
@@ -655,19 +696,19 @@
 - fallback-клик по кнопке Reload на `chrome://extensions`;
 - его точные координаты всё ещё зависят от сборки Chrome/масштаба окна.
 
-### 4. Exporter всё ещё тратит слишком много runtime на discovery до deep
+### 5. Exporter всё ещё тратит слишком много runtime на discovery до deep
 После последних фиксов короткие no-history run уже дают `3/3` успешных deep-update на видимом слое.
 Но на длинных прогонах runtime всё ещё может упираться в общий бюджет раньше, чем deep пройдёт следующий слой visible peer.
 
-### 5. X11 fallback для browser tab actions в этой среде ненадёжен
+### 6. X11 fallback для browser tab actions в этой среде ненадёжен
 Проверка `_x11_send_keys` на реальном Chrome window вернула `True`, но фактический `Ctrl+T` не создал новую вкладку.
 Это отдельный инфраструктурный долг browser CLI.
 
-### 6. Best-known latest может быть исторически сильным, но не самым свежим по времени
+### 7. Best-known latest может быть исторически сильным, но не самым свежим по времени
 Сейчас это осознанное поведение: `latest_*` в chat-dir означает лучший известный snapshot, а не обязательно самый свежий run.
 Если пользователю нужен именно последний run как основной артефакт, это потребуется оформить отдельно.
 
-### 7. Экспортёр остаётся монолитным
+### 8. Экспортёр остаётся монолитным
 `export_telegram_members_non_pii.py` всё ещё перегружен ответственностями и требует модульного разделения.
 
 ## Последний Подтверждённый Полезный Результат
@@ -718,6 +759,17 @@
     - `~/.local/share/telegram-sandbox-activity-runner/runs/20260502T054306-8c3daf4f/`;
   - остаточный gap:
     - exact username verification уже проходит, но автоматический клик по `ДОБАВИТЬ КОНТАКТ` в этом path всё ещё не переводит экран в stable `Новый контакт -> Готово`, поэтому последний submit-step пока остаётся недобитым.
+- Для unified tool platform подтверждён первый рабочий orchestration layer:
+  - registry: `/home/max/site-control-kit/tools/tool_platform/registry/tools.json`;
+  - CLI: `./tools/tool_platform/bin/tool-platform validate-registry`;
+  - GUI entrypoint: `./tools/tool_platform/bin/tool-platform-panel`;
+  - подключённые manifests:
+    - `/home/max/site-control-kit/tools/telegram_invite_manager/tool_manifest.json`;
+    - `/home/max/telegram-portable-session-tool/tool_manifest.json`;
+  - факт:
+    - отдельный `telegram-portable-session-tool` остался standalone-репозиторием;
+    - встроенный `telegram_invite_manager` остался внутренним инструментом `site-control-kit`;
+    - общая панель теперь видит оба как единый catalog.
 - Живой no-history run на новом runtime подтвердил, что основной export path уже собирает новые `@username` без помощи `identity_history.json` и обрабатывает несколько peer в одном deep-step.
 - Артефакты проверки:
   - `/tmp/tg_live_batch_boost3.7ErTfD/snapshot.md`
@@ -736,6 +788,7 @@
 5. Разделить browser capability/runtime compatibility и Telegram export concerns в отдельные модули/слои.
 6. Отделить понятие `best-known latest` от `most-recent run` в UI и документации, если пользователю важно видеть именно последний прогон как основной артефакт.
 7. Декомпозировать `export_telegram_members_non_pii.py` на модули.
+8. Для unified tool platform поверх общего catalog добавить richer dashboards, если оператору понадобятся отдельные формы и live artifact summaries.
 
 ## Как Продолжать Следующему Агенту
 1. Прочитать `AGENTS.md`.

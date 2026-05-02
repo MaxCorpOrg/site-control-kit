@@ -18,26 +18,34 @@ try:
         DEFAULT_SELECTABLE_STATUSES,
         append_history,
         atomic_write_json,
+        build_user_record,
+        consent_label,
         ensure_valid_status,
         load_state,
         normalize_username,
         now_utc,
+        parse_consent,
         save_state,
         select_candidates,
         summarize_state,
+        write_run_artifacts,
     )
 except ImportError:
     from telegram_invite_manager import (  # type: ignore
         DEFAULT_SELECTABLE_STATUSES,
         append_history,
         atomic_write_json,
+        build_user_record,
+        consent_label,
         ensure_valid_status,
         load_state,
         normalize_username,
         now_utc,
+        parse_consent,
         save_state,
         select_candidates,
         summarize_state,
+        write_run_artifacts,
     )
 
 
@@ -69,6 +77,10 @@ MEMBERS_TAB_STOP_MARKERS = (
     'search-super-tab-container search-super-container-similar',
 )
 PUBLIC_TELEGRAM_HANDLE_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{4,31}$")
+DESKTOP_ADD_CONTACT_X_RATIO = 0.394
+DESKTOP_ADD_CONTACT_Y_RATIO = 0.397
+DESKTOP_DONE_CONTACT_X_RATIO = 0.565
+DESKTOP_DONE_CONTACT_Y_RATIO = 0.715
 
 
 def _execution_runs_dir(job_dir: Path) -> Path:
@@ -84,6 +96,10 @@ def _execution_state(payload: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(browser_target, dict):
         browser_target = {}
         execution["browser_target"] = browser_target
+    portable_actor = execution.get("portable_actor")
+    if not isinstance(portable_actor, dict):
+        portable_actor = {}
+        execution["portable_actor"] = portable_actor
     return execution
 
 
@@ -108,9 +124,14 @@ def _merge_execution_config(
     tab_id: int | None = None,
     url_pattern: str | None = None,
     active: bool | None = None,
+    portable_profile_name: str | None = None,
+    portable_profile_dir: str | None = None,
+    account_username: str | None = None,
+    account_label: str | None = None,
 ) -> dict[str, Any]:
     execution = _execution_state(payload)
     browser_target = execution["browser_target"]
+    portable_actor = execution["portable_actor"]
 
     if invite_link is not None:
         execution["invite_link"] = _nonempty(invite_link)
@@ -128,6 +149,14 @@ def _merge_execution_config(
         browser_target["url_pattern"] = _nonempty(url_pattern)
     if active is not None:
         browser_target["active"] = bool(active)
+    if portable_profile_name is not None:
+        portable_actor["profile_name"] = _nonempty(portable_profile_name)
+    if portable_profile_dir is not None:
+        portable_actor["profile_dir"] = _nonempty(portable_profile_dir)
+    if account_username is not None:
+        portable_actor["account_username"] = _nonempty(account_username)
+    if account_label is not None:
+        portable_actor["account_label"] = _nonempty(account_label)
     return execution
 
 
@@ -142,10 +171,16 @@ def _resolved_execution_config(
     tab_id: int | None = None,
     url_pattern: str | None = None,
     active: bool | None = None,
+    portable_profile_name: str | None = None,
+    portable_profile_dir: str | None = None,
+    account_username: str | None = None,
+    account_label: str | None = None,
 ) -> dict[str, Any]:
     execution = dict(_execution_state(payload))
     browser_target = dict(execution.get("browser_target") or {})
     execution["browser_target"] = browser_target
+    portable_actor = dict(execution.get("portable_actor") or {})
+    execution["portable_actor"] = portable_actor
 
     if invite_link is not None:
         execution["invite_link"] = _nonempty(invite_link)
@@ -179,6 +214,22 @@ def _resolved_execution_config(
     if active is not None:
         browser_target["active"] = bool(active)
     browser_target["active"] = _bool_flag(browser_target.get("active"), default=True)
+
+    if portable_profile_name is not None:
+        portable_actor["profile_name"] = _nonempty(portable_profile_name)
+    portable_actor.setdefault("profile_name", "")
+
+    if portable_profile_dir is not None:
+        portable_actor["profile_dir"] = _nonempty(portable_profile_dir)
+    portable_actor.setdefault("profile_dir", "")
+
+    if account_username is not None:
+        portable_actor["account_username"] = _nonempty(account_username)
+    portable_actor.setdefault("account_username", "")
+
+    if account_label is not None:
+        portable_actor["account_label"] = _nonempty(account_label)
+    portable_actor.setdefault("account_label", "")
     return execution
 
 
@@ -201,27 +252,27 @@ def _plan_users(
     execution: dict[str, Any],
 ) -> list[dict[str, Any]]:
     selected = select_candidates(payload, limit, statuses)
+    return [_plan_row_for_user(row, execution=execution, chat_url=_nonempty(payload.get("chat_url"))) for row in selected]
+
+
+def _plan_row_for_user(row: dict[str, Any], *, execution: dict[str, Any], chat_url: str) -> dict[str, Any]:
     invite_link = _nonempty(execution.get("invite_link"))
     message_template = _nonempty(execution.get("message_template")) or DEFAULT_MESSAGE_TEMPLATE
-    chat_url = _nonempty(payload.get("chat_url"))
     requires_approval = bool(execution.get("requires_approval", True))
     action = "share_invite_link" if invite_link else "prepare_invite_link"
-    planned = []
-    for row in selected:
-        plan_row = {
-            "username": str(row.get("username") or ""),
-            "display_name": str(row.get("display_name") or ""),
-            "note": str(row.get("note") or ""),
-            "source": str(row.get("source") or ""),
-            "from_status": str(row.get("status") or ""),
-            "action": action,
-            "invite_link": invite_link,
-            "requires_approval": requires_approval,
-        }
-        if invite_link:
-            plan_row["message_text"] = _format_message(message_template, row, invite_link, chat_url)
-        planned.append(plan_row)
-    return planned
+    plan_row = {
+        "username": str(row.get("username") or ""),
+        "display_name": str(row.get("display_name") or ""),
+        "note": str(row.get("note") or ""),
+        "source": str(row.get("source") or ""),
+        "from_status": str(row.get("status") or ""),
+        "action": action,
+        "invite_link": invite_link,
+        "requires_approval": requires_approval,
+    }
+    if invite_link:
+        plan_row["message_text"] = _format_message(message_template, row, invite_link, chat_url)
+    return plan_row
 
 
 def _write_execution_artifacts(job_dir: Path, execution_id: str, payload: dict[str, Any], log_lines: list[str]) -> Path:
@@ -332,6 +383,66 @@ def _run_browser_json(repo_root: Path, command: list[str]) -> dict[str, Any]:
     except json.JSONDecodeError:
         payload["stdout_json"] = {}
     return payload
+
+
+def _portable_actor_args(actor: dict[str, Any]) -> list[str]:
+    profile_dir = _nonempty(actor.get("profile_dir"))
+    if profile_dir:
+        return ["--profile-dir", profile_dir]
+    profile_name = _nonempty(actor.get("profile_name"))
+    if profile_name:
+        return ["--profile-name", profile_name]
+    return []
+
+
+def _portable_command(repo_root: Path, actor: dict[str, Any], action: str) -> list[str]:
+    actor_args = _portable_actor_args(actor)
+    if not actor_args:
+        raise ValueError("portable actor requires profile_name or profile_dir")
+    return ["python3", str(repo_root / "scripts" / "telegram_portable.py"), action, *actor_args]
+
+
+def _portable_action_command(repo_root: Path, actor: dict[str, Any], action: str, *action_args: str) -> list[str]:
+    return [*_portable_command(repo_root, actor, action), *action_args]
+
+
+def _run_portable_json(repo_root: Path, command: list[str]) -> dict[str, Any]:
+    proc = subprocess.run(
+        command,
+        cwd=str(repo_root),
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    payload: dict[str, Any] = {
+        "command": command,
+        "returncode": int(proc.returncode),
+        "stdout": proc.stdout,
+        "stderr": proc.stderr,
+        "stdout_json": {},
+    }
+    try:
+        payload["stdout_json"] = json.loads(proc.stdout) if proc.stdout.strip() else {}
+    except json.JSONDecodeError:
+        payload["stdout_json"] = {}
+    return payload
+
+
+def _telegram_public_chat_uri(chat_url: str) -> str:
+    value = _nonempty(chat_url)
+    if not value:
+        return ""
+    parsed = urlparse(value)
+    host = (parsed.netloc or "").lower()
+    if host not in {"t.me", "telegram.me", "www.t.me", "www.telegram.me"}:
+        return ""
+    path = str(parsed.path or "").strip("/")
+    if not path or "/" in path:
+        return ""
+    handle = path.lstrip("@")
+    if not PUBLIC_TELEGRAM_HANDLE_RE.fullmatch(handle):
+        return ""
+    return f"tg://resolve?domain={handle}"
 
 
 def _browser_payload_text(payload: dict[str, Any], key: str) -> str:
@@ -643,6 +754,10 @@ def command_configure(args: argparse.Namespace) -> int:
         tab_id=args.tab_id,
         url_pattern=args.url_pattern,
         active=args.active,
+        portable_profile_name=getattr(args, "portable_profile_name", None),
+        portable_profile_dir=getattr(args, "portable_profile_dir", None),
+        account_username=getattr(args, "account_username", None),
+        account_label=getattr(args, "account_label", None),
     )
     save_state(job_dir, payload)
     print(
@@ -710,6 +825,7 @@ def command_plan(args: argparse.Namespace) -> int:
         "users": planned_users,
         "operator_checklist": [
             "Проверьте, что invite link актуален и ведёт в нужный чат.",
+            "Если execution привязан к portable_actor, сначала выполните ensure-portable и проверьте account/window.",
             "Не отправляйте ссылку пользователям без consent=yes в invite_state.json.",
             "Перед live add снимите inspect-chat или используйте add-contact с автопроверкой before/after.",
             "Не ставьте joined без подтверждения роста счётчика или другого отдельного сигнала вступления.",
@@ -758,6 +874,806 @@ def command_open_chat(args: argparse.Namespace) -> int:
         response["stdout_json"] = {}
     print(json.dumps(response, ensure_ascii=False, indent=2))
     return 0 if proc.returncode == 0 else int(proc.returncode)
+
+
+def command_ensure_portable(args: argparse.Namespace) -> int:
+    job_dir = Path(args.job_dir).expanduser()
+    payload = load_state(job_dir)
+    repo_root = Path(__file__).resolve().parents[1]
+    execution = _resolved_execution_config(
+        payload,
+        portable_profile_name=args.portable_profile_name,
+        portable_profile_dir=args.portable_profile_dir,
+        account_username=args.account_username,
+        account_label=args.account_label,
+    )
+    actor = execution.get("portable_actor") or {}
+    status_command = _portable_command(repo_root, actor, "status")
+    status_result = _run_portable_json(repo_root, status_command)
+    status_payload = status_result.get("stdout_json") if isinstance(status_result.get("stdout_json"), dict) else {}
+
+    launch_result: dict[str, Any] | None = None
+    if int(status_result.get("returncode", 1) or 0) == 0 and not bool(status_payload.get("running")) and args.launch_if_needed:
+        launch_command = _portable_command(repo_root, actor, "launch")
+        launch_result = _run_portable_json(repo_root, launch_command)
+        status_result = _run_portable_json(repo_root, status_command)
+        status_payload = status_result.get("stdout_json") if isinstance(status_result.get("stdout_json"), dict) else {}
+
+    response = {
+        "status": "completed" if int(status_result.get("returncode", 1) or 0) == 0 else "failed",
+        "job_dir": str(job_dir),
+        "chat_url": str(payload.get("chat_url") or ""),
+        "portable_actor": actor,
+        "account_username": _nonempty(actor.get("account_username")),
+        "status_result": status_result,
+        "launch_result": launch_result,
+        "running": bool(status_payload.get("running")),
+        "pids": status_payload.get("pids") if isinstance(status_payload.get("pids"), list) else [],
+        "windows": status_payload.get("windows") if isinstance(status_payload.get("windows"), list) else [],
+    }
+    print(json.dumps(response, ensure_ascii=False, indent=2))
+    return 0 if response["status"] == "completed" else 1
+
+
+def _ensure_portable_actor_ready(
+    *,
+    repo_root: Path,
+    actor: dict[str, Any],
+    launch_if_needed: bool,
+) -> dict[str, Any]:
+    status_command = _portable_command(repo_root, actor, "status")
+    status_result = _run_portable_json(repo_root, status_command)
+    status_payload = status_result.get("stdout_json") if isinstance(status_result.get("stdout_json"), dict) else {}
+
+    launch_result: dict[str, Any] | None = None
+    if int(status_result.get("returncode", 1) or 0) == 0 and not bool(status_payload.get("running")) and launch_if_needed:
+        launch_command = _portable_command(repo_root, actor, "launch")
+        launch_result = _run_portable_json(repo_root, launch_command)
+        status_result = _run_portable_json(repo_root, status_command)
+        status_payload = status_result.get("stdout_json") if isinstance(status_result.get("stdout_json"), dict) else {}
+
+    return {
+        "status_result": status_result,
+        "launch_result": launch_result,
+        "running": bool(status_payload.get("running")),
+        "pids": status_payload.get("pids") if isinstance(status_payload.get("pids"), list) else [],
+        "windows": status_payload.get("windows") if isinstance(status_payload.get("windows"), list) else [],
+    }
+
+
+def _ensure_user_for_prepare_next(
+    payload: dict[str, Any],
+    *,
+    username: str,
+    consent: str,
+    display_name: str,
+    note: str,
+    source: str,
+    dry_run: bool,
+) -> dict[str, Any] | None:
+    normalized = normalize_username(username)
+    if not normalized:
+        return None
+    users = payload.get("users")
+    if not isinstance(users, list):
+        raise ValueError("state missing users list")
+    existing = next((row for row in users if isinstance(row, dict) and str(row.get("username") or "") == normalized), None)
+    if existing is not None:
+        if not bool(existing.get("consent")):
+            if not parse_consent(consent):
+                raise ValueError(f"user has no consent=yes in invite_state.json: {normalized}")
+            if not dry_run:
+                at = now_utc()
+                from_status = str(existing.get("status") or "")
+                existing["consent"] = True
+                existing["status"] = "new" if from_status == "skipped" else from_status
+                append_history(existing, from_status, str(existing.get("status") or ""), "prepare_next_consent_update", at)
+        return existing
+
+    if not parse_consent(consent):
+        raise ValueError("prepare-next can add a new user only with explicit --consent yes")
+    at = now_utc()
+    record, error = build_user_record(
+        {
+            "username": normalized,
+            "display_name": display_name or normalized,
+            "note": note,
+            "consent": consent_label(True),
+            "source": source or "prepare-next",
+        },
+        at,
+    )
+    if error or record is None:
+        raise ValueError(error or f"unable to build user record for {normalized}")
+    append_history(record, "", "new", "prepare_next_add_user", at)
+    if not dry_run:
+        users.append(record)
+        import_stats = payload.get("import_stats")
+        if isinstance(import_stats, dict):
+            import_stats["rows_total"] = int(import_stats.get("rows_total", 0) or 0) + 1
+            import_stats["imported"] = int(import_stats.get("imported", 0) or 0) + 1
+            import_stats["consent_yes"] = int(import_stats.get("consent_yes", 0) or 0) + 1
+    return record
+
+
+def _select_prepare_next_user(
+    payload: dict[str, Any],
+    *,
+    username: str | None,
+    statuses: list[str],
+) -> dict[str, Any] | None:
+    if username:
+        normalized = normalize_username(username)
+        if not normalized:
+            raise ValueError(f"invalid username: {username}")
+        user = _find_state_user(payload, normalized)
+        if user is None:
+            return None
+        if not bool(user.get("consent")):
+            raise ValueError(f"user has no consent=yes in invite_state.json: {normalized}")
+        if str(user.get("status") or "") not in set(statuses):
+            raise ValueError(f"user {normalized} is not in selectable status: {str(user.get('status') or '')}")
+        return user
+
+    for status in statuses:
+        candidates = select_candidates(payload, 1, [status])
+        if candidates:
+            return candidates[0]
+    return None
+
+
+def _write_prepare_next_manager_artifact(
+    *,
+    job_dir: Path,
+    execution_id: str,
+    username: str,
+    from_status: str,
+    to_status: str,
+    dry_run: bool,
+) -> str:
+    run_payload = {
+        "status": "completed",
+        "job_dir": str(job_dir),
+        "run_id": execution_id,
+        "limit": 1,
+        "dry_run": bool(dry_run),
+        "selected_users": 1,
+        "processed": 1,
+        "updated": 0 if dry_run else 1,
+        "from_statuses": [from_status],
+        "target_status": to_status,
+        "results": [
+            {
+                "username": username,
+                "from_status": from_status,
+                "to_status": to_status,
+                "reason": "prepare_next_checked",
+            }
+        ],
+    }
+    run_dir = write_run_artifacts(job_dir, run_payload, [f"INFO: {username} {from_status} -> {to_status} (prepare_next_checked)"])
+    return str(run_dir)
+
+
+def command_prepare_next(args: argparse.Namespace) -> int:
+    job_dir = Path(args.job_dir).expanduser()
+    payload = load_state(job_dir)
+    repo_root = Path(__file__).resolve().parents[1]
+    execution = _resolved_execution_config(payload)
+    actor = execution.get("portable_actor") or {}
+    if not _portable_actor_args(actor):
+        raise ValueError("prepare-next requires portable_actor in execution config; run configure with --portable-profile-name/dir")
+
+    portable = _ensure_portable_actor_ready(
+        repo_root=repo_root,
+        actor=actor,
+        launch_if_needed=bool(args.launch_if_needed),
+    )
+    if int(portable["status_result"].get("returncode", 1) or 0) != 0:
+        raise RuntimeError(portable["status_result"].get("stderr") or portable["status_result"].get("stdout") or "portable status failed")
+    if not portable["running"]:
+        raise RuntimeError("portable actor is not running; rerun with --launch-if-needed or start Telegram Desktop portable")
+
+    requested_username = normalize_username(args.username) if args.username else None
+    if args.username:
+        _ensure_user_for_prepare_next(
+            payload,
+            username=args.username,
+            consent=args.consent,
+            display_name=args.display_name,
+            note=args.note,
+            source=args.source,
+            dry_run=bool(args.dry_run),
+        )
+
+    statuses = [ensure_valid_status(item) for item in (args.statuses or ["checked", "new"])]
+    selected_user = _select_prepare_next_user(payload, username=requested_username, statuses=statuses)
+    if selected_user is None:
+        response = {
+            "status": "no_candidates",
+            "job_dir": str(job_dir),
+            "chat_url": str(payload.get("chat_url") or ""),
+            "portable_actor": actor,
+            "portable": portable,
+            "from_statuses": statuses,
+            "next_action": "add a consented username, then rerun prepare-next",
+        }
+        print(json.dumps(response, ensure_ascii=False, indent=2))
+        return 0
+
+    execution_id = args.execution_id or _execution_id_now()
+    at = now_utc()
+    username = str(selected_user.get("username") or "")
+    original_status = str(selected_user.get("status") or "")
+    manager_run_dir = ""
+    if original_status == "new":
+        if not args.dry_run:
+            selected_user["status"] = "checked"
+            selected_user["last_attempt_at"] = at
+            selected_user["attempts"] = int(selected_user.get("attempts", 0) or 0) + 1
+            append_history(selected_user, "new", "checked", "prepare_next_checked", at)
+            save_state(job_dir, payload)
+        manager_run_dir = _write_prepare_next_manager_artifact(
+            job_dir=job_dir,
+            execution_id=execution_id,
+            username=username,
+            from_status="new",
+            to_status="checked",
+            dry_run=bool(args.dry_run),
+        )
+
+    current_status = "checked" if original_status == "new" else original_status
+    selected_user_for_plan = dict(selected_user)
+    selected_user_for_plan["status"] = current_status
+    plan_row = _plan_row_for_user(selected_user_for_plan, execution=execution, chat_url=_nonempty(payload.get("chat_url")))
+
+    reserved = 0
+    record_user = _find_state_user(payload, username)
+    if args.reserve:
+        if not _nonempty(execution.get("invite_link")):
+            raise ValueError("prepare-next --reserve requires invite_link to be configured")
+        if not args.dry_run and record_user is not None:
+            from_status = str(record_user.get("status") or "")
+            record_user["status"] = "invite_link_created"
+            record_user["last_attempt_at"] = at
+            record_user["attempts"] = int(record_user.get("attempts", 0) or 0) + 1
+            append_history(record_user, from_status, "invite_link_created", "prepare_next_execution_plan_created", at)
+            save_state(job_dir, payload)
+            plan_row["reserved_to_status"] = "invite_link_created"
+            reserved = 1
+        elif args.dry_run:
+            plan_row["reserved_to_status"] = "invite_link_created"
+
+    run_payload = {
+        "status": "completed",
+        "job_dir": str(job_dir),
+        "execution_id": execution_id,
+        "selected_users": 1,
+        "reserved": reserved,
+        "from_statuses": statuses,
+        "execution": execution,
+        "portable_actor": actor,
+        "users": [plan_row],
+        "operator_checklist": [
+            "Portable actor уже проверен этой командой.",
+            "Работать только с указанным username и consent=yes.",
+            "После отправки invite link или Desktop-действия записать результат через record.",
+            "Не ставить joined без отдельного подтверждения вступления.",
+        ],
+    }
+    log_lines = [
+        f"INFO: prepare-next started execution_id={execution_id}",
+        f"INFO: portable actor running={int(bool(portable['running']))}",
+        f"INFO: selected {username} from_status={original_status} reserve={int(bool(args.reserve))} dry_run={int(bool(args.dry_run))}",
+    ]
+    execution_run_dir = ""
+    if not args.dry_run:
+        execution_run_dir = str(_write_execution_artifacts(job_dir, execution_id, run_payload, log_lines))
+
+    response = {
+        "status": "completed",
+        "job_dir": str(job_dir),
+        "chat_url": str(payload.get("chat_url") or ""),
+        "execution_id": execution_id,
+        "dry_run": bool(args.dry_run),
+        "portable_actor": actor,
+        "portable": portable,
+        "selected_user": plan_row,
+        "manager_run_dir": manager_run_dir,
+        "execution_run_dir": execution_run_dir,
+        "reserved": reserved,
+        "target_status": "invite_link_created" if args.reserve else current_status,
+        "next_action": "send invite using Telegram Desktop portable actor, then record sent/requested/joined",
+    }
+    print(json.dumps(response, ensure_ascii=False, indent=2))
+    return 0
+
+
+def command_desktop_send_link(args: argparse.Namespace) -> int:
+    job_dir = Path(args.job_dir).expanduser()
+    payload = load_state(job_dir)
+    repo_root = Path(__file__).resolve().parents[1]
+    username = normalize_username(args.username)
+    if not username:
+        raise ValueError("desktop-send-link requires a valid Telegram username")
+    user = _find_state_user(payload, username)
+    if user is None:
+        raise ValueError(f"user is not present in invite_state.json: {username}")
+    if not bool(user.get("consent")):
+        raise ValueError(f"user has no consent=yes in invite_state.json: {username}")
+    allowed_statuses = {ensure_valid_status(item) for item in (args.statuses or ["invite_link_created", "checked"])}
+    user_status = str(user.get("status") or "")
+    if user_status not in allowed_statuses:
+        raise ValueError(f"user {username} has status {user_status!r}, expected one of {sorted(allowed_statuses)}")
+
+    execution = _resolved_execution_config(payload)
+    actor = execution.get("portable_actor") or {}
+    if not _portable_actor_args(actor):
+        raise ValueError("desktop-send-link requires portable_actor in execution config")
+    invite_link = _nonempty(args.invite_link) or _nonempty(execution.get("invite_link"))
+    if not invite_link:
+        raise ValueError("desktop-send-link requires invite_link in execution config or --invite-link")
+    message_text = _nonempty(args.message) or invite_link
+    try:
+        message_text.encode("ascii")
+    except UnicodeEncodeError as exc:
+        raise ValueError("desktop-send-link currently supports only ASCII text; use an ASCII invite link or message") from exc
+
+    portable = _ensure_portable_actor_ready(repo_root=repo_root, actor=actor, launch_if_needed=bool(args.launch_if_needed))
+    if int(portable["status_result"].get("returncode", 1) or 0) != 0:
+        raise RuntimeError(portable["status_result"].get("stderr") or portable["status_result"].get("stdout") or "portable status failed")
+    if not portable["running"]:
+        raise RuntimeError("portable actor is not running; rerun with --launch-if-needed or start Telegram Desktop portable")
+
+    execution_id = args.execution_id or _execution_id_now()
+    domain = username.lstrip("@")
+    uri = f"tg://resolve?domain={domain}"
+    steps: list[dict[str, Any]] = []
+    open_command = _portable_action_command(repo_root, actor, "open-uri", "--uri", uri)
+    if args.dry_run:
+        open_command.append("--dry-run")
+    open_result = _run_portable_json(repo_root, open_command)
+    steps.append({"label": "open_user_chat", **open_result})
+    if int(open_result.get("returncode", 1) or 0) != 0:
+        raise RuntimeError(open_result.get("stderr") or open_result.get("stdout") or "open user chat failed")
+    if not args.dry_run:
+        time.sleep(max(float(args.open_wait), 0.0))
+
+    type_command = _portable_action_command(repo_root, actor, "type-text", "--text", message_text)
+    if args.window_id:
+        type_command.extend(["--window-id", args.window_id])
+    if args.confirm_send:
+        type_command.append("--press-enter")
+    if args.dry_run or not args.confirm_send:
+        type_command.append("--dry-run")
+    type_result = _run_portable_json(repo_root, type_command)
+    steps.append({"label": "type_invite_link", **type_result})
+    if int(type_result.get("returncode", 1) or 0) != 0:
+        raise RuntimeError(type_result.get("stderr") or type_result.get("stdout") or "type invite link failed")
+
+    record_update: dict[str, str] | None = None
+    if args.record_result and args.confirm_send and not args.dry_run:
+        record_update = _record_user_status(
+            job_dir,
+            payload,
+            user,
+            status="sent",
+            reason="desktop_portable_invite_link_sent",
+        )
+
+    status = "sent" if args.confirm_send and not args.dry_run else "prepared"
+    response = {
+        "status": "completed",
+        "outcome": status,
+        "job_dir": str(job_dir),
+        "chat_url": str(payload.get("chat_url") or ""),
+        "execution_id": execution_id,
+        "username": username,
+        "portable_actor": actor,
+        "portable": portable,
+        "uri": uri,
+        "message_text": message_text,
+        "confirm_send": bool(args.confirm_send),
+        "record_update": record_update,
+        "target_status": record_update["to_status"] if isinstance(record_update, dict) else "",
+        "steps": steps,
+    }
+    log_lines = [
+        f"INFO: desktop-send-link started execution_id={execution_id}",
+        f"INFO: username={username} confirm_send={int(bool(args.confirm_send))} record_result={int(bool(args.record_result))}",
+    ]
+    run_dir = _write_execution_record(job_dir, execution_id, response, log_lines)
+    response["run_dir"] = str(run_dir)
+    print(json.dumps(response, ensure_ascii=False, indent=2))
+    return 0
+
+
+def command_desktop_open_add_members(args: argparse.Namespace) -> int:
+    job_dir = Path(args.job_dir).expanduser()
+    payload = load_state(job_dir)
+    repo_root = Path(__file__).resolve().parents[1]
+    username = normalize_username(args.username)
+    if not username:
+        raise ValueError("desktop-open-add-members requires a valid Telegram username")
+    user = _find_state_user(payload, username)
+    if user is None:
+        raise ValueError(f"user is not present in invite_state.json: {username}")
+    if not bool(user.get("consent")):
+        raise ValueError(f"user has no consent=yes in invite_state.json: {username}")
+
+    execution = _resolved_execution_config(payload)
+    actor = execution.get("portable_actor") or {}
+    if not _portable_actor_args(actor):
+        raise ValueError("desktop-open-add-members requires portable_actor in execution config")
+
+    portable = _ensure_portable_actor_ready(repo_root=repo_root, actor=actor, launch_if_needed=bool(args.launch_if_needed))
+    if int(portable["status_result"].get("returncode", 1) or 0) != 0:
+        raise RuntimeError(portable["status_result"].get("stderr") or portable["status_result"].get("stdout") or "portable status failed")
+    if not portable["running"]:
+        raise RuntimeError("portable actor is not running; rerun with --launch-if-needed or start Telegram Desktop portable")
+
+    execution_id = args.execution_id or _execution_id_now()
+    search_query = _nonempty(args.search_query) or username.lstrip("@")
+    group_uri = _nonempty(args.group_uri) or _telegram_public_chat_uri(str(payload.get("chat_url") or ""))
+    if not group_uri:
+        raise ValueError("desktop-open-add-members requires --group-uri or a public t.me chat_url in invite_state.json")
+
+    steps: list[dict[str, Any]] = []
+    outcome = "started"
+    chosen_search_field: dict[str, Any] | None = None
+
+    def run_portable_step(label: str, command: list[str], *, required: bool = True) -> dict[str, Any]:
+        result = {"label": label, **_run_portable_json(repo_root, command)}
+        steps.append(result)
+        if required and int(result.get("returncode", 1) or 0) != 0:
+            raise RuntimeError(f"{label} failed: {result.get('stderr') or result.get('stdout')}")
+        return result
+
+    log_lines = [
+        f"INFO: desktop-open-add-members started execution_id={execution_id}",
+        f"INFO: username={username} search_query={search_query!r}",
+        f"INFO: group_uri={group_uri!r}",
+    ]
+
+    try:
+        preflight_command = _portable_action_command(repo_root, actor, "log-diagnose")
+        preflight_result = run_portable_step("preflight_log", preflight_command, required=False)
+        preflight_json = preflight_result.get("stdout_json") if isinstance(preflight_result.get("stdout_json"), dict) else {}
+        alerts = preflight_json.get("alerts") if isinstance(preflight_json.get("alerts"), list) else []
+        blocking_alerts = [
+            item
+            for item in alerts
+            if isinstance(item, dict) and str(item.get("code") or "") in {"PEER_FLOOD", "FLOOD_WAIT"}
+        ]
+        if blocking_alerts:
+            log_lines.append(f"WARN: blocking alerts before UI flow: {json.dumps(blocking_alerts, ensure_ascii=False)}")
+            if not args.allow_alerts and not args.dry_run:
+                raise RuntimeError("Telegram portable log shows PEER_FLOOD/FLOOD_WAIT; stop direct add flow or rerun with --allow-alerts")
+
+        open_command = _portable_action_command(repo_root, actor, "open-uri", "--uri", group_uri)
+        if args.dry_run:
+            open_command.append("--dry-run")
+        run_portable_step("open_group", open_command)
+        if not args.dry_run:
+            time.sleep(max(float(args.open_wait), 0.0))
+
+        info_command = _portable_action_command(
+            repo_root,
+            actor,
+            "accessibility-click",
+            "--query",
+            "Info",
+            "--role",
+            "push button",
+            "--match-mode",
+            "exact",
+            "--visible-only",
+            "--pick",
+            "rightmost",
+        )
+        if args.dry_run:
+            info_command.append("--dry-run")
+        run_portable_step("open_info_panel", info_command)
+        if not args.dry_run:
+            time.sleep(max(float(args.panel_wait), 0.0))
+
+        add_members_command = _portable_action_command(
+            repo_root,
+            actor,
+            "accessibility-click",
+            "--query",
+            "Add members",
+            "--role",
+            "push button",
+            "--match-mode",
+            "exact",
+            "--pick",
+            "best",
+        )
+        if args.dry_run:
+            add_members_command.append("--dry-run")
+        run_portable_step("open_add_members_panel", add_members_command)
+        if not args.dry_run:
+            time.sleep(max(float(args.search_wait), 0.0))
+
+        search_dump_command = _portable_action_command(
+            repo_root,
+            actor,
+            "accessibility-dump",
+            "--query",
+            "Search",
+            "--role",
+            "text",
+            "--visible-only",
+            "--pick",
+            "rightmost",
+            "--max-results",
+            "10",
+        )
+        search_dump = run_portable_step("dump_search_fields", search_dump_command)
+        search_payload = search_dump.get("stdout_json") if isinstance(search_dump.get("stdout_json"), dict) else {}
+        search_matches = search_payload.get("matches") if isinstance(search_payload.get("matches"), list) else []
+        for row in search_matches:
+            if not isinstance(row, dict):
+                continue
+            relative_x_ratio = float(row.get("relative_x_ratio", 0.0) or 0.0)
+            resolved_extents = row.get("resolved_extents") if isinstance(row.get("resolved_extents"), dict) else {}
+            resolved_x = int(resolved_extents.get("x", 0) or 0)
+            if relative_x_ratio >= float(args.min_search_ratio) or (
+                int(args.min_search_x) > 0 and resolved_x >= int(args.min_search_x)
+            ):
+                chosen_search_field = row
+                break
+
+        if args.type_search:
+            if chosen_search_field is None:
+                outcome = "search_field_not_found"
+                raise RuntimeError(
+                    "Add Members search field was not found in the right-side pane; aborting before typing"
+                )
+            type_command = _portable_action_command(
+                repo_root,
+                actor,
+                "accessibility-type-text",
+                "--query",
+                "Search",
+                "--role",
+                "text",
+                "--match-mode",
+                "contains",
+                "--visible-only",
+                "--pick",
+                "rightmost",
+                "--text",
+                search_query,
+            )
+            if args.clear_search:
+                type_command.append("--clear-first")
+            if args.press_enter_after_search:
+                type_command.append("--press-enter")
+            if args.dry_run:
+                type_command.append("--dry-run")
+            run_portable_step("type_member_search", type_command)
+            outcome = "search_typed"
+        else:
+            outcome = "add_members_opened"
+    except Exception as exc:  # noqa: BLE001
+        if outcome == "started":
+            outcome = "failed"
+        log_lines.append(f"ERROR: {exc}")
+        response = {
+            "status": "failed",
+            "outcome": outcome,
+            "job_dir": str(job_dir),
+            "execution_id": execution_id,
+            "username": username,
+            "group_uri": group_uri,
+            "search_query": search_query,
+            "portable_actor": actor,
+            "portable": portable,
+            "chosen_search_field": chosen_search_field,
+            "error": str(exc),
+            "steps": steps,
+        }
+        run_dir = _write_execution_record(job_dir, execution_id, response, log_lines)
+        response["run_dir"] = str(run_dir)
+        print(json.dumps(response, ensure_ascii=False, indent=2))
+        return 0 if args.dry_run else 1
+
+    response = {
+        "status": "completed",
+        "outcome": outcome,
+        "job_dir": str(job_dir),
+        "execution_id": execution_id,
+        "username": username,
+        "group_uri": group_uri,
+        "search_query": search_query,
+        "portable_actor": actor,
+        "portable": portable,
+        "chosen_search_field": chosen_search_field,
+        "steps": steps,
+    }
+    run_dir = _write_execution_record(job_dir, execution_id, response, log_lines)
+    response["run_dir"] = str(run_dir)
+    print(json.dumps(response, ensure_ascii=False, indent=2))
+    return 0
+
+
+def command_desktop_add_contact_profile(args: argparse.Namespace) -> int:
+    job_dir = Path(args.job_dir).expanduser()
+    payload = load_state(job_dir)
+    repo_root = Path(__file__).resolve().parents[1]
+    username = normalize_username(args.username)
+    if not username:
+        raise ValueError("desktop-add-contact-profile requires a valid Telegram username")
+    user = _find_state_user(payload, username)
+    if user is None:
+        raise ValueError(f"user is not present in invite_state.json: {username}")
+    if not bool(user.get("consent")):
+        raise ValueError(f"user has no consent=yes in invite_state.json: {username}")
+
+    execution = _resolved_execution_config(payload)
+    actor = execution.get("portable_actor") or {}
+    if not _portable_actor_args(actor):
+        raise ValueError("desktop-add-contact-profile requires portable_actor in execution config")
+
+    portable = _ensure_portable_actor_ready(repo_root=repo_root, actor=actor, launch_if_needed=bool(args.launch_if_needed))
+    if int(portable["status_result"].get("returncode", 1) or 0) != 0:
+        raise RuntimeError(portable["status_result"].get("stderr") or portable["status_result"].get("stdout") or "portable status failed")
+    if not portable["running"]:
+        raise RuntimeError("portable actor is not running; rerun with --launch-if-needed or start Telegram Desktop portable")
+
+    execution_id = args.execution_id or _execution_id_now()
+    execution_run_dir = _execution_runs_dir(job_dir) / execution_id
+    execution_run_dir.mkdir(parents=True, exist_ok=True)
+    uri = f"tg://resolve?domain={username.lstrip('@')}&profile"
+    steps: list[dict[str, Any]] = []
+    screenshots: dict[str, str] = {}
+    outcome = "started"
+
+    def run_portable_step(label: str, command: list[str], *, required: bool = True) -> dict[str, Any]:
+        result = {"label": label, **_run_portable_json(repo_root, command)}
+        steps.append(result)
+        if required and int(result.get("returncode", 1) or 0) != 0:
+            raise RuntimeError(f"{label} failed: {result.get('stderr') or result.get('stdout')}")
+        return result
+
+    def capture_screenshot(label: str, filename: str) -> None:
+        if args.dry_run:
+            steps.append({"label": label, "dry_run": True, "skipped": True})
+            screenshots[label] = ""
+            return
+        screenshot_path = execution_run_dir / filename
+        result = run_portable_step(
+            label,
+            _portable_action_command(repo_root, actor, "window-screenshot", "--output", str(screenshot_path)),
+            required=False,
+        )
+        payload_json = result.get("stdout_json") if isinstance(result.get("stdout_json"), dict) else {}
+        screenshots[label] = str(payload_json.get("output_path") or screenshot_path)
+
+    log_lines = [
+        f"INFO: desktop-add-contact-profile started execution_id={execution_id}",
+        f"INFO: username={username} uri={uri!r}",
+        f"INFO: confirm_add={int(bool(args.confirm_add))} dry_run={int(bool(args.dry_run))}",
+        f"INFO: add_click_ratio=({float(args.add_click_x_ratio):.4f},{float(args.add_click_y_ratio):.4f})",
+        f"INFO: done_click_ratio=({float(args.done_click_x_ratio):.4f},{float(args.done_click_y_ratio):.4f}) repeat={int(args.done_click_repeat)}",
+    ]
+
+    try:
+        preflight_command = _portable_action_command(repo_root, actor, "log-diagnose")
+        run_portable_step("preflight_log", preflight_command, required=False)
+
+        open_command = _portable_action_command(repo_root, actor, "open-uri", "--uri", uri)
+        if args.dry_run:
+            open_command.append("--dry-run")
+        run_portable_step("open_user_profile", open_command)
+        if not args.dry_run:
+            time.sleep(max(float(args.open_wait), 0.0))
+
+        capture_screenshot("profile_before", "desktop_add_contact_profile_before.png")
+
+        if args.confirm_add:
+            click_add_command = _portable_action_command(
+                repo_root,
+                actor,
+                "window-click",
+                "--x-ratio",
+                str(float(args.add_click_x_ratio)),
+                "--y-ratio",
+                str(float(args.add_click_y_ratio)),
+            )
+            if args.dry_run:
+                click_add_command.append("--dry-run")
+            run_portable_step("click_add_to_contacts", click_add_command)
+            if not args.dry_run:
+                time.sleep(max(float(args.after_add_wait), 0.0))
+
+            last_name_text = _nonempty(args.last_name_text)
+            if last_name_text:
+                type_command = _portable_action_command(repo_root, actor, "type-text", "--text", last_name_text)
+                if bool(args.press_enter_after_last_name):
+                    type_command.append("--press-enter")
+                if args.dry_run:
+                    type_command.append("--dry-run")
+                run_portable_step("type_last_name", type_command)
+                if not args.dry_run:
+                    time.sleep(0.15)
+
+            done_repeat = max(int(args.done_click_repeat), 1)
+            for index in range(done_repeat):
+                click_done_command = _portable_action_command(
+                    repo_root,
+                    actor,
+                    "window-click",
+                    "--x-ratio",
+                    str(float(args.done_click_x_ratio)),
+                    "--y-ratio",
+                    str(float(args.done_click_y_ratio)),
+                )
+                if args.dry_run:
+                    click_done_command.append("--dry-run")
+                run_portable_step(f"click_done_{index + 1}", click_done_command)
+                if not args.dry_run:
+                    time.sleep(0.12)
+            if not args.dry_run:
+                time.sleep(max(float(args.after_done_wait), 0.0))
+
+        capture_screenshot("profile_after_actions", "desktop_add_contact_profile_after_actions.png")
+
+        if bool(args.verify_profile_reopen):
+            verify_open_command = _portable_action_command(repo_root, actor, "open-uri", "--uri", uri)
+            if args.dry_run:
+                verify_open_command.append("--dry-run")
+            run_portable_step("reopen_profile_for_verify", verify_open_command)
+            if not args.dry_run:
+                time.sleep(max(float(args.verify_wait), 0.0))
+            capture_screenshot("profile_verify", "desktop_add_contact_profile_verify.png")
+
+        if args.dry_run:
+            outcome = "dry_run"
+        elif args.confirm_add:
+            outcome = "contact_submit_clicked"
+        else:
+            outcome = "profile_opened"
+    except Exception as exc:  # noqa: BLE001
+        if outcome == "started":
+            outcome = "failed"
+        log_lines.append(f"ERROR: {exc}")
+        response = {
+            "status": "failed",
+            "outcome": outcome,
+            "job_dir": str(job_dir),
+            "execution_id": execution_id,
+            "username": username,
+            "uri": uri,
+            "portable_actor": actor,
+            "portable": portable,
+            "screenshots": screenshots,
+            "error": str(exc),
+            "steps": steps,
+        }
+        run_dir = _write_execution_record(job_dir, execution_id, response, log_lines)
+        response["run_dir"] = str(run_dir)
+        print(json.dumps(response, ensure_ascii=False, indent=2))
+        return 0 if args.dry_run else 1
+
+    response = {
+        "status": "completed",
+        "outcome": outcome,
+        "job_dir": str(job_dir),
+        "execution_id": execution_id,
+        "username": username,
+        "uri": uri,
+        "portable_actor": actor,
+        "portable": portable,
+        "screenshots": screenshots,
+        "steps": steps,
+    }
+    run_dir = _write_execution_record(job_dir, execution_id, response, log_lines)
+    response["run_dir"] = str(run_dir)
+    print(json.dumps(response, ensure_ascii=False, indent=2))
+    return 0
 
 
 def command_inspect_chat(args: argparse.Namespace) -> int:
@@ -1152,6 +2068,10 @@ def build_parser() -> argparse.ArgumentParser:
     configure_parser.add_argument("--client-id")
     configure_parser.add_argument("--tab-id", type=int)
     configure_parser.add_argument("--url-pattern")
+    configure_parser.add_argument("--portable-profile-name", help="Telegram Desktop portable profile name used as invite actor.")
+    configure_parser.add_argument("--portable-profile-dir", help="Explicit Telegram Desktop portable profile dir used as invite actor.")
+    configure_parser.add_argument("--account-username", help="Expected Telegram account username for the portable actor.")
+    configure_parser.add_argument("--account-label", help="Human-readable Telegram account/window label for the portable actor.")
     _add_bool_choice(
         configure_parser,
         "--requires-approval",
@@ -1199,6 +2119,137 @@ def build_parser() -> argparse.ArgumentParser:
     )
     open_parser.add_argument("--dry-run", action="store_true")
     open_parser.set_defaults(func=command_open_chat)
+
+    ensure_portable_parser = subparsers.add_parser(
+        "ensure-portable",
+        help="Verify or launch the configured Telegram Desktop portable actor for this invite job.",
+    )
+    ensure_portable_parser.add_argument("--job-dir", required=True)
+    ensure_portable_parser.add_argument("--portable-profile-name")
+    ensure_portable_parser.add_argument("--portable-profile-dir")
+    ensure_portable_parser.add_argument("--account-username")
+    ensure_portable_parser.add_argument("--account-label")
+    ensure_portable_parser.add_argument("--launch-if-needed", action="store_true")
+    ensure_portable_parser.set_defaults(func=command_ensure_portable)
+
+    prepare_next_parser = subparsers.add_parser(
+        "prepare-next",
+        help="One-command safe pipeline: ensure portable actor, select one consented user, check and reserve an execution plan.",
+    )
+    prepare_next_parser.add_argument("--job-dir", required=True)
+    prepare_next_parser.add_argument("--username", help="Optional explicit username. If missing, the next checked/new consented user is selected.")
+    prepare_next_parser.add_argument("--consent", default="", help="Must be yes when adding a new username through prepare-next.")
+    prepare_next_parser.add_argument("--display-name", default="")
+    prepare_next_parser.add_argument("--note", default="prepare-next")
+    prepare_next_parser.add_argument("--source", default="prepare-next")
+    prepare_next_parser.add_argument("--statuses", nargs="*", default=["checked", "new"])
+    prepare_next_parser.add_argument("--execution-id")
+    prepare_next_parser.add_argument("--launch-if-needed", action="store_true")
+    reserve_group = prepare_next_parser.add_mutually_exclusive_group()
+    reserve_group.add_argument("--reserve", dest="reserve", action="store_true", help="Move selected checked user to invite_link_created.")
+    reserve_group.add_argument("--no-reserve", dest="reserve", action="store_false", help="Leave selected user in checked after planning.")
+    prepare_next_parser.set_defaults(reserve=True)
+    prepare_next_parser.add_argument("--dry-run", action="store_true")
+    prepare_next_parser.set_defaults(func=command_prepare_next)
+
+    desktop_send_parser = subparsers.add_parser(
+        "desktop-send-link",
+        help="Open one consented user's DM in Telegram Desktop portable and optionally send the configured invite link.",
+    )
+    desktop_send_parser.add_argument("--job-dir", required=True)
+    desktop_send_parser.add_argument("--username", required=True)
+    desktop_send_parser.add_argument("--invite-link", help="Override configured invite link. Defaults to execution.invite_link.")
+    desktop_send_parser.add_argument("--message", help="ASCII message to type. Defaults to invite link only.")
+    desktop_send_parser.add_argument("--statuses", nargs="*", default=["invite_link_created", "checked"])
+    desktop_send_parser.add_argument("--execution-id")
+    desktop_send_parser.add_argument("--window-id", help="Explicit X11 Telegram Desktop window id. Defaults to the portable actor window.")
+    desktop_send_parser.add_argument("--open-wait", type=float, default=1.5)
+    desktop_send_parser.add_argument("--launch-if-needed", action="store_true")
+    desktop_send_parser.add_argument(
+        "--confirm-send",
+        action="store_true",
+        help="Press Enter after typing. Without this flag the command only prepares/dry-runs the typing step.",
+    )
+    desktop_send_parser.add_argument(
+        "--record-result",
+        action="store_true",
+        help="When --confirm-send succeeds, move the user to sent in invite_state.json.",
+    )
+    desktop_send_parser.add_argument("--dry-run", action="store_true")
+    desktop_send_parser.set_defaults(func=command_desktop_send_link)
+
+    desktop_open_add_parser = subparsers.add_parser(
+        "desktop-open-add-members",
+        help="Portable-only no-API UI path: open group info, try to open Add Members, and optionally type one username into the search field.",
+    )
+    desktop_open_add_parser.add_argument("--job-dir", required=True)
+    desktop_open_add_parser.add_argument("--username", required=True)
+    desktop_open_add_parser.add_argument("--search-query", help="Override Add Members search query; defaults to username without @.")
+    desktop_open_add_parser.add_argument("--group-uri", help="Override group tg://resolve URI. Defaults to public t.me chat_url from invite_state.json.")
+    desktop_open_add_parser.add_argument("--execution-id")
+    desktop_open_add_parser.add_argument("--open-wait", type=float, default=1.8)
+    desktop_open_add_parser.add_argument("--panel-wait", type=float, default=1.2)
+    desktop_open_add_parser.add_argument("--search-wait", type=float, default=1.2)
+    desktop_open_add_parser.add_argument("--min-search-x", type=int, default=0, help="Optional absolute X fallback for the Add Members search field.")
+    desktop_open_add_parser.add_argument("--min-search-ratio", type=float, default=0.55, help="Expected left edge ratio for the right-side Add Members search field within the Telegram window.")
+    desktop_open_add_parser.add_argument("--launch-if-needed", action="store_true")
+    desktop_open_add_parser.add_argument("--allow-alerts", action="store_true")
+    type_search_group = desktop_open_add_parser.add_mutually_exclusive_group()
+    type_search_group.add_argument(
+        "--type-search",
+        dest="type_search",
+        action="store_true",
+        help="After opening Add Members, type the username into the right-side search field.",
+    )
+    type_search_group.add_argument(
+        "--no-type-search",
+        dest="type_search",
+        action="store_false",
+        help="Stop after opening Add Members and dumping search fields.",
+    )
+    desktop_open_add_parser.set_defaults(type_search=True)
+    desktop_open_add_parser.add_argument("--clear-search", action="store_true")
+    desktop_open_add_parser.add_argument("--press-enter-after-search", action="store_true")
+    desktop_open_add_parser.add_argument("--dry-run", action="store_true")
+    desktop_open_add_parser.set_defaults(func=command_desktop_open_add_members)
+
+    desktop_add_contact_parser = subparsers.add_parser(
+        "desktop-add-contact-profile",
+        help="Portable no-API contact flow: open user profile, click Add to Contacts, and submit Done via configured click ratios.",
+    )
+    desktop_add_contact_parser.add_argument("--job-dir", required=True)
+    desktop_add_contact_parser.add_argument("--username", required=True)
+    desktop_add_contact_parser.add_argument("--execution-id")
+    desktop_add_contact_parser.add_argument("--open-wait", type=float, default=1.2)
+    desktop_add_contact_parser.add_argument("--after-add-wait", type=float, default=0.8)
+    desktop_add_contact_parser.add_argument("--after-done-wait", type=float, default=0.8)
+    desktop_add_contact_parser.add_argument("--verify-wait", type=float, default=1.2)
+    desktop_add_contact_parser.add_argument("--add-click-x-ratio", type=float, default=DESKTOP_ADD_CONTACT_X_RATIO)
+    desktop_add_contact_parser.add_argument("--add-click-y-ratio", type=float, default=DESKTOP_ADD_CONTACT_Y_RATIO)
+    desktop_add_contact_parser.add_argument("--done-click-x-ratio", type=float, default=DESKTOP_DONE_CONTACT_X_RATIO)
+    desktop_add_contact_parser.add_argument("--done-click-y-ratio", type=float, default=DESKTOP_DONE_CONTACT_Y_RATIO)
+    desktop_add_contact_parser.add_argument("--done-click-repeat", type=int, default=1)
+    desktop_add_contact_parser.add_argument(
+        "--last-name-text",
+        default="",
+        help="Optional ASCII text to type into the New Contact last name field before Done click.",
+    )
+    desktop_add_contact_parser.add_argument("--press-enter-after-last-name", action="store_true")
+    desktop_add_contact_parser.add_argument("--launch-if-needed", action="store_true")
+    _add_bool_choice(
+        desktop_add_contact_parser,
+        "--verify-profile-reopen",
+        dest="verify_profile_reopen",
+        help_true="Re-open tg://resolve?...&profile after clicks and capture verify screenshot.",
+        help_false="Skip profile reopen verification screenshot.",
+    )
+    desktop_add_contact_parser.add_argument(
+        "--confirm-add",
+        action="store_true",
+        help="Actually click Add to Contacts and Done. Without this flag the command only opens profile and captures evidence.",
+    )
+    desktop_add_contact_parser.add_argument("--dry-run", action="store_true")
+    desktop_add_contact_parser.set_defaults(func=command_desktop_add_contact_profile, verify_profile_reopen=True)
 
     inspect_parser = subparsers.add_parser(
         "inspect-chat",

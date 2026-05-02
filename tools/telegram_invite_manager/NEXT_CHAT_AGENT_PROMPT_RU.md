@@ -77,6 +77,17 @@
   - popup Add закрывается
   - ошибок Telegram не видно
   - member count не растёт автоматически
+- current portable actor:
+  - account username: @M_a_g_g_i_e
+  - profile dir: /home/max/TelegramPortableAK
+  - job: /home/max/telegram_invite_jobs/chat_Zhirotop_shop
+  - evidence: /tmp/tg_invite_portable_actor_20260426.json
+  - перед Desktop-assisted шагами запускай telegram-invite-executor ensure-portable
+- fast one-user command:
+  - telegram-invite-executor prepare-next --job-dir /home/max/telegram_invite_jobs/chat_Zhirotop_shop --username @USERNAME --consent yes --launch-if-needed
+  - telegram-invite-executor desktop-send-link --job-dir /home/max/telegram_invite_jobs/chat_Zhirotop_shop --username @USERNAME --dry-run
+  - live отправка требует --confirm-send --record-result
+  - текущий dry-run prepare-next вернул no_candidates, потому что все пользователи в этом job уже requested
 
 Как работать:
 - Сначала разберись в текущем состоянии, потом вноси изменения
@@ -85,6 +96,7 @@
 - Не помечай joined без отдельного подтверждения
 - Перед live add используй inspect-chat
 - После live add снова используй inspect-chat
+- Если работа идёт через Telegram Desktop portable, сначала проверь ensure-portable и не работай не тем аккаунтом
 - Если меняешь код, обязательно прогоняй тесты
 - После изменений обновляй docs и handoff
 - Коммиты пиши по-русски
@@ -114,4 +126,3 @@
 - оставь понятный handoff
 - закоммить изменения на русском
 ```
-

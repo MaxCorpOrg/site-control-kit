@@ -117,6 +117,30 @@ Execution-слой поверх Invite Manager.
 ### `scripts/telegram_contact_batches.py`
 Работа с numbered batch files, best snapshot promotion и related helpers.
 
+## Unified Tool Platform
+### `tool_platform/catalog.py`
+Registry и manifest loader.
+Делает:
+- загрузку `registry/tools.json`;
+- резолв embedded/external manifest paths;
+- валидацию `tool_id` и `action_id`.
+
+### `tool_platform/cli.py`
+CLI unified platform.
+Делает:
+- `list-tools`;
+- `show-tool`;
+- `validate-registry`;
+- `dump-catalog`;
+- `run-action`.
+
+### `tool_platform/gui.py`
+Tkinter graphical control panel.
+Делает:
+- единый каталог инструментов;
+- показ docs, actions, artifacts и capability tags;
+- запуск безопасных зарегистрированных actions без хардкода конкретного инструмента.
+
 ## GUI / Operator Layer
 ### `scripts/telegram_members_export_app.sh`
 Zenity-обёртка для более ручного экспорта.
@@ -148,9 +172,17 @@ cd /home/max/site-control-kit/tools/telegram_invite_manager
 ./bin/telegram-invite-executor --help
 ```
 
-4. Invite manager:
+5. Invite manager:
 ```bash
 python3 scripts/telegram_invite_manager.py init \
   --chat-url "https://web.telegram.org/k/#-2465948544" \
   --input "/home/max/telegram_invite_jobs/chat_-2465948544/users.csv"
+```
+
+6. Unified tool platform:
+```bash
+cd /home/max/site-control-kit/tools/tool_platform
+./bin/tool-platform validate-registry
+./bin/tool-platform list-tools
+./bin/tool-platform-panel
 ```

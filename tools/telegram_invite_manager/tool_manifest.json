@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "tool_id": "telegram_invite_manager",
+  "display_name": "Telegram Invite Manager",
+  "description": "Consent-based Telegram invite, add-contact and portable actor workflow inside site-control-kit.",
+  "kind": "embedded_tool",
+  "standalone": false,
+  "root_dir": ".",
+  "docs": [
+    {
+      "doc_id": "readme",
+      "label": "Visible Tool README",
+      "path": "README.md"
+    },
+    {
+      "doc_id": "agent_guide",
+      "label": "Agent Guide",
+      "path": "AGENT_GUIDE_RU.md"
+    },
+    {
+      "doc_id": "one_user_flow",
+      "label": "One User Flow",
+      "path": "ONE_USER_FLOW_RU.md"
+    },
+    {
+      "doc_id": "manager_doc",
+      "label": "Invite Manager Doc",
+      "path": "../../docs/TELEGRAM_INVITE_MANAGER_RU.md"
+    },
+    {
+      "doc_id": "executor_doc",
+      "label": "Invite Executor Doc",
+      "path": "../../docs/TELEGRAM_INVITE_EXECUTOR_RU.md"
+    }
+  ],
+  "actions": [
+    {
+      "action_id": "manager_help",
+      "label": "Manager Help",
+      "description": "Показать help для manager CLI.",
+      "argv": [
+        "./bin/telegram-invite-manager",
+        "--help"
+      ],
+      "workdir": "."
+    },
+    {
+      "action_id": "executor_help",
+      "label": "Executor Help",
+      "description": "Показать help для executor CLI.",
+      "argv": [
+        "./bin/telegram-invite-executor",
+        "--help"
+      ],
+      "workdir": "."
+    }
+  ],
+  "capabilities": [
+    "telegram_web",
+    "telegram_desktop_portable",
+    "consent_based_invite",
+    "add_contact_by_username"
+  ],
+  "tags": [
+    "telegram",
+    "invite",
+    "portable",
+    "site-control-kit"
+  ],
+  "artifacts": {
+    "job_root": "/home/max/telegram_invite_jobs"
+  }
+}
+

@@ -17,7 +17,9 @@
 - "сделай portable Telegram под Linux";
 - "автоматизируй импорт desktop-сессии Telegram".
 
-Не использовать его для задач Telegram Web, browser DOM automation, invite/extract flows или работы через `site-control` bridge.
+Не использовать его напрямую для задач Telegram Web, browser DOM automation или export flows.
+Для invite-flow helper используется только как низкоуровневый actor через `telegram_invite_executor.py`, чтобы state/consent/status оставались в общем invite-контуре.
+Отдельный standalone consumer этого helper уже вынесен в `/home/max/telegram-portable-session-tool` и теперь подключается в unified tool platform по `tool_manifest.json`, а не через копипасту команд в GUI.
 
 ## Файлы Инструмента
 - `scripts/telegram_portable.py`
@@ -39,6 +41,82 @@
 - берёт уже существующий portable-профиль;
 - запускает его повторно;
 - если этот же профиль уже запущен, не плодит второй процесс и возвращает `already_running`.
+
+### `status`
+Команда:
+- показывает, запущен ли portable-профиль;
+- возвращает `pid`, X11-окна, путь к `TelegramForcePortable/tdata`;
+- читает `portable-profile.json`, если профиль уже принят в управление.
+
+### `adopt`
+Команда:
+- принимает уже существующую portable-папку без переимпорта `tdata`;
+- пишет `portable-profile.json`;
+- позволяет привязать метку аккаунта, например `@M_a_g_g_i_e`;
+- нужна для старых папок вида `~/TelegramPortableAK`, которые были созданы до helper-формата `~/TelegramPortable-<profile>`.
+
+### `list`
+Команда:
+- показывает все portable-профили под выбранным `output-root`;
+- полезна агенту перед переключением Telegram-аккаунта.
+
+### `open-uri`
+Команда:
+- открывает `tg://...` URI через конкретный portable-профиль;
+- используется executor-слоем для открытия DM одного пользователя;
+- поддерживает `--dry-run`.
+
+### `type-text`
+Команда:
+- печатает ASCII-текст в X11-окно запущенного portable-профиля;
+- может нажать Enter только при `--press-enter`;
+- используется executor-слоем для controlled one-user invite link flow.
+
+### `press-keys`
+Команда:
+- отправляет один или несколько X11 key chords в окно portable-профиля;
+- принимает repeatable `--sequence`, например `Control_L+f` или `Escape`;
+- нужна как no-API keyboard fallback, когда Telegram Desktop реагирует на shortcut надёжнее, чем на правый header-click.
+
+### `log-diagnose`
+Команда:
+- читает последние строки `TelegramForcePortable/log.txt`;
+- вытаскивает `RPC Error`, `API Error`, `App Error`;
+- отдельно поднимает сигналы вроде `PEER_FLOOD`, `PEER_ID_INVALID`, `FLOOD_WAIT`;
+- нужна для Desktop portable диагностики, когда надо понять, что Telegram уже не даёт делать этому аккаунту.
+
+### `window-click`
+Команда:
+- кликает в окно portable-профиля по относительным координатам `x_ratio/y_ratio`;
+- использует реальную X11-геометрию окна из `wmctrl -l -G -p`;
+- нужна как низкоуровневый fallback, когда конкретный Desktop control не имеет стабильного accessibility node.
+
+### `window-screenshot`
+Команда:
+- снимает PNG именно X11-окна Telegram Desktop по `window_id`, а не просто общий bbox активного экрана;
+- полезна для live-debug no-API Desktop-flow, когда нужно проверить, что реально открылось после accessibility/X11 шага;
+- особенно нужна для случаев, где правый header Telegram ведёт себя нестабильно.
+
+### `accessibility-dump`
+Команда:
+- читает AT-SPI accessibility-дерево Telegram Desktop;
+- ищет узлы по `query`, `role`, `match_mode`;
+- умеет фильтровать только видимые узлы через `--visible-only`;
+- умеет фильтровать по AT-SPI state через repeatable `--state`, например `focused` или `editable`;
+- нужна для no-API desktop automation, когда надо понять, какие controls Telegram реально отдаёт в системную accessibility layer.
+
+### `accessibility-click`
+Команда:
+- ищет доступный control по AT-SPI и кликает в его центр;
+- если у самого узла нет собственных extents, пробует виртуальную точку через ближайший видимый ancestor container;
+- это основной no-API click primitive для Desktop UI-driver.
+
+### `accessibility-type-text`
+Команда:
+- находит доступное поле по AT-SPI;
+- фокусирует его click-ом;
+- печатает ASCII-текст через X11 typing helper;
+- умеет `--clear-first` и `--press-enter`.
 
 ## Базовые Команды
 ### Импорт и запуск
@@ -76,6 +154,95 @@ python3 scripts/telegram_portable.py launch \
   --profile-name "ak"
 ```
 
+### Принять существующий профиль в управление
+
+```bash
+python3 scripts/telegram_portable.py adopt \
+  --profile-dir "/home/max/TelegramPortableAK" \
+  --profile-name "AK" \
+  --account-username "@M_a_g_g_i_e" \
+  --account-label "@M_a_g_g_i_e"
+```
+
+### Проверить, что нужный профиль запущен
+
+```bash
+python3 scripts/telegram_portable.py status \
+  --profile-dir "/home/max/TelegramPortableAK"
+```
+
+### Список профилей
+
+```bash
+python3 scripts/telegram_portable.py list
+```
+
+### Низкоуровневый Desktop URI / typing
+
+Обычно эти команды вызывает `telegram_invite_executor.py desktop-send-link`.
+Ручной запуск нужен только для диагностики:
+
+```bash
+python3 scripts/telegram_portable.py open-uri \
+  --profile-dir "/home/max/TelegramPortableAK" \
+  --uri "tg://resolve?domain=alice_123" \
+  --dry-run
+
+python3 scripts/telegram_portable.py type-text \
+  --profile-dir "/home/max/TelegramPortableAK" \
+  --text "https://t.me/Zhirotop_shop" \
+  --dry-run
+
+python3 scripts/telegram_portable.py press-keys \
+  --profile-dir "/home/max/TelegramPortableAK" \
+  --sequence "Control_L+f" \
+  --dry-run
+
+python3 scripts/telegram_portable.py window-screenshot \
+  --profile-dir "/home/max/TelegramPortableAK" \
+  --output /tmp/tg_window.png
+
+python3 scripts/telegram_portable.py log-diagnose \
+  --profile-dir "/home/max/TelegramPortableAK"
+```
+
+### No-API Desktop UI primitives
+
+Для кодового Desktop-flow без Telegram API:
+
+```bash
+python3 scripts/telegram_portable.py accessibility-dump \
+  --profile-dir "/home/max/TelegramPortableAK" \
+  --query "Info" \
+  --role "push button" \
+  --match-mode exact \
+  --visible-only \
+  --pick rightmost
+
+python3 scripts/telegram_portable.py accessibility-dump \
+  --profile-dir "/home/max/TelegramPortableAK" \
+  --state focused \
+  --visible-only
+
+python3 scripts/telegram_portable.py accessibility-click \
+  --profile-dir "/home/max/TelegramPortableAK" \
+  --query "Info" \
+  --role "push button" \
+  --match-mode exact \
+  --visible-only \
+  --pick rightmost \
+  --dry-run
+
+python3 scripts/telegram_portable.py accessibility-type-text \
+  --profile-dir "/home/max/TelegramPortableAK" \
+  --query "Search" \
+  --role text \
+  --visible-only \
+  --pick rightmost \
+  --text "bulan04" \
+  --dry-run
+```
+
 ### GUI-режим
 
 ```bash
@@ -96,6 +263,13 @@ cd /home/max/site-control-kit
 - `TelegramForcePortable/tdata`
 - `portable-profile.json`
 - `portable-launch.log`
+
+Для принятого legacy-профиля путь может отличаться от нового шаблона.
+Например текущий профиль аккаунта `@M_a_g_g_i_e` принят как:
+
+```text
+/home/max/TelegramPortableAK/
+```
 
 Runtime cache лежит здесь:
 
@@ -125,6 +299,12 @@ Working dir: .../TelegramForcePortable/
 
 значит профиль реально поднялся в portable-режиме, а не ушёл в домашний каталог пользователя.
 
+Теперь helper умеет читать этот лог структурированно через `log-diagnose`.
+Это полезно, когда надо быстро увидеть:
+- `PEER_FLOOD` — Telegram уже режет peer/invite операции;
+- `PEER_ID_INVALID` — target/username не резолвится;
+- `FLOOD_WAIT` — Telegram требует паузу.
+
 ## Правила Безопасности И Поведения
 - Один `zip` с `tdata` = один отдельный профиль `~/TelegramPortable-<name>`.
 - Не распаковывать другой `zip` поверх уже запущенного профиля.
@@ -137,9 +317,26 @@ Working dir: .../TelegramForcePortable/
 - безопасно извлекает `zip` и runtime archive без path traversal;
 - переиспользует кэш runtime, чтобы не качать Telegram каждый раз заново;
 - возвращает JSON-результат, удобный для дальнейшей автоматизации;
+- умеет принимать существующий portable-профиль через `adopt`;
+- умеет показывать running status и X11-окна через `status`;
+- умеет открывать `tg://...` URI через `open-uri`;
+- умеет печатать ASCII-текст в окно профиля через `type-text`;
+- умеет отправлять произвольные X11 key chords через `press-keys`;
+- умеет разбирать `TelegramForcePortable/log.txt` через `log-diagnose`;
+- умеет кликать по окну portable-профиля через `window-click`;
+- умеет снимать PNG текущего Telegram X11-окна через `window-screenshot`;
+- умеет читать AT-SPI accessibility-узлы через `accessibility-dump`;
+- умеет фильтровать accessibility-узлы по state (`focused`, `editable`, `showing`);
+- умеет кликать по доступным controls через `accessibility-click`;
+- умеет печатать текст в доступные поля через `accessibility-type-text`;
 - имеет unit-тесты на import, replace, launch и already-running path.
 
 ## Что Агенту Полезно Помнить
 - Это отдельный helper для Telegram Desktop, а не часть browser API.
 - Если задача именно про desktop-сессию из `tdata.zip`, этот инструмент предпочтительнее ручной возни с `tar`, `unzip` и `TelegramForcePortable`.
-- Если задача про Telegram Web, чаты, DOM, экспорт usernames, invite execution или browser actions, использовать основной `site-control-kit` browser stack, а не этот helper.
+- Если задача про Telegram Web, DOM, экспорт usernames или browser actions, использовать основной `site-control-kit` browser stack, а не этот helper.
+- Если задача про consent-based invite execution через Desktop portable, использовать `scripts/telegram_invite_executor.py`, а не вызывать `open-uri/type-text` напрямую.
+- Если нужно понять, почему Telegram Desktop portable перестал давать invite/peer действия, сначала смотреть `log-diagnose`, а уже потом продолжать попытки.
+- Если цель именно "без Telegram API, но тоже кодом", начинать теперь можно с accessibility-команд этого helper: они дают более стабильный слой, чем blind X11-click по окну.
+- Если правый header Telegram Desktop ведёт себя нестабильно, использовать `press-keys` как отдельный no-API слой для shortcut/focus navigation и проверять layout через `accessibility-dump`.
+- Для спорных UI-случаев теперь лучше сразу добавлять `window-screenshot` после каждого шага: это даёт честный Telegram-only PNG по X11 `window_id`, даже если поверх экрана есть другое окно.

@@ -7,7 +7,7 @@
 Его задача другая:
 - держать конфигурацию consent-based invite workflow;
 - готовить execution-plan для оператора;
-- использовать `site-control` для открытия нужного Telegram-чата;
+- использовать `site-control` для Telegram Web и Telegram Desktop portable actor для Desktop-assisted шагов;
 - сохранять execution-артефакты;
 - записывать результат ручных действий обратно в `invite_state.json`.
 
@@ -15,6 +15,8 @@
 - `scripts/telegram_invite_executor.py`
 - `scripts/telegram_invite_executor_gui.sh`
 - `tests/test_telegram_invite_executor.py`
+
+Видимый operator entrypoint по-прежнему живёт в `tools/telegram_invite_manager/`, а подключение в unified panel идёт через `tools/telegram_invite_manager/tool_manifest.json`, без переноса самого executor-кода в platform-layer.
 
 ## Как Он Связан С Invite Manager
 `Invite Manager` остаётся источником истины по пользователям и статусам:
@@ -24,6 +26,10 @@
 `Invite Executor` использует тот же `invite_state.json`, но работает уже на слое исполнения:
 - `configure`
 - `plan`
+- `ensure-portable`
+- `prepare-next`
+- `desktop-send-link`
+- `desktop-open-add-members`
 - `inspect-chat`
 - `open-chat`
 - `add-contact`
@@ -45,6 +51,12 @@
       "tab_id": 0,
       "url_pattern": "web.telegram.org/k/#-2465948544",
       "active": true
+    },
+    "portable_actor": {
+      "profile_name": "AK",
+      "profile_dir": "/home/max/TelegramPortableAK",
+      "account_username": "@M_a_g_g_i_e",
+      "account_label": "@M_a_g_g_i_e"
     }
   }
 }
@@ -77,8 +89,14 @@ python3 scripts/telegram_invite_executor.py configure \
   --invite-link "https://t.me/+example" \
   --message-template "Привет! Вот ссылка для вступления в чат: {invite_link}" \
   --url-pattern "web.telegram.org/k/#-2465948544" \
+  --portable-profile-name "AK" \
+  --portable-profile-dir "/home/max/TelegramPortableAK" \
+  --account-username "@M_a_g_g_i_e" \
   --requires-approval
 ```
+
+`portable_actor` не заменяет browser-target. Это отдельная метка исполнителя для Telegram Desktop portable.
+Для текущего рабочего сценария `Zhirotop_shop` actor должен указывать на аккаунт `@M_a_g_g_i_e`.
 
 ### `plan`
 Готовит execution-plan для следующей пачки пользователей.
@@ -114,6 +132,131 @@ python3 scripts/telegram_invite_executor.py open-chat \
   --job-dir "/home/max/telegram_invite_jobs/chat_-2465948544" \
   --dry-run
 ```
+
+### `ensure-portable`
+Проверяет, что настроенный Telegram Desktop portable actor существует и запущен.
+Если передать `--launch-if-needed`, executor попробует поднять профиль через `telegram_portable.py launch`.
+
+Пример для текущего actor:
+
+```bash
+cd /home/max/site-control-kit
+python3 scripts/telegram_invite_executor.py ensure-portable \
+  --job-dir "/home/max/telegram_invite_jobs/chat_Zhirotop_shop"
+```
+
+Ожидаемый результат:
+- `portable_actor.profile_dir = /home/max/TelegramPortableAK`;
+- `account_username = @M_a_g_g_i_e`;
+- `running = true`;
+- в `windows[]` видно окно Telegram Desktop с целевым чатом.
+
+Перед Desktop-assisted invite-flow эта проверка обязательна: она защищает от ситуации, когда агент работает не тем аккаунтом.
+
+### `prepare-next`
+Один быстрый orchestration-шаг для Desktop portable flow.
+Команда:
+- проверяет `portable_actor`;
+- при `--launch-if-needed` запускает portable-профиль, если он не открыт;
+- выбирает одного consented пользователя из `checked`, а если таких нет — из `new`;
+- если пользователь был `new`, переводит его в `checked` и пишет `invite_run.json`;
+- создаёт `execution_plan.json`;
+- по умолчанию резервирует пользователя в `invite_link_created`;
+- если передан новый `--username`, добавляет его только при явном `--consent yes`.
+
+Пример для текущего `@M_a_g_g_i_e -> Zhirotop_shop`:
+
+```bash
+cd /home/max/site-control-kit
+python3 scripts/telegram_invite_executor.py prepare-next \
+  --job-dir "/home/max/telegram_invite_jobs/chat_Zhirotop_shop" \
+  --username "@USERNAME" \
+  --consent yes \
+  --launch-if-needed
+```
+
+Если username уже есть в `invite_state.json`, можно не передавать `--username`: команда возьмёт следующего кандидата из очереди.
+Если очередь пуста, вернётся `status = no_candidates`.
+
+### `desktop-send-link`
+Открывает DM ровно одного consented пользователя в Telegram Desktop portable actor и готовит/отправляет invite link.
+
+Ограничения:
+- пользователь должен быть в `invite_state.json`;
+- `consent` должен быть `true`;
+- допустимый статус по умолчанию: `invite_link_created` или `checked`;
+- текст должен быть ASCII, поэтому дефолтное сообщение — сама invite link;
+- реальная отправка требует явного `--confirm-send`;
+- статус `sent` пишется только при `--record-result` и успешном `--confirm-send`.
+
+Dry-run, без отправки:
+
+```bash
+cd /home/max/site-control-kit
+python3 scripts/telegram_invite_executor.py desktop-send-link \
+  --job-dir "/home/max/telegram_invite_jobs/chat_Zhirotop_shop" \
+  --username "@USERNAME" \
+  --dry-run
+```
+
+Live one-user отправка через текущий `@M_a_g_g_i_e` portable actor:
+
+```bash
+python3 scripts/telegram_invite_executor.py desktop-send-link \
+  --job-dir "/home/max/telegram_invite_jobs/chat_Zhirotop_shop" \
+  --username "@USERNAME" \
+  --confirm-send \
+  --record-result
+```
+
+Что делает команда:
+1. проверяет `portable_actor` через `telegram_portable.py status`;
+2. открывает DM через `tg://resolve?domain=<username>`;
+3. печатает invite link в окно Telegram Desktop portable;
+4. нажимает Enter только при `--confirm-send`;
+5. пишет `execution_record.json`.
+
+### `desktop-open-add-members`
+Portable-only no-API UI path поверх Telegram Desktop accessibility/X11 primitives.
+
+Команда:
+- проверяет `portable_actor`;
+- читает `log-diagnose` и может остановиться на `PEER_FLOOD` / `FLOOD_WAIT`;
+- открывает группу через `tg://resolve?domain=<handle>`;
+- открывает `Info` через AT-SPI accessibility node;
+- пытается открыть `Add members` тоже через accessibility layer;
+- может напечатать username в правое search field, если оно реально появилось.
+
+Это не Telegram API и не blind pixel-click.
+Под капотом используются новые primitive-команды `telegram_portable.py`:
+- `accessibility-dump`
+- `accessibility-click`
+- `accessibility-type-text`
+
+Dry-run для текущего `@M_a_g_g_i_e -> Zhirotop_shop`:
+
+```bash
+python3 scripts/telegram_invite_executor.py desktop-open-add-members \
+  --job-dir "/home/max/telegram_invite_jobs/chat_Zhirotop_shop" \
+  --username "@USERNAME" \
+  --no-type-search \
+  --dry-run
+```
+
+Попробовать дойти до search field и напечатать username:
+
+```bash
+python3 scripts/telegram_invite_executor.py desktop-open-add-members \
+  --job-dir "/home/max/telegram_invite_jobs/chat_Zhirotop_shop" \
+  --username "@USERNAME" \
+  --type-search
+```
+
+Важные ограничения текущего first-cut path:
+- команда пока не подтверждает финальный `Add`;
+- статус пользователя в `invite_state.json` не меняет;
+- если right-side search field не найден правее `--min-search-x`, команда останавливается до ввода, чтобы не печатать username в левый глобальный поиск Telegram Desktop;
+- при `PEER_FLOOD` / `FLOOD_WAIT` live path по умолчанию останавливается, пока явно не передан `--allow-alerts`.
 
 ### `inspect-chat`
 Считывает текущий Telegram Web view и возвращает:
@@ -229,6 +372,10 @@ bash scripts/telegram_invite_executor_gui.sh
 Теперь GUI покрывает основные operator actions:
 - `configure`
 - `plan`
+- `ensure-portable`
+- `prepare-next`
+- `desktop-send dry`
+- `desktop-send live`
 - `inspect-chat`
 - `open-chat`
 - `add-contact dry`
@@ -252,9 +399,10 @@ GUI не заменяет CLI, но теперь закрывает обычны
 Правильный сценарий:
 1. менеджерит consented users;
 2. готовит execution-plan;
-3. открывает нужный чат через `site-control`;
-4. оператор выполняет безопасный invite workflow или запускает `add-contact` на одного пользователя с auto-verification before/after;
-5. результат записывается через `record`.
+3. если flow идёт через Telegram Desktop portable, сначала проверяет `ensure-portable`;
+4. открывает нужный чат через `site-control` или работает в подтверждённом portable-окне;
+5. оператор выполняет безопасный invite workflow, запускает `desktop-send-link` для одного пользователя или запускает `add-contact` на одного пользователя с auto-verification before/after;
+6. результат записывается через `record`.
 
 ## Следующий Шаг
 Следующий логичный шаг — не forced-add path, а:

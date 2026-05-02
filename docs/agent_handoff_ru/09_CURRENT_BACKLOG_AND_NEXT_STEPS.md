@@ -48,13 +48,28 @@
 - вынести history/state helpers;
 - вынести output/reporting.
 
-## Следующий Приоритет P2
-### Единый User-Facing Control Layer
-Сейчас shell/GUI уже понимают profile presets.
-Но дальше можно сделать ещё лучше:
-- унифицировать user prompts;
-- показывать summary по profile effect;
-- добавлять run summary сразу в GUI после завершения.
+## Отдельный Трек: Unified Tool Platform
+
+Первый registry-driven control layer теперь уже существует:
+- `tools/tool_platform/registry/tools.json`;
+- `tool_platform/catalog.py`;
+- `tool_platform/cli.py`;
+- `tool_platform/gui.py`;
+- manifests для встроенного `telegram_invite_manager` и внешнего `telegram-portable-session-tool`.
+
+Следующий шаг для этого трека:
+1. подключать новые инструменты через manifests, а не через хардкод GUI;
+2. добавить tool-specific widgets поверх общего catalog там, где это реально помогает оператору;
+3. показывать health/status summaries и последние артефакты прямо в control panel;
+4. не смешивать business-логику отдельных инструментов с platform-слоем.
+
+## Следующий Приоритет P3
+### Action-Specific Dashboards
+Теперь общий catalog уже есть.
+Дальше можно делать следующий слой:
+- для некоторых инструментов показывать готовые формы поверх manifest actions;
+- выводить последние run/job артефакты;
+- делать richer operator summary без потери standalone-режима.
 
 ## Что Делать Не Нужно В Первую Очередь
 - переписывать весь hub;

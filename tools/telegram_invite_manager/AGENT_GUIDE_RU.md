@@ -16,6 +16,8 @@ cd /home/max/site-control-kit
 - `docs/TELEGRAM_INVITE_MANAGER_RU.md`
 - `docs/TELEGRAM_INVITE_EXECUTOR_RU.md`
 - `tools/telegram_invite_manager/README.md`
+- `tools/telegram_invite_manager/tool_manifest.json`
+- `tools/tool_platform/README_RU.md`
 - `tools/telegram_invite_manager/NEXT_CHAT_AGENT_PROMPT_RU.md`
 - `tools/telegram_invite_manager/ONE_USER_FLOW_RU.md`
 
@@ -32,6 +34,9 @@ cd /home/max/site-control-kit
 Есть execution-слой:
 - `configure`;
 - `plan`;
+- `ensure-portable` для проверки Telegram Desktop portable actor;
+- `prepare-next` для быстрого one-user pipeline через portable actor;
+- `desktop-send-link` для отправки invite link одному consented пользователю через Telegram Desktop portable;
 - `inspect-chat`;
 - `open-chat`;
 - `add-contact` для одного consented контакта через Telegram Web `Add Members`;
@@ -47,6 +52,14 @@ cd /home/max/site-control-kit
 tools/telegram_invite_manager/
 ```
 
+Есть и platform contract:
+
+```text
+tools/telegram_invite_manager/tool_manifest.json
+```
+
+Через него этот инструмент подключается в unified tool platform и не требует отдельного хардкода в panel.
+
 Есть отдельный copy-paste prompt для нового чата:
 
 ```text
@@ -58,13 +71,38 @@ tools/telegram_invite_manager/NEXT_CHAT_AGENT_PROMPT_RU.md
 1. Добавить пользователя только при явном consent.
 2. Перевести его в `checked`.
 3. Настроить invite-link.
-4. Создать execution-plan на `limit 1`.
-5. Открыть чат через `site-control`.
-6. Если нужен direct add через Telegram Web, использовать только `add-contact` на одного пользователя.
-7. Для live add предпочитать `add-contact --confirm-add --verify-membership --record-result`: он сам свяжет before/after `inspect-chat` с execution record и поставит `joined` только по сильному сигналу.
-8. После ручного действия или live add записать результат через `record` либо `add-contact --record-result`.
+4. Если исполнитель — Telegram Desktop portable, привязать `portable_actor` и выполнить `ensure-portable`.
+5. Создать execution-plan на `limit 1`.
+6. Открыть чат через `site-control` или работать в подтверждённом portable-окне.
+7. Если нужно отправить invite link из Desktop portable, использовать `desktop-send-link` на одного пользователя.
+8. Если нужен direct add через Telegram Web, использовать только `add-contact` на одного пользователя.
+9. Для live add предпочитать `add-contact --confirm-add --verify-membership --record-result`: он сам свяжет before/after `inspect-chat` с execution record и поставит `joined` только по сильному сигналу.
+10. После ручного действия или live add записать результат через `record`, `desktop-send-link --record-result` либо `add-contact --record-result`.
 
 Полная команда лежит в `ONE_USER_FLOW_RU.md`.
+
+Быстрый путь для текущего actor:
+
+```bash
+./tools/telegram_invite_manager/bin/telegram-invite-executor prepare-next \
+  --job-dir /home/max/telegram_invite_jobs/chat_Zhirotop_shop \
+  --username "@USERNAME" \
+  --consent yes \
+  --launch-if-needed
+```
+
+Этот шаг сам проверяет `@M_a_g_g_i_e`, добавляет/выбирает одного consented пользователя, делает `new -> checked`, создаёт execution-plan и резервирует пользователя.
+
+После подготовки можно проверить Desktop-send dry-run:
+
+```bash
+./tools/telegram_invite_manager/bin/telegram-invite-executor desktop-send-link \
+  --job-dir /home/max/telegram_invite_jobs/chat_Zhirotop_shop \
+  --username "@USERNAME" \
+  --dry-run
+```
+
+Live отправка требует явного `--confirm-send`; запись статуса `sent` требует `--record-result`.
 
 ## Важные Статусы
 
@@ -279,3 +317,42 @@ reason: live_add_members_confirmed_unverified
 
 Следующий практический шаг:
 - подтвердить `joined` ещё и за пределами текущего видимого списка участников, если нужный peer не попадает в правую панель сразу.
+
+## Portable Actor: `@M_a_g_g_i_e`
+
+Дата: `2026-04-26`
+
+Текущий invite job:
+
+```text
+/home/max/telegram_invite_jobs/chat_Zhirotop_shop/
+```
+
+Привязан Telegram Desktop portable actor:
+
+```text
+profile_name: AK
+profile_dir: /home/max/TelegramPortableAK
+account_username: @M_a_g_g_i_e
+target chat: https://t.me/Zhirotop_shop
+```
+
+Проверка:
+
+```bash
+./tools/telegram_invite_manager/bin/telegram-invite-executor ensure-portable \
+  --job-dir /home/max/telegram_invite_jobs/chat_Zhirotop_shop
+```
+
+Артефакт:
+
+```text
+/tmp/tg_invite_portable_actor_20260426.json
+```
+
+Факт проверки:
+- `running=true`;
+- `pid=10413`;
+- окно Telegram Desktop `0x0460002e`;
+- окно открыто на `Жиротоп Shop`.
+- dry-run `prepare-next` на `2026-04-26` вернул `no_candidates`, потому что в job нет пользователей со статусом `new` или `checked`; текущие 2 пользователя уже `requested`.

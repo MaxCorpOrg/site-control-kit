@@ -9,6 +9,7 @@
 - CLI `sitectl` и удобный слой `sitectl browser`.
 - браузерное MV3-расширение, которое исполняет команды в реальных вкладках.
 - Windows-обёртки `browser.cmd` и `start-hub.cmd` для быстрого старта.
+- registry-driven platform layer для отдельных operator tools и графической панели управления.
 
 Используйте этот репозиторий как основной локальный инструмент браузерной автоматизации, когда он доступен в рабочей папке.
 
@@ -158,7 +159,24 @@ DOM-команды:
 - `telegram_members_export_exe/` — готовая Windows GUI-упаковка для Telegram export сценария.
 - `dist/` — операторские артефакты, скриншоты, собранный zip расширения и следы упаковочных/ручных smoke-сценариев.
 
-### 9. Документация и operator knowledge base
+### 9. Unified tool platform
+Проект теперь умеет держать отдельные инструменты как самостоятельные единицы и одновременно подключать их в общий control layer.
+
+Сейчас этот слой уже умеет:
+- читать manifests подключённых инструментов;
+- держать registry embedded и external tools;
+- показывать единый catalog через CLI;
+- открывать Tkinter GUI panel без жёсткого хардкода конкретного Telegram-инструмента;
+- подключать как внутренний `telegram_invite_manager`, так и внешний `/home/max/telegram-portable-session-tool`.
+
+Основные файлы:
+- `tool_platform/catalog.py`
+- `tool_platform/cli.py`
+- `tool_platform/gui.py`
+- `tools/tool_platform/*`
+- `tools/telegram_invite_manager/tool_manifest.json`
+
+### 10. Документация и operator knowledge base
 Помимо кода, в проекте уже есть рабочая база знаний, по которой агент должен быстро понять нужный контур:
 - `README.md` и `BROWSER_QUICKSTART.md` — быстрый практический вход;
 - `docs/API.md`, `docs/ARCHITECTURE.md`, `docs/EXTENSION.md` — технический контракт и слои;
@@ -166,7 +184,7 @@ DOM-команды:
 - `docs/TELEGRAM_*` — отдельные дорожные карты и operator-инструкции для Telegram export / invite / portable;
 - `docs/agent_handoff_ru/*` и `docs/PROJECT_STATUS_RU.md` — continuity layer между агентами и чатами.
 
-### 10. Тесты и regression coverage
+### 11. Тесты и regression coverage
 Проект уже имеет unit coverage для ключевых слоёв:
 - `tests/test_store.py`
 - `tests/test_cli_browser_helpers.py`
@@ -206,6 +224,9 @@ DOM-команды:
 - Linux Telegram Desktop из `tdata.zip`:
   идти в `telegram_portable.py`, а не в browser bridge или Telegram Web code.
 
+- Unified tool platform / graphical control panel / manifests:
+  идти в `tool_platform/*.py`, `tools/tool_platform/*` и `tool_manifest.json` соответствующего инструмента, а не вшивать новый модуль прямо в существующий GUI.
+
 - Визуальное наблюдение и ручной browser recovery:
   смотреть `start_browser_novnc.sh` / `stop_browser_novnc.sh`.
 
@@ -233,6 +254,7 @@ DOM-команды:
 11. `docs/EXTENSION.md` — где реализованы background- и DOM-команды.
 12. Для Telegram-задач дополнительно: `docs/TELEGRAM_CLIENT_ROADMAP_RU.md`.
 13. Для задач про Linux Telegram Desktop portable-профили и `tdata.zip` дополнительно: `docs/TELEGRAM_PORTABLE_RU.md`.
+14. Для задач про unified tool platform дополнительно: `tools/tool_platform/README_RU.md` и `tools/tool_platform/AGENT_GUIDE_RU.md`.
 
 Запрещено начинать изменения в коде, не просмотрев `docs/PROJECT_STATUS_RU.md`. Этот файл нужен, чтобы новый чат или новый агент не дублировал уже закрытые задачи и видел текущие дыры.
 
@@ -360,6 +382,8 @@ DOM-команды:
 - `extension/background.js` — heartbeat, polling, tab-level команды, screenshot.
 - `extension/content.js` — DOM-команды, чтение страницы, click/fill/wait/text/html/js.
 - `scripts/*.cmd`, `scripts/*.ps1` — Windows-вход и удобство использования.
+- `tool_platform/*.py` — registry, manifest loader, unified CLI и GUI control panel.
+- `tools/tool_platform/*` — видимая папка platform-layer, registry и документация.
 
 ## Инварианты
 - Хаб — единственный источник правды по клиентам, очередям и результатам.

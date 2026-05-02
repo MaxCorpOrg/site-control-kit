@@ -19,6 +19,9 @@
 - `scripts/telegram_invite_executor_gui.sh`
 - `tests/test_telegram_invite_manager.py`
 - `tests/test_telegram_invite_executor.py`
+- `tools/telegram_invite_manager/tool_manifest.json`
+
+Инструмент теперь подключён и в unified tool platform через этот manifest, но продолжает жить как отдельная видимая единица внутри `tools/telegram_invite_manager/`.
 
 ## Где Хранится Состояние
 По умолчанию job-каталоги лежат в:
@@ -172,6 +175,10 @@ bash scripts/telegram_invite_manager_gui.sh
 - execution-config внутри `invite_state.json`
 - execution-plan через отдельный `Telegram Invite Executor`
 - browser-assisted `open-chat` через `site-control`
+- Desktop portable actor в execution-config для сценариев, где invite-flow должен идти из конкретного Telegram Desktop portable-аккаунта
+- `ensure-portable` для проверки, что нужный actor, например `@M_a_g_g_i_e`, реально запущен перед operator-assisted действием
+- `prepare-next` для быстрого one-user pipeline: actor preflight, добавление/выбор одного consented пользователя, `new -> checked`, execution-plan и reserve
+- `desktop-send-link` для one-user отправки invite link через Telegram Desktop portable actor с обязательным `--confirm-send`
 - автонормализация публичного `https://t.me/<handle>` в `https://web.telegram.org/k/#@<handle>` при открытии чата без явного browser-target
 - execution-record артефакты и update статусов после ручных действий
 - auto-verification before/after для live `add-contact`, чтобы `joined` фиксировался только по подтверждаемому сигналу
@@ -182,7 +189,6 @@ bash scripts/telegram_invite_manager_gui.sh
 Нет forced-add/mass-add логики и нет обхода лимитов Telegram.
 
 Следующий шаг можно делать отдельно:
-- invite link workflow
 - join request workflow
 - более сильное подтверждение вступления за пределами текущего видимого member list
 - живой smoke на поднятом browser bridge

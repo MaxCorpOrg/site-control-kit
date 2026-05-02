@@ -12,6 +12,23 @@
 
 Эта папка нужна как удобная точка входа для оператора и нового агента.
 
+## Подключение В Единую Платформу
+
+Инструмент теперь подключён в registry-driven unified panel через:
+
+```text
+tool_manifest.json
+../tool_platform/registry/tools.json
+```
+
+То есть `telegram_invite_manager` остаётся отдельным инструментом, но уже виден и в общей панели:
+
+```bash
+cd /home/max/site-control-kit/tools/tool_platform
+./bin/tool-platform show-tool --tool-id telegram_invite_manager
+./bin/tool-platform-panel
+```
+
 ## Быстрый Старт
 
 ```bash
@@ -25,7 +42,7 @@ cd /home/max/site-control-kit/tools/telegram_invite_manager
 
 GUI-обёртки теперь покрывают основной операторский поток:
 - manager GUI: `init`, `status`, `next`, `add user`, `run`, `mark`, `report`;
-- executor GUI: `configure`, `plan`, `inspect-chat`, `open-chat`, `add-contact dry/prepare/live`, `record`, `report`.
+- executor GUI: `configure`, `plan`, `ensure-portable`, `prepare-next`, `desktop-send dry/live`, `inspect-chat`, `open-chat`, `add-contact dry/prepare/live`, `record`, `report`.
 
 ## Один Пользователь
 
@@ -70,6 +87,53 @@ cd /home/max/site-control-kit/tools/telegram_invite_manager
 Если job хранит публичный `https://t.me/<handle>`, `open-chat` и `inspect-chat` без явного browser-target автоматически откроют `https://web.telegram.org/k/#@<handle>`.
 Если before/after проверка не подтверждает появление выбранного `peer_id` в видимом member list или рост `member_count`, результат записывается как `requested`, а не как `joined`.
 Сводка before/after теперь живёт прямо в `execution_record.json` в блоке `verification`.
+
+## Portable Actor Для Telegram Desktop
+
+Если приглашения должны идти из Telegram Desktop portable-аккаунта, сначала привяжите actor к job:
+
+```bash
+./bin/telegram-invite-executor configure \
+  --job-dir "/home/max/telegram_invite_jobs/chat_Zhirotop_shop" \
+  --portable-profile-name "AK" \
+  --portable-profile-dir "/home/max/TelegramPortableAK" \
+  --account-username "@M_a_g_g_i_e"
+
+./bin/telegram-invite-executor ensure-portable \
+  --job-dir "/home/max/telegram_invite_jobs/chat_Zhirotop_shop"
+```
+
+Для текущего рабочего контура actor уже привязан к `@M_a_g_g_i_e`.
+`ensure-portable` должен показывать `running=true` и окно Telegram Desktop с чатом `Жиротоп Shop`.
+
+Быстрый one-user pipeline:
+
+```bash
+./bin/telegram-invite-executor prepare-next \
+  --job-dir "/home/max/telegram_invite_jobs/chat_Zhirotop_shop" \
+  --username "@USERNAME" \
+  --consent yes \
+  --launch-if-needed
+```
+
+Команда сама проверит actor, добавит/выберет одного consented пользователя, создаст execution-plan и зарезервирует его в `invite_link_created`.
+
+Отправка invite link через Telegram Desktop portable на одного пользователя:
+
+```bash
+./bin/telegram-invite-executor desktop-send-link \
+  --job-dir "/home/max/telegram_invite_jobs/chat_Zhirotop_shop" \
+  --username "@USERNAME" \
+  --dry-run
+
+./bin/telegram-invite-executor desktop-send-link \
+  --job-dir "/home/max/telegram_invite_jobs/chat_Zhirotop_shop" \
+  --username "@USERNAME" \
+  --confirm-send \
+  --record-result
+```
+
+`--confirm-send` нужен для реального Enter в Telegram Desktop, а `--record-result` переводит пользователя в `sent` только после успешной отправки команды.
 
 Перед и после live add можно штатно снять счётчик чата:
 
