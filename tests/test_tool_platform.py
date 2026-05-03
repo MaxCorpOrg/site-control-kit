@@ -386,6 +386,9 @@ class ToolPlatformCatalogTests(unittest.TestCase):
                 state_root=tmp_dir,
                 payload={
                     "phase": "session_ready",
+                    "step_pattern": "11,2",
+                    "step_cursor": 2,
+                    "step_label": "сессия и сообщения",
                     "input_path": "/tmp/users.txt",
                     "invite_job_dir": "/tmp/job",
                     "last_status": "completed",
@@ -400,6 +403,9 @@ class ToolPlatformCatalogTests(unittest.TestCase):
 
         self.assertTrue(exists_before_cleanup)
         self.assertEqual(state["phase"], "session_ready")
+        self.assertEqual(state["step_pattern"], "11,2")
+        self.assertEqual(state["step_cursor"], 2)
+        self.assertEqual(state["step_label"], "сессия и сообщения")
         self.assertEqual(state["input_path"], "/tmp/users.txt")
         self.assertEqual(state["invite_job_dir"], "/tmp/job")
         self.assertEqual(state["last_status"], "completed")
@@ -408,6 +414,8 @@ class ToolPlatformCatalogTests(unittest.TestCase):
         state = default_combined_flow_state("AK", "/home/max/TelegramPortableAK")
         self.assertEqual(state["phase"], "contact_add")
         self.assertEqual(state["last_status"], "idle")
+        self.assertEqual(state["step_pattern"], "12")
+        self.assertEqual(state["step_cursor"], 0)
 
     def test_combined_contact_add_transition_auto_starts_session_after_success(self) -> None:
         transition = combined_contact_add_transition(
