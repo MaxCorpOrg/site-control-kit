@@ -1003,6 +1003,22 @@
     - session run: `/home/max/telegram-portable-session-tool/runs/20260503T161534Z-a04741cd/run.json`;
     - contact add execution: `/home/max/telegram_invite_jobs/contact_add__AK__1/executions/20260503T161425Z-001-aidar996/execution_record.json`;
   - persisted combined-state после stop снова был нормализован в `stopped`, чтобы панель не оставалась в псевдо-`running` после headless harness stop.
+- Подтверждён и следующий сценарий с серией из двух реальных автоотправок в одном session-cycle:
+  - combined-run стартовал с `contact_added: 31`, `new: 77` и поднял очередь до `contact_added: 32`, `new: 76`;
+  - contact-add шаг завершился успешно для `@aiexs_1996`:
+    - `/home/max/telegram_invite_jobs/contact_add__AK__1/executions/20260503T161937Z-001-aiexs_1996/execution_record.json`;
+  - session-run `20260503T162046Z-8075578f` реально отправил `2` сообщения в `@M_a_x_i_m_M_i_k_h_a_i_l_o_v`:
+    - `Ты где?`;
+    - `Добрый день!`;
+  - `messages_sent_total` вырос с `2` до `4`;
+  - артефакты:
+    - combined smoke summary: `/tmp/telegram-panel-real-combined-send-live-2/result.json`;
+    - session run: `/home/max/telegram-portable-session-tool/runs/20260503T162046Z-8075578f/run.json`;
+  - panel-log подтвердил цепочку:
+    - `добавление`;
+    - `запуск сессии`;
+    - затем старт следующего add-step, который был остановлен harness после фиксации двух send-ов;
+  - persisted combined-state после stop снова был возвращён в `stopped`.
 - Живой no-history run на новом runtime подтвердил, что основной export path уже собирает новые `@username` без помощи `identity_history.json` и обрабатывает несколько peer в одном deep-step.
 - Артефакты проверки:
   - `/tmp/tg_live_batch_boost3.7ErTfD/snapshot.md`
