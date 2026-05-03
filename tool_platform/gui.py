@@ -1540,6 +1540,7 @@ if tk is not None:
 
             self._build_profile_section(content)
             self._build_tool_selector(content)
+            self._build_profile_status_section(content)
             self._build_tool_content(content)
 
         def _build_profile_section(self, parent: ttk.Frame) -> None:
@@ -1594,16 +1595,24 @@ if tk is not None:
                 command=self._open_profile_manager,
             ).pack(side=tk.LEFT, padx=(10, 0))
 
+        def _build_profile_status_section(self, parent: ttk.Frame) -> None:
+            body = self._create_card(
+                parent,
+                "3. Состояние профиля",
+                "Этот блок вспомогательный: здесь детали выбранного профиля и сводка по всем найденным Telegram-пользователям.",
+            )
+            body.columnconfigure(0, weight=1)
+
             ttk.Label(body, text="Детали профиля", style="Field.TLabel").grid(
-                row=4, column=0, sticky="w", pady=(16, 0)
+                row=0, column=0, sticky="w"
             )
             self.profile_details = self._create_readonly_text(body, height=5)
-            self.profile_details.grid(row=5, column=0, columnspan=4, sticky="nsew", pady=(6, 0))
+            self.profile_details.grid(row=1, column=0, sticky="nsew", pady=(6, 0))
             ttk.Label(body, text="Все найденные профили", style="Field.TLabel").grid(
-                row=6, column=0, sticky="w", pady=(14, 0)
+                row=2, column=0, sticky="w", pady=(14, 0)
             )
             self.profile_overview = self._create_readonly_text(body, height=4)
-            self.profile_overview.grid(row=7, column=0, columnspan=4, sticky="nsew", pady=(6, 0))
+            self.profile_overview.grid(row=3, column=0, sticky="nsew", pady=(6, 0))
 
         def _build_tool_selector(self, parent: ttk.Frame) -> None:
             body = self._create_card(
@@ -1616,8 +1625,8 @@ if tk is not None:
 
             tools = [
                 ("telegram_invite_manager", "Добавить контакты из TXT"),
-                ("telegram_session_runner", "Старт сессии"),
-                ("telegram_combined_flow", "Совместный режим"),
+                ("telegram_session_runner", "Сессия и сообщения"),
+                ("telegram_combined_flow", "Совместный режим: Добавить → Сессия"),
             ]
             for tool_id, label in tools:
                 button = tk.Button(
