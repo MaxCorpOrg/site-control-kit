@@ -9,6 +9,7 @@ import shlex
 import subprocess
 import tempfile
 import threading
+import time
 import traceback
 from datetime import datetime
 from pathlib import Path
@@ -39,6 +40,7 @@ from .telegram_gui_helpers import (
     invite_manager_next_command,
     invite_manager_status_command,
     parse_json_payload,
+    session_config_defaults,
     session_message_targets,
     session_plan_command,
     session_run_command,
@@ -223,17 +225,35 @@ def format_session_plan_payload(payload: dict[str, Any]) -> str:
 
 
 def format_session_run_payload(payload: dict[str, Any]) -> str:
+    continuous = bool(payload.get("continuous"))
     run_info = payload.get("run") if isinstance(payload.get("run"), dict) else payload
     visits = run_info.get("visits") if isinstance(run_info.get("visits"), list) else []
-    drafts = run_info.get("message_drafts") if isinstance(run_info.get("message_drafts"), list) else []
+    messages = run_info.get("messages") if isinstance(run_info.get("messages"), list) else []
+    sent_count = int(run_info.get("sent_count", 0) or payload.get("sent_count") or 0)
     lines = [
         "Сессия и сообщения",
         f"Статус: {payload.get('status') or run_info.get('status') or 'ok'}",
-        f"Запуск: {payload.get('run_dir') or run_info.get('run_dir') or '-'}",
+        f"Режим: {'до ручного Стопа' if continuous else 'один запуск'}",
+        f"Запуск: {payload.get('run_dir') or run_info.get('run_dir') or run_info.get('run_id') or '-'}",
         f"Выполнено визитов: {len(visits)}",
-        f"Подготовлено сообщений: {len(drafts)}",
+        f"Подготовлено сообщений: {len(messages)}",
+        f"Отправлено сообщений: {sent_count}",
         f"Адресат сообщений: {run_info.get('message_target_username') or '-'}",
     ]
+    if continuous:
+        lines.extend(
+            [
+                f"Полных циклов: {payload.get('cycle_count') or 0}",
+                f"Время работы: {payload.get('elapsed_seconds') or 0} сек",
+            ]
+        )
+        cycles = payload.get("cycles") if isinstance(payload.get("cycles"), list) else []
+        if cycles:
+            lines.extend(["", "Последние циклы"])
+            for item in cycles[-5:]:
+                lines.append(
+                    f"- {item.get('run_id') or '-'} · статус: {item.get('status') or '-'} · визитов: {item.get('visit_count') or 0} · отправлено: {item.get('sent_count') or 0}"
+                )
     history = payload.get("history") if isinstance(payload.get("history"), list) else []
     if history:
         lines.extend(["", "История"])
@@ -296,6 +316,10 @@ if tk is not None:
             self.session_new_target_label_var = tk.StringVar()
             self.session_new_target_kind_var = tk.StringVar(value="Контакт")
             self.session_auto_send_var = tk.BooleanVar(value=False)
+            self.session_continuous_var = tk.BooleanVar(value=True)
+            self.session_messages_per_cycle_var = tk.StringVar(value="1")
+            self.session_total_limit_var = tk.StringVar(value="0")
+            self.session_timer_var = tk.StringVar(value="00:00:00")
             self.invite_status_var = tk.StringVar(value="Готово")
             self.session_status_var = tk.StringVar(value="Готово")
 
@@ -314,6 +338,8 @@ if tk is not None:
             self._process_lock = threading.Lock()
             self._ui_queue: queue.Queue[tuple[str, str, dict[str, Any] | None, str, bool, Callable[[dict[str, Any]], None]]] = queue.Queue()
             self._scroll_canvas: tk.Canvas | None = None
+            self._session_timer_started_at: float | None = None
+            self._session_timer_after_id: str | None = None
 
             self.profile_combo: ttk.Combobox | None = None
             self.profile_details: tk.Text | None = None
@@ -321,6 +347,7 @@ if tk is not None:
             self.invite_output: tk.Text | None = None
             self.session_output: tk.Text | None = None
             self.session_targets_list: tk.Listbox | None = None
+            self.session_templates_text: tk.Text | None = None
             self._tool_buttons: dict[str, tk.Button] = {}
             self._tool_frames: dict[str, ttk.Frame] = {}
 
@@ -485,6 +512,54 @@ if tk is not None:
             widget.see(tk.END)
             widget.configure(state="disabled")
 
+        def _format_elapsed(self, seconds_total: int) -> str:
+            total = max(0, int(seconds_total))
+            hours, remainder = divmod(total, 3600)
+            minutes, seconds = divmod(remainder, 60)
+            return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+        def _set_session_templates(self, templates: list[str]) -> None:
+            if self.session_templates_text is None:
+                return
+            self.session_templates_text.delete("1.0", tk.END)
+            if templates:
+                self.session_templates_text.insert("1.0", "\n".join(str(item) for item in templates))
+
+        def _session_templates(self) -> list[str]:
+            if self.session_templates_text is None:
+                return []
+            return [
+                line.strip()
+                for line in self.session_templates_text.get("1.0", tk.END).splitlines()
+                if line.strip()
+            ]
+
+        def _update_session_timer(self) -> None:
+            if self._session_timer_started_at is None:
+                self.session_timer_var.set("00:00:00")
+                self._session_timer_after_id = None
+                return
+            elapsed = int(time.monotonic() - self._session_timer_started_at)
+            self.session_timer_var.set(self._format_elapsed(elapsed))
+            self._session_timer_after_id = self.after(1000, self._update_session_timer)
+
+        def _start_session_timer(self) -> None:
+            self._stop_session_timer(reset=False)
+            self._session_timer_started_at = time.monotonic()
+            self.session_timer_var.set("00:00:00")
+            self._update_session_timer()
+
+        def _stop_session_timer(self, *, reset: bool = False) -> None:
+            if self._session_timer_after_id is not None:
+                try:
+                    self.after_cancel(self._session_timer_after_id)
+                except tk.TclError:
+                    pass
+                self._session_timer_after_id = None
+            self._session_timer_started_at = None
+            if reset:
+                self.session_timer_var.set("00:00:00")
+
         def _status_var_for_tool(self, tool_id: str) -> tk.StringVar:
             return (
                 self.invite_status_var
@@ -627,6 +702,8 @@ if tk is not None:
                     return
 
             command_text = shlex.join(command.argv)
+            if tool_id == "telegram_session_runner" and action_label == "запуск session runner":
+                self._start_session_timer()
             self._status_var_for_tool(tool_id).set(f"Выполняется: {action_label}")
             self._set_tool_busy(tool_id, True)
             self._log_event(tool_id, f"Старт: {action_label}")
@@ -708,6 +785,8 @@ if tk is not None:
             on_success: Callable[[dict[str, Any]], None],
         ) -> None:
             self._set_tool_busy(tool_id, False)
+            if tool_id == "telegram_session_runner" and action_label == "запуск session runner":
+                self._stop_session_timer()
             if stopped:
                 self._status_var_for_tool(tool_id).set("Остановлено")
                 self._log_event(tool_id, f"Остановлено: {action_label}")
@@ -720,7 +799,9 @@ if tk is not None:
                 return
             assert payload is not None
             payload_status = str(payload.get("status") or "").strip().lower()
-            if payload_status == "completed_with_errors":
+            if payload_status == "stopped":
+                self._status_var_for_tool(tool_id).set("Остановлено")
+            elif payload_status == "completed_with_errors":
                 self._status_var_for_tool(tool_id).set("Есть ошибки")
             elif payload_status == "dry_run":
                 self._status_var_for_tool(tool_id).set("Проверка завершена")
@@ -1016,11 +1097,11 @@ if tk is not None:
             body = self._create_card(
                 parent,
                 "Инструмент: Сессия и сообщения",
-                "Здесь выбирается список адресатов сообщений и запускается сам session runner. Этот экран никак не вмешивается в режим инвайтов.",
+                "Этот экран отдельно управляет живой Telegram-сессией: random walk по открытому профилю, список адресатов, текст сообщения и режим автоотправки.",
                 expand=True,
             )
             body.columnconfigure(0, weight=1)
-            body.columnconfigure(1, weight=0)
+            body.columnconfigure(1, weight=1)
 
             top_buttons = ttk.Frame(body, style="Card.TFrame")
             top_buttons.grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 12))
@@ -1052,6 +1133,16 @@ if tk is not None:
                 textvariable=self.session_status_var,
                 style="CardSubtitle.TLabel",
             ).pack(side=tk.LEFT, padx=(16, 0))
+            ttk.Label(
+                top_buttons,
+                text="Таймер:",
+                style="Field.TLabel",
+            ).pack(side=tk.LEFT, padx=(20, 6))
+            ttk.Label(
+                top_buttons,
+                textvariable=self.session_timer_var,
+                style="CardSubtitle.TLabel",
+            ).pack(side=tk.LEFT)
 
             ttk.Label(body, text="Шаг 1. Конфиг режима сессии", style="Field.TLabel").grid(
                 row=1, column=0, sticky="w"
@@ -1083,71 +1174,145 @@ if tk is not None:
             recipients_row = ttk.Frame(body, style="Card.TFrame")
             recipients_row.grid(row=4, column=0, columnspan=2, sticky="nsew", pady=(6, 0))
             recipients_row.columnconfigure(0, weight=1)
-            self.session_targets_list = self._create_listbox(
+            recipients_row.columnconfigure(1, weight=1)
+
+            recipients_panel = self._create_inline_panel(
                 recipients_row,
-                selectmode=tk.EXTENDED,
-                height=8,
+                "Кому писать",
+                "Список справа не нужен: выбери адресатов здесь или загрузи их из конфига.",
             )
-            self.session_targets_list.grid(row=0, column=0, rowspan=8, sticky="nsew")
+            recipients_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 12))
+            recipients_panel.columnconfigure(0, weight=1)
+            recipients_panel.rowconfigure(2, weight=1)
+
+            self.session_targets_list = self._create_listbox(
+                recipients_panel,
+                selectmode=tk.EXTENDED,
+                height=10,
+            )
+            self.session_targets_list.grid(row=2, column=0, sticky="nsew", pady=(0, 10))
             self._bind_scroll_to_widget(self.session_targets_list)
             session_remove_target_button = ttk.Button(
-                recipients_row,
+                recipients_panel,
                 text="Удалить выбранных",
                 command=self._remove_session_targets,
             )
-            session_remove_target_button.grid(row=0, column=1, sticky="ew", padx=(10, 0))
+            session_remove_target_button.grid(row=3, column=0, sticky="ew")
             self._register_busy_widget("telegram_session_runner", session_remove_target_button)
 
-            ttk.Label(recipients_row, text="Добавить новый адресат", style="Field.TLabel").grid(
-                row=1, column=1, sticky="w", padx=(10, 0), pady=(12, 0)
+            ttk.Label(recipients_panel, text="Добавить новый адресат", style="Field.TLabel").grid(
+                row=4, column=0, sticky="w", pady=(12, 0)
             )
-            ttk.Label(recipients_row, text="Username или @ссылка", style="Field.TLabel").grid(
-                row=2, column=1, sticky="w", padx=(10, 0), pady=(8, 0)
+            ttk.Label(recipients_panel, text="Username или @ссылка", style="Field.TLabel").grid(
+                row=5, column=0, sticky="w", pady=(8, 0)
             )
-            ttk.Entry(recipients_row, textvariable=self.session_new_target_var).grid(
-                row=3, column=1, sticky="ew", padx=(10, 0), pady=(4, 0)
+            ttk.Entry(recipients_panel, textvariable=self.session_new_target_var).grid(
+                row=6, column=0, sticky="ew", pady=(4, 0)
             )
-            ttk.Label(recipients_row, text="Понятное название", style="Field.TLabel").grid(
-                row=4, column=1, sticky="w", padx=(10, 0), pady=(8, 0)
+            ttk.Label(recipients_panel, text="Понятное название", style="Field.TLabel").grid(
+                row=7, column=0, sticky="w", pady=(8, 0)
             )
-            ttk.Entry(recipients_row, textvariable=self.session_new_target_label_var).grid(
-                row=5, column=1, sticky="ew", padx=(10, 0), pady=(4, 0)
+            ttk.Entry(recipients_panel, textvariable=self.session_new_target_label_var).grid(
+                row=8, column=0, sticky="ew", pady=(4, 0)
             )
-            ttk.Label(recipients_row, text="Тип адресата", style="Field.TLabel").grid(
-                row=6, column=1, sticky="w", padx=(10, 0), pady=(8, 0)
+            ttk.Label(recipients_panel, text="Тип адресата", style="Field.TLabel").grid(
+                row=9, column=0, sticky="w", pady=(8, 0)
             )
             kind_combo = ttk.Combobox(
-                recipients_row,
+                recipients_panel,
                 textvariable=self.session_new_target_kind_var,
                 state="readonly",
                 values=["Контакт", "Группа"],
             )
-            kind_combo.grid(row=7, column=1, sticky="ew", padx=(10, 0), pady=(4, 0))
+            kind_combo.grid(row=10, column=0, sticky="ew", pady=(4, 0))
             session_add_target_button = ttk.Button(
-                recipients_row,
+                recipients_panel,
                 text="Добавить адресата",
                 command=self._add_session_target,
             )
-            session_add_target_button.grid(row=8, column=1, sticky="ew", padx=(10, 0), pady=(10, 0))
+            session_add_target_button.grid(row=11, column=0, sticky="ew", pady=(10, 0))
             self._register_busy_widget("telegram_session_runner", session_add_target_button)
 
             ttk.Label(
-                recipients_row,
-                text="Сначала введи @username. Во второй строке можно дать понятное имя, а ниже выбрать тип: контакт или группа.",
+                recipients_panel,
+                text="Введи @username, при желании дай понятное имя и выбери тип адресата.",
                 style="CardSubtitle.TLabel",
-            ).grid(row=9, column=1, sticky="w", padx=(10, 0), pady=(10, 0))
+            ).grid(row=12, column=0, sticky="w", pady=(10, 0))
+
+            settings_panel = self._create_inline_panel(
+                recipients_row,
+                "Как писать",
+                "Здесь задаётся режим самой сессии: автоотправка, количество сообщений и непрерывная работа до нажатия `Стоп`.",
+            )
+            settings_panel.grid(row=0, column=1, sticky="nsew")
+            settings_panel.columnconfigure(1, weight=1)
+
+            ttk.Label(settings_panel, text="Сообщений за один цикл", style="Field.TLabel").grid(
+                row=2, column=0, sticky="w"
+            )
+            ttk.Entry(settings_panel, textvariable=self.session_messages_per_cycle_var, width=10).grid(
+                row=2, column=1, sticky="w", padx=(12, 0)
+            )
+            ttk.Label(
+                settings_panel,
+                text="Сколько сообщений пытаться отправить за один проход по сессии.",
+                style="CardSubtitle.TLabel",
+            ).grid(row=3, column=0, columnspan=2, sticky="w", pady=(4, 10))
+
+            ttk.Label(settings_panel, text="Максимум отправить за всю сессию", style="Field.TLabel").grid(
+                row=4, column=0, sticky="w"
+            )
+            ttk.Entry(settings_panel, textvariable=self.session_total_limit_var, width=10).grid(
+                row=4, column=1, sticky="w", padx=(12, 0)
+            )
+            ttk.Label(
+                settings_panel,
+                text="Поставь `0`, если лимит не нужен и сессия должна слать сообщения до ручного `Стоп`.",
+                style="CardSubtitle.TLabel",
+            ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(4, 10))
 
             ttk.Checkbutton(
-                body,
-                text="Отправлять сообщения автоматически",
+                settings_panel,
+                text="Отправлять сообщения сразу, а не оставлять в строке ввода",
                 variable=self.session_auto_send_var,
-            ).grid(row=5, column=0, sticky="w", pady=(14, 0))
+            ).grid(row=6, column=0, columnspan=2, sticky="w")
+            ttk.Checkbutton(
+                settings_panel,
+                text="Крутить сессию непрерывно до нажатия `Стоп`",
+                variable=self.session_continuous_var,
+            ).grid(row=7, column=0, columnspan=2, sticky="w", pady=(8, 0))
 
             ttk.Label(
                 body,
                 text="Текущий профиль сверху будет автоматически подставлен в runtime-config перед запуском.",
                 style="CardSubtitle.TLabel",
-            ).grid(row=6, column=0, columnspan=2, sticky="w", pady=(6, 0))
+            ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(12, 0))
+
+            templates_panel = self._create_inline_panel(
+                body,
+                "Шаг 3. Текст сообщения",
+                "Одна строка = один шаблон. Если строк несколько, session runner будет их ротировать между циклами.",
+            )
+            templates_panel.grid(row=6, column=0, columnspan=2, sticky="nsew", pady=(12, 0))
+            templates_panel.columnconfigure(0, weight=1)
+            self.session_templates_text = tk.Text(
+                templates_panel,
+                wrap="word",
+                height=6,
+                bg=self._colors["field"],
+                fg=self._colors["text"],
+                insertbackground=self._colors["text"],
+                highlightbackground=self._colors["border"],
+                highlightcolor=self._colors["accent"],
+                highlightthickness=1,
+                relief="flat",
+                borderwidth=0,
+                padx=12,
+                pady=10,
+                font=self._fonts["base"],
+            )
+            self.session_templates_text.grid(row=2, column=0, sticky="nsew")
+            self._bind_scroll_to_widget(self.session_templates_text)
 
             ttk.Label(body, text="Что происходит сейчас", style="Field.TLabel").grid(
                 row=7, column=0, sticky="w", pady=(16, 0)
@@ -1156,7 +1321,6 @@ if tk is not None:
             self.session_output.grid(row=8, column=0, columnspan=2, sticky="nsew", pady=(6, 0))
             self._bind_scroll_to_widget(self.session_output)
             body.rowconfigure(8, weight=1)
-            body.rowconfigure(4, weight=0)
 
         def _refresh_summary(self) -> None:
             selected_profile = self._selected_profile()
@@ -1685,10 +1849,15 @@ if tk is not None:
 
         def _load_session_targets(self, show_feedback: bool = True) -> None:
             try:
-                self._session_targets = session_message_targets(self.session_config_path_var.get())
+                defaults = session_config_defaults(self.session_config_path_var.get())
             except Exception as exc:
                 messagebox.showerror("Панель Telegram", f"Не удалось прочитать конфиг режима сессии:\n{exc}")
                 return
+            self._session_targets = list(defaults["message_targets"])
+            self.session_auto_send_var.set(bool(defaults["auto_send"]))
+            self.session_messages_per_cycle_var.set(str(defaults["drafts_per_run"]))
+            self.session_total_limit_var.set(str(defaults["total_message_limit"]))
+            self._set_session_templates(list(defaults["templates"]))
             self._render_session_targets()
             self.session_status_var.set("Список адресатов загружен")
             self._log_event(
@@ -1702,14 +1871,20 @@ if tk is not None:
                         "Сессия и сообщения",
                         f"Конфиг: {self.session_config_path_var.get()}",
                         f"Загружено адресатов: {len(self._session_targets)}",
-                        "Выше показан именно список адресатов сообщений.",
+                        f"Автоотправка: {'включена' if self.session_auto_send_var.get() else 'выключена'}",
+                        f"Сообщений за цикл: {self.session_messages_per_cycle_var.get()}",
+                        f"Лимит на всю сессию: {self.session_total_limit_var.get()}",
+                        f"Шаблонов текста: {len(defaults['templates'])}",
                     ]
                 ),
             )
             if show_feedback:
                 messagebox.showinfo(
                     "Панель Telegram",
-                    f"Из конфига загружено адресатов: {len(self._session_targets)}",
+                    (
+                        f"Из конфига загружено адресатов: {len(self._session_targets)}\n"
+                        f"Шаблонов текста: {len(defaults['templates'])}"
+                    ),
                 )
 
         def _add_session_target(self) -> None:
@@ -1772,7 +1947,17 @@ if tk is not None:
             )
 
         def _build_session_runtime_config(self) -> Path:
-            if not self._session_targets:
+            drafts_per_run = int((self.session_messages_per_cycle_var.get() or "0").strip())
+            total_message_limit = int((self.session_total_limit_var.get() or "0").strip())
+            templates = self._session_templates()
+            wants_messages = drafts_per_run > 0 and bool(templates)
+            if drafts_per_run < 0:
+                raise ValueError("Количество сообщений за цикл не может быть отрицательным.")
+            if total_message_limit < 0:
+                raise ValueError("Лимит сообщений за всю сессию не может быть отрицательным.")
+            if drafts_per_run > 0 and not templates:
+                raise ValueError("Добавь хотя бы один текст сообщения или поставь 0 сообщений за цикл.")
+            if wants_messages and not self._session_targets:
                 raise ValueError("Добавь хотя бы одного адресата для сообщений.")
             selected_profile = self._selected_profile()
             profile_dir = str(selected_profile.get("profile_dir") or "") if selected_profile else ""
@@ -1780,6 +1965,9 @@ if tk is not None:
                 base_config_path=self.session_config_path_var.get(),
                 output_path=self._session_runtime_config_path(),
                 message_targets=self._session_targets,
+                message_templates=templates,
+                drafts_per_run=drafts_per_run,
+                total_message_limit=total_message_limit,
                 portable_profile_dir=profile_dir,
                 auto_send=bool(self.session_auto_send_var.get()),
             )
@@ -1807,6 +1995,7 @@ if tk is not None:
                 command = session_run_command(
                     config_path=runtime_config,
                     auto_send=bool(self.session_auto_send_var.get()),
+                    continuous=bool(self.session_continuous_var.get()),
                 )
             except Exception as exc:
                 messagebox.showerror("Панель Telegram", f"Не удалось запустить режим сессии:\n{exc}")

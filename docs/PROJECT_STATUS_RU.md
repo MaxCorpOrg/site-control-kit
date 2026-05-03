@@ -160,7 +160,17 @@
     - `Сессия и сообщения`
   - в первом режиме принимать `.txt/.csv/.json` список username и реально добавлять эти username в контакты выбранного Telegram Desktop portable-профиля;
   - для первого режима использовать новый orchestration-командный слой `desktop-add-contact-batch`, который сам создаёт/продолжает local state и по очереди вызывает `desktop-add-contact-profile`;
-  - в режиме сессии загружать список адресатов из session-config, позволять править его в панели и запускать session runner кнопкой.
+  - в режиме сессии загружать из session-config не только список адресатов, но и шаблоны сообщений, автоотправку и лимиты;
+  - в режиме сессии позволять править в панели:
+    - кому писать;
+    - какой текст отправлять;
+    - сколько сообщений отправлять за цикл;
+    - сколько максимум отправить за всю непрерывную сессию;
+  - в режиме сессии показывать живой таймер, пока session runner работает;
+  - в режиме сессии запускать session runner либо на один цикл, либо в непрерывном режиме `до Стопа`;
+  - session runner больше не страдает от panel-regression, где GUI по умолчанию перетирал `auto_send=true` обратно в `false`;
+  - для реальной отправки сообщений session runner теперь использует каскад `кнопка Отправить -> двойной Return`, потому что один AT-SPI click по кнопке в живом `TelegramPortableAK` не всегда доводил действие до реального outgoing message;
+  - непрерывный CLI-режим `run-session --continuous` умеет корректно завершаться статусом `stopped` после operator stop по `SIGTERM`, а не только аварийным kill.
 - Отдельно собран новый видимый Telegram tools hub:
   - `tools/telegram/`
   - `platform/`
@@ -246,7 +256,7 @@
 ## Проверено
 - После перевода Telegram control center в русский двухрежимный UX подтверждены:
   - `python3 -m py_compile tool_platform/*.py scripts/telegram_portable.py scripts/telegram_invite_executor.py scripts/telegram_invite_manager.py`
-  - `PYTHONPATH="$PWD" python3 -m unittest discover -s tests -p 'test_*.py'` → `198 OK`
+  - `PYTHONPATH="$PWD" python3 -m unittest discover -s tests -p 'test_*.py'` → `199 OK`
   - `bash -n tools/telegram/platform/bin/tool-platform tools/telegram/platform/bin/tool-platform-panel tools/telegram/session_runner/bin/telegram-session-runner tools/telegram/invite_manager/bin/telegram-invite-manager tools/telegram/invite_manager/bin/telegram-invite-executor`
   - `./tools/telegram/platform/bin/tool-platform validate-registry`
   - live GUI smoke: окно `Центр управления Telegram` поднято, `xwininfo` подтвердил `1460x980`, старый английский тестовый экземпляр панели закрыт.
@@ -259,6 +269,16 @@
     - `Старт добавления` вернул batch summary по реальному `desktop-add-contact-batch`;
     - `Показать план` для session runner вернул статус `Завершено` и план с визитами/черновиком;
     - `Стоп` подтвердил остановку долгой фоновой команды со статусом `Остановлено`.
+  - после добивки режима `Сессия и сообщения` дополнительно подтверждены:
+    - `python3 -m py_compile telegram_portable_session_tool/*.py`
+    - `PYTHONPATH=/home/max/telegram-portable-session-tool python3 -m unittest discover -s tests -p 'test_*.py'` → `14 OK`
+    - live investigation по реальному `TelegramPortableAK`:
+      - run `/tmp/telegram-session-live-smoke-runs/20260503T112957Z-49d6569a/run.json` показал, что одного accessibility-click по `Отправить` недостаточно: черновик оставался в поле ввода;
+      - после усиления send-cascade live run `/tmp/telegram-session-live-smoke-runs-2/20260503T113146Z-c631d2e3/run.json` реально отправил `Добрый день!`;
+      - post-run screenshot `/tmp/telegram-session-live-smoke-after-final-2.png` подтвердил исходящее сообщение `Добрый день! 14:31` и пустое поле `Сообщение...`;
+    - live stop smoke непрерывной сессии:
+      - отдельный parent PID получил `SIGTERM`, завершился с `rc=0`;
+      - итоговый JSON `/tmp/telegram-session-continuous-stop-output.json` вернул `status: stopped`, `continuous: true`, `cycle_count: 2`.
   - safe smoke нового backend batch-path подтверждён на реальном portable actor `AK/@M_a_g_g_i_e` без изменения контактов:
     - команда: `python3 scripts/telegram_invite_executor.py desktop-add-contact-batch ... --confirm-add --dry-run`
     - результат: `status=dry_run`, `selected_users=1`, `failed_count=0`, `remaining_candidates=1`;

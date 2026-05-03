@@ -258,6 +258,26 @@ def load_session_config_payload(config_path: str | Path) -> dict[str, Any]:
     return payload
 
 
+def _as_bool(value: Any, *, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "y", "on"}:
+        return True
+    if text in {"0", "false", "no", "n", "off"}:
+        return False
+    return default
+
+
+def _as_int(value: Any, *, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def session_message_targets(config_path: str | Path) -> list[dict[str, Any]]:
     payload = load_session_config_payload(config_path)
     message_policy = payload.get("message_policy")
@@ -267,6 +287,22 @@ def session_message_targets(config_path: str | Path) -> list[dict[str, Any]]:
     if not isinstance(raw_targets, list):
         return []
     return [dict(item) for item in raw_targets if isinstance(item, dict)]
+
+
+def session_config_defaults(config_path: str | Path) -> dict[str, Any]:
+    payload = load_session_config_payload(config_path)
+    message_policy = payload.get("message_policy")
+    if not isinstance(message_policy, dict):
+        message_policy = {}
+    raw_targets = message_policy.get("message_targets")
+    raw_templates = message_policy.get("templates")
+    return {
+        "message_targets": [dict(item) for item in raw_targets if isinstance(item, dict)] if isinstance(raw_targets, list) else [],
+        "templates": [str(item).strip() for item in raw_templates if str(item).strip()] if isinstance(raw_templates, list) else [],
+        "auto_send": _as_bool(message_policy.get("auto_send"), default=False),
+        "drafts_per_run": _as_int(message_policy.get("drafts_per_run"), default=1),
+        "total_message_limit": _as_int(message_policy.get("total_message_limit"), default=0),
+    }
 
 
 def format_session_target_label(item: dict[str, Any]) -> str:
@@ -282,11 +318,12 @@ def build_session_runtime_config(
     base_config_path: str | Path,
     output_path: str | Path,
     message_targets: list[dict[str, Any]],
+    message_templates: list[str],
+    drafts_per_run: int,
+    total_message_limit: int,
     portable_profile_dir: str = "",
     auto_send: bool = False,
 ) -> Path:
-    if not message_targets:
-        raise ValueError("at least one message target is required")
     payload = load_session_config_payload(base_config_path)
     payload["portable_profile_dir"] = portable_profile_dir or str(
         payload.get("portable_profile_dir") or ""
@@ -296,10 +333,13 @@ def build_session_runtime_config(
         message_policy = {}
         payload["message_policy"] = message_policy
 
-    kinds = {str(item.get("kind") or "contact").strip().lower() for item in message_targets}
-    target_mode = "rotating_all" if "group" in kinds else "rotating_contacts"
     message_policy["message_targets"] = message_targets
-    message_policy["target_mode"] = target_mode
+    message_policy["target_username"] = ""
+    kinds = {str(item.get("kind") or "contact").strip().lower() for item in message_targets}
+    message_policy["target_mode"] = "rotating_all" if "group" in kinds else "rotating_contacts"
+    message_policy["templates"] = [str(item).strip() for item in message_templates if str(item).strip()]
+    message_policy["drafts_per_run"] = max(0, int(drafts_per_run))
+    message_policy["total_message_limit"] = max(0, int(total_message_limit))
     message_policy["auto_send"] = bool(auto_send)
 
     resolved_output = Path(output_path).expanduser().resolve()
@@ -344,6 +384,7 @@ def session_run(
     runs_dir: str | Path = DEFAULT_SESSION_RUNS_DIR,
     auto_send: bool = False,
     launch_if_needed: bool = True,
+    continuous: bool = False,
 ) -> dict[str, Any]:
     spec = session_run_command(
         config_path=config_path,
@@ -351,6 +392,7 @@ def session_run(
         runs_dir=runs_dir,
         auto_send=auto_send,
         launch_if_needed=launch_if_needed,
+        continuous=continuous,
     )
     return run_json_command(spec.argv, cwd=spec.cwd)
 
@@ -362,6 +404,7 @@ def session_run_command(
     runs_dir: str | Path = DEFAULT_SESSION_RUNS_DIR,
     auto_send: bool = False,
     launch_if_needed: bool = True,
+    continuous: bool = False,
 ) -> CommandSpec:
     argv = [
         "python3",
@@ -380,4 +423,6 @@ def session_run_command(
         argv.append("--launch-if-needed")
     if auto_send:
         argv.append("--auto-send")
+    if continuous:
+        argv.append("--continuous")
     return CommandSpec(argv=argv, cwd=DEFAULT_SESSION_REPO)

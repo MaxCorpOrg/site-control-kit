@@ -18,6 +18,7 @@ from tool_platform.telegram_gui_helpers import (
     invite_manager_init_command,
     parse_plaintext_usernames,
     prepare_invite_input_file,
+    session_config_defaults,
     session_plan_command,
     session_message_targets,
     session_run_command,
@@ -446,6 +447,34 @@ class ToolPlatformCatalogTests(unittest.TestCase):
 
         self.assertEqual(targets[0]["handle"], "@alice_test")
 
+    def test_session_config_defaults_reads_templates_and_limits(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config_path = Path(tmp_dir) / "config.json"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "message_policy": {
+                            "auto_send": True,
+                            "drafts_per_run": 3,
+                            "total_message_limit": 9,
+                            "templates": ["Привет", "Как дела?"],
+                            "message_targets": [
+                                {"label": "Alice", "handle": "@alice_test", "kind": "contact"}
+                            ],
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            defaults = session_config_defaults(config_path)
+
+        self.assertTrue(defaults["auto_send"])
+        self.assertEqual(defaults["drafts_per_run"], 3)
+        self.assertEqual(defaults["total_message_limit"], 9)
+        self.assertEqual(defaults["templates"], ["Привет", "Как дела?"])
+        self.assertEqual(defaults["message_targets"][0]["handle"], "@alice_test")
+
     def test_format_session_target_label_includes_label_handle_and_kind(self) -> None:
         self.assertEqual(
             format_session_target_label(
@@ -484,6 +513,9 @@ class ToolPlatformCatalogTests(unittest.TestCase):
                     {"label": "Alice", "handle": "@alice_test", "kind": "contact"},
                     {"label": "Group", "handle": "@group_test", "kind": "group"},
                 ],
+                message_templates=["Привет", "Как дела?"],
+                drafts_per_run=4,
+                total_message_limit=7,
                 portable_profile_dir="/home/max/TelegramPortable-AK2",
                 auto_send=True,
             )
@@ -492,6 +524,10 @@ class ToolPlatformCatalogTests(unittest.TestCase):
         self.assertEqual(payload["portable_profile_dir"], "/home/max/TelegramPortable-AK2")
         self.assertTrue(payload["message_policy"]["auto_send"])
         self.assertEqual(payload["message_policy"]["target_mode"], "rotating_all")
+        self.assertEqual(payload["message_policy"]["drafts_per_run"], 4)
+        self.assertEqual(payload["message_policy"]["total_message_limit"], 7)
+        self.assertEqual(payload["message_policy"]["templates"], ["Привет", "Как дела?"])
+        self.assertEqual(payload["message_policy"]["target_username"], "")
         self.assertEqual(len(payload["message_policy"]["message_targets"]), 2)
 
     def test_session_plan_command_targets_standalone_cli(self) -> None:
@@ -506,10 +542,12 @@ class ToolPlatformCatalogTests(unittest.TestCase):
             runs_dir="/tmp/runs",
             auto_send=True,
             launch_if_needed=True,
+            continuous=True,
         )
         self.assertIn("--execute", spec.argv)
         self.assertIn("--launch-if-needed", spec.argv)
         self.assertIn("--auto-send", spec.argv)
+        self.assertIn("--continuous", spec.argv)
 
 
 if __name__ == "__main__":
