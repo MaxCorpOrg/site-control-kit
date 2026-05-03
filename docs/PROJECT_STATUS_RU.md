@@ -985,6 +985,24 @@
     - `добавление`;
     - `сессия`;
   - persisted combined-state после остановки снова был нормализован в `stopped`, чтобы панель не выглядела зависшей на `running`, хотя живых child-процессов уже не было.
+- Отдельно подтверждён первый живой `Совместный режим` с реальной автоотправкой сообщения:
+  - использовался тот же профиль `AK/@M_a_g_g_i_e`, та же очередь `contact_add__AK__1` и тот же файл `/home/max/контакты/1.txt`;
+  - для safety-run были выставлены:
+    - `limit=1` на contact batch;
+    - `1` visit за session-cycle;
+    - `1` сообщение за cycle;
+    - общий message limit поднят ровно на один send (`messages_sent_total: 1 -> 2`);
+  - фактический результат:
+    - очередной contact-add шаг завершился успешно для `@aidar996`;
+    - после него session-run `20260503T161534Z-a04741cd` реально отправил `1` сообщение;
+    - адресат: `@M_a_x_i_m_M_i_k_h_a_i_l_o_v`;
+    - текст: `Позвоню?`;
+    - `messages_sent_total` вырос с `1` до `2`;
+  - артефакты:
+    - combined smoke summary: `/tmp/telegram-panel-real-combined-send-live/result.json`;
+    - session run: `/home/max/telegram-portable-session-tool/runs/20260503T161534Z-a04741cd/run.json`;
+    - contact add execution: `/home/max/telegram_invite_jobs/contact_add__AK__1/executions/20260503T161425Z-001-aidar996/execution_record.json`;
+  - persisted combined-state после stop снова был нормализован в `stopped`, чтобы панель не оставалась в псевдо-`running` после headless harness stop.
 - Живой no-history run на новом runtime подтвердил, что основной export path уже собирает новые `@username` без помощи `identity_history.json` и обрабатывает несколько peer в одном deep-step.
 - Артефакты проверки:
   - `/tmp/tg_live_batch_boost3.7ErTfD/snapshot.md`
