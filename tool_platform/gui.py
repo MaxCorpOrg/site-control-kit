@@ -239,6 +239,7 @@ if tk is not None:
 
             self.profile_combo: ttk.Combobox | None = None
             self.profile_details: tk.Text | None = None
+            self.profile_manager_window: tk.Toplevel | None = None
             self.invite_output: tk.Text | None = None
             self.session_output: tk.Text | None = None
             self.session_targets_list: tk.Listbox | None = None
@@ -522,161 +523,33 @@ if tk is not None:
                 state="readonly",
             )
             self.profile_combo.grid(
-                row=3, column=0, columnspan=2, sticky="ew", pady=(4, 0)
+                row=3, column=0, sticky="ew", pady=(4, 0)
             )
             self.profile_combo.bind("<<ComboboxSelected>>", self._on_profile_select)
+            action_row = ttk.Frame(body, style="Card.TFrame")
+            action_row.grid(row=3, column=1, columnspan=3, sticky="ew", padx=(10, 0), pady=(4, 0))
             ttk.Button(
-                body,
+                action_row,
                 text="Запустить",
                 style="Accent.TButton",
                 command=self._launch_selected_profile,
-            ).grid(row=3, column=2, sticky="ew", padx=(10, 0))
+            ).pack(side=tk.LEFT)
             ttk.Button(
-                body,
+                action_row,
                 text="Обновить статус",
                 command=self._refresh_selected_profile_status,
-            ).grid(row=3, column=3, sticky="ew", padx=(10, 0))
+            ).pack(side=tk.LEFT, padx=(10, 0))
+            ttk.Button(
+                action_row,
+                text="Добавить / подключить профили",
+                command=self._open_profile_manager,
+            ).pack(side=tk.LEFT, padx=(10, 0))
 
             ttk.Label(body, text="Детали профиля", style="Field.TLabel").grid(
                 row=4, column=0, sticky="w", pady=(16, 0)
             )
-            self.profile_details = self._create_readonly_text(body, height=8)
+            self.profile_details = self._create_readonly_text(body, height=5)
             self.profile_details.grid(row=5, column=0, columnspan=4, sticky="nsew", pady=(6, 0))
-            actions = ttk.Frame(body, style="Card.TFrame")
-            actions.grid(row=6, column=0, columnspan=4, sticky="ew", pady=(16, 0))
-            actions.columnconfigure(0, weight=1)
-            actions.columnconfigure(1, weight=1)
-
-            import_panel = self._create_inline_panel(
-                actions,
-                "Добавить нового пользователя",
-                "Импортируй `tdata.zip`, и профиль сразу появится в списке сверху.",
-            )
-            import_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
-            import_panel.columnconfigure(0, weight=1)
-
-            tk.Label(
-                import_panel,
-                text="Файл tdata.zip",
-                bg=self._colors["field"],
-                fg=self._colors["muted"],
-                font=self._fonts["small"],
-                anchor="w",
-            ).grid(row=2, column=0, sticky="w")
-            import_path_row = ttk.Frame(import_panel, style="Card.TFrame")
-            import_path_row.grid(row=3, column=0, sticky="ew", pady=(4, 8))
-            import_path_row.columnconfigure(0, weight=1)
-            ttk.Entry(import_path_row, textvariable=self.import_zip_var).grid(row=0, column=0, sticky="ew")
-            ttk.Button(import_path_row, text="Выбрать", command=self._choose_import_zip).grid(
-                row=0, column=1, padx=(10, 0)
-            )
-
-            tk.Label(
-                import_panel,
-                text="Имя профиля",
-                bg=self._colors["field"],
-                fg=self._colors["muted"],
-                font=self._fonts["small"],
-                anchor="w",
-            ).grid(row=4, column=0, sticky="w")
-            ttk.Entry(import_panel, textvariable=self.import_profile_name_var).grid(
-                row=5, column=0, sticky="ew", pady=(4, 8)
-            )
-
-            tk.Label(
-                import_panel,
-                text="Username аккаунта",
-                bg=self._colors["field"],
-                fg=self._colors["muted"],
-                font=self._fonts["small"],
-                anchor="w",
-            ).grid(row=6, column=0, sticky="w")
-            ttk.Entry(import_panel, textvariable=self.import_account_username_var).grid(
-                row=7, column=0, sticky="ew", pady=(4, 8)
-            )
-
-            tk.Label(
-                import_panel,
-                text="Понятная метка",
-                bg=self._colors["field"],
-                fg=self._colors["muted"],
-                font=self._fonts["small"],
-                anchor="w",
-            ).grid(row=8, column=0, sticky="w")
-            ttk.Entry(import_panel, textvariable=self.import_account_label_var).grid(
-                row=9, column=0, sticky="ew", pady=(4, 12)
-            )
-            ttk.Button(
-                import_panel,
-                text="Импортировать и запустить",
-                style="Accent.TButton",
-                command=self._import_profile,
-            ).grid(row=10, column=0, sticky="e")
-
-            adopt_panel = self._create_inline_panel(
-                actions,
-                "Подключить готовую папку",
-                "Если профиль уже лежит на диске, просто добавь его в список без переимпорта.",
-            )
-            adopt_panel.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
-            adopt_panel.columnconfigure(0, weight=1)
-
-            tk.Label(
-                adopt_panel,
-                text="Папка профиля",
-                bg=self._colors["field"],
-                fg=self._colors["muted"],
-                font=self._fonts["small"],
-                anchor="w",
-            ).grid(row=2, column=0, sticky="w")
-            adopt_path_row = ttk.Frame(adopt_panel, style="Card.TFrame")
-            adopt_path_row.grid(row=3, column=0, sticky="ew", pady=(4, 8))
-            adopt_path_row.columnconfigure(0, weight=1)
-            ttk.Entry(adopt_path_row, textvariable=self.adopt_profile_dir_var).grid(row=0, column=0, sticky="ew")
-            ttk.Button(adopt_path_row, text="Выбрать", command=self._choose_adopt_dir).grid(
-                row=0, column=1, padx=(10, 0)
-            )
-
-            tk.Label(
-                adopt_panel,
-                text="Имя профиля",
-                bg=self._colors["field"],
-                fg=self._colors["muted"],
-                font=self._fonts["small"],
-                anchor="w",
-            ).grid(row=4, column=0, sticky="w")
-            ttk.Entry(adopt_panel, textvariable=self.adopt_profile_name_var).grid(
-                row=5, column=0, sticky="ew", pady=(4, 8)
-            )
-
-            tk.Label(
-                adopt_panel,
-                text="Username аккаунта",
-                bg=self._colors["field"],
-                fg=self._colors["muted"],
-                font=self._fonts["small"],
-                anchor="w",
-            ).grid(row=6, column=0, sticky="w")
-            ttk.Entry(adopt_panel, textvariable=self.adopt_account_username_var).grid(
-                row=7, column=0, sticky="ew", pady=(4, 8)
-            )
-
-            tk.Label(
-                adopt_panel,
-                text="Понятная метка",
-                bg=self._colors["field"],
-                fg=self._colors["muted"],
-                font=self._fonts["small"],
-                anchor="w",
-            ).grid(row=8, column=0, sticky="w")
-            ttk.Entry(adopt_panel, textvariable=self.adopt_account_label_var).grid(
-                row=9, column=0, sticky="ew", pady=(4, 12)
-            )
-            ttk.Button(
-                adopt_panel,
-                text="Подключить профиль",
-                command=self._adopt_profile,
-            ).grid(row=10, column=0, sticky="e")
 
         def _build_tool_selector(self, parent: ttk.Frame) -> None:
             body = self._create_card(
@@ -1047,6 +920,178 @@ if tk is not None:
                         activeforeground=self._colors["text"],
                     )
             self._refresh_summary()
+
+        def _build_profile_manager_form(self, parent: ttk.Frame) -> None:
+            parent.columnconfigure(0, weight=1)
+            parent.columnconfigure(1, weight=1)
+
+            import_panel = self._create_inline_panel(
+                parent,
+                "Добавить нового пользователя",
+                "Импортируй `tdata.zip`, и профиль сразу появится в списке.",
+            )
+            import_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+            import_panel.columnconfigure(0, weight=1)
+
+            tk.Label(
+                import_panel,
+                text="Файл tdata.zip",
+                bg=self._colors["field"],
+                fg=self._colors["muted"],
+                font=self._fonts["small"],
+                anchor="w",
+            ).grid(row=2, column=0, sticky="w")
+            import_path_row = ttk.Frame(import_panel, style="Card.TFrame")
+            import_path_row.grid(row=3, column=0, sticky="ew", pady=(4, 8))
+            import_path_row.columnconfigure(0, weight=1)
+            ttk.Entry(import_path_row, textvariable=self.import_zip_var).grid(row=0, column=0, sticky="ew")
+            ttk.Button(import_path_row, text="Выбрать", command=self._choose_import_zip).grid(
+                row=0, column=1, padx=(10, 0)
+            )
+
+            tk.Label(
+                import_panel,
+                text="Имя профиля",
+                bg=self._colors["field"],
+                fg=self._colors["muted"],
+                font=self._fonts["small"],
+                anchor="w",
+            ).grid(row=4, column=0, sticky="w")
+            ttk.Entry(import_panel, textvariable=self.import_profile_name_var).grid(
+                row=5, column=0, sticky="ew", pady=(4, 8)
+            )
+
+            tk.Label(
+                import_panel,
+                text="Username аккаунта",
+                bg=self._colors["field"],
+                fg=self._colors["muted"],
+                font=self._fonts["small"],
+                anchor="w",
+            ).grid(row=6, column=0, sticky="w")
+            ttk.Entry(import_panel, textvariable=self.import_account_username_var).grid(
+                row=7, column=0, sticky="ew", pady=(4, 8)
+            )
+
+            tk.Label(
+                import_panel,
+                text="Понятная метка",
+                bg=self._colors["field"],
+                fg=self._colors["muted"],
+                font=self._fonts["small"],
+                anchor="w",
+            ).grid(row=8, column=0, sticky="w")
+            ttk.Entry(import_panel, textvariable=self.import_account_label_var).grid(
+                row=9, column=0, sticky="ew", pady=(4, 12)
+            )
+            ttk.Button(
+                import_panel,
+                text="Импортировать и запустить",
+                style="Accent.TButton",
+                command=self._import_profile,
+            ).grid(row=10, column=0, sticky="e")
+
+            adopt_panel = self._create_inline_panel(
+                parent,
+                "Подключить готовую папку",
+                "Если профиль уже лежит на диске, просто добавь его в список без переимпорта.",
+            )
+            adopt_panel.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
+            adopt_panel.columnconfigure(0, weight=1)
+
+            tk.Label(
+                adopt_panel,
+                text="Папка профиля",
+                bg=self._colors["field"],
+                fg=self._colors["muted"],
+                font=self._fonts["small"],
+                anchor="w",
+            ).grid(row=2, column=0, sticky="w")
+            adopt_path_row = ttk.Frame(adopt_panel, style="Card.TFrame")
+            adopt_path_row.grid(row=3, column=0, sticky="ew", pady=(4, 8))
+            adopt_path_row.columnconfigure(0, weight=1)
+            ttk.Entry(adopt_path_row, textvariable=self.adopt_profile_dir_var).grid(row=0, column=0, sticky="ew")
+            ttk.Button(adopt_path_row, text="Выбрать", command=self._choose_adopt_dir).grid(
+                row=0, column=1, padx=(10, 0)
+            )
+
+            tk.Label(
+                adopt_panel,
+                text="Имя профиля",
+                bg=self._colors["field"],
+                fg=self._colors["muted"],
+                font=self._fonts["small"],
+                anchor="w",
+            ).grid(row=4, column=0, sticky="w")
+            ttk.Entry(adopt_panel, textvariable=self.adopt_profile_name_var).grid(
+                row=5, column=0, sticky="ew", pady=(4, 8)
+            )
+
+            tk.Label(
+                adopt_panel,
+                text="Username аккаунта",
+                bg=self._colors["field"],
+                fg=self._colors["muted"],
+                font=self._fonts["small"],
+                anchor="w",
+            ).grid(row=6, column=0, sticky="w")
+            ttk.Entry(adopt_panel, textvariable=self.adopt_account_username_var).grid(
+                row=7, column=0, sticky="ew", pady=(4, 8)
+            )
+
+            tk.Label(
+                adopt_panel,
+                text="Понятная метка",
+                bg=self._colors["field"],
+                fg=self._colors["muted"],
+                font=self._fonts["small"],
+                anchor="w",
+            ).grid(row=8, column=0, sticky="w")
+            ttk.Entry(adopt_panel, textvariable=self.adopt_account_label_var).grid(
+                row=9, column=0, sticky="ew", pady=(4, 12)
+            )
+            ttk.Button(
+                adopt_panel,
+                text="Подключить профиль",
+                command=self._adopt_profile,
+            ).grid(row=10, column=0, sticky="e")
+
+        def _open_profile_manager(self) -> None:
+            if self.profile_manager_window is not None and self.profile_manager_window.winfo_exists():
+                self.profile_manager_window.lift()
+                self.profile_manager_window.focus_force()
+                return
+
+            window = tk.Toplevel(self)
+            window.title("Управление профилями Telegram")
+            window.geometry("1200x620")
+            window.minsize(1000, 540)
+            window.configure(bg=self._colors["bg"])
+            window.transient(self)
+            self.profile_manager_window = window
+
+            def _on_close() -> None:
+                self.profile_manager_window = None
+                window.destroy()
+
+            window.protocol("WM_DELETE_WINDOW", _on_close)
+
+            outer = ttk.Frame(window, style="App.TFrame", padding=20)
+            outer.pack(fill=tk.BOTH, expand=True)
+            ttk.Label(
+                outer,
+                text="Добавление и подключение Telegram-профилей",
+                style="HeroTitle.TLabel",
+            ).pack(anchor="w")
+            ttk.Label(
+                outer,
+                text="Здесь можно импортировать нового пользователя по tdata.zip или принять в управление уже готовую папку профиля.",
+                style="HeroSub.TLabel",
+            ).pack(anchor="w", pady=(6, 16))
+
+            form = ttk.Frame(outer, style="App.TFrame")
+            form.pack(fill=tk.BOTH, expand=True)
+            self._build_profile_manager_form(form)
 
         def _choose_import_zip(self) -> None:
             if filedialog is None:  # pragma: no cover - depends on tkinter extras

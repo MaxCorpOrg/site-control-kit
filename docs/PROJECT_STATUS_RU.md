@@ -249,6 +249,7 @@
   - `bash -n tools/telegram/platform/bin/tool-platform tools/telegram/platform/bin/tool-platform-panel tools/telegram/session_runner/bin/telegram-session-runner tools/telegram/invite_manager/bin/telegram-invite-manager tools/telegram/invite_manager/bin/telegram-invite-executor`
   - `./tools/telegram/platform/bin/tool-platform validate-registry`
   - live GUI smoke: окно `Центр управления Telegram` поднято, `xwininfo` подтвердил `1460x980`, старый английский тестовый экземпляр панели закрыт.
+  - дополнительный live UX-fix: блок `Добавить / подключить профили` вынесен в отдельное окно, чтобы кнопки `Инвайты по списку` и `Сессия и сообщения` были видны сразу на основном экране.
 - Для нового unified tool platform зелёные:
   - `PYTHONPATH="$PWD" python3 -m unittest discover -s tests -p 'test_*.py'`
   - `python3 -m py_compile tool_platform/*.py scripts/telegram_invite_executor.py scripts/telegram_portable.py`
