@@ -2729,6 +2729,8 @@ if tk is not None:
             if phase == "review":
                 return "Есть ошибки, проверь и разреши переход к сессии"
             if phase == "session_ready":
+                if last_action == "combined_contact_add_noop":
+                    return "Новых username для добавления нет; выбери другой файл или запускай сессию"
                 return "Контакты готовы, можно запускать сессию"
             if phase == "session_running":
                 return "Сессия выполняется"
@@ -3337,23 +3339,34 @@ if tk is not None:
         def _on_combined_contact_add_success(self, payload: dict[str, Any]) -> None:
             if payload.get("job_dir"):
                 self.combined_job_dir_var.set(str(payload["job_dir"]))
-            self._set_readonly_text(self.combined_output, format_contact_batch_payload(payload))
+            summary_text = format_contact_batch_payload(payload)
+            self._set_readonly_text(self.combined_output, summary_text)
             payload_status = str(payload.get("status") or "").strip().lower()
-            next_phase = "review" if payload_status == "completed_with_errors" else "session_ready"
+            selected_users = int(payload.get("selected_users") or 0)
+            remaining_candidates = int(payload.get("remaining_candidates") or 0)
+            failed_count = int(payload.get("failed_count") or 0)
+            if selected_users == 0 and failed_count == 0:
+                next_phase = "session_ready"
+                last_action = "combined_contact_add_noop"
+                status_text = "Новых username для добавления нет; выбери другой файл или запускай сессию"
+            else:
+                next_phase = "review" if payload_status == "completed_with_errors" else "session_ready"
+                last_action = "combined_contact_add_finished"
+                if next_phase == "session_ready":
+                    status_text = "Контакты добавлены, можно запускать сессию"
+                else:
+                    status_text = "Есть ошибки, проверь и разреши переход к сессии"
             self._set_combined_phase(
                 next_phase,
                 input_path=self.combined_input_path_var.get().strip(),
                 invite_job_dir=self.combined_job_dir_var.get().strip(),
                 session_config_path=self.session_config_path_var.get().strip(),
-                last_action="combined_contact_add_finished",
-                last_status=payload_status or "completed",
-                last_summary=format_contact_batch_payload(payload),
+                last_action=last_action,
+                last_status=(payload_status or "completed") if selected_users > 0 or failed_count > 0 or remaining_candidates > 0 else "no_new_usernames",
+                last_summary=summary_text,
                 last_invite_status=payload_status or "completed",
             )
-            if next_phase == "session_ready":
-                self.combined_status_var.set("Контакты добавлены, можно запускать сессию")
-            else:
-                self.combined_status_var.set("Есть ошибки, проверь и разреши переход к сессии")
+            self.combined_status_var.set(status_text)
             self._refresh_combined_dashboard()
 
         def _on_combined_session_success(self, payload: dict[str, Any], runtime_config: Path) -> None:

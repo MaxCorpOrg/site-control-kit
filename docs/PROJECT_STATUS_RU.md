@@ -331,6 +331,11 @@
       - шаг `сессия` завершился как `completed` с безопасным run без отправки сообщений;
       - после нового открытия панели combined summary и status корректно восстановились для профиля `AK`;
       - отдельный GUI-fix: закрытие окна больше не оставляет Tk traceback `invalid command name ... _drain_ui_queue`.
+  - после диагностики жалобы `в совместном режиме не добавляет` выявлена и закрыта конкретная операторская причина:
+    - у профиля `AK` в persisted combined-state оставался старый `job_dir` уже отработанной очереди;
+    - backend честно возвращал `selected_users=0`, но combined UX до фикса выглядел как будто шаг просто “ничего не сделал”;
+    - теперь panel-layer явно показывает статус `Новых username для добавления нет; выбери другой файл или запускай сессию`;
+    - stale combined-state для `AK` вручную сброшен с временного harness-path на пустой стартовый state.
 - Для нового unified tool platform зелёные:
   - `PYTHONPATH="$PWD" python3 -m unittest discover -s tests -p 'test_*.py'`
   - `python3 -m py_compile tool_platform/*.py scripts/telegram_invite_executor.py scripts/telegram_portable.py`
