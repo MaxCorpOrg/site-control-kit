@@ -387,6 +387,105 @@ def contact_job_snapshot(
     }
 
 
+def combined_contact_add_transition(
+    *,
+    previous_state: dict[str, Any],
+    payload: dict[str, Any],
+    session_continuous: bool,
+) -> dict[str, Any]:
+    payload_status = str(payload.get("status") or "").strip().lower() or "completed"
+    selected_users = _safe_int(payload.get("selected_users"))
+    remaining_candidates = _safe_int(payload.get("remaining_candidates"))
+    failed_count = _safe_int(payload.get("failed_count"))
+    had_previous_session = bool(
+        str(previous_state.get("last_session_status") or "").strip()
+        or str(previous_state.get("last_session_run_dir") or "").strip()
+    )
+
+    if payload_status == "completed_with_errors":
+        return {
+            "phase": "review",
+            "last_action": "combined_contact_add_finished",
+            "last_status": payload_status,
+            "status_text": "Есть ошибки, проверь и разреши переход к сессии",
+            "auto_start_session": False,
+        }
+
+    if selected_users == 0 and failed_count == 0:
+        if had_previous_session and remaining_candidates == 0:
+            return {
+                "phase": "stopped",
+                "last_action": "combined_contact_add_noop_after_session",
+                "last_status": "completed",
+                "status_text": "Очередь контактов закончилась, совместный режим завершён",
+                "auto_start_session": False,
+            }
+        return {
+            "phase": "session_ready",
+            "last_action": "combined_contact_add_noop",
+            "last_status": "no_new_usernames",
+            "status_text": "Новых username для добавления нет; выбери другой файл или запускай сессию",
+            "auto_start_session": False,
+        }
+
+    return {
+        "phase": "session_ready",
+        "last_action": "combined_contact_add_finished_auto",
+        "last_status": payload_status,
+        "status_text": (
+            "Контакты добавлены, запускаю непрерывную сессию"
+            if session_continuous
+            else "Контакты добавлены, запускаю шаг сессии"
+        ),
+        "auto_start_session": True,
+    }
+
+
+def combined_session_transition(
+    *,
+    payload: dict[str, Any],
+    invite_snapshot: dict[str, Any] | None,
+    session_continuous: bool,
+) -> dict[str, Any]:
+    payload_status = str(payload.get("status") or "").strip().lower() or "completed"
+    pending_total = _safe_int((invite_snapshot or {}).get("pending_total"))
+
+    if payload_status == "stopped":
+        return {
+            "phase": "stopped",
+            "last_action": "combined_session_finished",
+            "last_status": "stopped",
+            "status_text": "Сессия остановлена",
+            "auto_start_contact_add": False,
+        }
+
+    if pending_total > 0 and not session_continuous and payload_status == "completed":
+        return {
+            "phase": "contact_add",
+            "last_action": "combined_session_finished_next_contact",
+            "last_status": payload_status,
+            "status_text": f"Осталось username: {pending_total}. Запускаю следующий шаг добавления",
+            "auto_start_contact_add": True,
+        }
+
+    if payload_status == "completed":
+        status_text = (
+            "Непрерывная сессия завершила свой шаг"
+            if session_continuous
+            else "Совместный режим завершил шаг сессии"
+        )
+    else:
+        status_text = f"Сессия завершилась со статусом: {payload_status}"
+
+    return {
+        "phase": "stopped",
+        "last_action": "combined_session_finished",
+        "last_status": payload_status,
+        "status_text": status_text,
+        "auto_start_contact_add": False,
+    }
+
+
 def prepare_invite_input_file(source_path: str | Path, temp_dir: str | Path) -> Path:
     path = Path(source_path).expanduser().resolve()
     if path.suffix.lower() in {".csv", ".json"}:

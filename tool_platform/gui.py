@@ -38,7 +38,9 @@ from .telegram_gui_helpers import (
     DEFAULT_SESSION_STATE_FILE,
     active_profile_conflict,
     build_session_runtime_config,
+    combined_contact_add_transition,
     combined_flow_state_path,
+    combined_session_transition,
     contact_job_snapshot,
     contact_add_batch_command,
     default_contact_add_job_dir,
@@ -332,16 +334,26 @@ def format_combined_flow_state(
     ]
     if state.get("last_session_run_dir"):
         lines.append(f"Последний session run: {state.get('last_session_run_dir')}")
+    last_action = str(state.get("last_action") or "").strip()
     if phase == "contact_add":
-        lines.append("Что дальше: выбери файл контактов и нажми `1. Старт добавления`.")
+        if last_action == "combined_session_finished_next_contact":
+            lines.append("Что дальше: система сама запускает следующий шаг добавления.")
+        else:
+            lines.append("Что дальше: выбери файл контактов и нажми `1. Старт добавления`.")
     elif phase == "review":
         lines.append("Что дальше: посмотри ошибки ниже и нажми `Разрешить переход к сессии`, если можно продолжать.")
     elif phase == "session_ready":
-        lines.append("Что дальше: проверь настройки сессии и нажми `2. Старт сессии`.")
+        if last_action == "combined_contact_add_finished_auto":
+            lines.append("Что дальше: система сама запускает шаг сессии.")
+        else:
+            lines.append("Что дальше: проверь настройки сессии и нажми `2. Старт сессии`.")
     elif phase == "session_running":
         lines.append("Что дальше: наблюдай лог ниже или нажми `Стоп`.")
     else:
-        lines.append("Что дальше: можно повторно запустить шаг добавления или сразу перейти к новой сессии.")
+        if last_action == "combined_contact_add_noop_after_session":
+            lines.append("Что дальше: очередь контактов закончилась; можно выбрать новый файл и начать новый цикл.")
+        else:
+            lines.append("Что дальше: можно повторно запустить шаг добавления или сразу перейти к новой сессии.")
     if invite_snapshot and str(invite_snapshot.get("status") or "") == "ready":
         lines.append(
             f"Контакты: осталось {invite_snapshot.get('pending_total') or 0}, добавлено {invite_snapshot.get('added_total') or 0}, ошибок {invite_snapshot.get('failed_total') or 0}"
@@ -2725,16 +2737,22 @@ if tk is not None:
             last_status = str(state.get("last_status") or "").strip().lower()
             last_action = str(state.get("last_action") or "").strip()
             if phase == "contact_add":
+                if last_action == "combined_session_finished_next_contact":
+                    return "Есть ещё username, запускается следующий шаг добавления"
                 return "Готов к шагу добавления"
             if phase == "review":
                 return "Есть ошибки, проверь и разреши переход к сессии"
             if phase == "session_ready":
                 if last_action == "combined_contact_add_noop":
                     return "Новых username для добавления нет; выбери другой файл или запускай сессию"
+                if last_action == "combined_contact_add_finished_auto":
+                    return "Контакты готовы, сейчас запустится сессия"
                 return "Контакты готовы, можно запускать сессию"
             if phase == "session_running":
                 return "Сессия выполняется"
             if phase == "stopped":
+                if last_action == "combined_contact_add_noop_after_session":
+                    return "Очередь контактов закончилась, совместный режим завершён"
                 if last_action == "combined_session_finished":
                     if last_status == "completed":
                         return "Совместный режим завершил шаг сессии"
@@ -3337,62 +3355,65 @@ if tk is not None:
             self._refresh_session_dashboard()
 
         def _on_combined_contact_add_success(self, payload: dict[str, Any]) -> None:
+            previous_state = self._load_combined_state()
             if payload.get("job_dir"):
                 self.combined_job_dir_var.set(str(payload["job_dir"]))
             summary_text = format_contact_batch_payload(payload)
             self._set_readonly_text(self.combined_output, summary_text)
-            payload_status = str(payload.get("status") or "").strip().lower()
-            selected_users = int(payload.get("selected_users") or 0)
-            remaining_candidates = int(payload.get("remaining_candidates") or 0)
-            failed_count = int(payload.get("failed_count") or 0)
-            if selected_users == 0 and failed_count == 0:
-                next_phase = "session_ready"
-                last_action = "combined_contact_add_noop"
-                status_text = "Новых username для добавления нет; выбери другой файл или запускай сессию"
-            else:
-                next_phase = "review" if payload_status == "completed_with_errors" else "session_ready"
-                last_action = "combined_contact_add_finished"
-                if next_phase == "session_ready":
-                    status_text = "Контакты добавлены, можно запускать сессию"
-                else:
-                    status_text = "Есть ошибки, проверь и разреши переход к сессии"
+            transition = combined_contact_add_transition(
+                previous_state=previous_state,
+                payload=payload,
+                session_continuous=bool(self.session_continuous_var.get()),
+            )
             self._set_combined_phase(
-                next_phase,
+                str(transition["phase"]),
                 input_path=self.combined_input_path_var.get().strip(),
                 invite_job_dir=self.combined_job_dir_var.get().strip(),
                 session_config_path=self.session_config_path_var.get().strip(),
-                last_action=last_action,
-                last_status=(payload_status or "completed") if selected_users > 0 or failed_count > 0 or remaining_candidates > 0 else "no_new_usernames",
+                last_action=str(transition["last_action"]),
+                last_status=str(transition["last_status"]),
                 last_summary=summary_text,
-                last_invite_status=payload_status or "completed",
+                last_invite_status=str(payload.get("status") or "completed").strip().lower() or "completed",
             )
-            self.combined_status_var.set(status_text)
+            self.combined_status_var.set(str(transition["status_text"]))
             self._refresh_combined_dashboard()
+            if bool(transition.get("auto_start_session")):
+                self._combined_start_session()
 
         def _on_combined_session_success(self, payload: dict[str, Any], runtime_config: Path) -> None:
             summary = format_session_run_payload(payload)
             summary += f"\n\nRuntime config:\n{runtime_config}"
             self._set_readonly_text(self.combined_output, summary)
-            payload_status = str(payload.get("status") or "").strip().lower() or "completed"
             run_dir = str(payload.get("run_dir") or "")
             if not run_dir:
                 run_info = payload.get("run")
                 if isinstance(run_info, dict):
                     run_dir = str(run_info.get("run_dir") or run_info.get("run_id") or "")
+            invite_snapshot = None
+            job_dir = self.combined_job_dir_var.get().strip()
+            if job_dir:
+                invite_snapshot = contact_job_snapshot(job_dir)
+            transition = combined_session_transition(
+                payload=payload,
+                invite_snapshot=invite_snapshot,
+                session_continuous=bool(self.session_continuous_var.get()),
+            )
             self._set_combined_phase(
-                "stopped",
+                str(transition["phase"]),
                 input_path=self.combined_input_path_var.get().strip(),
                 invite_job_dir=self.combined_job_dir_var.get().strip(),
                 session_config_path=self.session_config_path_var.get().strip(),
                 last_runtime_config_path=str(runtime_config),
-                last_action="combined_session_finished",
-                last_status=payload_status,
+                last_action=str(transition["last_action"]),
+                last_status=str(transition["last_status"]),
                 last_summary=summary,
-                last_session_status=payload_status,
+                last_session_status=str(payload.get("status") or "").strip().lower() or "completed",
                 last_session_run_dir=run_dir,
             )
-            self.combined_status_var.set("Совместный режим завершил шаг сессии")
+            self.combined_status_var.set(str(transition["status_text"]))
             self._refresh_combined_dashboard()
+            if bool(transition.get("auto_start_contact_add")):
+                self._combined_start_contact_add()
 
 else:
 

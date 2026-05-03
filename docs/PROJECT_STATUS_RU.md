@@ -183,6 +183,10 @@
   - в режиме сессии запускать session runner либо на один цикл, либо в непрерывном режиме `до Стопа`;
   - в режиме сессии читать `session_state.json` и `runs/*/run.json`, чтобы прямо в панели показывать summary, историю последних запусков и сообщения, которые остались неотправленными;
   - в новом `Совместном режиме` вести один и тот же профиль по цепочке `Добавить → Сессия`, сохраняя panel-only phase-state и не разрешая второй live-процесс на тот же профиль;
+  - в новом `Совместном режиме`, если непрерывная сессия выключена, автоматически чередовать шаги:
+    - `batch контактов -> один session-cycle -> следующий batch -> следующий session-cycle`;
+    - цикл продолжается, пока в очереди есть `new/checked` username или пока оператор не остановит его;
+  - если в `Совместном режиме` включена непрерывная сессия, panel orchestration специально не делает дальнейшее чередование: после contact batch стартует одна длинная сессия до `Стоп`;
   - session runner больше не страдает от panel-regression, где GUI по умолчанию перетирал `auto_send=true` обратно в `false`;
   - для реальной отправки сообщений session runner теперь использует каскад `кнопка Отправить -> двойной Return`, потому что один AT-SPI click по кнопке в живом `TelegramPortableAK` не всегда доводил действие до реального outgoing message;
   - непрерывный CLI-режим `run-session --continuous` умеет корректно завершаться статусом `stopped` после operator stop по `SIGTERM`, а не только аварийным kill.
@@ -926,6 +930,21 @@
     - общая панель теперь видит все эти workflow как единый Telegram catalog;
     - панель уже умеет выбирать пользователя из списка portable-профилей и добавлять нового по `tdata.zip`;
     - после UI-refresh details больше не клиппятся в `Treeview` на текущем Linux окружении с `tk scaling ~= 2.0`, потому что панель переведена на text-card layout и tabbed intake forms.
+- Для Telegram control center подтверждено живое автоматическое чередование `Совместного режима` через сам panel-layer:
+  - исправлена логика callbacks `combined_contact_add_success` и `combined_session_success`, чтобы панель не останавливалась после первого batch, а сама запускала следующий session-cycle и затем следующий contact batch;
+  - чистая transition-логика вынесена в helper-функции и покрыта unit-тестами;
+  - live harness на actor `AK/@M_a_g_g_i_e` с двумя уже существующими контактами (`@abrikosovoevarenie`, `@abs11144`) и `limit=1` показал реальную последовательность:
+    - `добавление контактов`;
+    - `запуск сессии`;
+    - `добавление контактов`;
+    - `запуск сессии`;
+  - финальный артефакт:
+    - `/tmp/telegram-panel-alternating-live/result.json`;
+  - по итогам smoke:
+    - `combined_start_count = 4`;
+    - `contact_snapshot.counts = {contact_added: 2}`;
+    - `pending_total = 0`;
+    - финальная фаза combined-state: `stopped`, `last_action = combined_session_finished`, `last_status = completed`.
 - Живой no-history run на новом runtime подтвердил, что основной export path уже собирает новые `@username` без помощи `identity_history.json` и обрабатывает несколько peer в одном deep-step.
 - Артефакты проверки:
   - `/tmp/tg_live_batch_boost3.7ErTfD/snapshot.md`
@@ -939,13 +958,14 @@
 ## Следующий Приоритет
 1. Для Invite/Desktop: держать основным рабочим путём `site-control-kit` / Telegram Web flow (`open-chat -> inspect-chat -> add-contact`) и не подменять его Desktop-guessing path.
 2. Для Invite/Desktop: прогнать новый operator flow `Старт добавления -> Продолжить очередь -> Повторить ошибки` уже на панели, чтобы подтвердить не только backend batch, но и новый summary/retry UX end-to-end.
-3. Для Telegram control center: прогнать оператором руками долгий `Совместный режим` с реальной отправкой сообщений уже через видимую панель, а не через harness.
+3. Для Telegram control center: прогнать оператором руками долгий `Совместный режим` уже через видимую панель с реальной отправкой сообщений, чтобы подтвердить не только alternating harness, но и пользовательский live UX.
 4. Для Telegram control center: добавить быстрые кнопки `Открыть последний batch json`, `Открыть последний session run`, `Открыть последний screenshot`, если оператору станет тесно в текущем summary-режиме.
-5. Снизить runtime-затраты discovery относительно deep, чтобы multi-peer deep чаще успевал проходить следующий слой visible peer.
-6. Поднять приоритеты deep-target'ов: раньше брать тех peer, у кого вероятность успешного `Mention` выше.
-7. Разделить browser capability/runtime compatibility и Telegram export concerns в отдельные модули/слои.
-8. Отделить понятие `best-known latest` от `most-recent run` в UI и документации, если пользователю важно видеть именно последний прогон как основной артефакт.
-9. Декомпозировать `export_telegram_members_non_pii.py` на модули.
+5. Для Telegram control center: вывести в явный UI-блок подсказку, что `Непрерывно до Стопа` отключает дальнейшее автоматическое чередование и удерживает панель в одном session-run.
+6. Снизить runtime-затраты discovery относительно deep, чтобы multi-peer deep чаще успевал проходить следующий слой visible peer.
+7. Поднять приоритеты deep-target'ов: раньше брать тех peer, у кого вероятность успешного `Mention` выше.
+8. Разделить browser capability/runtime compatibility и Telegram export concerns в отдельные модули/слои.
+9. Отделить понятие `best-known latest` от `most-recent run` в UI и документации, если пользователю важно видеть именно последний прогон как основной артефакт.
+10. Декомпозировать `export_telegram_members_non_pii.py` на модули.
 
 ## Как Продолжать Следующему Агенту
 1. Прочитать `AGENTS.md`.

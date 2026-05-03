@@ -12,6 +12,8 @@ from tool_platform.gui import format_profile_details, format_workflow_details
 from tool_platform.telegram_gui_helpers import (
     active_profile_conflict,
     build_session_runtime_config,
+    combined_contact_add_transition,
+    combined_session_transition,
     combined_flow_state_path,
     contact_job_snapshot,
     contact_add_batch_command,
@@ -399,6 +401,68 @@ class ToolPlatformCatalogTests(unittest.TestCase):
         state = default_combined_flow_state("AK", "/home/max/TelegramPortableAK")
         self.assertEqual(state["phase"], "contact_add")
         self.assertEqual(state["last_status"], "idle")
+
+    def test_combined_contact_add_transition_auto_starts_session_after_success(self) -> None:
+        transition = combined_contact_add_transition(
+            previous_state=default_combined_flow_state("AK", "/home/max/TelegramPortableAK"),
+            payload={
+                "status": "completed",
+                "selected_users": 1,
+                "failed_count": 0,
+                "remaining_candidates": 3,
+            },
+            session_continuous=False,
+        )
+
+        self.assertEqual(transition["phase"], "session_ready")
+        self.assertEqual(transition["last_action"], "combined_contact_add_finished_auto")
+        self.assertTrue(transition["auto_start_session"])
+        self.assertIn("запускаю шаг сессии", transition["status_text"])
+
+    def test_combined_contact_add_transition_stops_when_queue_finishes_after_session(self) -> None:
+        previous_state = default_combined_flow_state("AK", "/home/max/TelegramPortableAK")
+        previous_state["last_session_status"] = "completed"
+        previous_state["last_session_run_dir"] = "/tmp/run"
+
+        transition = combined_contact_add_transition(
+            previous_state=previous_state,
+            payload={
+                "status": "completed",
+                "selected_users": 0,
+                "failed_count": 0,
+                "remaining_candidates": 0,
+            },
+            session_continuous=False,
+        )
+
+        self.assertEqual(transition["phase"], "stopped")
+        self.assertEqual(transition["last_action"], "combined_contact_add_noop_after_session")
+        self.assertFalse(transition["auto_start_session"])
+        self.assertIn("очередь контактов закончилась", transition["status_text"].lower())
+
+    def test_combined_session_transition_loops_back_to_contact_add_when_pending_left(self) -> None:
+        transition = combined_session_transition(
+            payload={"status": "completed"},
+            invite_snapshot={"pending_total": 2},
+            session_continuous=False,
+        )
+
+        self.assertEqual(transition["phase"], "contact_add")
+        self.assertEqual(transition["last_action"], "combined_session_finished_next_contact")
+        self.assertTrue(transition["auto_start_contact_add"])
+        self.assertIn("осталось username", transition["status_text"].lower())
+
+    def test_combined_session_transition_stops_for_continuous_session(self) -> None:
+        transition = combined_session_transition(
+            payload={"status": "completed"},
+            invite_snapshot={"pending_total": 5},
+            session_continuous=True,
+        )
+
+        self.assertEqual(transition["phase"], "stopped")
+        self.assertEqual(transition["last_action"], "combined_session_finished")
+        self.assertFalse(transition["auto_start_contact_add"])
+        self.assertIn("непрерывная сессия", transition["status_text"].lower())
 
     def test_active_profile_conflict_detects_same_running_profile(self) -> None:
         conflict = active_profile_conflict(
