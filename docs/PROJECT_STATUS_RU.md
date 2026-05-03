@@ -156,9 +156,10 @@
   - принимать в управление уже существующую portable-папку через adopt прямо из панели;
   - рендерить profile/workflow details в читаемых text-card блоках вместо тесных table rows, чтобы UI не ломался на Linux HiDPI scaling;
   - показывать оператору только два понятных режима:
-    - `Инвайты по списку`
+    - `Добавить контакты из TXT`
     - `Сессия и сообщения`
-  - в режиме инвайтов принимать `.txt/.csv/.json` список username и создавать invite-job прямо из панели;
+  - в первом режиме принимать `.txt/.csv/.json` список username и реально добавлять эти username в контакты выбранного Telegram Desktop portable-профиля;
+  - для первого режима использовать новый orchestration-командный слой `desktop-add-contact-batch`, который сам создаёт/продолжает local state и по очереди вызывает `desktop-add-contact-profile`;
   - в режиме сессии загружать список адресатов из session-config, позволять править его в панели и запускать session runner кнопкой.
 - Отдельно собран новый видимый Telegram tools hub:
   - `tools/telegram/`
@@ -244,19 +245,24 @@
 
 ## Проверено
 - После перевода Telegram control center в русский двухрежимный UX подтверждены:
-  - `python3 -m py_compile tool_platform/*.py scripts/telegram_portable.py scripts/telegram_invite_executor.py`
-  - `PYTHONPATH="$PWD" python3 -m unittest discover -s tests -p 'test_*.py'` → `195 OK`
+  - `python3 -m py_compile tool_platform/*.py scripts/telegram_portable.py scripts/telegram_invite_executor.py scripts/telegram_invite_manager.py`
+  - `PYTHONPATH="$PWD" python3 -m unittest discover -s tests -p 'test_*.py'` → `198 OK`
   - `bash -n tools/telegram/platform/bin/tool-platform tools/telegram/platform/bin/tool-platform-panel tools/telegram/session_runner/bin/telegram-session-runner tools/telegram/invite_manager/bin/telegram-invite-manager tools/telegram/invite_manager/bin/telegram-invite-executor`
   - `./tools/telegram/platform/bin/tool-platform validate-registry`
   - live GUI smoke: окно `Центр управления Telegram` поднято, `xwininfo` подтвердил `1460x980`, старый английский тестовый экземпляр панели закрыт.
-  - дополнительный live UX-fix: блок `Добавить / подключить профили` вынесен в отдельное окно, чтобы кнопки `Инвайты по списку` и `Сессия и сообщения` были видны сразу на основном экране.
-  - дополнительный UX-fix: на главном экране появились явные кнопки `Старт инвайтов` и `Старт сессии`, а загрузка invite-списка названа прямо как `Загрузить TXT / CSV / JSON`.
+  - дополнительный live UX-fix: блок `Добавить / подключить профили` вынесен в отдельное окно, чтобы большие режимы были видны сразу на основном экране.
+  - первый режим панели переименован из ложного `Старт инвайтов` в честный `Добавить контакты из TXT`;
+  - критический функциональный fix: первый режим больше не создаёт пустой invite-job вместо действия, а запускает `desktop-add-contact-batch` и реально работает как orchestration-слой поверх `desktop-add-contact-profile`;
   - критический live-fix: запуск panel actions переведён с прямого синхронного вызова на фоновый subprocess с безопасным возвратом через main-thread queue, поэтому `Показать план` и `Старт` больше не упираются в Tk thread-boundary;
   - добавлены явные `Стоп`-кнопки для invite/session режимов, общий лог панели `/tmp/telegram-control-center-panel.log` и вертикальная прокрутка длинного экрана;
   - live smoke самой панели через callbacks подтверждён:
-    - `Старт инвайтов` создал job из `.txt` списка и вернул статус `Завершено`;
+    - `Старт добавления` вернул batch summary по реальному `desktop-add-contact-batch`;
     - `Показать план` для session runner вернул статус `Завершено` и план с визитами/черновиком;
     - `Стоп` подтвердил остановку долгой фоновой команды со статусом `Остановлено`.
+  - safe smoke нового backend batch-path подтверждён на реальном portable actor `AK/@M_a_g_g_i_e` без изменения контактов:
+    - команда: `python3 scripts/telegram_invite_executor.py desktop-add-contact-batch ... --confirm-add --dry-run`
+    - результат: `status=dry_run`, `selected_users=1`, `failed_count=0`, `remaining_candidates=1`;
+    - артефакт: `/tmp/telegram-contact-batch-smoke.memxTC/job/executions/20260503T103931Z/batch_contact_add.json`
 - Для нового unified tool platform зелёные:
   - `PYTHONPATH="$PWD" python3 -m unittest discover -s tests -p 'test_*.py'`
   - `python3 -m py_compile tool_platform/*.py scripts/telegram_invite_executor.py scripts/telegram_portable.py`
@@ -699,10 +705,10 @@
 - импортировать нового пользователя по `tdata.zip`;
 - принимать в управление существующие папки;
 - разделять работу на два режима:
-  - `Инвайты по списку`
+  - `Добавить контакты из TXT`
   - `Сессия и сообщения`
 - подставлять выбранный профиль в runtime-config session runner;
-- принимать файл со списком username для invite manager;
+- принимать файл со списком username и запускать batch-добавление этих username в личные контакты выбранного профиля;
 - запускать session runner кнопкой с отдельно редактируемым списком адресатов сообщений.
 
 Следующий запас уже не в базовом UX, а в более удобных summary и быстрых переходах к последним job/run артефактам.

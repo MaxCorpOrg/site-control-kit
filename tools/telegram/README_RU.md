@@ -34,6 +34,7 @@ cd /home/max/site-control-kit/tools/telegram
 - выбор portable-пользователей из выпадающего списка;
 - импорт новых пользователей по `tdata.zip`;
 - adopt уже существующих Telegram portable-папок;
+- первый большой операторский режим `Добавить контакты из TXT` для реального добавления username в личные контакты выбранного portable-профиля;
 - подключение embedded tools и visible wrappers.
 
 ### `invite_manager/`

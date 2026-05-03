@@ -33,9 +33,9 @@ from .telegram_gui_helpers import (
     DEFAULT_INVITE_OUTPUT_ROOT,
     DEFAULT_SESSION_CONFIG,
     build_session_runtime_config,
-    default_invite_job_dir,
+    contact_add_batch_command,
+    default_contact_add_job_dir,
     format_session_target_label,
-    invite_manager_init_command,
     invite_manager_next_command,
     invite_manager_status_command,
     parse_json_payload,
@@ -122,11 +122,22 @@ def format_invite_status_payload(payload: dict[str, Any]) -> str:
     counts = payload.get("counts") if isinstance(payload.get("counts"), dict) else {}
     next_users = payload.get("users") if isinstance(payload.get("users"), list) else []
     latest_runs = payload.get("latest_runs") if isinstance(payload.get("latest_runs"), list) else []
+    if next_users and not counts and "total_users" not in payload:
+        lines = [
+            "Что осталось в очереди",
+            f"Папка задачи: {payload.get('job_dir') or '-'}",
+            f"Показано username: {payload.get('selected') or len(next_users)}",
+        ]
+        for item in next_users:
+            lines.append(
+                f"- {item.get('username') or '-'} · статус: {item.get('status') or '-'} · попыток: {item.get('attempts') or 0}"
+            )
+        return "\n".join(lines)
 
     lines = [
-        "Инвайты по списку",
+        "Добавление контактов из TXT",
         f"Папка задачи: {payload.get('job_dir') or '-'}",
-        f"Чат: {payload.get('chat_url') or '-'}",
+        f"Источник задачи: {payload.get('chat_url') or '-'}",
         f"Всего пользователей: {payload.get('total_users') or 0}",
         f"С consent=yes: {payload.get('consent_yes') or 0}",
         f"С consent=no: {payload.get('consent_no') or 0}",
@@ -148,6 +159,43 @@ def format_invite_status_payload(payload: dict[str, Any]) -> str:
             lines.append(
                 f"- {run.get('run_id') or '-'} · processed={run.get('processed') or 0} · updated={run.get('updated') or 0} · dry_run={int(bool(run.get('dry_run')))}"
             )
+    return "\n".join(lines)
+
+
+def format_contact_batch_payload(payload: dict[str, Any]) -> str:
+    summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+    results = payload.get("results") if isinstance(payload.get("results"), list) else []
+    lines = [
+        "Добавление контактов из TXT",
+        f"Статус: {payload.get('status') or '-'}",
+        f"Папка задачи: {payload.get('job_dir') or '-'}",
+        f"Файл списка: {payload.get('input_path') or '-'}",
+        f"Выбрано username: {payload.get('selected_users') or 0}",
+        f"Успешно добавлено: {payload.get('added_count') or 0}",
+        f"Ошибок: {payload.get('failed_count') or 0}",
+        f"Осталось в очереди: {payload.get('remaining_candidates') or 0}",
+    ]
+    if summary:
+        counts = summary.get("counts") if isinstance(summary.get("counts"), dict) else {}
+        lines.extend(["", "Состояние задачи"])
+        for key, value in sorted(counts.items()):
+            lines.append(f"- {key}: {value}")
+    if results:
+        lines.extend(["", "Последние результаты"])
+        for item in results[-8:]:
+            error = str(item.get("error") or "").strip()
+            suffix = f" · ошибка: {error}" if error else ""
+            lines.append(
+                f"- {item.get('username') or '-'} · {item.get('outcome') or item.get('status') or '-'}{suffix}"
+            )
+    remaining = payload.get("remaining_usernames") if isinstance(payload.get("remaining_usernames"), list) else []
+    if remaining:
+        lines.extend(["", "Что ещё осталось"])
+        for username in remaining[:10]:
+            lines.append(f"- {username}")
+    run_dir = str(payload.get("run_dir") or "").strip()
+    if run_dir:
+        lines.extend(["", f"Артефакты batch-запуска: {run_dir}"])
     return "\n".join(lines)
 
 
@@ -239,7 +287,6 @@ if tk is not None:
             self.adopt_account_username_var = tk.StringVar()
             self.adopt_account_label_var = tk.StringVar()
 
-            self.invite_chat_url_var = tk.StringVar()
             self.invite_input_path_var = tk.StringVar()
             self.invite_job_dir_var = tk.StringVar()
             self.invite_limit_var = tk.StringVar(value="10")
@@ -277,7 +324,7 @@ if tk is not None:
             self._tool_buttons: dict[str, tk.Button] = {}
             self._tool_frames: dict[str, ttk.Frame] = {}
 
-            self.invite_chat_url_var.trace_add("write", self._sync_invite_job_dir)
+            self.invite_input_path_var.trace_add("write", self._sync_contact_job_dir)
 
             self._build_ui()
             self._reload_profiles(initial=True)
@@ -672,7 +719,13 @@ if tk is not None:
                 messagebox.showerror("Панель Telegram", error_text)
                 return
             assert payload is not None
-            self._status_var_for_tool(tool_id).set("Завершено")
+            payload_status = str(payload.get("status") or "").strip().lower()
+            if payload_status == "completed_with_errors":
+                self._status_var_for_tool(tool_id).set("Есть ошибки")
+            elif payload_status == "dry_run":
+                self._status_var_for_tool(tool_id).set("Проверка завершена")
+            else:
+                self._status_var_for_tool(tool_id).set("Завершено")
             self._log_event(tool_id, f"Завершено: {action_label}")
             on_success(payload)
 
@@ -825,7 +878,7 @@ if tk is not None:
             selector.pack(fill="x")
 
             tools = [
-                ("telegram_invite_manager", "Старт инвайтов"),
+                ("telegram_invite_manager", "Добавить контакты из TXT"),
                 ("telegram_session_runner", "Старт сессии"),
             ]
             for tool_id, label in tools:
@@ -843,7 +896,7 @@ if tk is not None:
                 self._tool_buttons[tool_id] = button
             ttk.Label(
                 body,
-                text="`Старт инвайтов` открывает загрузку списка username из файла. `Старт сессии` открывает запуск random walk и список адресатов сообщений.",
+                text="`Добавить контакты из TXT` открывает простой режим реального добавления username в контакты выбранного сверху профиля. `Старт сессии` открывает random walk и список адресатов сообщений.",
                 style="CardSubtitle.TLabel",
             ).pack(anchor="w", pady=(10, 0))
 
@@ -867,8 +920,8 @@ if tk is not None:
         def _build_invite_view(self, parent: ttk.Frame) -> None:
             body = self._create_card(
                 parent,
-                "Инструмент: Инвайты по списку",
-                "Загрузи файл с username, создай задачу и смотри следующих пользователей. Это отдельный режим и он не смешивается с отправкой сообщений.",
+                "Инструмент: Добавление контактов из TXT",
+                "Загрузи файл с username и запусти реальное добавление этих людей в контакты выбранного сверху Telegram-пользователя. Этот режим отделён от сессий и сообщений.",
                 expand=True,
             )
             body.columnconfigure(0, weight=1)
@@ -878,7 +931,7 @@ if tk is not None:
             top_buttons.grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 12))
             invite_start_button = ttk.Button(
                 top_buttons,
-                text="Старт инвайтов",
+                text="Старт добавления",
                 style="Accent.TButton",
                 command=self._invite_create_job,
             )
@@ -893,7 +946,7 @@ if tk is not None:
             self._register_busy_widget("telegram_invite_manager", invite_status_button)
             invite_next_button = ttk.Button(
                 top_buttons,
-                text="Следующие username",
+                text="Что осталось",
                 command=self._invite_show_next,
             )
             invite_next_button.pack(side=tk.LEFT, padx=(10, 0))
@@ -912,18 +965,11 @@ if tk is not None:
                 style="CardSubtitle.TLabel",
             ).pack(side=tk.LEFT, padx=(16, 0))
 
-            ttk.Label(body, text="Шаг 1. Ссылка или ID чата", style="Field.TLabel").grid(
+            ttk.Label(body, text="Шаг 1. Файл со списком username с компьютера", style="Field.TLabel").grid(
                 row=1, column=0, sticky="w"
             )
-            ttk.Entry(body, textvariable=self.invite_chat_url_var).grid(
-                row=2, column=0, columnspan=2, sticky="ew", pady=(4, 10)
-            )
-
-            ttk.Label(body, text="Шаг 2. Файл со списком username с компьютера", style="Field.TLabel").grid(
-                row=3, column=0, sticky="w"
-            )
             file_row = ttk.Frame(body, style="Card.TFrame")
-            file_row.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(4, 10))
+            file_row.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(4, 10))
             file_row.columnconfigure(0, weight=1)
             ttk.Entry(file_row, textvariable=self.invite_input_path_var).grid(
                 row=0, column=0, sticky="ew"
@@ -936,22 +982,22 @@ if tk is not None:
             invite_choose_file_button.grid(row=0, column=1, padx=(10, 0))
             self._register_busy_widget("telegram_invite_manager", invite_choose_file_button)
 
-            ttk.Label(body, text="Шаг 3. Папка задачи", style="Field.TLabel").grid(
-                row=5, column=0, sticky="w"
+            ttk.Label(body, text="Шаг 2. Папка задачи", style="Field.TLabel").grid(
+                row=3, column=0, sticky="w"
             )
             ttk.Entry(body, textvariable=self.invite_job_dir_var).grid(
-                row=6, column=0, columnspan=2, sticky="ew", pady=(4, 10)
+                row=4, column=0, columnspan=2, sticky="ew", pady=(4, 10)
             )
 
             ttk.Label(
                 body,
-                text="Поддерживаются .txt, .csv и .json. Для .txt одна строка = один @username, consent=yes ставится автоматически.",
+                text="Поддерживаются .txt, .csv и .json. Для .txt одна строка = один @username, consent=yes ставится автоматически. Контакты будет добавлять именно тот профиль, который выбран сверху.",
                 style="CardSubtitle.TLabel",
-            ).grid(row=7, column=0, columnspan=2, sticky="w")
+            ).grid(row=5, column=0, columnspan=2, sticky="w")
 
             next_row = ttk.Frame(body, style="Card.TFrame")
-            next_row.grid(row=8, column=0, columnspan=2, sticky="w", pady=(14, 0))
-            ttk.Label(next_row, text="Сколько показать дальше", style="Field.TLabel").pack(
+            next_row.grid(row=6, column=0, columnspan=2, sticky="w", pady=(14, 0))
+            ttk.Label(next_row, text="Сколько username обработать за запуск", style="Field.TLabel").pack(
                 side=tk.LEFT
             )
             ttk.Entry(next_row, textvariable=self.invite_limit_var, width=8).pack(
@@ -959,12 +1005,12 @@ if tk is not None:
             )
 
             ttk.Label(body, text="Что происходит сейчас", style="Field.TLabel").grid(
-                row=9, column=0, sticky="w", pady=(16, 0)
+                row=7, column=0, sticky="w", pady=(16, 0)
             )
             self.invite_output = self._create_readonly_text(body, height=16)
-            self.invite_output.grid(row=10, column=0, columnspan=2, sticky="nsew", pady=(6, 0))
+            self.invite_output.grid(row=8, column=0, columnspan=2, sticky="nsew", pady=(6, 0))
             self._bind_scroll_to_widget(self.invite_output)
-            body.rowconfigure(10, weight=1)
+            body.rowconfigure(8, weight=1)
 
         def _build_session_view(self, parent: ttk.Frame) -> None:
             body = self._create_card(
@@ -1118,7 +1164,7 @@ if tk is not None:
                 format_profile_label(selected_profile) if selected_profile is not None else "профиль не выбран"
             )
             active_label = (
-                "Инвайты по списку"
+                "Добавление контактов из TXT"
                 if self._active_tool_id == "telegram_invite_manager"
                 else "Сессия и сообщения"
             )
@@ -1178,6 +1224,8 @@ if tk is not None:
             profile = self._selected_profile()
             if profile is not None:
                 self._show_profile(profile)
+                if self.invite_input_path_var.get().strip() and not self.invite_job_dir_var.get().strip():
+                    self._sync_contact_job_dir()
                 self._refresh_summary()
 
         def _launch_selected_profile(self) -> None:
@@ -1212,11 +1260,21 @@ if tk is not None:
             self._show_profile(fresh)
             self._refresh_summary()
 
-        def _sync_invite_job_dir(self, *_args: object) -> None:
-            chat_url = self.invite_chat_url_var.get().strip()
-            if not chat_url or self.invite_job_dir_var.get().strip():
+        def _sync_contact_job_dir(self, *_args: object) -> None:
+            input_path = self.invite_input_path_var.get().strip()
+            if not input_path or self.invite_job_dir_var.get().strip():
                 return
-            self.invite_job_dir_var.set(str(default_invite_job_dir(chat_url, DEFAULT_INVITE_OUTPUT_ROOT)))
+            profile = self._selected_profile()
+            profile_name = str((profile or {}).get("profile_name") or "profile").strip() or "profile"
+            self.invite_job_dir_var.set(
+                str(
+                    default_contact_add_job_dir(
+                        profile_name=profile_name,
+                        input_path=input_path,
+                        output_root=DEFAULT_INVITE_OUTPUT_ROOT,
+                    )
+                )
+            )
 
         def _switch_tool(self, tool_id: str) -> None:
             self._active_tool_id = tool_id
@@ -1243,10 +1301,10 @@ if tk is not None:
                     self.invite_output,
                     "\n".join(
                         [
-                            "Инвайты по списку",
-                            "1. Укажи ссылку или ID чата.",
+                            "Добавление контактов из TXT",
+                            "1. Сверху выбери Telegram-профиль, который будет добавлять контакты.",
                             "2. Нажми `Загрузить TXT / CSV / JSON` и выбери файл с компьютера.",
-                            "3. Нажми `Старт инвайтов`.",
+                            "3. Нажми `Старт добавления`.",
                         ]
                     ),
                 )
@@ -1472,6 +1530,8 @@ if tk is not None:
             )
             if selected:
                 self.invite_input_path_var.set(selected)
+                self.invite_job_dir_var.set("")
+                self._sync_contact_job_dir()
                 self.invite_status_var.set("Файл списка выбран")
                 self._log_event("telegram_invite_manager", f"Выбран файл списка: {selected}")
 
@@ -1536,34 +1596,48 @@ if tk is not None:
             job_dir = self.invite_job_dir_var.get().strip()
             if job_dir:
                 return Path(job_dir).expanduser().resolve()
-            chat_url = self.invite_chat_url_var.get().strip()
-            if not chat_url:
-                raise ValueError("Укажи ссылку или ID чата.")
-            resolved = default_invite_job_dir(chat_url, DEFAULT_INVITE_OUTPUT_ROOT)
+            input_path = self.invite_input_path_var.get().strip()
+            if not input_path:
+                raise ValueError("Выбери файл со списком username.")
+            profile = self._selected_profile()
+            profile_name = str((profile or {}).get("profile_name") or "profile").strip() or "profile"
+            resolved = default_contact_add_job_dir(
+                profile_name=profile_name,
+                input_path=input_path,
+                output_root=DEFAULT_INVITE_OUTPUT_ROOT,
+            )
             self.invite_job_dir_var.set(str(resolved))
             return resolved
 
         def _invite_create_job(self) -> None:
-            chat_url = self.invite_chat_url_var.get().strip()
             input_path = self.invite_input_path_var.get().strip()
-            if not chat_url:
-                messagebox.showinfo("Панель Telegram", "Укажи ссылку или ID чата.")
-                return
             if not input_path:
                 messagebox.showinfo("Панель Telegram", "Выбери файл со списком username.")
                 return
+            selected_profile = self._selected_profile()
+            if selected_profile is None:
+                messagebox.showinfo("Панель Telegram", "Сначала выбери Telegram-профиль сверху.")
+                return
             try:
-                command = invite_manager_init_command(
-                    chat_url=chat_url,
+                limit = max(int(self.invite_limit_var.get() or "0"), 0)
+            except ValueError:
+                limit = 0
+            try:
+                command = contact_add_batch_command(
                     input_path=input_path,
-                    job_dir=self.invite_job_dir_var.get().strip() or None,
+                    job_dir=self._invite_resolved_job_dir(),
+                    profile_name=str(selected_profile.get("profile_name") or ""),
+                    portable_profile_dir=str(selected_profile.get("profile_dir") or ""),
+                    account_username=str((selected_profile.get("account") or {}).get("username") or ""),
+                    account_label=str((selected_profile.get("account") or {}).get("label") or ""),
+                    limit=limit,
                 )
             except Exception as exc:
-                messagebox.showerror("Панель Telegram", f"Не удалось создать invite-задачу:\n{exc}")
+                messagebox.showerror("Панель Telegram", f"Не удалось подготовить batch-добавление контактов:\n{exc}")
                 return
             self._start_json_command(
                 tool_id="telegram_invite_manager",
-                action_label="создание invite-задачи",
+                action_label="добавление контактов из файла",
                 command=command,
                 on_success=self._on_invite_init_success,
             )
@@ -1576,7 +1650,7 @@ if tk is not None:
                 return
             self._start_json_command(
                 tool_id="telegram_invite_manager",
-                action_label="чтение статуса invite-задачи",
+                action_label="чтение статуса задачи добавления контактов",
                 command=command,
                 on_success=lambda payload: self._set_readonly_text(
                     self.invite_output, format_invite_status_payload(payload)
@@ -1595,7 +1669,7 @@ if tk is not None:
                 return
             self._start_json_command(
                 tool_id="telegram_invite_manager",
-                action_label="получение следующей пачки username",
+                action_label="чтение оставшихся username",
                 command=command,
                 on_success=lambda payload: self._set_readonly_text(
                     self.invite_output, format_invite_status_payload(payload)
@@ -1750,7 +1824,12 @@ if tk is not None:
         def _on_invite_init_success(self, payload: dict[str, Any]) -> None:
             if payload.get("job_dir"):
                 self.invite_job_dir_var.set(str(payload["job_dir"]))
-            self._set_readonly_text(self.invite_output, format_invite_status_payload(payload))
+            formatter = (
+                format_contact_batch_payload
+                if isinstance(payload.get("results"), list)
+                else format_invite_status_payload
+            )
+            self._set_readonly_text(self.invite_output, formatter(payload))
 
         def _on_session_plan_success(self, payload: dict[str, Any], runtime_config: Path) -> None:
             summary = format_session_plan_payload(payload)

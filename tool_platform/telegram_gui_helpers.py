@@ -10,6 +10,7 @@ from typing import Any
 
 
 DEFAULT_INVITE_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "telegram_invite_manager.py"
+DEFAULT_INVITE_EXECUTOR_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "telegram_invite_executor.py"
 DEFAULT_INVITE_OUTPUT_ROOT = Path.home() / "telegram_invite_jobs"
 DEFAULT_SESSION_REPO = Path("/home/max/telegram-portable-session-tool")
 DEFAULT_SESSION_CONFIG = DEFAULT_SESSION_REPO / "examples" / "session.example.json"
@@ -53,6 +54,29 @@ def chat_slug_from_chat_url(chat_url: str) -> str:
 
 def default_invite_job_dir(chat_url: str, output_root: str | Path = DEFAULT_INVITE_OUTPUT_ROOT) -> Path:
     return Path(output_root).expanduser().resolve() / f"chat_{chat_slug_from_chat_url(chat_url)}"
+
+
+def _safe_slug(value: str, fallback: str) -> str:
+    slug = re.sub(r"[^A-Za-z0-9._-]", "_", str(value or "").strip())
+    slug = slug.strip("._-")
+    return slug or fallback
+
+
+def default_contact_add_job_dir(
+    *,
+    profile_name: str,
+    input_path: str | Path,
+    output_root: str | Path = DEFAULT_INVITE_OUTPUT_ROOT,
+) -> Path:
+    input_stem = Path(input_path).expanduser().resolve().stem if str(input_path or "").strip() else "list"
+    profile_slug = _safe_slug(profile_name, "profile")
+    input_slug = _safe_slug(input_stem, "list")
+    return Path(output_root).expanduser().resolve() / f"contact_add__{profile_slug}__{input_slug}"
+
+
+def contact_add_chat_url(*, profile_name: str, account_username: str = "") -> str:
+    identity = _safe_slug(account_username or profile_name, "profile")
+    return f"contacts://{identity}"
 
 
 def parse_plaintext_usernames(text: str) -> list[str]:
@@ -176,6 +200,55 @@ def invite_manager_next_command(job_dir: str | Path, *, limit: int = 10) -> Comm
         ],
         cwd=DEFAULT_INVITE_SCRIPT.parent.parent,
     )
+
+
+def contact_add_batch_command(
+    *,
+    input_path: str | Path,
+    job_dir: str | Path,
+    profile_name: str,
+    portable_profile_dir: str | Path,
+    account_username: str = "",
+    account_label: str = "",
+    limit: int = 0,
+    output_root: str | Path = DEFAULT_INVITE_OUTPUT_ROOT,
+    temp_dir: str | Path = "/tmp/telegram-control-center",
+    launch_if_needed: bool = True,
+    confirm_add: bool = True,
+    dry_run: bool = False,
+) -> CommandSpec:
+    prepared_input = prepare_invite_input_file(input_path, temp_dir)
+    resolved_job_dir = Path(job_dir).expanduser().resolve()
+    argv = [
+        "python3",
+        str(DEFAULT_INVITE_EXECUTOR_SCRIPT),
+        "desktop-add-contact-batch",
+        "--job-dir",
+        str(resolved_job_dir),
+        "--input",
+        str(prepared_input),
+        "--chat-url",
+        contact_add_chat_url(profile_name=profile_name, account_username=account_username),
+        "--portable-profile-name",
+        str(profile_name or "").strip(),
+        "--portable-profile-dir",
+        str(Path(portable_profile_dir).expanduser().resolve()),
+        "--output-root",
+        str(Path(output_root).expanduser().resolve()),
+    ]
+    if account_username:
+        argv.extend(["--account-username", str(account_username).strip()])
+    if account_label:
+        argv.extend(["--account-label", str(account_label).strip()])
+    if limit > 0:
+        argv.extend(["--limit", str(int(limit))])
+    if launch_if_needed:
+        argv.append("--launch-if-needed")
+    if confirm_add:
+        argv.append("--confirm-add")
+    if dry_run:
+        argv.append("--dry-run")
+    return CommandSpec(argv=argv, cwd=DEFAULT_INVITE_EXECUTOR_SCRIPT.parent.parent)
 
 
 def load_session_config_payload(config_path: str | Path) -> dict[str, Any]:

@@ -11,7 +11,9 @@ from tool_platform.cli import execute_action
 from tool_platform.gui import format_profile_details, format_workflow_details
 from tool_platform.telegram_gui_helpers import (
     build_session_runtime_config,
+    contact_add_batch_command,
     default_invite_job_dir,
+    default_contact_add_job_dir,
     format_session_target_label,
     invite_manager_init_command,
     parse_plaintext_usernames,
@@ -345,6 +347,14 @@ class ToolPlatformCatalogTests(unittest.TestCase):
         )
         self.assertEqual(str(result), "/tmp/telegram_invite_jobs/chat_-2465948544")
 
+    def test_default_contact_add_job_dir_uses_profile_and_filename(self) -> None:
+        result = default_contact_add_job_dir(
+            profile_name="AK",
+            input_path="/tmp/users.txt",
+            output_root="/tmp/telegram_invite_jobs",
+        )
+        self.assertEqual(str(result), "/tmp/telegram_invite_jobs/contact_add__AK__users")
+
     def test_parse_plaintext_usernames_skips_comments_and_deduplicates(self) -> None:
         usernames = parse_plaintext_usernames(
             """
@@ -388,6 +398,33 @@ class ToolPlatformCatalogTests(unittest.TestCase):
         self.assertIn("--input", spec.argv)
         input_index = spec.argv.index("--input") + 1
         self.assertTrue(spec.argv[input_index].endswith(".invite-import.csv"))
+        self.assertEqual(spec.cwd, Path(__file__).resolve().parents[1])
+
+    def test_contact_add_batch_command_targets_executor_and_selected_profile(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            source = root / "users.txt"
+            source.write_text("@alice_test\n", encoding="utf-8")
+
+            spec = contact_add_batch_command(
+                input_path=source,
+                job_dir=root / "job",
+                profile_name="AK",
+                portable_profile_dir="/home/max/TelegramPortableAK",
+                account_username="@M_a_g_g_i_e",
+                account_label="Maggie",
+                limit=5,
+                output_root=root / "jobs",
+                temp_dir=root / "tmp",
+            )
+
+        self.assertIn("desktop-add-contact-batch", spec.argv)
+        self.assertIn("--portable-profile-name", spec.argv)
+        self.assertIn("AK", spec.argv)
+        self.assertIn("--portable-profile-dir", spec.argv)
+        self.assertIn("/home/max/TelegramPortableAK", spec.argv)
+        self.assertIn("--confirm-add", spec.argv)
+        self.assertIn("--launch-if-needed", spec.argv)
         self.assertEqual(spec.cwd, Path(__file__).resolve().parents[1])
 
     def test_session_message_targets_reads_message_policy_targets(self) -> None:

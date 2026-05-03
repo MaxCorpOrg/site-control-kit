@@ -16,6 +16,7 @@ DEFAULT_SELECTABLE_STATUSES = ("new",)
 ALLOWED_STATUSES = (
     "new",
     "checked",
+    "contact_added",
     "invite_link_created",
     "sent",
     "requested",

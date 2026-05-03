@@ -44,6 +44,11 @@ GUI-обёртки теперь покрывают основной операт
 - manager GUI: `init`, `status`, `next`, `add user`, `run`, `mark`, `report`;
 - executor GUI: `configure`, `plan`, `ensure-portable`, `prepare-next`, `desktop-send dry/live`, `inspect-chat`, `open-chat`, `add-contact dry/prepare/live`, `record`, `report`.
 
+Отдельно в общей Telegram-панели этот инструмент теперь используется ещё и как backend для режима:
+- `Добавить контакты из TXT`
+
+Под капотом панель запускает `telegram_invite_executor.py desktop-add-contact-batch`, а тот уже по очереди вызывает существующий `desktop-add-contact-profile`.
+
 ## Один Пользователь
 
 Подробный сценарий лежит в:
@@ -87,6 +92,27 @@ cd /home/max/site-control-kit/tools/telegram/invite_manager
 Если job хранит публичный `https://t.me/<handle>`, `open-chat` и `inspect-chat` без явного browser-target автоматически откроют `https://web.telegram.org/k/#@<handle>`.
 Если before/after проверка не подтверждает появление выбранного `peer_id` в видимом member list или рост `member_count`, результат записывается как `requested`, а не как `joined`.
 Сводка before/after теперь живёт прямо в `execution_record.json` в блоке `verification`.
+
+## Batch Добавление В Личные Контакты
+
+Для простого сценария "взять `.txt` и добавить username себе в контакты" теперь есть отдельная batch-команда:
+
+```bash
+./bin/telegram-invite-executor desktop-add-contact-batch \
+  --job-dir "/home/max/telegram_invite_jobs/contact_add__AK__users" \
+  --input "/tmp/users.import.csv" \
+  --portable-profile-name "AK" \
+  --portable-profile-dir "/home/max/TelegramPortableAK" \
+  --account-username "@M_a_g_g_i_e" \
+  --confirm-add \
+  --launch-if-needed
+```
+
+Она:
+- создаёт или продолжает local state в `invite_state.json`;
+- выбирает consented username из статусов `new/checked/failed`;
+- запускает `desktop-add-contact-profile` на каждого пользователя;
+- после успешного live add переводит пользователя в `contact_added`.
 
 ## Portable Actor Для Telegram Desktop
 

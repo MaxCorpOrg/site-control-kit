@@ -748,6 +748,72 @@ class TelegramInviteExecutorTests(unittest.TestCase):
             self.assertTrue(payload["screenshots"]["profile_verify"].endswith("desktop_add_contact_profile_verify.png"))
             self.assertTrue((Path(payload["run_dir"]) / "execution_record.json").exists())
 
+    def test_desktop_add_contact_batch_initializes_job_and_marks_contact_added(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            job_dir = root / "job"
+            input_path = root / "users.csv"
+            input_path.write_text(
+                "username,consent,source\n@alice_123,yes,panel\n",
+                encoding="utf-8",
+            )
+
+            def fake_portable(_repo_root, command):
+                if "status" in command:
+                    payload = {"status": "completed", "running": True, "pids": [38744], "windows": [{"window_id": "0x04c0002e"}]}
+                elif "log-diagnose" in command:
+                    payload = {"status": "completed", "alerts": []}
+                elif "window-screenshot" in command:
+                    output_path = command[command.index("--output") + 1]
+                    payload = {"status": "completed", "output_path": output_path, "window_id": "0x04c0002e"}
+                else:
+                    payload = {"status": "completed"}
+                return {"command": command, "returncode": 0, "stdout": json.dumps(payload), "stderr": "", "stdout_json": payload}
+
+            with mock.patch.object(self.executor, "_run_portable_json", side_effect=fake_portable), mock.patch.object(
+                self.executor.time, "sleep"
+            ):
+                rc, payload = self._call_json(
+                    self.executor.command_desktop_add_contact_batch,
+                    Namespace(
+                        job_dir=str(job_dir),
+                        input=str(input_path),
+                        chat_url="contacts://AK",
+                        output_root="",
+                        portable_profile_name="AK",
+                        portable_profile_dir="/home/max/TelegramPortableAK",
+                        account_username="@M_a_g_g_i_e",
+                        account_label="@M_a_g_g_i_e",
+                        limit=0,
+                        statuses=["new", "checked", "failed"],
+                        execution_id="20260503T101500Z",
+                        open_wait=0,
+                        after_add_wait=0,
+                        after_done_wait=0,
+                        verify_wait=0,
+                        add_click_x_ratio=0.394,
+                        add_click_y_ratio=0.397,
+                        done_click_x_ratio=0.565,
+                        done_click_y_ratio=0.715,
+                        done_click_repeat=1,
+                        last_name_text="",
+                        press_enter_after_last_name=False,
+                        launch_if_needed=False,
+                        verify_profile_reopen=True,
+                        confirm_add=True,
+                        dry_run=False,
+                    ),
+                )
+
+            self.assertEqual(rc, 0)
+            self.assertTrue(payload["initialized_from_input"])
+            self.assertEqual(payload["selected_users"], 1)
+            self.assertEqual(payload["added_count"], 1)
+            self.assertEqual(payload["failed_count"], 0)
+            self.assertTrue((Path(payload["run_dir"]) / "batch_contact_add.json").exists())
+            state = self.manager.load_state(job_dir)
+            self.assertEqual(state["users"][0]["status"], "contact_added")
+
     def test_extract_member_count(self) -> None:
         count, count_text = self.executor._extract_member_count("Жиротоп Shop\n2 440 members, 153 online")
         self.assertEqual(count, 2440)

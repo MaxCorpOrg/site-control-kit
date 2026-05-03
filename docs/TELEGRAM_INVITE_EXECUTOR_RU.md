@@ -259,6 +259,69 @@ python3 scripts/telegram_invite_executor.py desktop-open-add-members \
 - если right-side search field не найден правее `--min-search-x`, команда останавливается до ввода, чтобы не печатать username в левый глобальный поиск Telegram Desktop;
 - при `PEER_FLOOD` / `FLOOD_WAIT` live path по умолчанию останавливается, пока явно не передан `--allow-alerts`.
 
+### `desktop-add-contact-profile`
+Portable-only no-API path для добавления одного username именно в личные контакты текущего Telegram Desktop portable-аккаунта.
+
+Команда:
+- проверяет `portable_actor`;
+- открывает `tg://resolve?domain=<username>&profile`;
+- идёт по UI-пути `Add to contacts -> Done`;
+- пишет `execution_record.json` и PNG-скриншоты до/после/verify;
+- не требует Telegram API и не работает массово сама по себе: один запуск = один username.
+
+Dry-run:
+
+```bash
+cd /home/max/site-control-kit
+python3 scripts/telegram_invite_executor.py desktop-add-contact-profile \
+  --job-dir "/home/max/telegram_invite_jobs/contact_add__AK__users" \
+  --username "@alice_123" \
+  --dry-run
+```
+
+Реальное добавление:
+
+```bash
+python3 scripts/telegram_invite_executor.py desktop-add-contact-profile \
+  --job-dir "/home/max/telegram_invite_jobs/contact_add__AK__users" \
+  --username "@alice_123" \
+  --confirm-add \
+  --launch-if-needed
+```
+
+После успешного клика команда сама state пользователя не меняет.
+Если нужен batch-режим с обновлением state, использовать именно `desktop-add-contact-batch`.
+
+### `desktop-add-contact-batch`
+Новый batch-режим для панели и CLI-обвязок.
+Его задача: взять `.csv/.json` список consented username, создать или продолжить локальную job-state, привязать выбранный portable actor и по очереди вызвать существующий `desktop-add-contact-profile` для каждого username.
+
+Команда:
+- принимает `--job-dir`;
+- если `invite_state.json` ещё нет, берёт `--input` и создаёт локальный state;
+- сохраняет `portable_actor` в execution config;
+- обрабатывает очередь по статусам `new/checked/failed`;
+- после успешного live add помечает пользователя как `contact_added`;
+- при ошибке помечает пользователя как `failed`;
+- пишет batch summary в `executions/<execution_id>/batch_contact_add.json`.
+
+Пример для оператора:
+
+```bash
+cd /home/max/site-control-kit
+python3 scripts/telegram_invite_executor.py desktop-add-contact-batch \
+  --job-dir "/home/max/telegram_invite_jobs/contact_add__AK__users" \
+  --input "/tmp/users.import.csv" \
+  --portable-profile-name "AK" \
+  --portable-profile-dir "/home/max/TelegramPortableAK" \
+  --account-username "@M_a_g_g_i_e" \
+  --confirm-add \
+  --launch-if-needed
+```
+
+Для dry-run достаточно добавить `--dry-run`.
+Если `invite_state.json` уже создан, `--input` нужен только для первого запуска: дальше batch-команда продолжает именно этот job-state и не переинициализирует его молча.
+
 ### `inspect-chat`
 Считывает текущий Telegram Web view и возвращает:
 - `page_url`;

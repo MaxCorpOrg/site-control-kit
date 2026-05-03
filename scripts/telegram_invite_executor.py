@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import html
+import io
 import json
 import os
 import re
@@ -19,15 +21,19 @@ try:
         append_history,
         atomic_write_json,
         build_user_record,
+        chat_slug_from_chat_url,
         consent_label,
         ensure_valid_status,
+        load_input_rows,
         load_state,
         normalize_username,
         now_utc,
         parse_consent,
+        prepare_users,
         save_state,
         select_candidates,
         summarize_state,
+        state_path_for,
         write_run_artifacts,
     )
 except ImportError:
@@ -36,21 +42,26 @@ except ImportError:
         append_history,
         atomic_write_json,
         build_user_record,
+        chat_slug_from_chat_url,
         consent_label,
         ensure_valid_status,
+        load_input_rows,
         load_state,
         normalize_username,
         now_utc,
         parse_consent,
+        prepare_users,
         save_state,
         select_candidates,
         summarize_state,
+        state_path_for,
         write_run_artifacts,
     )
 
 
 DEFAULT_MESSAGE_TEMPLATE = "Привет! Вот ссылка для вступления в чат: {invite_link}"
 DEFAULT_EXECUTION_STATUSES = ("checked",)
+DEFAULT_CONTACT_BATCH_STATUSES = ("new", "checked", "failed")
 MEMBER_COUNT_RE = re.compile(r"(?P<count>\d[\d\s,.]*)\s+members?\b", re.IGNORECASE)
 ADD_MEMBERS_OPEN_SELECTORS = (
     "#column-right .profile-container.can-add-members button.btn-circle.btn-corner",
@@ -293,6 +304,59 @@ def _write_execution_record(job_dir: Path, execution_id: str, payload: dict[str,
 
 def _execution_id_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
+def _invoke_json_command(func: Any, namespace: argparse.Namespace) -> tuple[int, dict[str, Any]]:
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        rc = int(func(namespace))
+    raw_output = buffer.getvalue().strip()
+    if not raw_output:
+        raise RuntimeError("command returned empty stdout")
+    payload = json.loads(raw_output)
+    if not isinstance(payload, dict):
+        raise RuntimeError("command returned non-object JSON payload")
+    return rc, payload
+
+
+def _init_job_state_from_input(
+    *,
+    job_dir: Path,
+    input_path: Path,
+    chat_url: str,
+) -> dict[str, Any]:
+    imported_at = now_utc()
+    rows = load_input_rows(input_path)
+    users, import_stats = prepare_users(rows, imported_at)
+    state = {
+        "version": 1,
+        "chat_url": chat_url,
+        "chat_slug": chat_slug_from_chat_url(chat_url),
+        "created_at": imported_at,
+        "updated_at": imported_at,
+        "source_file": str(input_path),
+        "users": users,
+        "import_stats": import_stats,
+    }
+    job_dir.mkdir(parents=True, exist_ok=True)
+    save_state(job_dir, state)
+    return state
+
+
+def _write_contact_batch_artifacts(
+    job_dir: Path,
+    execution_id: str,
+    payload: dict[str, Any],
+    log_lines: list[str],
+) -> Path:
+    run_dir = _execution_runs_dir(job_dir) / execution_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    atomic_write_json(run_dir / "batch_contact_add.json", payload)
+    (run_dir / "batch_contact_add.log").write_text(
+        "\n".join(log_lines) + ("\n" if log_lines else ""),
+        encoding="utf-8",
+    )
+    return run_dir
 
 
 def _browser_command(
@@ -1676,6 +1740,185 @@ def command_desktop_add_contact_profile(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_desktop_add_contact_batch(args: argparse.Namespace) -> int:
+    job_dir = Path(args.job_dir).expanduser()
+    repo_root = Path(__file__).resolve().parents[1]
+    input_path = Path(args.input).expanduser().resolve() if _nonempty(args.input) else None
+    state_exists = state_path_for(job_dir).exists()
+    if not state_exists:
+        if input_path is None:
+            raise ValueError("desktop-add-contact-batch requires --input when invite_state.json does not exist")
+        if not input_path.exists():
+            raise ValueError(f"input file does not exist: {input_path}")
+        payload = _init_job_state_from_input(
+            job_dir=job_dir,
+            input_path=input_path,
+            chat_url=_nonempty(args.chat_url) or f"contacts://{job_dir.name}",
+        )
+        initialized_from_input = True
+    else:
+        payload = load_state(job_dir)
+        initialized_from_input = False
+
+    _merge_execution_config(
+        payload,
+        portable_profile_name=getattr(args, "portable_profile_name", None),
+        portable_profile_dir=getattr(args, "portable_profile_dir", None),
+        account_username=getattr(args, "account_username", None),
+        account_label=getattr(args, "account_label", None),
+    )
+    save_state(job_dir, payload)
+
+    execution = _resolved_execution_config(payload)
+    actor = execution.get("portable_actor") or {}
+    if not _portable_actor_args(actor):
+        raise ValueError("desktop-add-contact-batch requires portable_actor in execution config")
+
+    portable = _ensure_portable_actor_ready(
+        repo_root=repo_root,
+        actor=actor,
+        launch_if_needed=bool(args.launch_if_needed),
+    )
+    if int(portable["status_result"].get("returncode", 1) or 0) != 0:
+        raise RuntimeError(
+            portable["status_result"].get("stderr")
+            or portable["status_result"].get("stdout")
+            or "portable status failed"
+        )
+    if not portable["running"]:
+        raise RuntimeError(
+            "portable actor is not running; rerun with --launch-if-needed or start Telegram Desktop portable"
+        )
+
+    statuses = [ensure_valid_status(item) for item in (args.statuses or DEFAULT_CONTACT_BATCH_STATUSES)]
+    limit = max(int(args.limit or 0), 0)
+    selection_limit = limit if limit > 0 else 10_000
+    candidates = select_candidates(payload, selection_limit, statuses)
+    execution_id = args.execution_id or _execution_id_now()
+    log_lines = [
+        f"INFO: desktop-add-contact-batch started execution_id={execution_id}",
+        f"INFO: job_dir={job_dir}",
+        f"INFO: initialized_from_input={int(initialized_from_input)}",
+        f"INFO: statuses={','.join(statuses)} limit={limit or 0} selected={len(candidates)}",
+        f"INFO: confirm_add={int(bool(args.confirm_add))} dry_run={int(bool(args.dry_run))}",
+    ]
+    results: list[dict[str, Any]] = []
+    added_count = 0
+    failed_count = 0
+
+    for index, row in enumerate(candidates, start=1):
+        username = str(row.get("username") or "")
+        user_execution_id = f"{execution_id}-{index:03d}-{username.lstrip('@')}"
+        log_lines.append(f"INFO: processing {username} execution_id={user_execution_id}")
+        namespace = argparse.Namespace(
+            job_dir=str(job_dir),
+            username=username,
+            execution_id=user_execution_id,
+            open_wait=float(args.open_wait),
+            after_add_wait=float(args.after_add_wait),
+            after_done_wait=float(args.after_done_wait),
+            verify_wait=float(args.verify_wait),
+            add_click_x_ratio=float(args.add_click_x_ratio),
+            add_click_y_ratio=float(args.add_click_y_ratio),
+            done_click_x_ratio=float(args.done_click_x_ratio),
+            done_click_y_ratio=float(args.done_click_y_ratio),
+            done_click_repeat=int(args.done_click_repeat),
+            last_name_text=_nonempty(args.last_name_text),
+            press_enter_after_last_name=bool(args.press_enter_after_last_name),
+            launch_if_needed=False,
+            verify_profile_reopen=bool(args.verify_profile_reopen),
+            confirm_add=bool(args.confirm_add),
+            dry_run=bool(args.dry_run),
+        )
+        try:
+            user_rc, user_payload = _invoke_json_command(command_desktop_add_contact_profile, namespace)
+            result: dict[str, Any] = {
+                "username": username,
+                "returncode": int(user_rc),
+                "status": str(user_payload.get("status") or ""),
+                "outcome": str(user_payload.get("outcome") or ""),
+                "run_dir": str(user_payload.get("run_dir") or ""),
+            }
+            if user_rc == 0 and str(user_payload.get("status") or "") == "completed":
+                if not args.dry_run and args.confirm_add:
+                    state_payload = load_state(job_dir)
+                    current_user = _find_state_user(state_payload, username)
+                    if current_user is not None:
+                        result["state_update"] = _record_user_status(
+                            job_dir,
+                            state_payload,
+                            current_user,
+                            status="contact_added",
+                            reason="desktop_contact_batch_added",
+                        )
+                    added_count += 1
+                else:
+                    result["state_update"] = None
+                log_lines.append(f"INFO: success {username} outcome={result['outcome']}")
+            else:
+                failed_count += 1
+                result["error"] = str(user_payload.get("error") or f"command failed with code {user_rc}")
+                if not args.dry_run:
+                    state_payload = load_state(job_dir)
+                    current_user = _find_state_user(state_payload, username)
+                    if current_user is not None:
+                        result["state_update"] = _record_user_status(
+                            job_dir,
+                            state_payload,
+                            current_user,
+                            status="failed",
+                            reason="desktop_contact_batch_failed",
+                        )
+                log_lines.append(f"WARN: failed {username} error={result.get('error')!r}")
+            results.append(result)
+        except Exception as exc:  # noqa: BLE001
+            failed_count += 1
+            result = {
+                "username": username,
+                "returncode": 1,
+                "status": "failed",
+                "outcome": "failed",
+                "error": str(exc),
+            }
+            if not args.dry_run:
+                state_payload = load_state(job_dir)
+                current_user = _find_state_user(state_payload, username)
+                if current_user is not None:
+                    result["state_update"] = _record_user_status(
+                        job_dir,
+                        state_payload,
+                        current_user,
+                        status="failed",
+                        reason="desktop_contact_batch_failed",
+                    )
+            results.append(result)
+            log_lines.append(f"ERROR: {username} {exc}")
+
+    final_state = load_state(job_dir)
+    summary = summarize_state(final_state)
+    remaining_candidates = select_candidates(final_state, 10_000, statuses)
+    response = {
+        "status": "completed_with_errors" if failed_count else ("dry_run" if args.dry_run else "completed"),
+        "job_dir": str(job_dir),
+        "input_path": str(input_path) if input_path is not None else str(final_state.get("source_file") or ""),
+        "initialized_from_input": bool(initialized_from_input),
+        "execution_id": execution_id,
+        "portable_actor": actor,
+        "portable": portable,
+        "selected_users": len(candidates),
+        "added_count": added_count,
+        "failed_count": failed_count,
+        "remaining_candidates": len(remaining_candidates),
+        "remaining_usernames": [str(item.get("username") or "") for item in remaining_candidates[:20]],
+        "summary": summary,
+        "results": results,
+    }
+    run_dir = _write_contact_batch_artifacts(job_dir, execution_id, response, log_lines)
+    response["run_dir"] = str(run_dir)
+    print(json.dumps(response, ensure_ascii=False, indent=2))
+    return 0
+
+
 def command_inspect_chat(args: argparse.Namespace) -> int:
     job_dir = Path(args.job_dir).expanduser()
     payload = load_state(job_dir)
@@ -2250,6 +2493,48 @@ def build_parser() -> argparse.ArgumentParser:
     )
     desktop_add_contact_parser.add_argument("--dry-run", action="store_true")
     desktop_add_contact_parser.set_defaults(func=command_desktop_add_contact_profile, verify_profile_reopen=True)
+
+    desktop_add_contact_batch_parser = subparsers.add_parser(
+        "desktop-add-contact-batch",
+        help="Load consented usernames from a job/input file and add them into Telegram Desktop contacts one by one.",
+    )
+    desktop_add_contact_batch_parser.add_argument("--job-dir", required=True)
+    desktop_add_contact_batch_parser.add_argument("--input", help="CSV/JSON input file. Required when invite_state.json does not exist yet.")
+    desktop_add_contact_batch_parser.add_argument("--chat-url", default="", help="Service chat identifier used only when creating a new local job state from input.")
+    desktop_add_contact_batch_parser.add_argument("--output-root", default="", help="Reserved for wrappers; batch command itself writes into --job-dir.")
+    desktop_add_contact_batch_parser.add_argument("--portable-profile-name")
+    desktop_add_contact_batch_parser.add_argument("--portable-profile-dir")
+    desktop_add_contact_batch_parser.add_argument("--account-username")
+    desktop_add_contact_batch_parser.add_argument("--account-label")
+    desktop_add_contact_batch_parser.add_argument("--limit", type=int, default=0, help="0 means process all selectable usernames.")
+    desktop_add_contact_batch_parser.add_argument("--statuses", nargs="*", default=list(DEFAULT_CONTACT_BATCH_STATUSES))
+    desktop_add_contact_batch_parser.add_argument("--execution-id")
+    desktop_add_contact_batch_parser.add_argument("--open-wait", type=float, default=1.2)
+    desktop_add_contact_batch_parser.add_argument("--after-add-wait", type=float, default=0.8)
+    desktop_add_contact_batch_parser.add_argument("--after-done-wait", type=float, default=0.8)
+    desktop_add_contact_batch_parser.add_argument("--verify-wait", type=float, default=1.2)
+    desktop_add_contact_batch_parser.add_argument("--add-click-x-ratio", type=float, default=DESKTOP_ADD_CONTACT_X_RATIO)
+    desktop_add_contact_batch_parser.add_argument("--add-click-y-ratio", type=float, default=DESKTOP_ADD_CONTACT_Y_RATIO)
+    desktop_add_contact_batch_parser.add_argument("--done-click-x-ratio", type=float, default=DESKTOP_DONE_CONTACT_X_RATIO)
+    desktop_add_contact_batch_parser.add_argument("--done-click-y-ratio", type=float, default=DESKTOP_DONE_CONTACT_Y_RATIO)
+    desktop_add_contact_batch_parser.add_argument("--done-click-repeat", type=int, default=1)
+    desktop_add_contact_batch_parser.add_argument("--last-name-text", default="")
+    desktop_add_contact_batch_parser.add_argument("--press-enter-after-last-name", action="store_true")
+    desktop_add_contact_batch_parser.add_argument("--launch-if-needed", action="store_true")
+    _add_bool_choice(
+        desktop_add_contact_batch_parser,
+        "--verify-profile-reopen",
+        dest="verify_profile_reopen",
+        help_true="Re-open the profile after each add and capture verify screenshots.",
+        help_false="Skip verify reopen step for each contact.",
+    )
+    desktop_add_contact_batch_parser.add_argument(
+        "--confirm-add",
+        action="store_true",
+        help="Actually click Add to Contacts and Done for every selected username.",
+    )
+    desktop_add_contact_batch_parser.add_argument("--dry-run", action="store_true")
+    desktop_add_contact_batch_parser.set_defaults(func=command_desktop_add_contact_batch, verify_profile_reopen=True)
 
     inspect_parser = subparsers.add_parser(
         "inspect-chat",
