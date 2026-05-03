@@ -11,14 +11,17 @@ from tool_platform.cli import execute_action
 from tool_platform.gui import format_profile_details, format_workflow_details
 from tool_platform.telegram_gui_helpers import (
     build_session_runtime_config,
+    contact_job_snapshot,
     contact_add_batch_command,
     default_invite_job_dir,
     default_contact_add_job_dir,
     format_session_target_label,
     invite_manager_init_command,
     parse_plaintext_usernames,
+    preview_invite_input_file,
     prepare_invite_input_file,
     session_config_defaults,
+    session_history_snapshot,
     session_plan_command,
     session_message_targets,
     session_run_command,
@@ -381,6 +384,18 @@ class ToolPlatformCatalogTests(unittest.TestCase):
         self.assertIn("@alice_test,yes,panel_txt_import", rows)
         self.assertIn("@bob_test,yes,panel_txt_import", rows)
 
+    def test_preview_invite_input_file_counts_duplicates_and_invalid_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            source = Path(tmp_dir) / "users.txt"
+            source.write_text("@alice_test\nbob_test\nbad!\n@alice_test\n", encoding="utf-8")
+
+            preview = preview_invite_input_file(source)
+
+        self.assertEqual(preview["unique_usernames"], 2)
+        self.assertEqual(preview["duplicates"], 1)
+        self.assertEqual(preview["invalid_count"], 1)
+        self.assertEqual(preview["usernames"], ["@alice_test", "@bob_test"])
+
     def test_invite_manager_init_command_uses_converted_txt_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
@@ -428,6 +443,76 @@ class ToolPlatformCatalogTests(unittest.TestCase):
         self.assertIn("--launch-if-needed", spec.argv)
         self.assertEqual(spec.cwd, Path(__file__).resolve().parents[1])
 
+    def test_contact_add_batch_command_can_continue_existing_job_without_input(self) -> None:
+        spec = contact_add_batch_command(
+            input_path=None,
+            job_dir="/tmp/job",
+            profile_name="AK",
+            portable_profile_dir="/home/max/TelegramPortableAK",
+            statuses=["failed"],
+        )
+
+        self.assertIn("desktop-add-contact-batch", spec.argv)
+        self.assertNotIn("--input", spec.argv)
+        self.assertIn("--statuses", spec.argv)
+        self.assertIn("failed", spec.argv)
+
+    def test_contact_job_snapshot_reads_state_and_latest_batch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            job_dir = Path(tmp_dir) / "job"
+            executions_dir = job_dir / "executions" / "20260503T100000Z"
+            executions_dir.mkdir(parents=True)
+            (job_dir / "invite_state.json").write_text(
+                json.dumps(
+                    {
+                        "chat_url": "contacts://maggie",
+                        "source_file": "/tmp/users.txt",
+                        "updated_at": "2026-05-03T10:00:00Z",
+                        "users": [
+                            {"username": "@alice_test", "status": "new", "attempts": 0},
+                            {
+                                "username": "@bob_test",
+                                "status": "failed",
+                                "attempts": 2,
+                                "last_attempt_at": "2026-05-03T10:00:00Z",
+                                "history": [{"reason": "desktop_contact_batch_failed"}],
+                            },
+                            {"username": "@carol_test", "status": "contact_added", "attempts": 1},
+                        ],
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            (executions_dir / "batch_contact_add.json").write_text(
+                json.dumps(
+                    {
+                        "execution_id": "20260503T100000Z",
+                        "status": "completed_with_errors",
+                        "added_count": 1,
+                        "failed_count": 1,
+                        "remaining_candidates": 1,
+                        "selected_users": 2,
+                        "results": [
+                            {"username": "@bob_test", "status": "failed", "error": "button not found"}
+                        ],
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+
+            snapshot = contact_job_snapshot(job_dir)
+
+        self.assertEqual(snapshot["pending_total"], 1)
+        self.assertEqual(snapshot["added_total"], 1)
+        self.assertEqual(snapshot["failed_total"], 1)
+        self.assertEqual(snapshot["pending_usernames"], ["@alice_test"])
+        self.assertEqual(snapshot["latest_errors"][0]["username"], "@bob_test")
+        self.assertEqual(snapshot["latest_runs"][0]["execution_id"], "20260503T100000Z")
+
     def test_session_message_targets_reads_message_policy_targets(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             config_path = Path(tmp_dir) / "config.json"
@@ -474,6 +559,9 @@ class ToolPlatformCatalogTests(unittest.TestCase):
         self.assertEqual(defaults["total_message_limit"], 9)
         self.assertEqual(defaults["templates"], ["Привет", "Как дела?"])
         self.assertEqual(defaults["message_targets"][0]["handle"], "@alice_test")
+        self.assertEqual(defaults["random_walk_visits_per_run"], 6)
+        self.assertEqual(defaults["view_min_seconds"], 3)
+        self.assertEqual(defaults["view_max_seconds"], 6)
 
     def test_format_session_target_label_includes_label_handle_and_kind(self) -> None:
         self.assertEqual(
@@ -491,6 +579,11 @@ class ToolPlatformCatalogTests(unittest.TestCase):
             base.write_text(
                 json.dumps(
                     {
+                        "session": {
+                            "random_walk_visits_per_run": 6,
+                            "view_min_seconds": 3,
+                            "view_max_seconds": 6,
+                        },
                         "portable_profile_dir": "/home/max/TelegramPortableAK",
                         "message_policy": {
                             "target_mode": "rotating_contacts",
@@ -518,6 +611,11 @@ class ToolPlatformCatalogTests(unittest.TestCase):
                 total_message_limit=7,
                 portable_profile_dir="/home/max/TelegramPortable-AK2",
                 auto_send=True,
+                session_overrides={
+                    "random_walk_visits_per_run": 9,
+                    "view_min_seconds": 4,
+                    "view_max_seconds": 8,
+                },
             )
             payload = json.loads(result.read_text(encoding="utf-8"))
 
@@ -529,6 +627,60 @@ class ToolPlatformCatalogTests(unittest.TestCase):
         self.assertEqual(payload["message_policy"]["templates"], ["Привет", "Как дела?"])
         self.assertEqual(payload["message_policy"]["target_username"], "")
         self.assertEqual(len(payload["message_policy"]["message_targets"]), 2)
+        self.assertEqual(payload["session"]["random_walk_visits_per_run"], 9)
+        self.assertEqual(payload["session"]["view_min_seconds"], 4)
+        self.assertEqual(payload["session"]["view_max_seconds"], 8)
+
+    def test_session_history_snapshot_reads_state_and_run_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            state_file = root / "session_state.json"
+            runs_dir = root / "runs" / "20260503T100000Z-aaaa"
+            runs_dir.mkdir(parents=True)
+            state_file.write_text(
+                json.dumps(
+                    {
+                        "messages_sent_total": 3,
+                        "message_cursor": 2,
+                        "message_target_cursor": 1,
+                        "history": [
+                            {
+                                "run_id": "20260503T100000Z-aaaa",
+                                "visit_count": 4,
+                                "sent_count": 1,
+                            }
+                        ],
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            (runs_dir / "run.json").write_text(
+                json.dumps(
+                    {
+                        "run_id": "20260503T100000Z-aaaa",
+                        "status": "completed",
+                        "visits": [{}, {}],
+                        "sent_count": 1,
+                        "plan": {"message_target_username": "@alice_test"},
+                        "messages": [
+                            {"index": 1, "text": "Привет", "sent": True},
+                            {"index": 2, "text": "Напомни", "sent": False},
+                        ],
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+
+            snapshot = session_history_snapshot(state_file=state_file, runs_dir=root / "runs")
+
+        self.assertEqual(snapshot["messages_sent_total"], 3)
+        self.assertEqual(snapshot["last_run"]["run_id"], "20260503T100000Z-aaaa")
+        self.assertEqual(snapshot["last_run"]["sent_count"], 1)
+        self.assertEqual(snapshot["last_run"]["unsent_messages"][0]["text"], "Напомни")
 
     def test_session_plan_command_targets_standalone_cli(self) -> None:
         spec = session_plan_command(config_path="/tmp/runtime.json", state_file="/tmp/state.json")

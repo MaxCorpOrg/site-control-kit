@@ -160,14 +160,20 @@
     - `Сессия и сообщения`
   - в первом режиме принимать `.txt/.csv/.json` список username и реально добавлять эти username в контакты выбранного Telegram Desktop portable-профиля;
   - для первого режима использовать новый orchestration-командный слой `desktop-add-contact-batch`, который сам создаёт/продолжает local state и по очереди вызывает `desktop-add-contact-profile`;
+  - для первого режима показывать прямо в панели preview списка, очередь `осталось`, блок `уже добавлены`, последние ошибки и историю batch-запусков;
+  - для первого режима уметь не только стартовать новую задачу, но и отдельно `Продолжить очередь` и `Повторить ошибки` по уже сохранённому `invite_state.json` без повторного выбора файла;
+  - для первого режима читать operator summaries напрямую из `invite_state.json` и `executions/*/batch_contact_add.json`, чтобы после рестарта панели не терялась видимость состояния;
   - в режиме сессии загружать из session-config не только список адресатов, но и шаблоны сообщений, автоотправку и лимиты;
   - в режиме сессии позволять править в панели:
     - кому писать;
     - какой текст отправлять;
+    - сколько random-walk визитов делать за цикл;
+    - сколько секунд держать открытый чат;
     - сколько сообщений отправлять за цикл;
     - сколько максимум отправить за всю непрерывную сессию;
   - в режиме сессии показывать живой таймер, пока session runner работает;
   - в режиме сессии запускать session runner либо на один цикл, либо в непрерывном режиме `до Стопа`;
+  - в режиме сессии читать `session_state.json` и `runs/*/run.json`, чтобы прямо в панели показывать summary, историю последних запусков и сообщения, которые остались неотправленными;
   - session runner больше не страдает от panel-regression, где GUI по умолчанию перетирал `auto_send=true` обратно в `false`;
   - для реальной отправки сообщений session runner теперь использует каскад `кнопка Отправить -> двойной Return`, потому что один AT-SPI click по кнопке в живом `TelegramPortableAK` не всегда доводил действие до реального outgoing message;
   - непрерывный CLI-режим `run-session --continuous` умеет корректно завершаться статусом `stopped` после operator stop по `SIGTERM`, а не только аварийным kill.
@@ -283,6 +289,10 @@
     - команда: `python3 scripts/telegram_invite_executor.py desktop-add-contact-batch ... --confirm-add --dry-run`
     - результат: `status=dry_run`, `selected_users=1`, `failed_count=0`, `remaining_candidates=1`;
     - артефакт: `/tmp/telegram-contact-batch-smoke.memxTC/job/executions/20260503T103931Z/batch_contact_add.json`
+  - после добивки operator-summary слоя панели подтверждены:
+    - `python3 -m py_compile tool_platform/gui.py tool_platform/telegram_gui_helpers.py tests/test_tool_platform.py`
+    - `PYTHONPATH="$PWD" python3 -m unittest tests.test_tool_platform` → `25 OK`
+    - helper-слой теперь покрывает preview списка, snapshot очереди контактов, retry/continue command-shaping и session history snapshot.
 - Для нового unified tool platform зелёные:
   - `PYTHONPATH="$PWD" python3 -m unittest discover -s tests -p 'test_*.py'`
   - `python3 -m py_compile tool_platform/*.py scripts/telegram_invite_executor.py scripts/telegram_portable.py`
@@ -878,13 +888,13 @@
 
 ## Следующий Приоритет
 1. Для Invite/Desktop: держать основным рабочим путём `site-control-kit` / Telegram Web flow (`open-chat -> inspect-chat -> add-contact`) и не подменять его Desktop-guessing path.
-2. Для Invite/Desktop: прогнать уже починенный submit-path не только на одиночном `@abs11144`, но и как минимум на одном реальном batch-цикле из панели `Добавить контакты из TXT`, чтобы подтвердить end-to-end orchestration без ручного CLI.
+2. Для Invite/Desktop: прогнать новый operator flow `Старт добавления -> Продолжить очередь -> Повторить ошибки` уже на панели, чтобы подтвердить не только backend batch, но и новый summary/retry UX end-to-end.
 3. Снизить runtime-затраты discovery относительно deep, чтобы multi-peer deep чаще успевал проходить следующий слой visible peer.
 4. Поднять приоритеты deep-target'ов: раньше брать тех peer, у кого вероятность успешного `Mention` выше.
 5. Разделить browser capability/runtime compatibility и Telegram export concerns в отдельные модули/слои.
 6. Отделить понятие `best-known latest` от `most-recent run` в UI и документации, если пользователю важно видеть именно последний прогон как основной артефакт.
 7. Декомпозировать `export_telegram_members_non_pii.py` на модули.
-8. Для Telegram control center добавить profile-aware shortcuts и richer artifact summaries, если оператору понадобятся live status без ручного копирования путей.
+8. Для Telegram control center при необходимости добавить быстрые переходы `Открыть последний лог / Открыть последний run.json / Открыть последний screenshot`, если оператору станет тесно в текущем summary-режиме.
 
 ## Как Продолжать Следующему Агенту
 1. Прочитать `AGENTS.md`.

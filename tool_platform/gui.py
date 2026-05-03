@@ -33,15 +33,18 @@ from .telegram_gui_helpers import (
     CommandSpec,
     DEFAULT_INVITE_OUTPUT_ROOT,
     DEFAULT_SESSION_CONFIG,
+    DEFAULT_SESSION_RUNS_DIR,
+    DEFAULT_SESSION_STATE_FILE,
     build_session_runtime_config,
+    contact_job_snapshot,
     contact_add_batch_command,
     default_contact_add_job_dir,
     format_session_target_label,
     invite_manager_next_command,
-    invite_manager_status_command,
     parse_json_payload,
+    preview_invite_input_file,
     session_config_defaults,
-    session_message_targets,
+    session_history_snapshot,
     session_plan_command,
     session_run_command,
 )
@@ -116,6 +119,165 @@ def format_workflow_details(tool: ToolManifest) -> str:
     if tool.artifacts:
         lines.extend(
             ["", "Артефакты", *[f"- {key}: {value}" for key, value in tool.artifacts.items()]]
+        )
+    return "\n".join(lines)
+
+
+def format_profiles_overview(profiles: list[dict[str, Any]]) -> str:
+    if not profiles:
+        return "Профили пока не найдены."
+    lines = ["Все профили"]
+    for profile in profiles:
+        account = profile.get("account") if isinstance(profile.get("account"), dict) else {}
+        username = str(account.get("username") or "без username")
+        label = str(account.get("label") or "").strip() or username
+        state = "запущен" if profile.get("running") else "остановлен"
+        profile_name = str(profile.get("profile_name") or "profile")
+        lines.append(f"- {label} · {profile_name} · {state}")
+    return "\n".join(lines)
+
+
+def _format_username_block(title: str, usernames: list[str], *, empty_text: str) -> str:
+    lines = [title]
+    if not usernames:
+        lines.append(empty_text)
+        return "\n".join(lines)
+    for item in usernames:
+        lines.append(f"- {item}")
+    return "\n".join(lines)
+
+
+def format_contact_dashboard_snapshot(snapshot: dict[str, Any]) -> str:
+    if str(snapshot.get("status") or "") == "missing":
+        return "\n".join(
+            [
+                "Задача добавления контактов пока не создана.",
+                f"Папка задачи: {snapshot.get('job_dir') or '-'}",
+                "Выбери файл со списком и нажми `Старт добавления`.",
+            ]
+        )
+    counts = snapshot.get("counts") if isinstance(snapshot.get("counts"), dict) else {}
+    lines = [
+        "Сводка задачи",
+        f"Папка задачи: {snapshot.get('job_dir') or '-'}",
+        f"Источник списка: {snapshot.get('source_file') or '-'}",
+        f"Всего username: {snapshot.get('total_users') or 0}",
+        f"Осталось: {snapshot.get('pending_total') or 0}",
+        f"Добавлено: {snapshot.get('added_total') or 0}",
+        f"Ошибок: {snapshot.get('failed_total') or 0}",
+    ]
+    if counts:
+        lines.append("")
+        lines.append("Статусы")
+        for key, value in sorted(counts.items()):
+            lines.append(f"- {key}: {value}")
+    latest_runs = snapshot.get("latest_runs") if isinstance(snapshot.get("latest_runs"), list) else []
+    if latest_runs:
+        last_run = latest_runs[-1]
+        lines.extend(
+            [
+                "",
+                "Последний batch",
+                (
+                    f"- {last_run.get('execution_id') or '-'} · статус: {last_run.get('status') or '-'}"
+                    f" · добавлено: {last_run.get('added_count') or 0}"
+                    f" · ошибок: {last_run.get('failed_count') or 0}"
+                ),
+            ]
+        )
+    return "\n".join(lines)
+
+
+def format_contact_history(snapshot: dict[str, Any]) -> str:
+    history = snapshot.get("latest_runs") if isinstance(snapshot.get("latest_runs"), list) else []
+    if not history:
+        return "История batch-запусков\nПока нет запусков."
+    lines = ["История batch-запусков"]
+    for item in history[-8:]:
+        lines.append(
+            f"- {item.get('execution_id') or '-'} · {item.get('status') or '-'} · добавлено {item.get('added_count') or 0} · ошибок {item.get('failed_count') or 0} · осталось {item.get('remaining_candidates') or 0}"
+        )
+    return "\n".join(lines)
+
+
+def format_contact_errors(snapshot: dict[str, Any]) -> str:
+    errors = snapshot.get("latest_errors") if isinstance(snapshot.get("latest_errors"), list) else []
+    if not errors:
+        return "Последние ошибки\nСвежих ошибок не найдено."
+    lines = ["Последние ошибки"]
+    for item in errors:
+        error_text = str(item.get("error") or "").strip() or str(item.get("outcome") or "-")
+        lines.append(f"- {item.get('username') or '-'} · {error_text}")
+    return "\n".join(lines)
+
+
+def format_invite_input_preview(preview: dict[str, Any]) -> str:
+    lines = [
+        "Предпросмотр списка username",
+        f"Файл: {preview.get('path') or '-'}",
+        f"Формат: {preview.get('format') or '-'}",
+        f"Строк прочитано: {preview.get('rows_total') or 0}",
+        f"Уникальных username: {preview.get('unique_usernames') or 0}",
+        f"Дубликатов: {preview.get('duplicates') or 0}",
+        f"Некорректных строк: {preview.get('invalid_count') or 0}",
+    ]
+    usernames = preview.get("usernames") if isinstance(preview.get("usernames"), list) else []
+    if usernames:
+        lines.extend(["", "Первые username"])
+        for item in usernames:
+            lines.append(f"- {item}")
+    invalid_entries = preview.get("invalid_entries") if isinstance(preview.get("invalid_entries"), list) else []
+    if invalid_entries:
+        lines.extend(["", "Некорректные строки"])
+        for item in invalid_entries:
+            lines.append(f"- {item}")
+    return "\n".join(lines)
+
+
+def format_session_dashboard_snapshot(snapshot: dict[str, Any]) -> str:
+    if str(snapshot.get("status") or "") == "missing":
+        return "\n".join(
+            [
+                "История сессий пока не найдена.",
+                f"State file: {snapshot.get('state_file') or '-'}",
+                "Запусти хотя бы один plan или session-run.",
+            ]
+        )
+    last_run = snapshot.get("last_run") if isinstance(snapshot.get("last_run"), dict) else {}
+    lines = [
+        "Сводка сессий",
+        f"Всего отправлено сообщений: {snapshot.get('messages_sent_total') or 0}",
+        f"Курсор шаблонов: {snapshot.get('message_cursor') or 0}",
+        f"Курсор адресатов: {snapshot.get('message_target_cursor') or 0}",
+    ]
+    if last_run:
+        lines.extend(
+            [
+                "",
+                "Последний запуск",
+                f"- {last_run.get('run_id') or '-'} · статус: {last_run.get('status') or '-'}",
+                f"- Визитов: {last_run.get('visit_count') or 0} · сообщений: {last_run.get('message_count') or 0} · отправлено: {last_run.get('sent_count') or 0}",
+                f"- Адресат: {last_run.get('message_target_username') or 'не выбран'}",
+            ]
+        )
+        unsent = last_run.get("unsent_messages") if isinstance(last_run.get("unsent_messages"), list) else []
+        if unsent:
+            lines.extend(["", "Неотправленные сообщения"])
+            for item in unsent:
+                lines.append(
+                    f"- #{item.get('index') or 0} · {str(item.get('text') or '').strip()} · sent={int(bool(item.get('sent')))}"
+                )
+    return "\n".join(lines)
+
+
+def format_session_history(snapshot: dict[str, Any]) -> str:
+    latest_runs = snapshot.get("latest_runs") if isinstance(snapshot.get("latest_runs"), list) else []
+    if not latest_runs:
+        return "История запусков сессии\nПока нет run.json."
+    lines = ["История запусков сессии"]
+    for item in latest_runs[-8:]:
+        lines.append(
+            f"- {item.get('run_id') or '-'} · {item.get('status') or '-'} · визитов {item.get('visit_count') or 0} · сообщений {item.get('message_count') or 0} · отправлено {item.get('sent_count') or 0}"
         )
     return "\n".join(lines)
 
@@ -259,6 +421,13 @@ def format_session_run_payload(payload: dict[str, Any]) -> str:
         lines.extend(["", "История"])
         for item in history[-5:]:
             lines.append(f"- {item}")
+    if messages:
+        lines.extend(["", "Сообщения"])
+        for item in messages[-5:]:
+            sent = bool(item.get("sent"))
+            lines.append(
+                f"- #{item.get('index') or 0} · {'отправлено' if sent else 'не отправлено'} · {str(item.get('text') or '').strip()}"
+            )
     return "\n".join(lines)
 
 
@@ -310,6 +479,7 @@ if tk is not None:
             self.invite_input_path_var = tk.StringVar()
             self.invite_job_dir_var = tk.StringVar()
             self.invite_limit_var = tk.StringVar(value="10")
+            self.invite_preview_var = tk.StringVar(value="Список ещё не выбран")
 
             self.session_config_path_var = tk.StringVar(value=str(DEFAULT_SESSION_CONFIG))
             self.session_new_target_var = tk.StringVar()
@@ -319,6 +489,9 @@ if tk is not None:
             self.session_continuous_var = tk.BooleanVar(value=True)
             self.session_messages_per_cycle_var = tk.StringVar(value="1")
             self.session_total_limit_var = tk.StringVar(value="0")
+            self.session_visit_count_var = tk.StringVar(value="6")
+            self.session_view_min_var = tk.StringVar(value="3")
+            self.session_view_max_var = tk.StringVar(value="6")
             self.session_timer_var = tk.StringVar(value="00:00:00")
             self.invite_status_var = tk.StringVar(value="Готово")
             self.session_status_var = tk.StringVar(value="Готово")
@@ -340,12 +513,24 @@ if tk is not None:
             self._scroll_canvas: tk.Canvas | None = None
             self._session_timer_started_at: float | None = None
             self._session_timer_after_id: str | None = None
+            self._monitor_after_ids: dict[str, str | None] = {
+                "telegram_invite_manager": None,
+                "telegram_session_runner": None,
+            }
 
             self.profile_combo: ttk.Combobox | None = None
             self.profile_details: tk.Text | None = None
+            self.profile_overview: tk.Text | None = None
             self.profile_manager_window: tk.Toplevel | None = None
             self.invite_output: tk.Text | None = None
+            self.invite_summary_text: tk.Text | None = None
+            self.invite_queue_text: tk.Text | None = None
+            self.invite_added_text: tk.Text | None = None
+            self.invite_failed_text: tk.Text | None = None
+            self.invite_history_text: tk.Text | None = None
             self.session_output: tk.Text | None = None
+            self.session_summary_text: tk.Text | None = None
+            self.session_history_text: tk.Text | None = None
             self.session_targets_list: tk.Listbox | None = None
             self.session_templates_text: tk.Text | None = None
             self._tool_buttons: dict[str, tk.Button] = {}
@@ -595,6 +780,38 @@ if tk is not None:
                 except tk.TclError:
                     continue
 
+        def _cancel_tool_monitor(self, tool_id: str) -> None:
+            after_id = self._monitor_after_ids.get(tool_id)
+            if after_id:
+                try:
+                    self.after_cancel(after_id)
+                except tk.TclError:
+                    pass
+            self._monitor_after_ids[tool_id] = None
+
+        def _schedule_tool_monitor(self, tool_id: str) -> None:
+            self._cancel_tool_monitor(tool_id)
+            self._poll_tool_snapshot(tool_id)
+
+        def _poll_tool_snapshot(self, tool_id: str) -> None:
+            try:
+                if tool_id == "telegram_invite_manager":
+                    self._refresh_invite_dashboard()
+                elif tool_id == "telegram_session_runner":
+                    self._refresh_session_dashboard()
+            except Exception as exc:
+                self._log_event(tool_id, f"Не удалось обновить live-статус: {exc}")
+            with self._process_lock:
+                proc = self._active_processes.get(tool_id)
+                running = proc is not None and proc.poll() is None
+            if running:
+                self._monitor_after_ids[tool_id] = self.after(
+                    1800,
+                    lambda current=tool_id: self._poll_tool_snapshot(current),
+                )
+            else:
+                self._monitor_after_ids[tool_id] = None
+
         def _create_listbox(self, parent: tk.Widget, *, selectmode: str = tk.SINGLE, height: int = 6) -> tk.Listbox:
             return tk.Listbox(
                 parent,
@@ -694,6 +911,7 @@ if tk is not None:
             action_label: str,
             command: CommandSpec,
             on_success: Callable[[dict[str, Any]], None],
+            monitor_active_state: bool = False,
         ) -> None:
             with self._process_lock:
                 existing = self._active_processes.get(tool_id)
@@ -704,6 +922,8 @@ if tk is not None:
             command_text = shlex.join(command.argv)
             if tool_id == "telegram_session_runner" and action_label == "запуск session runner":
                 self._start_session_timer()
+            if monitor_active_state:
+                self._schedule_tool_monitor(tool_id)
             self._status_var_for_tool(tool_id).set(f"Выполняется: {action_label}")
             self._set_tool_busy(tool_id, True)
             self._log_event(tool_id, f"Старт: {action_label}")
@@ -785,16 +1005,25 @@ if tk is not None:
             on_success: Callable[[dict[str, Any]], None],
         ) -> None:
             self._set_tool_busy(tool_id, False)
+            self._cancel_tool_monitor(tool_id)
             if tool_id == "telegram_session_runner" and action_label == "запуск session runner":
                 self._stop_session_timer()
             if stopped:
                 self._status_var_for_tool(tool_id).set("Остановлено")
                 self._log_event(tool_id, f"Остановлено: {action_label}")
+                if tool_id == "telegram_invite_manager":
+                    self._refresh_invite_dashboard()
+                elif tool_id == "telegram_session_runner":
+                    self._refresh_session_dashboard()
                 return
             if error_text:
                 self._status_var_for_tool(tool_id).set("Ошибка")
                 self._log_event(tool_id, f"Ошибка: {action_label}")
                 self._log_event(tool_id, error_text)
+                if tool_id == "telegram_invite_manager":
+                    self._refresh_invite_dashboard()
+                elif tool_id == "telegram_session_runner":
+                    self._refresh_session_dashboard()
                 messagebox.showerror("Панель Telegram", error_text)
                 return
             assert payload is not None
@@ -948,6 +1177,11 @@ if tk is not None:
             )
             self.profile_details = self._create_readonly_text(body, height=5)
             self.profile_details.grid(row=5, column=0, columnspan=4, sticky="nsew", pady=(6, 0))
+            ttk.Label(body, text="Все найденные профили", style="Field.TLabel").grid(
+                row=6, column=0, sticky="w", pady=(14, 0)
+            )
+            self.profile_overview = self._create_readonly_text(body, height=4)
+            self.profile_overview.grid(row=7, column=0, columnspan=4, sticky="nsew", pady=(6, 0))
 
         def _build_tool_selector(self, parent: ttk.Frame) -> None:
             body = self._create_card(
@@ -1002,14 +1236,15 @@ if tk is not None:
             body = self._create_card(
                 parent,
                 "Инструмент: Добавление контактов из TXT",
-                "Загрузи файл с username и запусти реальное добавление этих людей в контакты выбранного сверху Telegram-пользователя. Этот режим отделён от сессий и сообщений.",
+                "Загрузи файл с username и запусти реальное добавление этих людей в контакты выбранного сверху Telegram-пользователя. Ниже сразу видны очередь, успешно добавленные, ошибки и история запусков.",
                 expand=True,
             )
             body.columnconfigure(0, weight=1)
-            body.columnconfigure(1, weight=0)
+            body.columnconfigure(1, weight=1)
+            body.columnconfigure(2, weight=1)
 
             top_buttons = ttk.Frame(body, style="Card.TFrame")
-            top_buttons.grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 12))
+            top_buttons.grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 12))
             invite_start_button = ttk.Button(
                 top_buttons,
                 text="Старт добавления",
@@ -1032,6 +1267,27 @@ if tk is not None:
             )
             invite_next_button.pack(side=tk.LEFT, padx=(10, 0))
             self._register_busy_widget("telegram_invite_manager", invite_next_button)
+            invite_continue_button = ttk.Button(
+                top_buttons,
+                text="Продолжить очередь",
+                command=self._invite_continue_queue,
+            )
+            invite_continue_button.pack(side=tk.LEFT, padx=(10, 0))
+            self._register_busy_widget("telegram_invite_manager", invite_continue_button)
+            invite_retry_button = ttk.Button(
+                top_buttons,
+                text="Повторить ошибки",
+                command=self._invite_retry_failed,
+            )
+            invite_retry_button.pack(side=tk.LEFT, padx=(10, 0))
+            self._register_busy_widget("telegram_invite_manager", invite_retry_button)
+            invite_refresh_button = ttk.Button(
+                top_buttons,
+                text="Обновить экран",
+                command=self._refresh_invite_dashboard,
+            )
+            invite_refresh_button.pack(side=tk.LEFT, padx=(10, 0))
+            self._register_busy_widget("telegram_invite_manager", invite_refresh_button)
             invite_stop_button = ttk.Button(
                 top_buttons,
                 text="Стоп",
@@ -1050,7 +1306,7 @@ if tk is not None:
                 row=1, column=0, sticky="w"
             )
             file_row = ttk.Frame(body, style="Card.TFrame")
-            file_row.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(4, 10))
+            file_row.grid(row=2, column=0, columnspan=3, sticky="ew", pady=(4, 10))
             file_row.columnconfigure(0, weight=1)
             ttk.Entry(file_row, textvariable=self.invite_input_path_var).grid(
                 row=0, column=0, sticky="ew"
@@ -1062,22 +1318,25 @@ if tk is not None:
             )
             invite_choose_file_button.grid(row=0, column=1, padx=(10, 0))
             self._register_busy_widget("telegram_invite_manager", invite_choose_file_button)
+            ttk.Label(body, textvariable=self.invite_preview_var, style="CardSubtitle.TLabel").grid(
+                row=3, column=0, columnspan=3, sticky="w"
+            )
 
             ttk.Label(body, text="Шаг 2. Папка задачи", style="Field.TLabel").grid(
-                row=3, column=0, sticky="w"
+                row=4, column=0, sticky="w", pady=(8, 0)
             )
             ttk.Entry(body, textvariable=self.invite_job_dir_var).grid(
-                row=4, column=0, columnspan=2, sticky="ew", pady=(4, 10)
+                row=5, column=0, columnspan=3, sticky="ew", pady=(4, 10)
             )
 
             ttk.Label(
                 body,
                 text="Поддерживаются .txt, .csv и .json. Для .txt одна строка = один @username, consent=yes ставится автоматически. Контакты будет добавлять именно тот профиль, который выбран сверху.",
                 style="CardSubtitle.TLabel",
-            ).grid(row=5, column=0, columnspan=2, sticky="w")
+            ).grid(row=6, column=0, columnspan=3, sticky="w")
 
             next_row = ttk.Frame(body, style="Card.TFrame")
-            next_row.grid(row=6, column=0, columnspan=2, sticky="w", pady=(14, 0))
+            next_row.grid(row=7, column=0, columnspan=3, sticky="w", pady=(14, 0))
             ttk.Label(next_row, text="Сколько username обработать за запуск", style="Field.TLabel").pack(
                 side=tk.LEFT
             )
@@ -1085,19 +1344,74 @@ if tk is not None:
                 side=tk.LEFT, padx=(10, 0)
             )
 
-            ttk.Label(body, text="Что происходит сейчас", style="Field.TLabel").grid(
-                row=7, column=0, sticky="w", pady=(16, 0)
+            summary_panel = self._create_inline_panel(
+                body,
+                "Текущее состояние задачи",
+                "Здесь сразу видны общая сводка, сколько осталось и что происходило в последнем batch.",
             )
-            self.invite_output = self._create_readonly_text(body, height=16)
-            self.invite_output.grid(row=8, column=0, columnspan=2, sticky="nsew", pady=(6, 0))
+            summary_panel.grid(row=8, column=0, sticky="nsew", padx=(0, 10), pady=(14, 0))
+            summary_panel.columnconfigure(0, weight=1)
+            self.invite_summary_text = self._create_readonly_text(summary_panel, height=10)
+            self.invite_summary_text.grid(row=2, column=0, sticky="nsew")
+            self._bind_scroll_to_widget(self.invite_summary_text)
+
+            history_panel = self._create_inline_panel(
+                body,
+                "История запусков",
+                "Каждая строка показывает execution_id, статус, сколько удалось добавить и сколько осталось.",
+            )
+            history_panel.grid(row=8, column=1, sticky="nsew", padx=(0, 10), pady=(14, 0))
+            history_panel.columnconfigure(0, weight=1)
+            self.invite_history_text = self._create_readonly_text(history_panel, height=10)
+            self.invite_history_text.grid(row=2, column=0, sticky="nsew")
+            self._bind_scroll_to_widget(self.invite_history_text)
+
+            errors_panel = self._create_inline_panel(
+                body,
+                "Последние ошибки",
+                "Если что-то не сработало, ошибка будет здесь. Кнопка `Повторить ошибки` берёт именно этих пользователей со статусом failed.",
+            )
+            errors_panel.grid(row=8, column=2, sticky="nsew", pady=(14, 0))
+            errors_panel.columnconfigure(0, weight=1)
+            self.invite_failed_text = self._create_readonly_text(errors_panel, height=10)
+            self.invite_failed_text.grid(row=2, column=0, sticky="nsew")
+            self._bind_scroll_to_widget(self.invite_failed_text)
+
+            queue_panel = self._create_inline_panel(
+                body,
+                "Осталось в очереди",
+                "Это ближайшие username, которые ещё не обработаны.",
+            )
+            queue_panel.grid(row=9, column=0, sticky="nsew", padx=(0, 10), pady=(14, 0))
+            queue_panel.columnconfigure(0, weight=1)
+            self.invite_queue_text = self._create_readonly_text(queue_panel, height=10)
+            self.invite_queue_text.grid(row=2, column=0, sticky="nsew")
+            self._bind_scroll_to_widget(self.invite_queue_text)
+
+            added_panel = self._create_inline_panel(
+                body,
+                "Уже добавлены",
+                "Последние успешно добавленные контакты из этой задачи.",
+            )
+            added_panel.grid(row=9, column=1, sticky="nsew", padx=(0, 10), pady=(14, 0))
+            added_panel.columnconfigure(0, weight=1)
+            self.invite_added_text = self._create_readonly_text(added_panel, height=10)
+            self.invite_added_text.grid(row=2, column=0, sticky="nsew")
+            self._bind_scroll_to_widget(self.invite_added_text)
+
+            ttk.Label(body, text="Живой статус и лог", style="Field.TLabel").grid(
+                row=10, column=0, sticky="w", pady=(16, 0)
+            )
+            self.invite_output = self._create_readonly_text(body, height=14)
+            self.invite_output.grid(row=11, column=0, columnspan=3, sticky="nsew", pady=(6, 0))
             self._bind_scroll_to_widget(self.invite_output)
-            body.rowconfigure(8, weight=1)
+            body.rowconfigure(11, weight=1)
 
         def _build_session_view(self, parent: ttk.Frame) -> None:
             body = self._create_card(
                 parent,
                 "Инструмент: Сессия и сообщения",
-                "Этот экран отдельно управляет живой Telegram-сессией: random walk по открытому профилю, список адресатов, текст сообщения и режим автоотправки.",
+                "Этот экран отдельно управляет живой Telegram-сессией: random walk по открытому профилю, список адресатов, текст сообщения, интервалы и история запусков.",
                 expand=True,
             )
             body.columnconfigure(0, weight=1)
@@ -1120,6 +1434,13 @@ if tk is not None:
             )
             session_plan_button.pack(side=tk.LEFT, padx=(10, 0))
             self._register_busy_widget("telegram_session_runner", session_plan_button)
+            session_refresh_button = ttk.Button(
+                top_buttons,
+                text="Обновить экран",
+                command=self._refresh_session_dashboard,
+            )
+            session_refresh_button.pack(side=tk.LEFT, padx=(10, 0))
+            self._register_busy_widget("telegram_session_runner", session_refresh_button)
             session_stop_button = ttk.Button(
                 top_buttons,
                 text="Стоп",
@@ -1242,45 +1563,81 @@ if tk is not None:
             settings_panel = self._create_inline_panel(
                 recipients_row,
                 "Как писать",
-                "Здесь задаётся режим самой сессии: автоотправка, количество сообщений и непрерывная работа до нажатия `Стоп`.",
+                "Здесь задаётся режим самой сессии: длительность визитов, количество сообщений и непрерывная работа до нажатия `Стоп`.",
             )
             settings_panel.grid(row=0, column=1, sticky="nsew")
             settings_panel.columnconfigure(1, weight=1)
 
-            ttk.Label(settings_panel, text="Сообщений за один цикл", style="Field.TLabel").grid(
+            ttk.Label(settings_panel, text="Визитов за один цикл", style="Field.TLabel").grid(
                 row=2, column=0, sticky="w"
             )
-            ttk.Entry(settings_panel, textvariable=self.session_messages_per_cycle_var, width=10).grid(
+            ttk.Entry(settings_panel, textvariable=self.session_visit_count_var, width=10).grid(
                 row=2, column=1, sticky="w", padx=(12, 0)
+            )
+            ttk.Label(
+                settings_panel,
+                text="Сколько случайных переходов по чатам сделать за один цикл сессии.",
+                style="CardSubtitle.TLabel",
+            ).grid(row=3, column=0, columnspan=2, sticky="w", pady=(4, 10))
+
+            ttk.Label(settings_panel, text="Минимум секунд в чате", style="Field.TLabel").grid(
+                row=4, column=0, sticky="w"
+            )
+            ttk.Entry(settings_panel, textvariable=self.session_view_min_var, width=10).grid(
+                row=4, column=1, sticky="w", padx=(12, 0)
+            )
+            ttk.Label(
+                settings_panel,
+                text="Минимальная случайная пауза, сколько пользователь находится в открытом чате.",
+                style="CardSubtitle.TLabel",
+            ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(4, 10))
+
+            ttk.Label(settings_panel, text="Максимум секунд в чате", style="Field.TLabel").grid(
+                row=6, column=0, sticky="w"
+            )
+            ttk.Entry(settings_panel, textvariable=self.session_view_max_var, width=10).grid(
+                row=6, column=1, sticky="w", padx=(12, 0)
+            )
+            ttk.Label(
+                settings_panel,
+                text="Максимальная случайная пауза в одном чате.",
+                style="CardSubtitle.TLabel",
+            ).grid(row=7, column=0, columnspan=2, sticky="w", pady=(4, 10))
+
+            ttk.Label(settings_panel, text="Сообщений за один цикл", style="Field.TLabel").grid(
+                row=8, column=0, sticky="w"
+            )
+            ttk.Entry(settings_panel, textvariable=self.session_messages_per_cycle_var, width=10).grid(
+                row=8, column=1, sticky="w", padx=(12, 0)
             )
             ttk.Label(
                 settings_panel,
                 text="Сколько сообщений пытаться отправить за один проход по сессии.",
                 style="CardSubtitle.TLabel",
-            ).grid(row=3, column=0, columnspan=2, sticky="w", pady=(4, 10))
+            ).grid(row=9, column=0, columnspan=2, sticky="w", pady=(4, 10))
 
             ttk.Label(settings_panel, text="Максимум отправить за всю сессию", style="Field.TLabel").grid(
-                row=4, column=0, sticky="w"
+                row=10, column=0, sticky="w"
             )
             ttk.Entry(settings_panel, textvariable=self.session_total_limit_var, width=10).grid(
-                row=4, column=1, sticky="w", padx=(12, 0)
+                row=10, column=1, sticky="w", padx=(12, 0)
             )
             ttk.Label(
                 settings_panel,
                 text="Поставь `0`, если лимит не нужен и сессия должна слать сообщения до ручного `Стоп`.",
                 style="CardSubtitle.TLabel",
-            ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(4, 10))
+            ).grid(row=11, column=0, columnspan=2, sticky="w", pady=(4, 10))
 
             ttk.Checkbutton(
                 settings_panel,
                 text="Отправлять сообщения сразу, а не оставлять в строке ввода",
                 variable=self.session_auto_send_var,
-            ).grid(row=6, column=0, columnspan=2, sticky="w")
+            ).grid(row=12, column=0, columnspan=2, sticky="w")
             ttk.Checkbutton(
                 settings_panel,
                 text="Крутить сессию непрерывно до нажатия `Стоп`",
                 variable=self.session_continuous_var,
-            ).grid(row=7, column=0, columnspan=2, sticky="w", pady=(8, 0))
+            ).grid(row=13, column=0, columnspan=2, sticky="w", pady=(8, 0))
 
             ttk.Label(
                 body,
@@ -1314,13 +1671,35 @@ if tk is not None:
             self.session_templates_text.grid(row=2, column=0, sticky="nsew")
             self._bind_scroll_to_widget(self.session_templates_text)
 
-            ttk.Label(body, text="Что происходит сейчас", style="Field.TLabel").grid(
-                row=7, column=0, sticky="w", pady=(16, 0)
+            summary_panel = self._create_inline_panel(
+                body,
+                "Сводка и подтверждение отправки",
+                "Здесь видно общий прогресс, последний запуск и сообщения, которые не были отправлены.",
+            )
+            summary_panel.grid(row=7, column=0, sticky="nsew", pady=(14, 0), padx=(0, 10))
+            summary_panel.columnconfigure(0, weight=1)
+            self.session_summary_text = self._create_readonly_text(summary_panel, height=10)
+            self.session_summary_text.grid(row=2, column=0, sticky="nsew")
+            self._bind_scroll_to_widget(self.session_summary_text)
+
+            history_panel = self._create_inline_panel(
+                body,
+                "История запусков сессии",
+                "Показывает последние run.json: статус, визиты, сколько сообщений действительно отправлено.",
+            )
+            history_panel.grid(row=7, column=1, sticky="nsew", pady=(14, 0))
+            history_panel.columnconfigure(0, weight=1)
+            self.session_history_text = self._create_readonly_text(history_panel, height=10)
+            self.session_history_text.grid(row=2, column=0, sticky="nsew")
+            self._bind_scroll_to_widget(self.session_history_text)
+
+            ttk.Label(body, text="Живой статус и лог", style="Field.TLabel").grid(
+                row=8, column=0, sticky="w", pady=(16, 0)
             )
             self.session_output = self._create_readonly_text(body, height=16)
-            self.session_output.grid(row=8, column=0, columnspan=2, sticky="nsew", pady=(6, 0))
+            self.session_output.grid(row=9, column=0, columnspan=2, sticky="nsew", pady=(6, 0))
             self._bind_scroll_to_widget(self.session_output)
-            body.rowconfigure(8, weight=1)
+            body.rowconfigure(9, weight=1)
 
         def _refresh_summary(self) -> None:
             selected_profile = self._selected_profile()
@@ -1359,6 +1738,7 @@ if tk is not None:
                     self.profile_details,
                     "Профили не найдены. Проверь корень профилей и импортируй нужный tdata.",
                 )
+                self._set_readonly_text(self.profile_overview, "Профили пока не найдены.")
                 self._refresh_summary()
                 return
 
@@ -1371,6 +1751,7 @@ if tk is not None:
             if self.profile_combo is not None:
                 self.profile_combo.current(index)
             self._show_profile(self._profiles[index])
+            self._set_readonly_text(self.profile_overview, format_profiles_overview(self._profiles))
             self._refresh_summary()
 
         def _selected_profile(self) -> dict[str, Any] | None:
@@ -1472,6 +1853,7 @@ if tk is not None:
                         ]
                     ),
                 )
+                self._refresh_invite_dashboard()
             elif tool_id == "telegram_session_runner":
                 self._set_readonly_text(
                     self.session_output,
@@ -1484,6 +1866,7 @@ if tk is not None:
                         ]
                     ),
                 )
+                self._refresh_session_dashboard()
             self._refresh_summary()
 
         def _build_profile_manager_form(self, parent: ttk.Frame) -> None:
@@ -1698,6 +2081,7 @@ if tk is not None:
                 self._sync_contact_job_dir()
                 self.invite_status_var.set("Файл списка выбран")
                 self._log_event("telegram_invite_manager", f"Выбран файл списка: {selected}")
+                self._refresh_invite_dashboard()
 
         def _choose_session_config(self) -> None:
             if filedialog is None:  # pragma: no cover - depends on tkinter extras
@@ -1711,6 +2095,105 @@ if tk is not None:
                 self.session_status_var.set("Конфиг выбран")
                 self._log_event("telegram_session_runner", f"Выбран конфиг: {selected}")
                 self._load_session_targets(show_feedback=False)
+
+        def _refresh_invite_dashboard(self) -> None:
+            job_dir_text = self.invite_job_dir_var.get().strip()
+            if not job_dir_text:
+                preview_path = self.invite_input_path_var.get().strip()
+                if preview_path:
+                    try:
+                        preview = preview_invite_input_file(preview_path)
+                    except Exception as exc:
+                        self._set_readonly_text(
+                            self.invite_summary_text,
+                            f"Не удалось прочитать список username:\n{exc}",
+                        )
+                        return
+                    self.invite_preview_var.set(
+                        f"Уникальных username: {preview.get('unique_usernames') or 0} · дубликатов: {preview.get('duplicates') or 0} · ошибок: {preview.get('invalid_count') or 0}"
+                    )
+                    self._set_readonly_text(self.invite_summary_text, format_invite_input_preview(preview))
+                    self._set_readonly_text(
+                        self.invite_queue_text,
+                        _format_username_block(
+                            "Первые username из файла",
+                            list(preview.get("usernames") or []),
+                            empty_text="В файле пока нет корректных username.",
+                        ),
+                    )
+                    self._set_readonly_text(self.invite_added_text, "Уже добавлены\nЗадача ещё не запускалась.")
+                    self._set_readonly_text(self.invite_failed_text, "Последние ошибки\nОшибок пока нет.")
+                    self._set_readonly_text(self.invite_history_text, "История batch-запусков\nПока нет запусков.")
+                return
+
+            snapshot = contact_job_snapshot(job_dir_text)
+            self._set_readonly_text(self.invite_summary_text, format_contact_dashboard_snapshot(snapshot))
+            self._set_readonly_text(
+                self.invite_queue_text,
+                _format_username_block(
+                    "Осталось в очереди",
+                    list(snapshot.get("pending_usernames") or []),
+                    empty_text="Очередь сейчас пуста.",
+                ),
+            )
+            self._set_readonly_text(
+                self.invite_added_text,
+                _format_username_block(
+                    "Уже добавлены",
+                    list(snapshot.get("added_usernames") or []),
+                    empty_text="Пока никто не добавлен.",
+                ),
+            )
+            self._set_readonly_text(self.invite_failed_text, format_contact_errors(snapshot))
+            self._set_readonly_text(self.invite_history_text, format_contact_history(snapshot))
+            self.invite_preview_var.set(
+                f"Осталось: {snapshot.get('pending_total') or 0} · добавлено: {snapshot.get('added_total') or 0} · ошибок: {snapshot.get('failed_total') or 0}"
+            )
+
+        def _refresh_session_dashboard(self) -> None:
+            snapshot = session_history_snapshot(
+                state_file=DEFAULT_SESSION_STATE_FILE,
+                runs_dir=DEFAULT_SESSION_RUNS_DIR,
+            )
+            self._set_readonly_text(self.session_summary_text, format_session_dashboard_snapshot(snapshot))
+            self._set_readonly_text(self.session_history_text, format_session_history(snapshot))
+
+        def _invite_batch_command(
+            self,
+            *,
+            input_path: str | Path | None,
+            statuses: list[str] | tuple[str, ...] | None,
+            action_label: str,
+        ) -> None:
+            selected_profile = self._selected_profile()
+            if selected_profile is None:
+                messagebox.showinfo("Панель Telegram", "Сначала выбери Telegram-профиль сверху.")
+                return
+            try:
+                limit = max(int(self.invite_limit_var.get() or "0"), 0)
+            except ValueError:
+                limit = 0
+            try:
+                command = contact_add_batch_command(
+                    input_path=input_path,
+                    job_dir=self._invite_resolved_job_dir(),
+                    profile_name=str(selected_profile.get("profile_name") or ""),
+                    portable_profile_dir=str(selected_profile.get("profile_dir") or ""),
+                    account_username=str((selected_profile.get("account") or {}).get("username") or ""),
+                    account_label=str((selected_profile.get("account") or {}).get("label") or ""),
+                    limit=limit,
+                    statuses=statuses,
+                )
+            except Exception as exc:
+                messagebox.showerror("Панель Telegram", f"Не удалось подготовить batch-добавление контактов:\n{exc}")
+                return
+            self._start_json_command(
+                tool_id="telegram_invite_manager",
+                action_label=action_label,
+                command=command,
+                on_success=self._on_invite_init_success,
+                monitor_active_state=True,
+            )
 
         def _import_profile(self) -> None:
             zip_path = self.import_zip_var.get().strip()
@@ -1778,48 +2261,45 @@ if tk is not None:
             if not input_path:
                 messagebox.showinfo("Панель Telegram", "Выбери файл со списком username.")
                 return
-            selected_profile = self._selected_profile()
-            if selected_profile is None:
-                messagebox.showinfo("Панель Telegram", "Сначала выбери Telegram-профиль сверху.")
-                return
-            try:
-                limit = max(int(self.invite_limit_var.get() or "0"), 0)
-            except ValueError:
-                limit = 0
-            try:
-                command = contact_add_batch_command(
-                    input_path=input_path,
-                    job_dir=self._invite_resolved_job_dir(),
-                    profile_name=str(selected_profile.get("profile_name") or ""),
-                    portable_profile_dir=str(selected_profile.get("profile_dir") or ""),
-                    account_username=str((selected_profile.get("account") or {}).get("username") or ""),
-                    account_label=str((selected_profile.get("account") or {}).get("label") or ""),
-                    limit=limit,
-                )
-            except Exception as exc:
-                messagebox.showerror("Панель Telegram", f"Не удалось подготовить batch-добавление контактов:\n{exc}")
-                return
-            self._start_json_command(
-                tool_id="telegram_invite_manager",
+            self._invite_batch_command(
+                input_path=input_path,
+                statuses=["new", "checked"],
                 action_label="добавление контактов из файла",
-                command=command,
-                on_success=self._on_invite_init_success,
+            )
+
+        def _invite_continue_queue(self) -> None:
+            try:
+                self._invite_resolved_job_dir()
+            except Exception as exc:
+                messagebox.showerror("Панель Telegram", f"Не удалось определить папку задачи:\n{exc}")
+                return
+            self._invite_batch_command(
+                input_path=None,
+                statuses=["new", "checked"],
+                action_label="продолжение очереди добавления контактов",
+            )
+
+        def _invite_retry_failed(self) -> None:
+            try:
+                self._invite_resolved_job_dir()
+            except Exception as exc:
+                messagebox.showerror("Панель Telegram", f"Не удалось определить папку задачи:\n{exc}")
+                return
+            self._invite_batch_command(
+                input_path=None,
+                statuses=["failed"],
+                action_label="повтор batch ошибок добавления контактов",
             )
 
         def _invite_show_status(self) -> None:
             try:
-                command = invite_manager_status_command(self._invite_resolved_job_dir())
+                self._refresh_invite_dashboard()
+                self._set_readonly_text(
+                    self.invite_output,
+                    "Статус задачи обновлён из invite_state.json и batch-артефактов.",
+                )
             except Exception as exc:
                 messagebox.showerror("Панель Telegram", f"Не удалось прочитать статус:\n{exc}")
-                return
-            self._start_json_command(
-                tool_id="telegram_invite_manager",
-                action_label="чтение статуса задачи добавления контактов",
-                command=command,
-                on_success=lambda payload: self._set_readonly_text(
-                    self.invite_output, format_invite_status_payload(payload)
-                ),
-            )
 
         def _invite_show_next(self) -> None:
             try:
@@ -1857,6 +2337,9 @@ if tk is not None:
             self.session_auto_send_var.set(bool(defaults["auto_send"]))
             self.session_messages_per_cycle_var.set(str(defaults["drafts_per_run"]))
             self.session_total_limit_var.set(str(defaults["total_message_limit"]))
+            self.session_visit_count_var.set(str(defaults["random_walk_visits_per_run"]))
+            self.session_view_min_var.set(str(defaults["view_min_seconds"]))
+            self.session_view_max_var.set(str(defaults["view_max_seconds"]))
             self._set_session_templates(list(defaults["templates"]))
             self._render_session_targets()
             self.session_status_var.set("Список адресатов загружен")
@@ -1872,12 +2355,15 @@ if tk is not None:
                         f"Конфиг: {self.session_config_path_var.get()}",
                         f"Загружено адресатов: {len(self._session_targets)}",
                         f"Автоотправка: {'включена' if self.session_auto_send_var.get() else 'выключена'}",
+                        f"Визитов за цикл: {self.session_visit_count_var.get()}",
+                        f"Интервал в чате: {self.session_view_min_var.get()}-{self.session_view_max_var.get()} сек",
                         f"Сообщений за цикл: {self.session_messages_per_cycle_var.get()}",
                         f"Лимит на всю сессию: {self.session_total_limit_var.get()}",
                         f"Шаблонов текста: {len(defaults['templates'])}",
                     ]
                 ),
             )
+            self._refresh_session_dashboard()
             if show_feedback:
                 messagebox.showinfo(
                     "Панель Telegram",
@@ -1947,10 +2433,19 @@ if tk is not None:
             )
 
         def _build_session_runtime_config(self) -> Path:
+            visits_per_cycle = int((self.session_visit_count_var.get() or "0").strip())
+            view_min_seconds = int((self.session_view_min_var.get() or "0").strip())
+            view_max_seconds = int((self.session_view_max_var.get() or "0").strip())
             drafts_per_run = int((self.session_messages_per_cycle_var.get() or "0").strip())
             total_message_limit = int((self.session_total_limit_var.get() or "0").strip())
             templates = self._session_templates()
             wants_messages = drafts_per_run > 0 and bool(templates)
+            if visits_per_cycle <= 0:
+                raise ValueError("Количество визитов за цикл должно быть больше нуля.")
+            if view_min_seconds <= 0 or view_max_seconds <= 0:
+                raise ValueError("Минимум и максимум секунд в чате должны быть больше нуля.")
+            if view_min_seconds > view_max_seconds:
+                raise ValueError("Минимум секунд в чате не может быть больше максимума.")
             if drafts_per_run < 0:
                 raise ValueError("Количество сообщений за цикл не может быть отрицательным.")
             if total_message_limit < 0:
@@ -1970,6 +2465,11 @@ if tk is not None:
                 total_message_limit=total_message_limit,
                 portable_profile_dir=profile_dir,
                 auto_send=bool(self.session_auto_send_var.get()),
+                session_overrides={
+                    "random_walk_visits_per_run": visits_per_cycle,
+                    "view_min_seconds": view_min_seconds,
+                    "view_max_seconds": view_max_seconds,
+                },
             )
 
         def _session_show_plan(self) -> None:
@@ -2008,6 +2508,7 @@ if tk is not None:
                     payload,
                     runtime_config,
                 ),
+                monitor_active_state=True,
             )
 
         def _on_invite_init_success(self, payload: dict[str, Any]) -> None:
@@ -2019,16 +2520,19 @@ if tk is not None:
                 else format_invite_status_payload
             )
             self._set_readonly_text(self.invite_output, formatter(payload))
+            self._refresh_invite_dashboard()
 
         def _on_session_plan_success(self, payload: dict[str, Any], runtime_config: Path) -> None:
             summary = format_session_plan_payload(payload)
             summary += f"\n\nRuntime config:\n{runtime_config}"
             self._set_readonly_text(self.session_output, summary)
+            self._refresh_session_dashboard()
 
         def _on_session_run_success(self, payload: dict[str, Any], runtime_config: Path) -> None:
             summary = format_session_run_payload(payload)
             summary += f"\n\nRuntime config:\n{runtime_config}"
             self._set_readonly_text(self.session_output, summary)
+            self._refresh_session_dashboard()
 
 else:
 
