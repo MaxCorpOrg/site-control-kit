@@ -297,6 +297,7 @@ def _iter_contact_batch_runs(job_dir: str | Path, *, history_limit: int) -> list
                 "execution_id": str(payload.get("execution_id") or path.parent.name),
                 "status": str(payload.get("status") or ""),
                 "added_count": _safe_int(payload.get("added_count")),
+                "already_present_count": _safe_int(payload.get("already_present_count")),
                 "failed_count": _safe_int(payload.get("failed_count")),
                 "remaining_candidates": _safe_int(payload.get("remaining_candidates")),
                 "selected_users": _safe_int(payload.get("selected_users")),

@@ -543,6 +543,7 @@ class ToolPlatformCatalogTests(unittest.TestCase):
                         "execution_id": "20260503T100000Z",
                         "status": "completed_with_errors",
                         "added_count": 1,
+                        "already_present_count": 1,
                         "failed_count": 1,
                         "remaining_candidates": 1,
                         "selected_users": 2,
@@ -564,6 +565,7 @@ class ToolPlatformCatalogTests(unittest.TestCase):
         self.assertEqual(snapshot["pending_usernames"], ["@alice_test"])
         self.assertEqual(snapshot["latest_errors"][0]["username"], "@bob_test")
         self.assertEqual(snapshot["latest_runs"][0]["execution_id"], "20260503T100000Z")
+        self.assertEqual(snapshot["latest_runs"][0]["already_present_count"], 1)
 
     def test_session_message_targets_reads_message_policy_targets(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

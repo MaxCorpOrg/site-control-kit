@@ -310,6 +310,14 @@
       - phase restore после перезапуска панели;
       - profile-conflict guard для live-процессов;
       - новую верхнюю раскладку session settings.
+  - после добивки live-case `контакт уже есть` дополнительно подтверждены:
+    - `python3 -m py_compile scripts/telegram_invite_executor.py tests/test_telegram_invite_executor.py`
+    - `PYTHONPATH="$PWD" python3 -m unittest tests.test_telegram_invite_executor` → `31 OK`
+    - live smoke на actor `AK/@M_a_g_g_i_e` для `@abs11144`:
+      - `/tmp/telegram-existing-contact-smoke/20260503T150245Z/job/executions/20260503T150245Z/batch_contact_add.json`
+      - итог: `status=completed`, `added_count=1`, `already_present_count=1`, `failed_count=0`
+      - user-level outcome: `contact_already_present`
+      - verify снова подтвердил `Изменить контакт` / `Удалить контакт`, а `Добавить контакт` не видно, поэтому пользователь корректно оставлен в `contact_added`, а не в `failed`.
 - Для нового unified tool platform зелёные:
   - `PYTHONPATH="$PWD" python3 -m unittest discover -s tests -p 'test_*.py'`
   - `python3 -m py_compile tool_platform/*.py scripts/telegram_invite_executor.py scripts/telegram_portable.py`
@@ -878,6 +886,13 @@
     - `/home/max/telegram_invite_jobs/contact_add__AK__1/executions/20260503T131500Z-fix-abs11144/execution_record.json`;
     - verify уже показывает `Изменить контакт` и `Удалить контакт`, а `Добавить контакт` исчез;
     - итог команды: `status=completed`, `outcome=contact_added_verified`.
+- Для Telegram control center закрыт ещё один операторский UX-gap на уже существующем контакте:
+  - если в профиле пользователя кнопки `Добавить контакт` уже нет, но видны `Изменить контакт` / `Удалить контакт`, backend больше не возвращает `ui_add_button_not_found`;
+  - новый outcome: `contact_already_present`;
+  - batch считает это успехом, переводит пользователя в `contact_added` и отдельно возвращает `already_present_count`;
+  - live evidence на actor `AK/@M_a_g_g_i_e` для `@abs11144`:
+    - `/tmp/telegram-existing-contact-smoke/20260503T150245Z/job/executions/20260503T150245Z/batch_contact_add.json`;
+    - итог batch: `status=completed`, `added_count=1`, `already_present_count=1`, `failed_count=0`.
 - Для unified tool platform подтверждён первый рабочий orchestration layer:
   - registry: `/home/max/site-control-kit/tools/telegram/platform/registry/tools.json`;
   - CLI: `./tools/telegram/platform/bin/tool-platform validate-registry`;
@@ -906,13 +921,14 @@
 ## Следующий Приоритет
 1. Для Invite/Desktop: держать основным рабочим путём `site-control-kit` / Telegram Web flow (`open-chat -> inspect-chat -> add-contact`) и не подменять его Desktop-guessing path.
 2. Для Invite/Desktop: прогнать новый operator flow `Старт добавления -> Продолжить очередь -> Повторить ошибки` уже на панели, чтобы подтвердить не только backend batch, но и новый summary/retry UX end-to-end.
-3. Для unified panel: живым smoke подтвердить `Совместный режим` целиком по цепочке `Добавить -> Разрешить переход -> Старт сессии`, включая restore summary после рестарта панели.
-3. Снизить runtime-затраты discovery относительно deep, чтобы multi-peer deep чаще успевал проходить следующий слой visible peer.
-4. Поднять приоритеты deep-target'ов: раньше брать тех peer, у кого вероятность успешного `Mention` выше.
-5. Разделить browser capability/runtime compatibility и Telegram export concerns в отдельные модули/слои.
-6. Отделить понятие `best-known latest` от `most-recent run` в UI и документации, если пользователю важно видеть именно последний прогон как основной артефакт.
-7. Декомпозировать `export_telegram_members_non_pii.py` на модули.
-8. Для Telegram control center при необходимости добавить быстрые переходы `Открыть последний лог / Открыть последний run.json / Открыть последний screenshot`, если оператору станет тесно в текущем summary-режиме.
+3. Для unified panel: живым smoke подтвердить `Совместный режим` целиком по цепочке `Добавить -> Разрешить переход -> Старт сессии`, включая restore summary после рестарта панели, уже не только на backend smoke, а через сам Tk-интерфейс.
+4. Для Invite/Desktop: в summary панели вывести `already_present_count` отдельной строкой, чтобы оператор сразу видел разницу между `ново добавлено` и `уже было в контактах`.
+5. Снизить runtime-затраты discovery относительно deep, чтобы multi-peer deep чаще успевал проходить следующий слой visible peer.
+6. Поднять приоритеты deep-target'ов: раньше брать тех peer, у кого вероятность успешного `Mention` выше.
+7. Разделить browser capability/runtime compatibility и Telegram export concerns в отдельные модули/слои.
+8. Отделить понятие `best-known latest` от `most-recent run` в UI и документации, если пользователю важно видеть именно последний прогон как основной артефакт.
+9. Декомпозировать `export_telegram_members_non_pii.py` на модули.
+10. Для Telegram control center при необходимости добавить быстрые переходы `Открыть последний лог / Открыть последний run.json / Открыть последний screenshot`, если оператору станет тесно в текущем summary-режиме.
 
 ## Как Продолжать Следующему Агенту
 1. Прочитать `AGENTS.md`.

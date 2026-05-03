@@ -303,7 +303,8 @@ python3 scripts/telegram_invite_executor.py desktop-add-contact-profile \
 - если `invite_state.json` ещё нет, берёт `--input` и создаёт локальный state;
 - сохраняет `portable_actor` в execution config;
 - обрабатывает очередь по статусам `new/checked/failed`;
-- после успешного live add помечает пользователя как `contact_added` только при verify-статусе `contact_added_verified`;
+- после успешного live add помечает пользователя как `contact_added` при verify-статусе `contact_added_verified`;
+- если `Добавить контакт` уже не видно, а в профиле уже есть `Изменить контакт` / `Удалить контакт`, команда теперь возвращает `contact_already_present` и тоже помечает пользователя как `contact_added`, а не как ошибку;
 - при ошибке помечает пользователя как `failed`;
 - пишет batch summary в `executions/<execution_id>/batch_contact_add.json`.
 

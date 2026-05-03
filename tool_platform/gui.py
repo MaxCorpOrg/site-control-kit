@@ -187,6 +187,7 @@ def format_contact_dashboard_snapshot(snapshot: dict[str, Any]) -> str:
                 (
                     f"- {last_run.get('execution_id') or '-'} · статус: {last_run.get('status') or '-'}"
                     f" · добавлено: {last_run.get('added_count') or 0}"
+                    f" · уже было: {last_run.get('already_present_count') or 0}"
                     f" · ошибок: {last_run.get('failed_count') or 0}"
                 ),
             ]
@@ -201,7 +202,7 @@ def format_contact_history(snapshot: dict[str, Any]) -> str:
     lines = ["История batch-запусков"]
     for item in history[-8:]:
         lines.append(
-            f"- {item.get('execution_id') or '-'} · {item.get('status') or '-'} · добавлено {item.get('added_count') or 0} · ошибок {item.get('failed_count') or 0} · осталось {item.get('remaining_candidates') or 0}"
+            f"- {item.get('execution_id') or '-'} · {item.get('status') or '-'} · добавлено {item.get('added_count') or 0} · уже было {item.get('already_present_count') or 0} · ошибок {item.get('failed_count') or 0} · осталось {item.get('remaining_candidates') or 0}"
         )
     return "\n".join(lines)
 
@@ -409,6 +410,7 @@ def format_contact_batch_payload(payload: dict[str, Any]) -> str:
         f"Файл списка: {payload.get('input_path') or '-'}",
         f"Выбрано username: {payload.get('selected_users') or 0}",
         f"Успешно добавлено: {payload.get('added_count') or 0}",
+        f"Уже были в контактах: {payload.get('already_present_count') or 0}",
         f"Ошибок: {payload.get('failed_count') or 0}",
         f"Осталось в очереди: {payload.get('remaining_candidates') or 0}",
     ]
