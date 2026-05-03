@@ -37,8 +37,10 @@
 Точка, на которой проект зафиксирован сейчас:
 - site-control-kit:
   - ветка: codex/telegram-client-hardening
-  - основной checkpoint commit: 39b9c47
-  - смысл коммита: Telegram control center с профилями и session runner
+  - последние checkpoint commits:
+    - `188f2bd` — шаблонный совместный режим Telegram панели
+    - `2be8229` — сохранение `step_pattern/step_cursor` в combined-state
+  - смысл текущей точки: Telegram control center уже умеет единый `Совместный режим` с шаблоном шагов `1/2`, но живой GUI-баг пользователя ещё не закрыт
 - standalone session tool:
   - репозиторий: /home/max/telegram-portable-session-tool
   - ветка: main
@@ -62,6 +64,14 @@
   - /home/max/site-control-kit/tools/telegram/platform/registry/tools.json
 - реальный runtime session-runner всё ещё живёт отдельно:
   - /home/max/telegram-portable-session-tool
+- совместный режим панели уже не состоит из двух ручных кнопок:
+  - теперь это один `Старт совместного режима`;
+  - `1` = добавление контактов;
+  - `2` = сессия и сообщения;
+  - поддерживается шаблон вроде `11,2,1111,22,1,222,1111`;
+- parser шаблона и сохранение `step_pattern/step_cursor` уже починены;
+- panel-harness на самом `ToolPlatformPanel` уже подтвердил, что шаблон с запятыми может давать правильную последовательность шагов;
+- но пользователь всё ещё сообщает, что в реальном GUI это “не чередует”, поэтому считать баг закрытым нельзя.
 
 Что сейчас важно не потерять:
 - session-runner не копировать вручную в site-control-kit без отдельного решения;
@@ -98,11 +108,17 @@
   - /home/max/telegram-portable-session-tool/*
 
 Текущий логичный следующий шаг:
-- не строить новую большую панель с множеством экранов;
-- довести profile-aware shortcuts:
-  - чтобы выбранный portable-профиль легче подставлялся в invite/session workflows;
-- добавить простые live summaries по последним run/job артефактам там, где это реально экономит ручную работу;
-- сохранять отдельность инструментов и manifest-driven интеграцию.
+- первым делом не добавлять новые фичи, а воспроизвести живой GUI-баг пользователя в `Совместном режиме`;
+- проверить именно реальную панель, а не только panel-harness:
+  - какой шаблон введён;
+  - что лежит в `/tmp/telegram-control-center/combined_flows/AK__TelegramPortableAK.json`;
+  - что пишет `/tmp/telegram-control-center-panel.log`;
+  - какая фактическая последовательность start/complete у add/session шагов;
+- если баг подтверждается только в реальном окне, искать расхождение между:
+  - live Tk event flow;
+  - сохранённым combined-state;
+  - `_start_json_command` / `_complete_json_command`;
+- только после этого продолжать UX-полировку.
 
 Как работать:
 - сначала восстанови контекст по этим файлам, потом меняй код;
