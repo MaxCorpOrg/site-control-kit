@@ -38,6 +38,7 @@ from .telegram_gui_helpers import (
     DEFAULT_SESSION_STATE_FILE,
     active_profile_conflict,
     build_session_runtime_config,
+    combined_step_label,
     combined_contact_add_transition,
     combined_flow_state_path,
     combined_session_transition,
@@ -49,6 +50,7 @@ from .telegram_gui_helpers import (
     invite_manager_next_command,
     load_combined_flow_state,
     parse_json_payload,
+    parse_combined_step_pattern,
     preview_invite_input_file,
     save_combined_flow_state,
     session_config_defaults,
@@ -479,7 +481,7 @@ def format_session_operator_summary(
 def combined_phase_label(phase: str) -> str:
     mapping = {
         "contact_add": "Шаг 1: добавление контактов",
-        "review": "Проверка результата и решение по продолжению",
+        "review": "Добавление завершилось с ошибками",
         "session_ready": "Шаг 2 готов: можно запускать сессию",
         "session_running": "Шаг 2 выполняется: сессия работает",
         "stopped": "Остановлено / завершено",
@@ -515,6 +517,9 @@ def format_combined_flow_state(
         messages_per_cycle=messages_per_cycle,
         total_message_limit=total_message_limit,
     )
+    pattern_tokens = parse_combined_step_pattern(str(state.get("step_pattern") or ""))
+    pattern_preview = "".join(pattern_tokens) if pattern_tokens else "12"
+    next_step_label = combined_step_label(str(pattern_tokens[_safe_preview_int(state.get("step_cursor")) % len(pattern_tokens)])) if pattern_tokens else combined_step_label("1")
     pending_usernames = (
         list(invite_snapshot.get("pending_usernames") or [])
         if isinstance(invite_snapshot, dict)
@@ -530,6 +535,8 @@ def format_combined_flow_state(
         f"Последний статус: {state.get('last_status') or '-'}",
         "",
         "Что произойдёт дальше",
+        f"Шаблон шагов: {pattern_preview}",
+        f"Следующий шаг по шаблону: {next_step_label}",
         f"Следующий username в очереди: {next_username or 'очередь сейчас пуста'}",
         f"Следующий цикл сессии: {max(0, _safe_preview_int(visits_per_cycle))} визитов, {max(0, _safe_preview_int(view_min_seconds))}-{max(0, _safe_preview_int(view_max_seconds))} сек в чате",
         f"Сообщений за цикл: {max(0, _safe_preview_int(messages_per_cycle))} · общий лимит: {limit_text}",
@@ -556,21 +563,21 @@ def format_combined_flow_state(
         if last_action == "combined_session_finished_next_contact":
             lines.append("Что дальше: система сама запускает следующий шаг добавления.")
         else:
-            lines.append("Что дальше: выбери файл контактов и нажми `1. Старт добавления`.")
+            lines.append("Что дальше: выбери файл контактов и нажми `Старт совместного режима`.")
     elif phase == "review":
-        lines.append("Что дальше: посмотри ошибки ниже и нажми `Разрешить переход к сессии`, если можно продолжать.")
+        lines.append("Что дальше: посмотри ошибки ниже и перезапусти общий режим, если хочешь повторить цикл.")
     elif phase == "session_ready":
         if last_action == "combined_contact_add_finished_auto":
             lines.append("Что дальше: система сама запускает шаг сессии.")
         else:
-            lines.append("Что дальше: проверь настройки сессии и нажми `2. Старт сессии`.")
+            lines.append("Что дальше: система готова к шагу сессии; если шаг был остановлен, нажми `Старт совместного режима`.")
     elif phase == "session_running":
         lines.append("Что дальше: наблюдай лог ниже или нажми `Стоп`.")
     else:
         if last_action == "combined_contact_add_noop_after_session":
             lines.append("Что дальше: очередь контактов закончилась; можно выбрать новый файл и начать новый цикл.")
         else:
-            lines.append("Что дальше: можно повторно запустить шаг добавления или сразу перейти к новой сессии.")
+            lines.append("Что дальше: можно снова нажать `Старт совместного режима`, чтобы продолжить общий цикл.")
     if invite_snapshot and str(invite_snapshot.get("status") or "") == "ready":
         lines.append(
             f"Контакты: осталось {invite_snapshot.get('pending_total') or 0}, добавлено {invite_snapshot.get('added_total') or 0}, ошибок {invite_snapshot.get('failed_total') or 0}"
@@ -792,13 +799,14 @@ if tk is not None:
             self.combined_input_path_var = tk.StringVar()
             self.combined_job_dir_var = tk.StringVar()
             self.combined_preview_var = tk.StringVar(value="Список ещё не выбран")
+            self.combined_step_pattern_var = tk.StringVar(value="12")
 
             self.session_config_path_var = tk.StringVar(value=str(DEFAULT_SESSION_CONFIG))
             self.session_new_target_var = tk.StringVar()
             self.session_new_target_label_var = tk.StringVar()
             self.session_new_target_kind_var = tk.StringVar(value="Контакт")
             self.session_auto_send_var = tk.BooleanVar(value=False)
-            self.session_continuous_var = tk.BooleanVar(value=True)
+            self.session_continuous_var = tk.BooleanVar(value=False)
             self.session_messages_per_cycle_var = tk.StringVar(value="1")
             self.session_total_limit_var = tk.StringVar(value="0")
             self.session_visit_count_var = tk.StringVar(value="6")
@@ -2147,28 +2155,14 @@ if tk is not None:
 
             top_buttons = ttk.Frame(body, style="Card.TFrame")
             top_buttons.grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 12))
-            combined_contact_button = ttk.Button(
+            combined_start_button = ttk.Button(
                 top_buttons,
-                text="1. Старт добавления",
+                text="Старт совместного режима",
                 style="Accent.TButton",
-                command=self._combined_start_contact_add,
+                command=self._combined_start_flow,
             )
-            combined_contact_button.pack(side=tk.LEFT)
-            self._register_busy_widget("telegram_combined_flow", combined_contact_button)
-            combined_allow_button = ttk.Button(
-                top_buttons,
-                text="Разрешить переход к сессии",
-                command=self._combined_allow_session,
-            )
-            combined_allow_button.pack(side=tk.LEFT, padx=(10, 0))
-            self._register_busy_widget("telegram_combined_flow", combined_allow_button)
-            combined_session_button = ttk.Button(
-                top_buttons,
-                text="2. Старт сессии",
-                command=self._combined_start_session,
-            )
-            combined_session_button.pack(side=tk.LEFT, padx=(10, 0))
-            self._register_busy_widget("telegram_combined_flow", combined_session_button)
+            combined_start_button.pack(side=tk.LEFT)
+            self._register_busy_widget("telegram_combined_flow", combined_start_button)
             combined_refresh_button = ttk.Button(
                 top_buttons,
                 text="Обновить экран",
@@ -2212,16 +2206,21 @@ if tk is not None:
             ttk.Label(body, textvariable=self.combined_preview_var, style="CardSubtitle.TLabel").grid(
                 row=3, column=0, columnspan=2, sticky="w"
             )
+            ttk.Label(
+                body,
+                text="Один `Старт` сам крутит общий цикл. Шаги берутся из шаблона ниже: `1` = добавление, `2` = сессия.",
+                style="CardSubtitle.TLabel",
+            ).grid(row=4, column=0, columnspan=2, sticky="w", pady=(2, 0))
 
             ttk.Label(body, text="Шаг 2. Папка задачи добавления", style="Field.TLabel").grid(
-                row=4, column=0, sticky="w", pady=(8, 0)
+                row=5, column=0, sticky="w", pady=(8, 0)
             )
             ttk.Entry(body, textvariable=self.combined_job_dir_var).grid(
-                row=5, column=0, columnspan=2, sticky="ew", pady=(4, 10)
+                row=6, column=0, columnspan=2, sticky="ew", pady=(4, 10)
             )
 
             limit_row = ttk.Frame(body, style="Card.TFrame")
-            limit_row.grid(row=6, column=0, columnspan=2, sticky="w")
+            limit_row.grid(row=7, column=0, columnspan=2, sticky="w")
             ttk.Label(limit_row, text="Сколько username обработать за один запуск", style="Field.TLabel").pack(
                 side=tk.LEFT
             )
@@ -2229,19 +2228,29 @@ if tk is not None:
                 side=tk.LEFT,
                 padx=(10, 0),
             )
+            ttk.Label(limit_row, text="Шаблон шагов", style="Field.TLabel").pack(side=tk.LEFT, padx=(20, 0))
+            ttk.Entry(limit_row, textvariable=self.combined_step_pattern_var, width=22).pack(
+                side=tk.LEFT,
+                padx=(10, 0),
+            )
+            ttk.Label(
+                limit_row,
+                text="Например: 11,2,1111,22,1,222,1111",
+                style="CardSubtitle.TLabel",
+            ).pack(side=tk.LEFT, padx=(10, 0))
 
             ttk.Label(body, text="Шаг 3. Что уже произошло", style="Field.TLabel").grid(
-                row=7, column=0, sticky="w", pady=(10, 0)
+                row=8, column=0, sticky="w", pady=(10, 0)
             )
             self.combined_state_text = self._create_readonly_text(body, height=9)
-            self.combined_state_text.grid(row=8, column=0, columnspan=2, sticky="nsew", pady=(6, 0))
+            self.combined_state_text.grid(row=9, column=0, columnspan=2, sticky="nsew", pady=(6, 0))
             self._bind_scroll_to_widget(self.combined_state_text)
 
             ttk.Label(body, text="Шаг 4. Настройки сессии и сообщений", style="Field.TLabel").grid(
-                row=9, column=0, sticky="w", pady=(14, 0)
+                row=10, column=0, sticky="w", pady=(14, 0)
             )
             settings_row = ttk.Frame(body, style="Card.TFrame")
-            settings_row.grid(row=10, column=0, columnspan=2, sticky="nsew", pady=(6, 0))
+            settings_row.grid(row=11, column=0, columnspan=2, sticky="nsew", pady=(6, 0))
             settings_row.columnconfigure(0, weight=1)
             settings_row.columnconfigure(1, weight=1)
 
@@ -2342,7 +2351,7 @@ if tk is not None:
                 "Тексты сообщений",
                 "Одна строка = один шаблон. Это тот же текстовый пул, который использует отдельный режим `Сессия и сообщения`.",
             )
-            templates_panel.grid(row=11, column=0, sticky="nsew", pady=(14, 0), padx=(0, 10))
+            templates_panel.grid(row=12, column=0, sticky="nsew", pady=(14, 0), padx=(0, 10))
             templates_panel.columnconfigure(0, weight=1)
             combined_templates = tk.Text(
                 templates_panel,
@@ -2370,7 +2379,7 @@ if tk is not None:
                 "Сводка по контактам и сессиям",
                 "Слева — состояние шага добавления, справа — последний результат session runner.",
             )
-            combined_session_panel.grid(row=11, column=1, sticky="nsew", pady=(14, 0))
+            combined_session_panel.grid(row=12, column=1, sticky="nsew", pady=(14, 0))
             combined_session_panel.columnconfigure(0, weight=1)
             combined_session_panel.rowconfigure(2, weight=1)
             combined_split = ttk.Frame(combined_session_panel, style="Card.TFrame")
@@ -2385,12 +2394,12 @@ if tk is not None:
             self._bind_scroll_to_widget(self.combined_session_text)
 
             ttk.Label(body, text="Общий лог совместного режима", style="Field.TLabel").grid(
-                row=12, column=0, sticky="w", pady=(16, 0)
+                row=13, column=0, sticky="w", pady=(16, 0)
             )
             self.combined_output = self._create_readonly_text(body, height=16)
-            self.combined_output.grid(row=13, column=0, columnspan=2, sticky="nsew", pady=(6, 0))
+            self.combined_output.grid(row=14, column=0, columnspan=2, sticky="nsew", pady=(6, 0))
             self._bind_scroll_to_widget(self.combined_output)
-            body.rowconfigure(13, weight=1)
+            body.rowconfigure(14, weight=1)
 
         def _refresh_summary(self) -> None:
             selected_profile = self._selected_profile()
@@ -2974,6 +2983,59 @@ if tk is not None:
                 "continuous": bool(self.session_continuous_var.get()),
             }
 
+        def _combined_pattern_tokens(self) -> list[str]:
+            tokens = parse_combined_step_pattern(self.combined_step_pattern_var.get())
+            if not tokens:
+                raise ValueError("Шаблон совместного режима должен содержать хотя бы один шаг: `1` или `2`.")
+            return tokens
+
+        def _combined_pattern_text(self) -> str:
+            return self.combined_step_pattern_var.get().strip()
+
+        def _combined_current_step(self, state: dict[str, Any] | None = None) -> tuple[list[str], int, str]:
+            current_state = state or self._load_combined_state()
+            raw_pattern = str(current_state.get("step_pattern") or "").strip()
+            ui_pattern = self._combined_pattern_text()
+            if raw_pattern != ui_pattern:
+                tokens = self._combined_pattern_tokens()
+                cursor = 0
+            else:
+                tokens = parse_combined_step_pattern(raw_pattern) or self._combined_pattern_tokens()
+                cursor = max(0, _safe_preview_int(current_state.get("step_cursor")))
+            step_code = tokens[cursor % len(tokens)]
+            return tokens, cursor, step_code
+
+        def _combined_advance_cursor(self, state: dict[str, Any]) -> tuple[list[str], int, str]:
+            tokens, cursor, _step_code = self._combined_current_step(state)
+            next_cursor = (cursor + 1) % len(tokens)
+            next_step = tokens[next_cursor]
+            return tokens, next_cursor, next_step
+
+        def _combined_autostart_next_step(self, step_code: str) -> None:
+            if str(step_code) == "1":
+                self._combined_start_contact_add()
+            else:
+                self._combined_start_session(force=True)
+
+        def _combined_start_flow(self) -> None:
+            try:
+                state = self._load_combined_state()
+                tokens, cursor, step_code = self._combined_current_step(state)
+            except Exception as exc:
+                messagebox.showerror("Панель Telegram", f"Не удалось подготовить совместный режим:\n{exc}")
+                return
+            self._save_combined_state(
+                step_pattern=self._combined_pattern_text(),
+                step_cursor=cursor,
+                step_label=combined_step_label(step_code),
+            )
+            self.combined_status_var.set(f"Следующий шаг по шаблону: {combined_step_label(step_code)}")
+            self._log_event(
+                "telegram_combined_flow",
+                f"Старт общего режима: шаг {cursor + 1}/{len(tokens)} по шаблону -> {combined_step_label(step_code)}",
+            )
+            self._combined_autostart_next_step(step_code)
+
         def _combined_targets_summary(self) -> str:
             return format_session_targets_summary(self._session_targets)
 
@@ -2989,13 +3051,13 @@ if tk is not None:
                     return "Есть ещё username, запускается следующий шаг добавления"
                 return "Готов к шагу добавления"
             if phase == "review":
-                return "Есть ошибки, проверь и разреши переход к сессии"
+                return "Есть ошибки, проверь лог и перезапусти общий режим"
             if phase == "session_ready":
                 if last_action == "combined_contact_add_noop":
-                    return "Новых username для добавления нет; выбери другой файл или запускай сессию"
+                    return "Новых username для добавления нет; выбери другой файл или перезапусти общий режим"
                 if last_action == "combined_contact_add_finished_auto":
                     return "Контакты готовы, сейчас запустится сессия"
-                return "Контакты готовы, можно запускать сессию"
+                return "Контакты готовы, общий режим может продолжать следующий шаг"
             if phase == "session_running":
                 return "Сессия выполняется"
             if phase == "stopped":
@@ -3039,6 +3101,8 @@ if tk is not None:
                 self.combined_job_dir_var.set(str(state.get("invite_job_dir") or ""))
             if state.get("session_config_path"):
                 self.session_config_path_var.set(str(state.get("session_config_path") or ""))
+            if state.get("step_pattern"):
+                self.combined_step_pattern_var.set(str(state.get("step_pattern") or ""))
             input_path = self.combined_input_path_var.get().strip()
             invite_snapshot: dict[str, Any] | None = None
             preview_text = "Список ещё не выбран"
@@ -3173,10 +3237,17 @@ if tk is not None:
             except Exception as exc:
                 messagebox.showerror("Панель Telegram", f"Не удалось подготовить совместный шаг добавления:\n{exc}")
                 return
+            try:
+                tokens, cursor, step_code = self._combined_current_step()
+            except Exception:
+                tokens, cursor, step_code = (["1", "2"], 0, "1")
             self._set_combined_phase(
                 "contact_add",
                 input_path=input_path,
                 invite_job_dir=str(job_dir),
+                step_pattern=self._combined_pattern_text(),
+                step_cursor=cursor,
+                step_label=combined_step_label(step_code),
                 last_action="combined_contact_add_started",
                 last_status="running",
                 session_config_path=self.session_config_path_var.get().strip(),
@@ -3190,39 +3261,17 @@ if tk is not None:
                 profile_dir=str(selected_profile.get("profile_dir") or ""),
             )
 
-        def _combined_allow_session(self) -> None:
+        def _combined_start_session(self, force: bool = False) -> None:
             try:
                 state = self._load_combined_state()
             except Exception as exc:
                 messagebox.showerror("Панель Telegram", f"Не удалось прочитать состояние совместного режима:\n{exc}")
                 return
             phase = str(state.get("phase") or "contact_add")
-            if phase not in {"review", "contact_add", "stopped"}:
-                messagebox.showinfo("Панель Telegram", "Переход к сессии уже разрешён или сейчас выполняется другой шаг.")
-                return
-            self._set_combined_phase(
-                "session_ready",
-                input_path=self.combined_input_path_var.get().strip(),
-                invite_job_dir=self.combined_job_dir_var.get().strip(),
-                session_config_path=self.session_config_path_var.get().strip(),
-                last_action="combined_session_allowed",
-                last_status="ready",
-            )
-            self.combined_status_var.set("Можно запускать сессию")
-            self._log_event("telegram_combined_flow", "Оператор разрешил переход к шагу сессии.")
-            self._refresh_combined_dashboard()
-
-        def _combined_start_session(self) -> None:
-            try:
-                state = self._load_combined_state()
-            except Exception as exc:
-                messagebox.showerror("Панель Telegram", f"Не удалось прочитать состояние совместного режима:\n{exc}")
-                return
-            phase = str(state.get("phase") or "contact_add")
-            if phase not in {"session_ready", "stopped"}:
+            if phase not in {"session_ready", "stopped"} and not force:
                 messagebox.showinfo(
                     "Панель Telegram",
-                    "Сначала заверши шаг добавления контактов. Если были частичные ошибки, нажми `Разрешить переход к сессии`.",
+                    "Этот шаг сессии ещё не готов. Запусти общий режим кнопкой `Старт совместного режима`.",
                 )
                 return
             selected_profile = self._selected_profile()
@@ -3239,11 +3288,18 @@ if tk is not None:
             except Exception as exc:
                 messagebox.showerror("Панель Telegram", f"Не удалось подготовить совместный шаг сессии:\n{exc}")
                 return
+            try:
+                tokens, cursor, step_code = self._combined_current_step(state)
+            except Exception:
+                tokens, cursor, step_code = (["1", "2"], 1, "2")
             self._set_combined_phase(
                 "session_running",
                 input_path=self.combined_input_path_var.get().strip(),
                 invite_job_dir=self.combined_job_dir_var.get().strip(),
                 session_config_path=self.session_config_path_var.get().strip(),
+                step_pattern=self._combined_pattern_text(),
+                step_cursor=cursor,
+                step_label=combined_step_label(step_code),
                 last_runtime_config_path=str(runtime_config),
                 last_action="combined_session_started",
                 last_status="running",
@@ -3614,11 +3670,15 @@ if tk is not None:
                 payload=payload,
                 session_continuous=bool(self.session_continuous_var.get()),
             )
+            tokens, next_cursor, next_step = self._combined_advance_cursor(previous_state)
             self._set_combined_phase(
                 str(transition["phase"]),
                 input_path=self.combined_input_path_var.get().strip(),
                 invite_job_dir=self.combined_job_dir_var.get().strip(),
                 session_config_path=self.session_config_path_var.get().strip(),
+                step_pattern=self._combined_pattern_text(),
+                step_cursor=next_cursor,
+                step_label=combined_step_label(next_step),
                 last_action=str(transition["last_action"]),
                 last_status=str(transition["last_status"]),
                 last_summary=summary_text,
@@ -3626,8 +3686,12 @@ if tk is not None:
             )
             self.combined_status_var.set(str(transition["status_text"]))
             self._refresh_combined_dashboard()
-            if bool(transition.get("auto_start_session")):
-                self._combined_start_session()
+            if _safe_preview_int(payload.get("selected_users")) > 0 and str(transition.get("phase") or "") != "stopped":
+                self._log_event(
+                    "telegram_combined_flow",
+                    f"Автопереход по шаблону: следующий шаг -> {combined_step_label(next_step)}",
+                )
+                self._combined_autostart_next_step(next_step)
 
         def _on_combined_session_success(self, payload: dict[str, Any], runtime_config: Path) -> None:
             summary = format_session_run_payload(payload)
@@ -3647,11 +3711,16 @@ if tk is not None:
                 invite_snapshot=invite_snapshot,
                 session_continuous=bool(self.session_continuous_var.get()),
             )
+            current_state = self._load_combined_state()
+            tokens, next_cursor, next_step = self._combined_advance_cursor(current_state)
             self._set_combined_phase(
                 str(transition["phase"]),
                 input_path=self.combined_input_path_var.get().strip(),
                 invite_job_dir=self.combined_job_dir_var.get().strip(),
                 session_config_path=self.session_config_path_var.get().strip(),
+                step_pattern=self._combined_pattern_text(),
+                step_cursor=next_cursor,
+                step_label=combined_step_label(next_step),
                 last_runtime_config_path=str(runtime_config),
                 last_action=str(transition["last_action"]),
                 last_status=str(transition["last_status"]),
@@ -3662,7 +3731,11 @@ if tk is not None:
             self.combined_status_var.set(str(transition["status_text"]))
             self._refresh_combined_dashboard()
             if bool(transition.get("auto_start_contact_add")):
-                self._combined_start_contact_add()
+                self._log_event(
+                    "telegram_combined_flow",
+                    f"Автопереход по шаблону: следующий шаг -> {combined_step_label(next_step)}",
+                )
+                self._combined_autostart_next_step(next_step)
 
 else:
 

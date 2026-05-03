@@ -403,11 +403,23 @@ def combined_contact_add_transition(
     )
 
     if payload_status == "completed_with_errors":
+        if selected_users > 0:
+            return {
+                "phase": "session_ready",
+                "last_action": "combined_contact_add_finished_auto",
+                "last_status": payload_status,
+                "status_text": (
+                    "Часть контактов добавлена, ошибки сохранены, запускаю непрерывную сессию"
+                    if session_continuous
+                    else "Часть контактов добавлена, ошибки сохранены, запускаю шаг сессии"
+                ),
+                "auto_start_session": True,
+            }
         return {
-            "phase": "review",
+            "phase": "stopped",
             "last_action": "combined_contact_add_finished",
             "last_status": payload_status,
-            "status_text": "Есть ошибки, проверь и разреши переход к сессии",
+            "status_text": "Шаг добавления завершился с ошибками и не перешёл к сессии",
             "auto_start_session": False,
         }
 
@@ -661,6 +673,14 @@ def _as_bool(value: Any, *, default: bool = False) -> bool:
     if text in {"0", "false", "no", "n", "off"}:
         return False
     return default
+
+
+def parse_combined_step_pattern(pattern_text: str) -> list[str]:
+    return [char for char in str(pattern_text or "") if char in {"1", "2"}]
+
+
+def combined_step_label(step_code: str) -> str:
+    return "добавление контактов" if str(step_code) == "1" else "сессия и сообщения"
 
 
 def _as_int(value: Any, *, default: int = 0) -> int:

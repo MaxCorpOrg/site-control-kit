@@ -18,6 +18,7 @@ from tool_platform.telegram_gui_helpers import (
     active_profile_conflict,
     build_session_runtime_config,
     combined_contact_add_transition,
+    combined_step_label,
     combined_session_transition,
     combined_flow_state_path,
     contact_job_snapshot,
@@ -29,6 +30,7 @@ from tool_platform.telegram_gui_helpers import (
     invite_manager_init_command,
     load_combined_flow_state,
     parse_plaintext_usernames,
+    parse_combined_step_pattern,
     preview_invite_input_file,
     prepare_invite_input_file,
     save_combined_flow_state,
@@ -424,6 +426,23 @@ class ToolPlatformCatalogTests(unittest.TestCase):
         self.assertTrue(transition["auto_start_session"])
         self.assertIn("запускаю шаг сессии", transition["status_text"])
 
+    def test_combined_contact_add_transition_continues_after_partial_errors(self) -> None:
+        transition = combined_contact_add_transition(
+            previous_state=default_combined_flow_state("AK", "/home/max/TelegramPortableAK"),
+            payload={
+                "status": "completed_with_errors",
+                "selected_users": 2,
+                "failed_count": 1,
+                "remaining_candidates": 10,
+            },
+            session_continuous=False,
+        )
+
+        self.assertEqual(transition["phase"], "session_ready")
+        self.assertEqual(transition["last_action"], "combined_contact_add_finished_auto")
+        self.assertTrue(transition["auto_start_session"])
+        self.assertIn("ошибки сохранены", transition["status_text"].lower())
+
     def test_combined_contact_add_transition_stops_when_queue_finishes_after_session(self) -> None:
         previous_state = default_combined_flow_state("AK", "/home/max/TelegramPortableAK")
         previous_state["last_session_status"] = "completed"
@@ -490,6 +509,14 @@ class ToolPlatformCatalogTests(unittest.TestCase):
             """
         )
         self.assertEqual(usernames, ["@alice_test", "@bob_test"])
+
+    def test_parse_combined_step_pattern_keeps_only_add_and_session_steps(self) -> None:
+        self.assertEqual(
+            parse_combined_step_pattern("11,2,1111,22,1,222,1111"),
+            list("11211112212221111"),
+        )
+        self.assertEqual(combined_step_label("1"), "добавление контактов")
+        self.assertEqual(combined_step_label("2"), "сессия и сообщения")
 
     def test_prepare_invite_input_file_converts_txt_into_csv(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
