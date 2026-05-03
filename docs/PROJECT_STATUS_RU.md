@@ -967,6 +967,24 @@
     - `добавление`;
     - `запуск сессии`;
   - после остановки smoke persisted combined-state был вручную нормализован в `stopped`, потому что headless harness нажал `Стоп` уже после старта следующего add-step и завершился быстрее, чем Tk успел переписать phase-state; живых процессов после этого не осталось.
+- Следующим live smoke тот же `Совместный режим` был прогнан ещё раз на том же `1.txt` уже на трёх подряд alternating циклах без отправки сообщений:
+  - `@ahmedovsssss -> session-cycle`;
+  - `@ahtoxaveesp -> session-cycle`;
+  - `@aidadovgan -> session-cycle`;
+  - итоговый harness summary:
+    - `/tmp/telegram-panel-real-combined-live-2/result.json`;
+  - прирост состояния очереди за этот прогон:
+    - было `contact_added: 27`, `new: 81`;
+    - стало `contact_added: 30`, `new: 78`;
+    - `failed` не вырос и остался `5`;
+  - panel-log снова подтвердил pattern:
+    - `добавление`;
+    - `сессия`;
+    - `добавление`;
+    - `сессия`;
+    - `добавление`;
+    - `сессия`;
+  - persisted combined-state после остановки снова был нормализован в `stopped`, чтобы панель не выглядела зависшей на `running`, хотя живых child-процессов уже не было.
 - Живой no-history run на новом runtime подтвердил, что основной export path уже собирает новые `@username` без помощи `identity_history.json` и обрабатывает несколько peer в одном deep-step.
 - Артефакты проверки:
   - `/tmp/tg_live_batch_boost3.7ErTfD/snapshot.md`
