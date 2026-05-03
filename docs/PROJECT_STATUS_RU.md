@@ -945,6 +945,28 @@
     - `contact_snapshot.counts = {contact_added: 2}`;
     - `pending_total = 0`;
     - финальная фаза combined-state: `stopped`, `last_action = combined_session_finished`, `last_status = completed`.
+- Дополнительно подтверждён живой `Совместный режим` уже на реальном файле `/home/max/контакты/1.txt` и реальной очереди `contact_add__AK__1`:
+  - запускался через сам panel-layer на actor `AK/@M_a_g_g_i_e`;
+  - сообщения были отключены (`0` сообщений за цикл), чтобы проверить только alternation `добавление -> сессия`;
+  - batch-limit был выставлен в `1`, чтобы панель переходила между режимами после каждого username;
+  - за один live smoke панель реально выполнила:
+    - `добавление @aguilarchik -> session-cycle`;
+    - `добавление @ahmaaad7777 -> session-cycle`;
+  - оба contact-add execution record завершились как `contact_added_verified`:
+    - `/home/max/telegram_invite_jobs/contact_add__AK__1/executions/20260503T160228Z-001-aguilarchik/execution_record.json`;
+    - `/home/max/telegram_invite_jobs/contact_add__AK__1/executions/20260503T160333Z-001-ahmaaad7777/execution_record.json`;
+  - job snapshot после smoke:
+    - `contact_added: 27`;
+    - `failed: 5`;
+    - `new: 81`;
+  - полный harness summary:
+    - `/tmp/telegram-panel-real-combined-live/result.json`;
+  - panel-log подтвердил именно чередование стартов:
+    - `добавление`;
+    - `запуск сессии`;
+    - `добавление`;
+    - `запуск сессии`;
+  - после остановки smoke persisted combined-state был вручную нормализован в `stopped`, потому что headless harness нажал `Стоп` уже после старта следующего add-step и завершился быстрее, чем Tk успел переписать phase-state; живых процессов после этого не осталось.
 - Живой no-history run на новом runtime подтвердил, что основной export path уже собирает новые `@username` без помощи `identity_history.json` и обрабатывает несколько peer в одном deep-step.
 - Артефакты проверки:
   - `/tmp/tg_live_batch_boost3.7ErTfD/snapshot.md`
