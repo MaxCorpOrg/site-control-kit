@@ -4,6 +4,7 @@ import csv
 import json
 import re
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,19 @@ DEFAULT_SESSION_RUNS_DIR = DEFAULT_SESSION_REPO / "runs"
 USERNAME_RE = re.compile(r"^@?[A-Za-z0-9_]{5,32}$")
 
 
+@dataclass(frozen=True)
+class CommandSpec:
+    argv: list[str]
+    cwd: Path
+
+
+def parse_json_payload(stdout: str) -> dict[str, Any]:
+    payload = json.loads(stdout)
+    if not isinstance(payload, dict):
+        raise RuntimeError("command returned unexpected JSON payload")
+    return payload
+
+
 def run_json_command(argv: list[str], *, cwd: str | Path | None = None) -> dict[str, Any]:
     completed = subprocess.run(
         argv,
@@ -28,10 +42,7 @@ def run_json_command(argv: list[str], *, cwd: str | Path | None = None) -> dict[
     if completed.returncode != 0:
         detail = (completed.stderr or completed.stdout or "").strip()
         raise RuntimeError(detail or f"command failed with code {completed.returncode}")
-    payload = json.loads(completed.stdout)
-    if not isinstance(payload, dict):
-        raise RuntimeError("command returned unexpected JSON payload")
-    return payload
+    return parse_json_payload(completed.stdout)
 
 
 def chat_slug_from_chat_url(chat_url: str) -> str:
@@ -94,6 +105,24 @@ def invite_manager_init(
     output_root: str | Path = DEFAULT_INVITE_OUTPUT_ROOT,
     temp_dir: str | Path = "/tmp/telegram-control-center",
 ) -> dict[str, Any]:
+    spec = invite_manager_init_command(
+        chat_url=chat_url,
+        input_path=input_path,
+        job_dir=job_dir,
+        output_root=output_root,
+        temp_dir=temp_dir,
+    )
+    return run_json_command(spec.argv, cwd=spec.cwd)
+
+
+def invite_manager_init_command(
+    *,
+    chat_url: str,
+    input_path: str | Path,
+    job_dir: str | Path | None = None,
+    output_root: str | Path = DEFAULT_INVITE_OUTPUT_ROOT,
+    temp_dir: str | Path = "/tmp/telegram-control-center",
+) -> CommandSpec:
     prepared_input = prepare_invite_input_file(input_path, temp_dir)
     argv = [
         "python3",
@@ -108,12 +137,17 @@ def invite_manager_init(
     ]
     if job_dir:
         argv.extend(["--job-dir", str(Path(job_dir).expanduser().resolve())])
-    return run_json_command(argv, cwd=DEFAULT_INVITE_SCRIPT.parent.parent)
+    return CommandSpec(argv=argv, cwd=DEFAULT_INVITE_SCRIPT.parent.parent)
 
 
 def invite_manager_status(job_dir: str | Path) -> dict[str, Any]:
-    return run_json_command(
-        [
+    spec = invite_manager_status_command(job_dir)
+    return run_json_command(spec.argv, cwd=spec.cwd)
+
+
+def invite_manager_status_command(job_dir: str | Path) -> CommandSpec:
+    return CommandSpec(
+        argv=[
             "python3",
             str(DEFAULT_INVITE_SCRIPT),
             "status",
@@ -125,8 +159,13 @@ def invite_manager_status(job_dir: str | Path) -> dict[str, Any]:
 
 
 def invite_manager_next(job_dir: str | Path, *, limit: int = 10) -> dict[str, Any]:
-    return run_json_command(
-        [
+    spec = invite_manager_next_command(job_dir, limit=limit)
+    return run_json_command(spec.argv, cwd=spec.cwd)
+
+
+def invite_manager_next_command(job_dir: str | Path, *, limit: int = 10) -> CommandSpec:
+    return CommandSpec(
+        argv=[
             "python3",
             str(DEFAULT_INVITE_SCRIPT),
             "next",
@@ -201,8 +240,17 @@ def session_plan(
     config_path: str | Path,
     state_file: str | Path = DEFAULT_SESSION_STATE_FILE,
 ) -> dict[str, Any]:
-    return run_json_command(
-        [
+    spec = session_plan_command(config_path=config_path, state_file=state_file)
+    return run_json_command(spec.argv, cwd=spec.cwd)
+
+
+def session_plan_command(
+    *,
+    config_path: str | Path,
+    state_file: str | Path = DEFAULT_SESSION_STATE_FILE,
+) -> CommandSpec:
+    return CommandSpec(
+        argv=[
             "python3",
             "-m",
             "telegram_portable_session_tool.cli",
@@ -224,6 +272,24 @@ def session_run(
     auto_send: bool = False,
     launch_if_needed: bool = True,
 ) -> dict[str, Any]:
+    spec = session_run_command(
+        config_path=config_path,
+        state_file=state_file,
+        runs_dir=runs_dir,
+        auto_send=auto_send,
+        launch_if_needed=launch_if_needed,
+    )
+    return run_json_command(spec.argv, cwd=spec.cwd)
+
+
+def session_run_command(
+    *,
+    config_path: str | Path,
+    state_file: str | Path = DEFAULT_SESSION_STATE_FILE,
+    runs_dir: str | Path = DEFAULT_SESSION_RUNS_DIR,
+    auto_send: bool = False,
+    launch_if_needed: bool = True,
+) -> CommandSpec:
     argv = [
         "python3",
         "-m",
@@ -241,4 +307,4 @@ def session_run(
         argv.append("--launch-if-needed")
     if auto_send:
         argv.append("--auto-send")
-    return run_json_command(argv, cwd=DEFAULT_SESSION_REPO)
+    return CommandSpec(argv=argv, cwd=DEFAULT_SESSION_REPO)

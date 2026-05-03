@@ -2,11 +2,17 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
+import queue
 import re
+import shlex
+import subprocess
 import tempfile
+import threading
 import traceback
+from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 try:
     import tkinter as tk
@@ -23,17 +29,19 @@ else:  # pragma: no cover - trivial branch
 
 from .catalog import DEFAULT_REGISTRY_PATH, ToolManifest, load_catalog
 from .telegram_gui_helpers import (
+    CommandSpec,
     DEFAULT_INVITE_OUTPUT_ROOT,
     DEFAULT_SESSION_CONFIG,
     build_session_runtime_config,
     default_invite_job_dir,
     format_session_target_label,
-    invite_manager_init,
-    invite_manager_next,
-    invite_manager_status,
+    invite_manager_init_command,
+    invite_manager_next_command,
+    invite_manager_status_command,
+    parse_json_payload,
     session_message_targets,
-    session_plan,
-    session_run,
+    session_plan_command,
+    session_run_command,
 )
 from .telegram_profiles import (
     DEFAULT_OUTPUT_ROOT,
@@ -47,6 +55,15 @@ from .telegram_profiles import (
 
 
 USERNAME_RE = re.compile(r"^@?[A-Za-z0-9_]{5,32}$")
+PANEL_LOG_PATH = Path("/tmp/telegram-control-center-panel.log")
+LOGGER = logging.getLogger("telegram_control_center_panel")
+if not LOGGER.handlers:
+    PANEL_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    _handler = logging.FileHandler(PANEL_LOG_PATH, encoding="utf-8")
+    _handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    LOGGER.addHandler(_handler)
+LOGGER.setLevel(logging.INFO)
+LOGGER.propagate = False
 
 
 def format_profile_details(profile: dict[str, Any]) -> str:
@@ -232,10 +249,24 @@ if tk is not None:
             self.session_new_target_label_var = tk.StringVar()
             self.session_new_target_kind_var = tk.StringVar(value="Контакт")
             self.session_auto_send_var = tk.BooleanVar(value=False)
+            self.invite_status_var = tk.StringVar(value="Готово")
+            self.session_status_var = tk.StringVar(value="Готово")
 
             self._profiles: list[dict[str, Any]] = []
             self._session_targets: list[dict[str, Any]] = []
             self._active_tool_id = "telegram_invite_manager"
+            self._active_processes: dict[str, subprocess.Popen[str]] = {}
+            self._busy_controls: dict[str, list[Any]] = {
+                "telegram_invite_manager": [],
+                "telegram_session_runner": [],
+            }
+            self._stop_controls: dict[str, list[Any]] = {
+                "telegram_invite_manager": [],
+                "telegram_session_runner": [],
+            }
+            self._process_lock = threading.Lock()
+            self._ui_queue: queue.Queue[tuple[str, str, dict[str, Any] | None, str, bool, Callable[[dict[str, Any]], None]]] = queue.Queue()
+            self._scroll_canvas: tk.Canvas | None = None
 
             self.profile_combo: ttk.Combobox | None = None
             self.profile_details: tk.Text | None = None
@@ -252,6 +283,7 @@ if tk is not None:
             self._reload_profiles(initial=True)
             self._load_session_targets(show_feedback=False)
             self._switch_tool("telegram_invite_manager")
+            self.after(120, self._drain_ui_queue)
 
         def _configure_styles(self) -> None:
             if ttk is None or tkfont is None:
@@ -396,6 +428,51 @@ if tk is not None:
             widget.insert("1.0", content.strip() + "\n")
             widget.configure(state="disabled")
 
+        def _append_readonly_text(self, widget: tk.Text | None, content: str) -> None:
+            if widget is None:
+                return
+            widget.configure(state="normal")
+            if widget.index("end-1c") != "1.0":
+                widget.insert(tk.END, "\n")
+            widget.insert(tk.END, content.rstrip() + "\n")
+            widget.see(tk.END)
+            widget.configure(state="disabled")
+
+        def _status_var_for_tool(self, tool_id: str) -> tk.StringVar:
+            return (
+                self.invite_status_var
+                if tool_id == "telegram_invite_manager"
+                else self.session_status_var
+            )
+
+        def _output_widget_for_tool(self, tool_id: str) -> tk.Text | None:
+            return self.invite_output if tool_id == "telegram_invite_manager" else self.session_output
+
+        def _log_event(self, tool_id: str, message: str) -> None:
+            line = f"[{datetime.now().strftime('%H:%M:%S')}] {message}"
+            LOGGER.info("%s | %s", tool_id, message)
+            self._append_readonly_text(self._output_widget_for_tool(tool_id), line)
+
+        def _register_busy_widget(self, tool_id: str, widget: Any) -> None:
+            self._busy_controls[tool_id].append(widget)
+
+        def _register_stop_widget(self, tool_id: str, widget: Any) -> None:
+            self._stop_controls[tool_id].append(widget)
+
+        def _set_tool_busy(self, tool_id: str, busy: bool) -> None:
+            state = "disabled" if busy else "normal"
+            for widget in self._busy_controls[tool_id]:
+                try:
+                    widget.configure(state=state)
+                except tk.TclError:
+                    continue
+            stop_state = "normal" if busy else "disabled"
+            for widget in self._stop_controls[tool_id]:
+                try:
+                    widget.configure(state=stop_state)
+                except tk.TclError:
+                    continue
+
         def _create_listbox(self, parent: tk.Widget, *, selectmode: str = tk.SINGLE, height: int = 6) -> tk.Listbox:
             return tk.Listbox(
                 parent,
@@ -464,6 +541,165 @@ if tk is not None:
             ).grid(row=1, column=0, sticky="w", pady=(4, 10))
             return panel
 
+        def _bind_scroll_to_widget(self, widget: tk.Widget) -> None:
+            widget.bind("<MouseWheel>", self._on_mousewheel, add="+")
+            widget.bind("<Button-4>", self._on_mousewheel_linux_up, add="+")
+            widget.bind("<Button-5>", self._on_mousewheel_linux_down, add="+")
+
+        def _on_mousewheel(self, event: Any) -> str | None:
+            if self._scroll_canvas is None:
+                return None
+            delta = int(-1 * (event.delta / 120)) if getattr(event, "delta", 0) else 0
+            self._scroll_canvas.yview_scroll(delta, "units")
+            return "break"
+
+        def _on_mousewheel_linux_up(self, _event: Any) -> str | None:
+            if self._scroll_canvas is None:
+                return None
+            self._scroll_canvas.yview_scroll(-3, "units")
+            return "break"
+
+        def _on_mousewheel_linux_down(self, _event: Any) -> str | None:
+            if self._scroll_canvas is None:
+                return None
+            self._scroll_canvas.yview_scroll(3, "units")
+            return "break"
+
+        def _start_json_command(
+            self,
+            *,
+            tool_id: str,
+            action_label: str,
+            command: CommandSpec,
+            on_success: Callable[[dict[str, Any]], None],
+        ) -> None:
+            with self._process_lock:
+                existing = self._active_processes.get(tool_id)
+                if existing is not None and existing.poll() is None:
+                    messagebox.showinfo("Панель Telegram", "Сначала дождись завершения текущего действия или нажми `Стоп`.")
+                    return
+
+            command_text = shlex.join(command.argv)
+            self._status_var_for_tool(tool_id).set(f"Выполняется: {action_label}")
+            self._set_tool_busy(tool_id, True)
+            self._log_event(tool_id, f"Старт: {action_label}")
+            self._log_event(tool_id, f"Команда: {command_text}")
+
+            def _worker() -> None:
+                completed_payload: dict[str, Any] | None = None
+                error_text = ""
+                stopped = False
+                proc: subprocess.Popen[str] | None = None
+                try:
+                    proc = subprocess.Popen(
+                        command.argv,
+                        cwd=str(command.cwd),
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                    )
+                    with self._process_lock:
+                        self._active_processes[tool_id] = proc
+                    stdout, stderr = proc.communicate()
+                    stopped = proc.returncode in (-15, -9)
+                    if proc.returncode == 0:
+                        completed_payload = parse_json_payload(stdout)
+                    else:
+                        error_text = (stderr or stdout or "").strip() or f"command failed with code {proc.returncode}"
+                except Exception as exc:
+                        error_text = str(exc)
+                finally:
+                    with self._process_lock:
+                        current = self._active_processes.get(tool_id)
+                        if current is proc:
+                            self._active_processes.pop(tool_id, None)
+                self._ui_queue.put(
+                    (
+                        tool_id,
+                        action_label,
+                        completed_payload,
+                        error_text,
+                        stopped,
+                        on_success,
+                    )
+                )
+
+            threading.Thread(target=_worker, daemon=True).start()
+
+        def _drain_ui_queue(self) -> None:
+            while True:
+                try:
+                    (
+                        tool_id,
+                        action_label,
+                        payload,
+                        error_text,
+                        stopped,
+                        on_success,
+                    ) = self._ui_queue.get_nowait()
+                except queue.Empty:
+                    break
+                self._complete_json_command(
+                    tool_id=tool_id,
+                    action_label=action_label,
+                    payload=payload,
+                    error_text=error_text,
+                    stopped=stopped,
+                    on_success=on_success,
+                )
+            if self.winfo_exists():
+                self.after(120, self._drain_ui_queue)
+
+        def _complete_json_command(
+            self,
+            *,
+            tool_id: str,
+            action_label: str,
+            payload: dict[str, Any] | None,
+            error_text: str,
+            stopped: bool,
+            on_success: Callable[[dict[str, Any]], None],
+        ) -> None:
+            self._set_tool_busy(tool_id, False)
+            if stopped:
+                self._status_var_for_tool(tool_id).set("Остановлено")
+                self._log_event(tool_id, f"Остановлено: {action_label}")
+                return
+            if error_text:
+                self._status_var_for_tool(tool_id).set("Ошибка")
+                self._log_event(tool_id, f"Ошибка: {action_label}")
+                self._log_event(tool_id, error_text)
+                messagebox.showerror("Панель Telegram", error_text)
+                return
+            assert payload is not None
+            self._status_var_for_tool(tool_id).set("Завершено")
+            self._log_event(tool_id, f"Завершено: {action_label}")
+            on_success(payload)
+
+        def _stop_tool_process(self, tool_id: str) -> None:
+            with self._process_lock:
+                proc = self._active_processes.get(tool_id)
+            if proc is None or proc.poll() is not None:
+                self._status_var_for_tool(tool_id).set("Нет активного действия")
+                self._log_event(tool_id, "Попытка остановки: активный процесс не найден.")
+                return
+            self._status_var_for_tool(tool_id).set("Останавливается")
+            self._log_event(tool_id, "Остановка активного процесса...")
+            try:
+                proc.terminate()
+                self.after(1500, lambda: self._kill_if_needed(tool_id, proc))
+            except Exception as exc:
+                self._log_event(tool_id, f"Не удалось остановить процесс: {exc}")
+
+        def _kill_if_needed(self, tool_id: str, proc: subprocess.Popen[str]) -> None:
+            if proc.poll() is not None:
+                return
+            self._log_event(tool_id, "Процесс не завершился после terminate, отправляю kill.")
+            try:
+                proc.kill()
+            except Exception as exc:
+                self._log_event(tool_id, f"Не удалось завершить процесс kill: {exc}")
+
         def _build_ui(self) -> None:
             outer = ttk.Frame(self, style="App.TFrame", padding=20)
             outer.pack(fill=tk.BOTH, expand=True)
@@ -486,8 +722,36 @@ if tk is not None:
 
             ttk.Separator(outer, orient="horizontal").pack(fill="x", pady=(16, 18))
 
-            content = ttk.Frame(outer, style="App.TFrame")
-            content.pack(fill=tk.BOTH, expand=True)
+            scroll_host = ttk.Frame(outer, style="App.TFrame")
+            scroll_host.pack(fill=tk.BOTH, expand=True)
+            canvas = tk.Canvas(
+                scroll_host,
+                bg=self._colors["bg"],
+                highlightthickness=0,
+                borderwidth=0,
+            )
+            scrollbar = ttk.Scrollbar(scroll_host, orient="vertical", command=canvas.yview)
+            canvas.configure(yscrollcommand=scrollbar.set)
+            canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+            content = ttk.Frame(canvas, style="App.TFrame")
+            window_id = canvas.create_window((0, 0), window=content, anchor="nw")
+            self._scroll_canvas = canvas
+
+            def _sync_scrollregion(_event: object) -> None:
+                canvas.configure(scrollregion=canvas.bbox("all"))
+
+            def _sync_content_width(event: object) -> None:
+                width = getattr(event, "width", None)
+                if width:
+                    canvas.itemconfigure(window_id, width=width)
+
+            content.bind("<Configure>", _sync_scrollregion)
+            canvas.bind("<Configure>", _sync_content_width)
+            self._bind_scroll_to_widget(canvas)
+            self.bind_all("<MouseWheel>", self._on_mousewheel, add="+")
+            self.bind_all("<Button-4>", self._on_mousewheel_linux_up, add="+")
+            self.bind_all("<Button-5>", self._on_mousewheel_linux_down, add="+")
 
             self._build_profile_section(content)
             self._build_tool_selector(content)
@@ -612,31 +876,50 @@ if tk is not None:
 
             top_buttons = ttk.Frame(body, style="Card.TFrame")
             top_buttons.grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 12))
-            ttk.Button(
+            invite_start_button = ttk.Button(
                 top_buttons,
                 text="Старт инвайтов",
                 style="Accent.TButton",
                 command=self._invite_create_job,
-            ).pack(side=tk.LEFT)
-            ttk.Button(
+            )
+            invite_start_button.pack(side=tk.LEFT)
+            self._register_busy_widget("telegram_invite_manager", invite_start_button)
+            invite_status_button = ttk.Button(
                 top_buttons,
                 text="Статус задачи",
                 command=self._invite_show_status,
-            ).pack(side=tk.LEFT, padx=(10, 0))
-            ttk.Button(
+            )
+            invite_status_button.pack(side=tk.LEFT, padx=(10, 0))
+            self._register_busy_widget("telegram_invite_manager", invite_status_button)
+            invite_next_button = ttk.Button(
                 top_buttons,
                 text="Следующие username",
                 command=self._invite_show_next,
-            ).pack(side=tk.LEFT, padx=(10, 0))
+            )
+            invite_next_button.pack(side=tk.LEFT, padx=(10, 0))
+            self._register_busy_widget("telegram_invite_manager", invite_next_button)
+            invite_stop_button = ttk.Button(
+                top_buttons,
+                text="Стоп",
+                command=lambda: self._stop_tool_process("telegram_invite_manager"),
+                state="disabled",
+            )
+            invite_stop_button.pack(side=tk.LEFT, padx=(10, 0))
+            self._register_stop_widget("telegram_invite_manager", invite_stop_button)
+            ttk.Label(
+                top_buttons,
+                textvariable=self.invite_status_var,
+                style="CardSubtitle.TLabel",
+            ).pack(side=tk.LEFT, padx=(16, 0))
 
-            ttk.Label(body, text="Ссылка или ID чата", style="Field.TLabel").grid(
+            ttk.Label(body, text="Шаг 1. Ссылка или ID чата", style="Field.TLabel").grid(
                 row=1, column=0, sticky="w"
             )
             ttk.Entry(body, textvariable=self.invite_chat_url_var).grid(
                 row=2, column=0, columnspan=2, sticky="ew", pady=(4, 10)
             )
 
-            ttk.Label(body, text="Файл со списком username с компьютера", style="Field.TLabel").grid(
+            ttk.Label(body, text="Шаг 2. Файл со списком username с компьютера", style="Field.TLabel").grid(
                 row=3, column=0, sticky="w"
             )
             file_row = ttk.Frame(body, style="Card.TFrame")
@@ -645,11 +928,15 @@ if tk is not None:
             ttk.Entry(file_row, textvariable=self.invite_input_path_var).grid(
                 row=0, column=0, sticky="ew"
             )
-            ttk.Button(file_row, text="Загрузить TXT / CSV / JSON", command=self._choose_invite_input).grid(
-                row=0, column=1, padx=(10, 0)
+            invite_choose_file_button = ttk.Button(
+                file_row,
+                text="Загрузить TXT / CSV / JSON",
+                command=self._choose_invite_input,
             )
+            invite_choose_file_button.grid(row=0, column=1, padx=(10, 0))
+            self._register_busy_widget("telegram_invite_manager", invite_choose_file_button)
 
-            ttk.Label(body, text="Папка задачи", style="Field.TLabel").grid(
+            ttk.Label(body, text="Шаг 3. Папка задачи", style="Field.TLabel").grid(
                 row=5, column=0, sticky="w"
             )
             ttk.Entry(body, textvariable=self.invite_job_dir_var).grid(
@@ -671,11 +958,12 @@ if tk is not None:
                 side=tk.LEFT, padx=(10, 0)
             )
 
-            ttk.Label(body, text="Результат", style="Field.TLabel").grid(
+            ttk.Label(body, text="Что происходит сейчас", style="Field.TLabel").grid(
                 row=9, column=0, sticky="w", pady=(16, 0)
             )
             self.invite_output = self._create_readonly_text(body, height=16)
             self.invite_output.grid(row=10, column=0, columnspan=2, sticky="nsew", pady=(6, 0))
+            self._bind_scroll_to_widget(self.invite_output)
             body.rowconfigure(10, weight=1)
 
         def _build_session_view(self, parent: ttk.Frame) -> None:
@@ -690,19 +978,36 @@ if tk is not None:
 
             top_buttons = ttk.Frame(body, style="Card.TFrame")
             top_buttons.grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 12))
-            ttk.Button(
+            session_start_button = ttk.Button(
                 top_buttons,
                 text="Старт сессии",
                 style="Accent.TButton",
                 command=self._session_run,
-            ).pack(side=tk.LEFT)
-            ttk.Button(
+            )
+            session_start_button.pack(side=tk.LEFT)
+            self._register_busy_widget("telegram_session_runner", session_start_button)
+            session_plan_button = ttk.Button(
                 top_buttons,
                 text="Показать план",
                 command=self._session_show_plan,
-            ).pack(side=tk.LEFT, padx=(10, 0))
+            )
+            session_plan_button.pack(side=tk.LEFT, padx=(10, 0))
+            self._register_busy_widget("telegram_session_runner", session_plan_button)
+            session_stop_button = ttk.Button(
+                top_buttons,
+                text="Стоп",
+                command=lambda: self._stop_tool_process("telegram_session_runner"),
+                state="disabled",
+            )
+            session_stop_button.pack(side=tk.LEFT, padx=(10, 0))
+            self._register_stop_widget("telegram_session_runner", session_stop_button)
+            ttk.Label(
+                top_buttons,
+                textvariable=self.session_status_var,
+                style="CardSubtitle.TLabel",
+            ).pack(side=tk.LEFT, padx=(16, 0))
 
-            ttk.Label(body, text="Конфиг режима сессии", style="Field.TLabel").grid(
+            ttk.Label(body, text="Шаг 1. Конфиг режима сессии", style="Field.TLabel").grid(
                 row=1, column=0, sticky="w"
             )
             config_row = ttk.Frame(body, style="Card.TFrame")
@@ -711,14 +1016,22 @@ if tk is not None:
             ttk.Entry(config_row, textvariable=self.session_config_path_var).grid(
                 row=0, column=0, sticky="ew"
             )
-            ttk.Button(config_row, text="Выбрать конфиг", command=self._choose_session_config).grid(
-                row=0, column=1, padx=(10, 0)
+            session_choose_config_button = ttk.Button(
+                config_row,
+                text="Выбрать конфиг",
+                command=self._choose_session_config,
             )
-            ttk.Button(config_row, text="Загрузить список адресатов", command=self._load_session_targets).grid(
-                row=0, column=2, padx=(10, 0)
+            session_choose_config_button.grid(row=0, column=1, padx=(10, 0))
+            self._register_busy_widget("telegram_session_runner", session_choose_config_button)
+            session_load_targets_button = ttk.Button(
+                config_row,
+                text="Загрузить список адресатов",
+                command=self._load_session_targets,
             )
+            session_load_targets_button.grid(row=0, column=2, padx=(10, 0))
+            self._register_busy_widget("telegram_session_runner", session_load_targets_button)
 
-            ttk.Label(body, text="Список адресатов сообщений", style="Field.TLabel").grid(
+            ttk.Label(body, text="Шаг 2. Список адресатов сообщений", style="Field.TLabel").grid(
                 row=3, column=0, sticky="w"
             )
             recipients_row = ttk.Frame(body, style="Card.TFrame")
@@ -730,11 +1043,14 @@ if tk is not None:
                 height=8,
             )
             self.session_targets_list.grid(row=0, column=0, rowspan=8, sticky="nsew")
-            ttk.Button(
+            self._bind_scroll_to_widget(self.session_targets_list)
+            session_remove_target_button = ttk.Button(
                 recipients_row,
                 text="Удалить выбранных",
                 command=self._remove_session_targets,
-            ).grid(row=0, column=1, sticky="ew", padx=(10, 0))
+            )
+            session_remove_target_button.grid(row=0, column=1, sticky="ew", padx=(10, 0))
+            self._register_busy_widget("telegram_session_runner", session_remove_target_button)
 
             ttk.Label(recipients_row, text="Добавить новый адресат", style="Field.TLabel").grid(
                 row=1, column=1, sticky="w", padx=(10, 0), pady=(12, 0)
@@ -761,11 +1077,13 @@ if tk is not None:
                 values=["Контакт", "Группа"],
             )
             kind_combo.grid(row=7, column=1, sticky="ew", padx=(10, 0), pady=(4, 0))
-            ttk.Button(
+            session_add_target_button = ttk.Button(
                 recipients_row,
                 text="Добавить адресата",
                 command=self._add_session_target,
-            ).grid(row=8, column=1, sticky="ew", padx=(10, 0), pady=(10, 0))
+            )
+            session_add_target_button.grid(row=8, column=1, sticky="ew", padx=(10, 0), pady=(10, 0))
+            self._register_busy_widget("telegram_session_runner", session_add_target_button)
 
             ttk.Label(
                 recipients_row,
@@ -785,11 +1103,12 @@ if tk is not None:
                 style="CardSubtitle.TLabel",
             ).grid(row=6, column=0, columnspan=2, sticky="w", pady=(6, 0))
 
-            ttk.Label(body, text="Результат", style="Field.TLabel").grid(
+            ttk.Label(body, text="Что происходит сейчас", style="Field.TLabel").grid(
                 row=7, column=0, sticky="w", pady=(16, 0)
             )
             self.session_output = self._create_readonly_text(body, height=16)
             self.session_output.grid(row=8, column=0, columnspan=2, sticky="nsew", pady=(6, 0))
+            self._bind_scroll_to_widget(self.session_output)
             body.rowconfigure(8, weight=1)
             body.rowconfigure(4, weight=0)
 
@@ -1153,6 +1472,8 @@ if tk is not None:
             )
             if selected:
                 self.invite_input_path_var.set(selected)
+                self.invite_status_var.set("Файл списка выбран")
+                self._log_event("telegram_invite_manager", f"Выбран файл списка: {selected}")
 
         def _choose_session_config(self) -> None:
             if filedialog is None:  # pragma: no cover - depends on tkinter extras
@@ -1163,6 +1484,8 @@ if tk is not None:
             )
             if selected:
                 self.session_config_path_var.set(selected)
+                self.session_status_var.set("Конфиг выбран")
+                self._log_event("telegram_session_runner", f"Выбран конфиг: {selected}")
                 self._load_session_targets(show_feedback=False)
 
         def _import_profile(self) -> None:
@@ -1230,25 +1553,35 @@ if tk is not None:
                 messagebox.showinfo("Панель Telegram", "Выбери файл со списком username.")
                 return
             try:
-                payload = invite_manager_init(
+                command = invite_manager_init_command(
                     chat_url=chat_url,
                     input_path=input_path,
                     job_dir=self.invite_job_dir_var.get().strip() or None,
                 )
-            except Exception as exc:  # pragma: no cover - GUI fallback
+            except Exception as exc:
                 messagebox.showerror("Панель Telegram", f"Не удалось создать invite-задачу:\n{exc}")
                 return
-            if payload.get("job_dir"):
-                self.invite_job_dir_var.set(str(payload["job_dir"]))
-            self._set_readonly_text(self.invite_output, format_invite_status_payload(payload))
+            self._start_json_command(
+                tool_id="telegram_invite_manager",
+                action_label="создание invite-задачи",
+                command=command,
+                on_success=self._on_invite_init_success,
+            )
 
         def _invite_show_status(self) -> None:
             try:
-                payload = invite_manager_status(self._invite_resolved_job_dir())
-            except Exception as exc:  # pragma: no cover - GUI fallback
+                command = invite_manager_status_command(self._invite_resolved_job_dir())
+            except Exception as exc:
                 messagebox.showerror("Панель Telegram", f"Не удалось прочитать статус:\n{exc}")
                 return
-            self._set_readonly_text(self.invite_output, format_invite_status_payload(payload))
+            self._start_json_command(
+                tool_id="telegram_invite_manager",
+                action_label="чтение статуса invite-задачи",
+                command=command,
+                on_success=lambda payload: self._set_readonly_text(
+                    self.invite_output, format_invite_status_payload(payload)
+                ),
+            )
 
         def _invite_show_next(self) -> None:
             try:
@@ -1256,11 +1589,18 @@ if tk is not None:
             except ValueError:
                 limit = 10
             try:
-                payload = invite_manager_next(self._invite_resolved_job_dir(), limit=limit)
-            except Exception as exc:  # pragma: no cover - GUI fallback
+                command = invite_manager_next_command(self._invite_resolved_job_dir(), limit=limit)
+            except Exception as exc:
                 messagebox.showerror("Панель Telegram", f"Не удалось получить следующих пользователей:\n{exc}")
                 return
-            self._set_readonly_text(self.invite_output, format_invite_status_payload(payload))
+            self._start_json_command(
+                tool_id="telegram_invite_manager",
+                action_label="получение следующей пачки username",
+                command=command,
+                on_success=lambda payload: self._set_readonly_text(
+                    self.invite_output, format_invite_status_payload(payload)
+                ),
+            )
 
         def _render_session_targets(self) -> None:
             if self.session_targets_list is None:
@@ -1272,10 +1612,15 @@ if tk is not None:
         def _load_session_targets(self, show_feedback: bool = True) -> None:
             try:
                 self._session_targets = session_message_targets(self.session_config_path_var.get())
-            except Exception as exc:  # pragma: no cover - GUI fallback
+            except Exception as exc:
                 messagebox.showerror("Панель Telegram", f"Не удалось прочитать конфиг режима сессии:\n{exc}")
                 return
             self._render_session_targets()
+            self.session_status_var.set("Список адресатов загружен")
+            self._log_event(
+                "telegram_session_runner",
+                f"Загружено адресатов из конфига: {len(self._session_targets)}",
+            )
             self._set_readonly_text(
                 self.session_output,
                 "\n".join(
@@ -1368,24 +1713,51 @@ if tk is not None:
         def _session_show_plan(self) -> None:
             try:
                 runtime_config = self._build_session_runtime_config()
-                payload = session_plan(config_path=runtime_config)
-            except Exception as exc:  # pragma: no cover - GUI fallback
+                command = session_plan_command(config_path=runtime_config)
+            except Exception as exc:
                 messagebox.showerror("Панель Telegram", f"Не удалось построить session plan:\n{exc}")
                 return
-            summary = format_session_plan_payload(payload)
-            summary += f"\n\nRuntime config:\n{runtime_config}"
-            self._set_readonly_text(self.session_output, summary)
+            self._start_json_command(
+                tool_id="telegram_session_runner",
+                action_label="построение session plan",
+                command=command,
+                on_success=lambda payload, runtime_config=runtime_config: self._on_session_plan_success(
+                    payload,
+                    runtime_config,
+                ),
+            )
 
         def _session_run(self) -> None:
             try:
                 runtime_config = self._build_session_runtime_config()
-                payload = session_run(
+                command = session_run_command(
                     config_path=runtime_config,
                     auto_send=bool(self.session_auto_send_var.get()),
                 )
-            except Exception as exc:  # pragma: no cover - GUI fallback
+            except Exception as exc:
                 messagebox.showerror("Панель Telegram", f"Не удалось запустить режим сессии:\n{exc}")
                 return
+            self._start_json_command(
+                tool_id="telegram_session_runner",
+                action_label="запуск session runner",
+                command=command,
+                on_success=lambda payload, runtime_config=runtime_config: self._on_session_run_success(
+                    payload,
+                    runtime_config,
+                ),
+            )
+
+        def _on_invite_init_success(self, payload: dict[str, Any]) -> None:
+            if payload.get("job_dir"):
+                self.invite_job_dir_var.set(str(payload["job_dir"]))
+            self._set_readonly_text(self.invite_output, format_invite_status_payload(payload))
+
+        def _on_session_plan_success(self, payload: dict[str, Any], runtime_config: Path) -> None:
+            summary = format_session_plan_payload(payload)
+            summary += f"\n\nRuntime config:\n{runtime_config}"
+            self._set_readonly_text(self.session_output, summary)
+
+        def _on_session_run_success(self, payload: dict[str, Any], runtime_config: Path) -> None:
             summary = format_session_run_payload(payload)
             summary += f"\n\nRuntime config:\n{runtime_config}"
             self._set_readonly_text(self.session_output, summary)

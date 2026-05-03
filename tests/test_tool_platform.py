@@ -13,9 +13,12 @@ from tool_platform.telegram_gui_helpers import (
     build_session_runtime_config,
     default_invite_job_dir,
     format_session_target_label,
+    invite_manager_init_command,
     parse_plaintext_usernames,
     prepare_invite_input_file,
+    session_plan_command,
     session_message_targets,
+    session_run_command,
 )
 from tool_platform.telegram_profiles import (
     adopt_existing_profile,
@@ -367,6 +370,26 @@ class ToolPlatformCatalogTests(unittest.TestCase):
         self.assertIn("@alice_test,yes,panel_txt_import", rows)
         self.assertIn("@bob_test,yes,panel_txt_import", rows)
 
+    def test_invite_manager_init_command_uses_converted_txt_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            source = root / "users.txt"
+            source.write_text("@alice_test\n", encoding="utf-8")
+
+            spec = invite_manager_init_command(
+                chat_url="https://web.telegram.org/k/#-2465948544",
+                input_path=source,
+                job_dir=root / "job",
+                output_root=root / "jobs",
+                temp_dir=root / "tmp",
+            )
+
+        self.assertIn("init", spec.argv)
+        self.assertIn("--input", spec.argv)
+        input_index = spec.argv.index("--input") + 1
+        self.assertTrue(spec.argv[input_index].endswith(".invite-import.csv"))
+        self.assertEqual(spec.cwd, Path(__file__).resolve().parents[1])
+
     def test_session_message_targets_reads_message_policy_targets(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             config_path = Path(tmp_dir) / "config.json"
@@ -433,6 +456,23 @@ class ToolPlatformCatalogTests(unittest.TestCase):
         self.assertTrue(payload["message_policy"]["auto_send"])
         self.assertEqual(payload["message_policy"]["target_mode"], "rotating_all")
         self.assertEqual(len(payload["message_policy"]["message_targets"]), 2)
+
+    def test_session_plan_command_targets_standalone_cli(self) -> None:
+        spec = session_plan_command(config_path="/tmp/runtime.json", state_file="/tmp/state.json")
+        self.assertEqual(spec.argv[:4], ["python3", "-m", "telegram_portable_session_tool.cli", "plan-session"])
+        self.assertEqual(spec.cwd, Path("/home/max/telegram-portable-session-tool"))
+
+    def test_session_run_command_adds_execute_and_auto_send_flags(self) -> None:
+        spec = session_run_command(
+            config_path="/tmp/runtime.json",
+            state_file="/tmp/state.json",
+            runs_dir="/tmp/runs",
+            auto_send=True,
+            launch_if_needed=True,
+        )
+        self.assertIn("--execute", spec.argv)
+        self.assertIn("--launch-if-needed", spec.argv)
+        self.assertIn("--auto-send", spec.argv)
 
 
 if __name__ == "__main__":

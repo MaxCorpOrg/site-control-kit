@@ -245,12 +245,18 @@
 ## Проверено
 - После перевода Telegram control center в русский двухрежимный UX подтверждены:
   - `python3 -m py_compile tool_platform/*.py scripts/telegram_portable.py scripts/telegram_invite_executor.py`
-  - `PYTHONPATH="$PWD" python3 -m unittest discover -s tests -p 'test_*.py'` → `192 OK`
+  - `PYTHONPATH="$PWD" python3 -m unittest discover -s tests -p 'test_*.py'` → `195 OK`
   - `bash -n tools/telegram/platform/bin/tool-platform tools/telegram/platform/bin/tool-platform-panel tools/telegram/session_runner/bin/telegram-session-runner tools/telegram/invite_manager/bin/telegram-invite-manager tools/telegram/invite_manager/bin/telegram-invite-executor`
   - `./tools/telegram/platform/bin/tool-platform validate-registry`
   - live GUI smoke: окно `Центр управления Telegram` поднято, `xwininfo` подтвердил `1460x980`, старый английский тестовый экземпляр панели закрыт.
   - дополнительный live UX-fix: блок `Добавить / подключить профили` вынесен в отдельное окно, чтобы кнопки `Инвайты по списку` и `Сессия и сообщения` были видны сразу на основном экране.
   - дополнительный UX-fix: на главном экране появились явные кнопки `Старт инвайтов` и `Старт сессии`, а загрузка invite-списка названа прямо как `Загрузить TXT / CSV / JSON`.
+  - критический live-fix: запуск panel actions переведён с прямого синхронного вызова на фоновый subprocess с безопасным возвратом через main-thread queue, поэтому `Показать план` и `Старт` больше не упираются в Tk thread-boundary;
+  - добавлены явные `Стоп`-кнопки для invite/session режимов, общий лог панели `/tmp/telegram-control-center-panel.log` и вертикальная прокрутка длинного экрана;
+  - live smoke самой панели через callbacks подтверждён:
+    - `Старт инвайтов` создал job из `.txt` списка и вернул статус `Завершено`;
+    - `Показать план` для session runner вернул статус `Завершено` и план с визитами/черновиком;
+    - `Стоп` подтвердил остановку долгой фоновой команды со статусом `Остановлено`.
 - Для нового unified tool platform зелёные:
   - `PYTHONPATH="$PWD" python3 -m unittest discover -s tests -p 'test_*.py'`
   - `python3 -m py_compile tool_platform/*.py scripts/telegram_invite_executor.py scripts/telegram_portable.py`
