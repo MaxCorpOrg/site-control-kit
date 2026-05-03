@@ -10,16 +10,21 @@ from tool_platform.catalog import find_action, find_tool, load_catalog
 from tool_platform.cli import execute_action
 from tool_platform.gui import format_profile_details, format_workflow_details
 from tool_platform.telegram_gui_helpers import (
+    active_profile_conflict,
     build_session_runtime_config,
+    combined_flow_state_path,
     contact_job_snapshot,
     contact_add_batch_command,
+    default_combined_flow_state,
     default_invite_job_dir,
     default_contact_add_job_dir,
     format_session_target_label,
     invite_manager_init_command,
+    load_combined_flow_state,
     parse_plaintext_usernames,
     preview_invite_input_file,
     prepare_invite_input_file,
+    save_combined_flow_state,
     session_config_defaults,
     session_history_snapshot,
     session_plan_command,
@@ -358,6 +363,53 @@ class ToolPlatformCatalogTests(unittest.TestCase):
             output_root="/tmp/telegram_invite_jobs",
         )
         self.assertEqual(str(result), "/tmp/telegram_invite_jobs/contact_add__AK__users")
+
+    def test_combined_flow_state_roundtrip_preserves_phase_and_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            state_path = combined_flow_state_path(
+                profile_name="AK",
+                profile_dir="/home/max/TelegramPortableAK",
+                state_root=tmp_dir,
+            )
+            save_combined_flow_state(
+                profile_name="AK",
+                profile_dir="/home/max/TelegramPortableAK",
+                state_root=tmp_dir,
+                payload={
+                    "phase": "session_ready",
+                    "input_path": "/tmp/users.txt",
+                    "invite_job_dir": "/tmp/job",
+                    "last_status": "completed",
+                },
+            )
+            state = load_combined_flow_state(
+                profile_name="AK",
+                profile_dir="/home/max/TelegramPortableAK",
+                state_root=tmp_dir,
+            )
+            exists_before_cleanup = state_path.exists()
+
+        self.assertTrue(exists_before_cleanup)
+        self.assertEqual(state["phase"], "session_ready")
+        self.assertEqual(state["input_path"], "/tmp/users.txt")
+        self.assertEqual(state["invite_job_dir"], "/tmp/job")
+        self.assertEqual(state["last_status"], "completed")
+
+    def test_default_combined_flow_state_starts_in_contact_add_phase(self) -> None:
+        state = default_combined_flow_state("AK", "/home/max/TelegramPortableAK")
+        self.assertEqual(state["phase"], "contact_add")
+        self.assertEqual(state["last_status"], "idle")
+
+    def test_active_profile_conflict_detects_same_running_profile(self) -> None:
+        conflict = active_profile_conflict(
+            {
+                "telegram_invite_manager": "/home/max/TelegramPortableAK",
+                "telegram_session_runner": "/home/max/TelegramPortableAK2",
+            },
+            "/home/max/TelegramPortableAK",
+            current_tool_id="telegram_combined_flow",
+        )
+        self.assertEqual(conflict, ("telegram_invite_manager", "/home/max/TelegramPortableAK"))
 
     def test_parse_plaintext_usernames_skips_comments_and_deduplicates(self) -> None:
         usernames = parse_plaintext_usernames(

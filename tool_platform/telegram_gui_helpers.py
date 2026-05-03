@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import Counter
 import csv
+from datetime import datetime, timezone
 import json
 import re
 import subprocess
@@ -17,10 +18,12 @@ DEFAULT_SESSION_REPO = Path("/home/max/telegram-portable-session-tool")
 DEFAULT_SESSION_CONFIG = DEFAULT_SESSION_REPO / "examples" / "session.example.json"
 DEFAULT_SESSION_STATE_FILE = DEFAULT_SESSION_REPO / ".state" / "session_state.json"
 DEFAULT_SESSION_RUNS_DIR = DEFAULT_SESSION_REPO / "runs"
+DEFAULT_PANEL_STATE_ROOT = Path("/tmp/telegram-control-center")
 USERNAME_RE = re.compile(r"^@?[A-Za-z0-9_]{5,32}$")
 CONTACT_PENDING_STATUSES = {"new", "checked"}
 CONTACT_SUCCESS_STATUSES = {"contact_added"}
 CONTACT_ERROR_STATUSES = {"failed"}
+COMBINED_PHASES = {"contact_add", "review", "session_ready", "session_running", "stopped"}
 
 
 @dataclass(frozen=True)
@@ -45,6 +48,10 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def _now_utc() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def parse_json_payload(stdout: str) -> dict[str, Any]:
@@ -99,6 +106,99 @@ def default_contact_add_job_dir(
 def contact_add_chat_url(*, profile_name: str, account_username: str = "") -> str:
     identity = _safe_slug(account_username or profile_name, "profile")
     return f"contacts://{identity}"
+
+
+def combined_flow_state_path(
+    *,
+    profile_name: str,
+    profile_dir: str | Path,
+    state_root: str | Path = DEFAULT_PANEL_STATE_ROOT,
+) -> Path:
+    profile_slug = _safe_slug(profile_name, "profile")
+    dir_slug = _safe_slug(Path(profile_dir).expanduser().resolve().name if str(profile_dir or "").strip() else "portable", "portable")
+    return Path(state_root).expanduser().resolve() / "combined_flows" / f"{profile_slug}__{dir_slug}.json"
+
+
+def default_combined_flow_state(profile_name: str, profile_dir: str | Path) -> dict[str, Any]:
+    return {
+        "profile_name": str(profile_name or "").strip() or "profile",
+        "profile_dir": str(Path(profile_dir).expanduser().resolve()) if str(profile_dir or "").strip() else "",
+        "phase": "contact_add",
+        "input_path": "",
+        "invite_job_dir": "",
+        "session_config_path": "",
+        "last_runtime_config_path": "",
+        "last_action": "",
+        "last_status": "idle",
+        "last_summary": "",
+        "last_invite_status": "",
+        "last_session_status": "",
+        "last_session_run_dir": "",
+        "updated_at": "",
+    }
+
+
+def load_combined_flow_state(
+    *,
+    profile_name: str,
+    profile_dir: str | Path,
+    state_root: str | Path = DEFAULT_PANEL_STATE_ROOT,
+) -> dict[str, Any]:
+    path = combined_flow_state_path(
+        profile_name=profile_name,
+        profile_dir=profile_dir,
+        state_root=state_root,
+    )
+    if not path.exists():
+        return default_combined_flow_state(profile_name, profile_dir)
+    payload = _load_json_file(path)
+    if not isinstance(payload, dict):
+        raise ValueError("combined flow state must contain a JSON object")
+    state = default_combined_flow_state(profile_name, profile_dir)
+    state.update({key: value for key, value in payload.items() if key in state})
+    if str(state.get("phase") or "") not in COMBINED_PHASES:
+        state["phase"] = "contact_add"
+    return state
+
+
+def save_combined_flow_state(
+    *,
+    profile_name: str,
+    profile_dir: str | Path,
+    payload: dict[str, Any],
+    state_root: str | Path = DEFAULT_PANEL_STATE_ROOT,
+) -> Path:
+    state = default_combined_flow_state(profile_name, profile_dir)
+    state.update({key: value for key, value in payload.items() if key in state})
+    if str(state.get("phase") or "") not in COMBINED_PHASES:
+        state["phase"] = "contact_add"
+    state["updated_at"] = _now_utc()
+    path = combined_flow_state_path(
+        profile_name=profile_name,
+        profile_dir=profile_dir,
+        state_root=state_root,
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
+def active_profile_conflict(
+    active_profiles: dict[str, str],
+    requested_profile_dir: str | Path,
+    *,
+    current_tool_id: str | None = None,
+) -> tuple[str, str] | None:
+    requested = str(Path(requested_profile_dir).expanduser().resolve()) if str(requested_profile_dir or "").strip() else ""
+    if not requested:
+        return None
+    for tool_id, profile_dir in active_profiles.items():
+        if current_tool_id is not None and tool_id == current_tool_id:
+            continue
+        normalized = str(Path(profile_dir).expanduser().resolve()) if str(profile_dir or "").strip() else ""
+        if normalized and normalized == requested:
+            return tool_id, normalized
+    return None
 
 
 def parse_plaintext_usernames(text: str) -> list[str]:

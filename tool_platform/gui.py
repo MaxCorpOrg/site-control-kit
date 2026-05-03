@@ -32,17 +32,23 @@ from .catalog import DEFAULT_REGISTRY_PATH, ToolManifest, load_catalog
 from .telegram_gui_helpers import (
     CommandSpec,
     DEFAULT_INVITE_OUTPUT_ROOT,
+    DEFAULT_PANEL_STATE_ROOT,
     DEFAULT_SESSION_CONFIG,
     DEFAULT_SESSION_RUNS_DIR,
     DEFAULT_SESSION_STATE_FILE,
+    active_profile_conflict,
     build_session_runtime_config,
+    combined_flow_state_path,
     contact_job_snapshot,
     contact_add_batch_command,
     default_contact_add_job_dir,
+    default_combined_flow_state,
     format_session_target_label,
     invite_manager_next_command,
+    load_combined_flow_state,
     parse_json_payload,
     preview_invite_input_file,
+    save_combined_flow_state,
     session_config_defaults,
     session_history_snapshot,
     session_plan_command,
@@ -282,6 +288,73 @@ def format_session_history(snapshot: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def format_session_targets_summary(targets: list[dict[str, Any]], *, limit: int = 8) -> str:
+    lines = [f"Адресаты для сообщений: {len(targets)}"]
+    if not targets:
+        lines.append("Список пока пуст. Загрузи адресатов из конфига или добавь их в экране `Сессия и сообщения`.")
+        return "\n".join(lines)
+    for item in targets[:limit]:
+        lines.append(f"- {format_session_target_label(item)}")
+    if len(targets) > limit:
+        lines.append(f"... и ещё {len(targets) - limit}")
+    return "\n".join(lines)
+
+
+def combined_phase_label(phase: str) -> str:
+    mapping = {
+        "contact_add": "Шаг 1: добавление контактов",
+        "review": "Проверка результата и решение по продолжению",
+        "session_ready": "Шаг 2 готов: можно запускать сессию",
+        "session_running": "Шаг 2 выполняется: сессия работает",
+        "stopped": "Остановлено / завершено",
+    }
+    return mapping.get(str(phase or "").strip(), "Неизвестная фаза")
+
+
+def format_combined_flow_state(
+    state: dict[str, Any],
+    *,
+    profile_label: str,
+    session_targets: list[dict[str, Any]],
+    invite_snapshot: dict[str, Any] | None = None,
+    session_snapshot: dict[str, Any] | None = None,
+) -> str:
+    phase = str(state.get("phase") or "contact_add")
+    lines = [
+        "Совместный режим `Добавить → Сессия`",
+        f"Профиль: {profile_label}",
+        f"Фаза: {combined_phase_label(phase)}",
+        f"Последнее действие: {state.get('last_action') or 'ещё не запускалось'}",
+        f"Последний статус: {state.get('last_status') or '-'}",
+        f"Файл контактов: {state.get('input_path') or 'не выбран'}",
+        f"Папка задачи: {state.get('invite_job_dir') or 'не задана'}",
+    ]
+    if state.get("last_session_run_dir"):
+        lines.append(f"Последний session run: {state.get('last_session_run_dir')}")
+    if phase == "contact_add":
+        lines.append("Что дальше: выбери файл контактов и нажми `1. Старт добавления`.")
+    elif phase == "review":
+        lines.append("Что дальше: посмотри ошибки ниже и нажми `Разрешить переход к сессии`, если можно продолжать.")
+    elif phase == "session_ready":
+        lines.append("Что дальше: проверь настройки сессии и нажми `2. Старт сессии`.")
+    elif phase == "session_running":
+        lines.append("Что дальше: наблюдай лог ниже или нажми `Стоп`.")
+    else:
+        lines.append("Что дальше: можно повторно запустить шаг добавления или сразу перейти к новой сессии.")
+    if invite_snapshot and str(invite_snapshot.get("status") or "") == "ready":
+        lines.append(
+            f"Контакты: осталось {invite_snapshot.get('pending_total') or 0}, добавлено {invite_snapshot.get('added_total') or 0}, ошибок {invite_snapshot.get('failed_total') or 0}"
+        )
+    if session_snapshot and str(session_snapshot.get("status") or "") != "missing":
+        last_run = session_snapshot.get("last_run") if isinstance(session_snapshot.get("last_run"), dict) else {}
+        if last_run:
+            lines.append(
+                f"Сессии: последнее отправлено {last_run.get('sent_count') or 0}, визитов {last_run.get('visit_count') or 0}, статус {last_run.get('status') or '-'}"
+            )
+    lines.extend(["", format_session_targets_summary(session_targets)])
+    return "\n".join(lines)
+
+
 def format_invite_status_payload(payload: dict[str, Any]) -> str:
     counts = payload.get("counts") if isinstance(payload.get("counts"), dict) else {}
     next_users = payload.get("users") if isinstance(payload.get("users"), list) else []
@@ -480,6 +553,9 @@ if tk is not None:
             self.invite_job_dir_var = tk.StringVar()
             self.invite_limit_var = tk.StringVar(value="10")
             self.invite_preview_var = tk.StringVar(value="Список ещё не выбран")
+            self.combined_input_path_var = tk.StringVar()
+            self.combined_job_dir_var = tk.StringVar()
+            self.combined_preview_var = tk.StringVar(value="Список ещё не выбран")
 
             self.session_config_path_var = tk.StringVar(value=str(DEFAULT_SESSION_CONFIG))
             self.session_new_target_var = tk.StringVar()
@@ -495,18 +571,23 @@ if tk is not None:
             self.session_timer_var = tk.StringVar(value="00:00:00")
             self.invite_status_var = tk.StringVar(value="Готово")
             self.session_status_var = tk.StringVar(value="Готово")
+            self.combined_status_var = tk.StringVar(value="Готово")
+            self.combined_phase_var = tk.StringVar(value=combined_phase_label("contact_add"))
 
             self._profiles: list[dict[str, Any]] = []
             self._session_targets: list[dict[str, Any]] = []
             self._active_tool_id = "telegram_invite_manager"
             self._active_processes: dict[str, subprocess.Popen[str]] = {}
+            self._active_process_profiles: dict[str, str] = {}
             self._busy_controls: dict[str, list[Any]] = {
                 "telegram_invite_manager": [],
                 "telegram_session_runner": [],
+                "telegram_combined_flow": [],
             }
             self._stop_controls: dict[str, list[Any]] = {
                 "telegram_invite_manager": [],
                 "telegram_session_runner": [],
+                "telegram_combined_flow": [],
             }
             self._process_lock = threading.Lock()
             self._ui_queue: queue.Queue[tuple[str, str, dict[str, Any] | None, str, bool, Callable[[dict[str, Any]], None]]] = queue.Queue()
@@ -516,6 +597,7 @@ if tk is not None:
             self._monitor_after_ids: dict[str, str | None] = {
                 "telegram_invite_manager": None,
                 "telegram_session_runner": None,
+                "telegram_combined_flow": None,
             }
 
             self.profile_combo: ttk.Combobox | None = None
@@ -531,12 +613,20 @@ if tk is not None:
             self.session_output: tk.Text | None = None
             self.session_summary_text: tk.Text | None = None
             self.session_history_text: tk.Text | None = None
+            self.combined_output: tk.Text | None = None
+            self.combined_state_text: tk.Text | None = None
+            self.combined_contact_text: tk.Text | None = None
+            self.combined_session_text: tk.Text | None = None
+            self.combined_targets_text: tk.Text | None = None
             self.session_targets_list: tk.Listbox | None = None
             self.session_templates_text: tk.Text | None = None
+            self.combined_templates_text: tk.Text | None = None
+            self._session_template_widgets: list[tk.Text] = []
             self._tool_buttons: dict[str, tk.Button] = {}
             self._tool_frames: dict[str, ttk.Frame] = {}
 
             self.invite_input_path_var.trace_add("write", self._sync_contact_job_dir)
+            self.combined_input_path_var.trace_add("write", self._sync_combined_job_dir)
 
             self._build_ui()
             self._reload_profiles(initial=True)
@@ -704,20 +794,42 @@ if tk is not None:
             return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
         def _set_session_templates(self, templates: list[str]) -> None:
-            if self.session_templates_text is None:
-                return
-            self.session_templates_text.delete("1.0", tk.END)
-            if templates:
-                self.session_templates_text.insert("1.0", "\n".join(str(item) for item in templates))
+            content = "\n".join(str(item) for item in templates)
+            for widget in self._session_template_widgets:
+                widget.delete("1.0", tk.END)
+                if content:
+                    widget.insert("1.0", content)
 
         def _session_templates(self) -> list[str]:
-            if self.session_templates_text is None:
+            if not self._session_template_widgets:
                 return []
+            focused = self.focus_get()
+            source: tk.Text | None = None
+            if isinstance(focused, tk.Text) and focused in self._session_template_widgets:
+                source = focused
+            elif self.session_templates_text is not None:
+                source = self.session_templates_text
+            else:
+                source = self._session_template_widgets[0]
+            content = source.get("1.0", tk.END)
+            for widget in self._session_template_widgets:
+                if widget is source:
+                    continue
+                current = widget.get("1.0", tk.END)
+                if current != content:
+                    widget.delete("1.0", tk.END)
+                    widget.insert("1.0", content)
             return [
                 line.strip()
-                for line in self.session_templates_text.get("1.0", tk.END).splitlines()
+                for line in content.splitlines()
                 if line.strip()
             ]
+
+        def _register_session_template_widget(self, widget: tk.Text, *, primary: bool = False) -> None:
+            self._session_template_widgets.append(widget)
+            widget.bind("<FocusOut>", lambda _event: self._session_templates(), add="+")
+            if primary or self.session_templates_text is None:
+                self.session_templates_text = widget
 
         def _update_session_timer(self) -> None:
             if self._session_timer_started_at is None:
@@ -746,14 +858,25 @@ if tk is not None:
                 self.session_timer_var.set("00:00:00")
 
         def _status_var_for_tool(self, tool_id: str) -> tk.StringVar:
-            return (
-                self.invite_status_var
-                if tool_id == "telegram_invite_manager"
-                else self.session_status_var
-            )
+            if tool_id == "telegram_invite_manager":
+                return self.invite_status_var
+            if tool_id == "telegram_combined_flow":
+                return self.combined_status_var
+            return self.session_status_var
 
         def _output_widget_for_tool(self, tool_id: str) -> tk.Text | None:
-            return self.invite_output if tool_id == "telegram_invite_manager" else self.session_output
+            if tool_id == "telegram_invite_manager":
+                return self.invite_output
+            if tool_id == "telegram_combined_flow":
+                return self.combined_output
+            return self.session_output
+
+        def _tool_label(self, tool_id: str) -> str:
+            return {
+                "telegram_invite_manager": "Добавить контакты из TXT",
+                "telegram_session_runner": "Сессия и сообщения",
+                "telegram_combined_flow": "Совместный режим",
+            }.get(tool_id, tool_id)
 
         def _log_event(self, tool_id: str, message: str) -> None:
             line = f"[{datetime.now().strftime('%H:%M:%S')}] {message}"
@@ -797,6 +920,8 @@ if tk is not None:
             try:
                 if tool_id == "telegram_invite_manager":
                     self._refresh_invite_dashboard()
+                elif tool_id == "telegram_combined_flow":
+                    self._refresh_combined_dashboard()
                 elif tool_id == "telegram_session_runner":
                     self._refresh_session_dashboard()
             except Exception as exc:
@@ -912,11 +1037,28 @@ if tk is not None:
             command: CommandSpec,
             on_success: Callable[[dict[str, Any]], None],
             monitor_active_state: bool = False,
+            profile_dir: str = "",
         ) -> None:
             with self._process_lock:
                 existing = self._active_processes.get(tool_id)
                 if existing is not None and existing.poll() is None:
                     messagebox.showinfo("Панель Telegram", "Сначала дождись завершения текущего действия или нажми `Стоп`.")
+                    return
+                conflict = active_profile_conflict(
+                    self._active_process_profiles,
+                    profile_dir,
+                    current_tool_id=tool_id,
+                )
+                if conflict is not None:
+                    conflicting_tool_id, _ = conflict
+                    messagebox.showinfo(
+                        "Панель Telegram",
+                        (
+                            "Этот Telegram-профиль уже занят другим живым действием.\n\n"
+                            f"Активный режим: {self._tool_label(conflicting_tool_id)}\n"
+                            "Сначала дождись завершения или нажми `Стоп` в активном режиме."
+                        ),
+                    )
                     return
 
             command_text = shlex.join(command.argv)
@@ -944,6 +1086,8 @@ if tk is not None:
                     )
                     with self._process_lock:
                         self._active_processes[tool_id] = proc
+                        if str(profile_dir).strip():
+                            self._active_process_profiles[tool_id] = str(Path(profile_dir).expanduser().resolve())
                     stdout, stderr = proc.communicate()
                     stopped = proc.returncode in (-15, -9)
                     if proc.returncode == 0:
@@ -957,6 +1101,7 @@ if tk is not None:
                         current = self._active_processes.get(tool_id)
                         if current is proc:
                             self._active_processes.pop(tool_id, None)
+                        self._active_process_profiles.pop(tool_id, None)
                 self._ui_queue.put(
                     (
                         tool_id,
@@ -1013,6 +1158,16 @@ if tk is not None:
                 self._log_event(tool_id, f"Остановлено: {action_label}")
                 if tool_id == "telegram_invite_manager":
                     self._refresh_invite_dashboard()
+                elif tool_id == "telegram_combined_flow":
+                    try:
+                        self._set_combined_phase(
+                            "stopped",
+                            last_action=action_label,
+                            last_status="stopped",
+                        )
+                    except Exception:
+                        pass
+                    self._refresh_combined_dashboard()
                 elif tool_id == "telegram_session_runner":
                     self._refresh_session_dashboard()
                 return
@@ -1022,6 +1177,16 @@ if tk is not None:
                 self._log_event(tool_id, error_text)
                 if tool_id == "telegram_invite_manager":
                     self._refresh_invite_dashboard()
+                elif tool_id == "telegram_combined_flow":
+                    try:
+                        self._save_combined_state(
+                            last_action=action_label,
+                            last_status="error",
+                            last_summary=error_text,
+                        )
+                    except Exception:
+                        pass
+                    self._refresh_combined_dashboard()
                 elif tool_id == "telegram_session_runner":
                     self._refresh_session_dashboard()
                 messagebox.showerror("Панель Telegram", error_text)
@@ -1195,6 +1360,7 @@ if tk is not None:
             tools = [
                 ("telegram_invite_manager", "Добавить контакты из TXT"),
                 ("telegram_session_runner", "Старт сессии"),
+                ("telegram_combined_flow", "Совместный режим"),
             ]
             for tool_id, label in tools:
                 button = tk.Button(
@@ -1211,7 +1377,7 @@ if tk is not None:
                 self._tool_buttons[tool_id] = button
             ttk.Label(
                 body,
-                text="`Добавить контакты из TXT` открывает простой режим реального добавления username в контакты выбранного сверху профиля. `Старт сессии` открывает random walk и список адресатов сообщений.",
+                text="`Добавить контакты из TXT` запускает реальное добавление контактов. `Старт сессии` управляет random walk и сообщениями. `Совместный режим` ведёт по сценарию `Добавить → Сессия` на одном профиле.",
                 style="CardSubtitle.TLabel",
             ).pack(anchor="w", pady=(10, 0))
 
@@ -1221,16 +1387,20 @@ if tk is not None:
 
             invite_frame = ttk.Frame(container, style="App.TFrame")
             session_frame = ttk.Frame(container, style="App.TFrame")
+            combined_frame = ttk.Frame(container, style="App.TFrame")
             invite_frame.grid(row=0, column=0, sticky="nsew")
             session_frame.grid(row=0, column=0, sticky="nsew")
+            combined_frame.grid(row=0, column=0, sticky="nsew")
             container.columnconfigure(0, weight=1)
             container.rowconfigure(0, weight=1)
 
             self._tool_frames["telegram_invite_manager"] = invite_frame
             self._tool_frames["telegram_session_runner"] = session_frame
+            self._tool_frames["telegram_combined_flow"] = combined_frame
 
             self._build_invite_view(invite_frame)
             self._build_session_view(session_frame)
+            self._build_combined_view(combined_frame)
 
         def _build_invite_view(self, parent: ttk.Frame) -> None:
             body = self._create_card(
@@ -1411,7 +1581,7 @@ if tk is not None:
             body = self._create_card(
                 parent,
                 "Инструмент: Сессия и сообщения",
-                "Этот экран отдельно управляет живой Telegram-сессией: random walk по открытому профилю, список адресатов, текст сообщения, интервалы и история запусков.",
+                "Этот экран отдельно управляет живой Telegram-сессией: сверху сразу видны настройки визитов и отправки, ниже — адресаты, текст, история и живой лог.",
                 expand=True,
             )
             body.columnconfigure(0, weight=1)
@@ -1489,20 +1659,103 @@ if tk is not None:
             session_load_targets_button.grid(row=0, column=2, padx=(10, 0))
             self._register_busy_widget("telegram_session_runner", session_load_targets_button)
 
-            ttk.Label(body, text="Шаг 2. Список адресатов сообщений", style="Field.TLabel").grid(
-                row=3, column=0, sticky="w"
+            settings_panel = self._create_inline_panel(
+                body,
+                "Шаг 2. Настройки сессии",
+                "Эти параметры теперь наверху: сколько ходить по чатам, сколько времени держать чат открытым и сколько сообщений отправлять.",
             )
-            recipients_row = ttk.Frame(body, style="Card.TFrame")
-            recipients_row.grid(row=4, column=0, columnspan=2, sticky="nsew", pady=(6, 0))
-            recipients_row.columnconfigure(0, weight=1)
-            recipients_row.columnconfigure(1, weight=1)
+            settings_panel.grid(row=3, column=0, columnspan=2, sticky="nsew", pady=(6, 0))
+            settings_panel.columnconfigure(1, weight=1)
+            settings_panel.columnconfigure(3, weight=1)
+
+            ttk.Label(settings_panel, text="Визитов за один цикл", style="Field.TLabel").grid(
+                row=2, column=0, sticky="w"
+            )
+            ttk.Entry(settings_panel, textvariable=self.session_visit_count_var, width=10).grid(
+                row=2, column=1, sticky="w", padx=(12, 0)
+            )
+            ttk.Label(
+                settings_panel,
+                text="Сколько случайных переходов по чатам сделать за один цикл сессии.",
+                style="CardSubtitle.TLabel",
+            ).grid(row=3, column=0, columnspan=2, sticky="w", pady=(4, 10))
+
+            ttk.Label(settings_panel, text="Минимум секунд в чате", style="Field.TLabel").grid(
+                row=2, column=2, sticky="w", padx=(16, 0)
+            )
+            ttk.Entry(settings_panel, textvariable=self.session_view_min_var, width=10).grid(
+                row=2, column=3, sticky="w", padx=(12, 0)
+            )
+            ttk.Label(
+                settings_panel,
+                text="Минимальная случайная пауза, сколько пользователь находится в открытом чате.",
+                style="CardSubtitle.TLabel",
+            ).grid(row=3, column=2, columnspan=2, sticky="w", padx=(16, 0), pady=(4, 10))
+
+            ttk.Label(settings_panel, text="Максимум секунд в чате", style="Field.TLabel").grid(
+                row=4, column=0, sticky="w"
+            )
+            ttk.Entry(settings_panel, textvariable=self.session_view_max_var, width=10).grid(
+                row=4, column=1, sticky="w", padx=(12, 0)
+            )
+            ttk.Label(
+                settings_panel,
+                text="Максимальная случайная пауза в одном чате.",
+                style="CardSubtitle.TLabel",
+            ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(4, 10))
+
+            ttk.Label(settings_panel, text="Сообщений за один цикл", style="Field.TLabel").grid(
+                row=4, column=2, sticky="w", padx=(16, 0)
+            )
+            ttk.Entry(settings_panel, textvariable=self.session_messages_per_cycle_var, width=10).grid(
+                row=4, column=3, sticky="w", padx=(12, 0)
+            )
+            ttk.Label(
+                settings_panel,
+                text="Сколько сообщений пытаться отправить за один проход по сессии.",
+                style="CardSubtitle.TLabel",
+            ).grid(row=5, column=2, columnspan=2, sticky="w", padx=(16, 0), pady=(4, 10))
+
+            ttk.Label(settings_panel, text="Максимум отправить за всю сессию", style="Field.TLabel").grid(
+                row=6, column=0, sticky="w"
+            )
+            ttk.Entry(settings_panel, textvariable=self.session_total_limit_var, width=10).grid(
+                row=6, column=1, sticky="w", padx=(12, 0)
+            )
+            ttk.Label(
+                settings_panel,
+                text="Поставь `0`, если лимит не нужен и сессия должна слать сообщения до ручного `Стоп`.",
+                style="CardSubtitle.TLabel",
+            ).grid(row=7, column=0, columnspan=2, sticky="w", pady=(4, 10))
+
+            ttk.Checkbutton(
+                settings_panel,
+                text="Отправлять сообщения сразу, а не оставлять в строке ввода",
+                variable=self.session_auto_send_var,
+            ).grid(row=6, column=2, columnspan=2, sticky="w", padx=(16, 0))
+            ttk.Checkbutton(
+                settings_panel,
+                text="Крутить сессию непрерывно до нажатия `Стоп`",
+                variable=self.session_continuous_var,
+            ).grid(row=7, column=2, columnspan=2, sticky="w", padx=(16, 0), pady=(8, 0))
+
+            ttk.Label(
+                body,
+                text="Текущий профиль сверху будет автоматически подставлен в runtime-config перед запуском.",
+                style="CardSubtitle.TLabel",
+            ).grid(row=4, column=0, columnspan=2, sticky="w", pady=(12, 0))
+
+            editors_row = ttk.Frame(body, style="Card.TFrame")
+            editors_row.grid(row=5, column=0, columnspan=2, sticky="nsew", pady=(12, 0))
+            editors_row.columnconfigure(0, weight=1)
+            editors_row.columnconfigure(1, weight=1)
 
             recipients_panel = self._create_inline_panel(
-                recipients_row,
-                "Кому писать",
-                "Список справа не нужен: выбери адресатов здесь или загрузи их из конфига.",
+                editors_row,
+                "Шаг 3. Кому писать",
+                "Список адресатов и ручное добавление. Это отдельный блок, чтобы он не спорил по месту с настройками сессии.",
             )
-            recipients_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 12))
+            recipients_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
             recipients_panel.columnconfigure(0, weight=1)
             recipients_panel.rowconfigure(2, weight=1)
 
@@ -1553,109 +1806,23 @@ if tk is not None:
             )
             session_add_target_button.grid(row=11, column=0, sticky="ew", pady=(10, 0))
             self._register_busy_widget("telegram_session_runner", session_add_target_button)
-
             ttk.Label(
                 recipients_panel,
                 text="Введи @username, при желании дай понятное имя и выбери тип адресата.",
                 style="CardSubtitle.TLabel",
             ).grid(row=12, column=0, sticky="w", pady=(10, 0))
 
-            settings_panel = self._create_inline_panel(
-                recipients_row,
-                "Как писать",
-                "Здесь задаётся режим самой сессии: длительность визитов, количество сообщений и непрерывная работа до нажатия `Стоп`.",
-            )
-            settings_panel.grid(row=0, column=1, sticky="nsew")
-            settings_panel.columnconfigure(1, weight=1)
-
-            ttk.Label(settings_panel, text="Визитов за один цикл", style="Field.TLabel").grid(
-                row=2, column=0, sticky="w"
-            )
-            ttk.Entry(settings_panel, textvariable=self.session_visit_count_var, width=10).grid(
-                row=2, column=1, sticky="w", padx=(12, 0)
-            )
-            ttk.Label(
-                settings_panel,
-                text="Сколько случайных переходов по чатам сделать за один цикл сессии.",
-                style="CardSubtitle.TLabel",
-            ).grid(row=3, column=0, columnspan=2, sticky="w", pady=(4, 10))
-
-            ttk.Label(settings_panel, text="Минимум секунд в чате", style="Field.TLabel").grid(
-                row=4, column=0, sticky="w"
-            )
-            ttk.Entry(settings_panel, textvariable=self.session_view_min_var, width=10).grid(
-                row=4, column=1, sticky="w", padx=(12, 0)
-            )
-            ttk.Label(
-                settings_panel,
-                text="Минимальная случайная пауза, сколько пользователь находится в открытом чате.",
-                style="CardSubtitle.TLabel",
-            ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(4, 10))
-
-            ttk.Label(settings_panel, text="Максимум секунд в чате", style="Field.TLabel").grid(
-                row=6, column=0, sticky="w"
-            )
-            ttk.Entry(settings_panel, textvariable=self.session_view_max_var, width=10).grid(
-                row=6, column=1, sticky="w", padx=(12, 0)
-            )
-            ttk.Label(
-                settings_panel,
-                text="Максимальная случайная пауза в одном чате.",
-                style="CardSubtitle.TLabel",
-            ).grid(row=7, column=0, columnspan=2, sticky="w", pady=(4, 10))
-
-            ttk.Label(settings_panel, text="Сообщений за один цикл", style="Field.TLabel").grid(
-                row=8, column=0, sticky="w"
-            )
-            ttk.Entry(settings_panel, textvariable=self.session_messages_per_cycle_var, width=10).grid(
-                row=8, column=1, sticky="w", padx=(12, 0)
-            )
-            ttk.Label(
-                settings_panel,
-                text="Сколько сообщений пытаться отправить за один проход по сессии.",
-                style="CardSubtitle.TLabel",
-            ).grid(row=9, column=0, columnspan=2, sticky="w", pady=(4, 10))
-
-            ttk.Label(settings_panel, text="Максимум отправить за всю сессию", style="Field.TLabel").grid(
-                row=10, column=0, sticky="w"
-            )
-            ttk.Entry(settings_panel, textvariable=self.session_total_limit_var, width=10).grid(
-                row=10, column=1, sticky="w", padx=(12, 0)
-            )
-            ttk.Label(
-                settings_panel,
-                text="Поставь `0`, если лимит не нужен и сессия должна слать сообщения до ручного `Стоп`.",
-                style="CardSubtitle.TLabel",
-            ).grid(row=11, column=0, columnspan=2, sticky="w", pady=(4, 10))
-
-            ttk.Checkbutton(
-                settings_panel,
-                text="Отправлять сообщения сразу, а не оставлять в строке ввода",
-                variable=self.session_auto_send_var,
-            ).grid(row=12, column=0, columnspan=2, sticky="w")
-            ttk.Checkbutton(
-                settings_panel,
-                text="Крутить сессию непрерывно до нажатия `Стоп`",
-                variable=self.session_continuous_var,
-            ).grid(row=13, column=0, columnspan=2, sticky="w", pady=(8, 0))
-
-            ttk.Label(
-                body,
-                text="Текущий профиль сверху будет автоматически подставлен в runtime-config перед запуском.",
-                style="CardSubtitle.TLabel",
-            ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(12, 0))
-
             templates_panel = self._create_inline_panel(
-                body,
-                "Шаг 3. Текст сообщения",
-                "Одна строка = один шаблон. Если строк несколько, session runner будет их ротировать между циклами.",
+                editors_row,
+                "Шаг 4. Текст сообщения",
+                "Одна строка = один шаблон. Этот блок справа, чтобы одновременно видеть и список адресатов, и тексты.",
             )
-            templates_panel.grid(row=6, column=0, columnspan=2, sticky="nsew", pady=(12, 0))
+            templates_panel.grid(row=0, column=1, sticky="nsew")
             templates_panel.columnconfigure(0, weight=1)
-            self.session_templates_text = tk.Text(
+            session_templates = tk.Text(
                 templates_panel,
                 wrap="word",
-                height=6,
+                height=12,
                 bg=self._colors["field"],
                 fg=self._colors["text"],
                 insertbackground=self._colors["text"],
@@ -1668,15 +1835,16 @@ if tk is not None:
                 pady=10,
                 font=self._fonts["base"],
             )
-            self.session_templates_text.grid(row=2, column=0, sticky="nsew")
-            self._bind_scroll_to_widget(self.session_templates_text)
+            session_templates.grid(row=2, column=0, sticky="nsew")
+            self._bind_scroll_to_widget(session_templates)
+            self._register_session_template_widget(session_templates, primary=True)
 
             summary_panel = self._create_inline_panel(
                 body,
                 "Сводка и подтверждение отправки",
                 "Здесь видно общий прогресс, последний запуск и сообщения, которые не были отправлены.",
             )
-            summary_panel.grid(row=7, column=0, sticky="nsew", pady=(14, 0), padx=(0, 10))
+            summary_panel.grid(row=6, column=0, sticky="nsew", pady=(14, 0), padx=(0, 10))
             summary_panel.columnconfigure(0, weight=1)
             self.session_summary_text = self._create_readonly_text(summary_panel, height=10)
             self.session_summary_text.grid(row=2, column=0, sticky="nsew")
@@ -1687,19 +1855,276 @@ if tk is not None:
                 "История запусков сессии",
                 "Показывает последние run.json: статус, визиты, сколько сообщений действительно отправлено.",
             )
-            history_panel.grid(row=7, column=1, sticky="nsew", pady=(14, 0))
+            history_panel.grid(row=6, column=1, sticky="nsew", pady=(14, 0))
             history_panel.columnconfigure(0, weight=1)
             self.session_history_text = self._create_readonly_text(history_panel, height=10)
             self.session_history_text.grid(row=2, column=0, sticky="nsew")
             self._bind_scroll_to_widget(self.session_history_text)
 
             ttk.Label(body, text="Живой статус и лог", style="Field.TLabel").grid(
-                row=8, column=0, sticky="w", pady=(16, 0)
+                row=7, column=0, sticky="w", pady=(16, 0)
             )
             self.session_output = self._create_readonly_text(body, height=16)
-            self.session_output.grid(row=9, column=0, columnspan=2, sticky="nsew", pady=(6, 0))
+            self.session_output.grid(row=8, column=0, columnspan=2, sticky="nsew", pady=(6, 0))
             self._bind_scroll_to_widget(self.session_output)
-            body.rowconfigure(9, weight=1)
+            body.rowconfigure(8, weight=1)
+
+        def _build_combined_view(self, parent: ttk.Frame) -> None:
+            body = self._create_card(
+                parent,
+                "Инструмент: Совместный режим `Добавить → Сессия`",
+                "Этот экран ведёт один профиль по цепочке: сначала добавляем контакты из файла, затем на том же профиле запускаем сессию и сообщения. Одновременно два живых действия на одном окне Telegram здесь не допускаются.",
+                expand=True,
+            )
+            body.columnconfigure(0, weight=1)
+            body.columnconfigure(1, weight=1)
+
+            top_buttons = ttk.Frame(body, style="Card.TFrame")
+            top_buttons.grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 12))
+            combined_contact_button = ttk.Button(
+                top_buttons,
+                text="1. Старт добавления",
+                style="Accent.TButton",
+                command=self._combined_start_contact_add,
+            )
+            combined_contact_button.pack(side=tk.LEFT)
+            self._register_busy_widget("telegram_combined_flow", combined_contact_button)
+            combined_allow_button = ttk.Button(
+                top_buttons,
+                text="Разрешить переход к сессии",
+                command=self._combined_allow_session,
+            )
+            combined_allow_button.pack(side=tk.LEFT, padx=(10, 0))
+            self._register_busy_widget("telegram_combined_flow", combined_allow_button)
+            combined_session_button = ttk.Button(
+                top_buttons,
+                text="2. Старт сессии",
+                command=self._combined_start_session,
+            )
+            combined_session_button.pack(side=tk.LEFT, padx=(10, 0))
+            self._register_busy_widget("telegram_combined_flow", combined_session_button)
+            combined_refresh_button = ttk.Button(
+                top_buttons,
+                text="Обновить экран",
+                command=self._refresh_combined_dashboard,
+            )
+            combined_refresh_button.pack(side=tk.LEFT, padx=(10, 0))
+            self._register_busy_widget("telegram_combined_flow", combined_refresh_button)
+            combined_stop_button = ttk.Button(
+                top_buttons,
+                text="Стоп",
+                command=lambda: self._stop_tool_process("telegram_combined_flow"),
+                state="disabled",
+            )
+            combined_stop_button.pack(side=tk.LEFT, padx=(10, 0))
+            self._register_stop_widget("telegram_combined_flow", combined_stop_button)
+            ttk.Label(
+                top_buttons,
+                textvariable=self.combined_status_var,
+                style="CardSubtitle.TLabel",
+            ).pack(side=tk.LEFT, padx=(16, 0))
+            ttk.Label(
+                top_buttons,
+                textvariable=self.combined_phase_var,
+                style="CardSubtitle.TLabel",
+            ).pack(side=tk.LEFT, padx=(12, 0))
+
+            ttk.Label(body, text="Шаг 1. Файл контактов", style="Field.TLabel").grid(
+                row=1, column=0, sticky="w"
+            )
+            file_row = ttk.Frame(body, style="Card.TFrame")
+            file_row.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(4, 10))
+            file_row.columnconfigure(0, weight=1)
+            ttk.Entry(file_row, textvariable=self.combined_input_path_var).grid(row=0, column=0, sticky="ew")
+            combined_choose_file_button = ttk.Button(
+                file_row,
+                text="Загрузить TXT / CSV / JSON",
+                command=self._choose_combined_input,
+            )
+            combined_choose_file_button.grid(row=0, column=1, padx=(10, 0))
+            self._register_busy_widget("telegram_combined_flow", combined_choose_file_button)
+            ttk.Label(body, textvariable=self.combined_preview_var, style="CardSubtitle.TLabel").grid(
+                row=3, column=0, columnspan=2, sticky="w"
+            )
+
+            ttk.Label(body, text="Шаг 2. Папка задачи добавления", style="Field.TLabel").grid(
+                row=4, column=0, sticky="w", pady=(8, 0)
+            )
+            ttk.Entry(body, textvariable=self.combined_job_dir_var).grid(
+                row=5, column=0, columnspan=2, sticky="ew", pady=(4, 10)
+            )
+
+            limit_row = ttk.Frame(body, style="Card.TFrame")
+            limit_row.grid(row=6, column=0, columnspan=2, sticky="w")
+            ttk.Label(limit_row, text="Сколько username обработать за один запуск", style="Field.TLabel").pack(
+                side=tk.LEFT
+            )
+            ttk.Entry(limit_row, textvariable=self.invite_limit_var, width=8).pack(
+                side=tk.LEFT,
+                padx=(10, 0),
+            )
+
+            ttk.Label(body, text="Шаг 3. Что уже произошло", style="Field.TLabel").grid(
+                row=7, column=0, sticky="w", pady=(10, 0)
+            )
+            self.combined_state_text = self._create_readonly_text(body, height=9)
+            self.combined_state_text.grid(row=8, column=0, columnspan=2, sticky="nsew", pady=(6, 0))
+            self._bind_scroll_to_widget(self.combined_state_text)
+
+            ttk.Label(body, text="Шаг 4. Настройки сессии и сообщений", style="Field.TLabel").grid(
+                row=9, column=0, sticky="w", pady=(14, 0)
+            )
+            settings_row = ttk.Frame(body, style="Card.TFrame")
+            settings_row.grid(row=10, column=0, columnspan=2, sticky="nsew", pady=(6, 0))
+            settings_row.columnconfigure(0, weight=1)
+            settings_row.columnconfigure(1, weight=1)
+
+            combined_settings_panel = self._create_inline_panel(
+                settings_row,
+                "Настройки сессии",
+                "Здесь всегда видны визиты за цикл, время в чате, число сообщений, лимит, автоотправка и режим до `Стоп`.",
+            )
+            combined_settings_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+            combined_settings_panel.columnconfigure(1, weight=1)
+            combined_settings_panel.columnconfigure(3, weight=1)
+
+            ttk.Label(combined_settings_panel, text="Конфиг режима", style="Field.TLabel").grid(
+                row=2, column=0, sticky="w"
+            )
+            combined_config_row = ttk.Frame(combined_settings_panel, style="Card.TFrame")
+            combined_config_row.grid(row=3, column=0, columnspan=4, sticky="ew", pady=(4, 10))
+            combined_config_row.columnconfigure(0, weight=1)
+            ttk.Entry(combined_config_row, textvariable=self.session_config_path_var).grid(
+                row=0, column=0, sticky="ew"
+            )
+            combined_choose_config_button = ttk.Button(
+                combined_config_row,
+                text="Выбрать конфиг",
+                command=self._choose_session_config,
+            )
+            combined_choose_config_button.grid(row=0, column=1, padx=(10, 0))
+            self._register_busy_widget("telegram_combined_flow", combined_choose_config_button)
+            combined_load_targets_button = ttk.Button(
+                combined_config_row,
+                text="Загрузить адресатов",
+                command=self._load_session_targets,
+            )
+            combined_load_targets_button.grid(row=0, column=2, padx=(10, 0))
+            self._register_busy_widget("telegram_combined_flow", combined_load_targets_button)
+
+            ttk.Label(combined_settings_panel, text="Визитов за цикл", style="Field.TLabel").grid(
+                row=4, column=0, sticky="w"
+            )
+            ttk.Entry(combined_settings_panel, textvariable=self.session_visit_count_var, width=10).grid(
+                row=4, column=1, sticky="w", padx=(12, 0)
+            )
+            ttk.Label(combined_settings_panel, text="Мин. секунд в чате", style="Field.TLabel").grid(
+                row=4, column=2, sticky="w", padx=(16, 0)
+            )
+            ttk.Entry(combined_settings_panel, textvariable=self.session_view_min_var, width=10).grid(
+                row=4, column=3, sticky="w", padx=(12, 0)
+            )
+            ttk.Label(combined_settings_panel, text="Макс. секунд в чате", style="Field.TLabel").grid(
+                row=5, column=0, sticky="w", pady=(8, 0)
+            )
+            ttk.Entry(combined_settings_panel, textvariable=self.session_view_max_var, width=10).grid(
+                row=5, column=1, sticky="w", padx=(12, 0), pady=(8, 0)
+            )
+            ttk.Label(combined_settings_panel, text="Сообщений за цикл", style="Field.TLabel").grid(
+                row=5, column=2, sticky="w", padx=(16, 0), pady=(8, 0)
+            )
+            ttk.Entry(combined_settings_panel, textvariable=self.session_messages_per_cycle_var, width=10).grid(
+                row=5, column=3, sticky="w", padx=(12, 0), pady=(8, 0)
+            )
+            ttk.Label(combined_settings_panel, text="Общий лимит сообщений", style="Field.TLabel").grid(
+                row=6, column=0, sticky="w", pady=(8, 0)
+            )
+            ttk.Entry(combined_settings_panel, textvariable=self.session_total_limit_var, width=10).grid(
+                row=6, column=1, sticky="w", padx=(12, 0), pady=(8, 0)
+            )
+            ttk.Checkbutton(
+                combined_settings_panel,
+                text="Автоотправка",
+                variable=self.session_auto_send_var,
+            ).grid(row=6, column=2, columnspan=2, sticky="w", padx=(16, 0), pady=(8, 0))
+            ttk.Checkbutton(
+                combined_settings_panel,
+                text="Непрерывно до `Стоп`",
+                variable=self.session_continuous_var,
+            ).grid(row=7, column=2, columnspan=2, sticky="w", padx=(16, 0), pady=(8, 0))
+
+            combined_targets_panel = self._create_inline_panel(
+                settings_row,
+                "Кому писать",
+                "Совместный режим не берёт адресатов автоматически из TXT. Он использует текущий список адресатов режима сессии.",
+            )
+            combined_targets_panel.grid(row=0, column=1, sticky="nsew")
+            combined_targets_panel.columnconfigure(0, weight=1)
+            self.combined_targets_text = self._create_readonly_text(combined_targets_panel, height=10)
+            self.combined_targets_text.grid(row=2, column=0, sticky="nsew")
+            self._bind_scroll_to_widget(self.combined_targets_text)
+            open_session_editor_button = ttk.Button(
+                combined_targets_panel,
+                text="Открыть экран сессии для редактирования адресатов",
+                command=self._combined_switch_to_session,
+            )
+            open_session_editor_button.grid(row=3, column=0, sticky="ew", pady=(10, 0))
+            self._register_busy_widget("telegram_combined_flow", open_session_editor_button)
+
+            templates_panel = self._create_inline_panel(
+                body,
+                "Тексты сообщений",
+                "Одна строка = один шаблон. Это тот же текстовый пул, который использует отдельный режим `Сессия и сообщения`.",
+            )
+            templates_panel.grid(row=11, column=0, sticky="nsew", pady=(14, 0), padx=(0, 10))
+            templates_panel.columnconfigure(0, weight=1)
+            combined_templates = tk.Text(
+                templates_panel,
+                wrap="word",
+                height=8,
+                bg=self._colors["field"],
+                fg=self._colors["text"],
+                insertbackground=self._colors["text"],
+                highlightbackground=self._colors["border"],
+                highlightcolor=self._colors["accent"],
+                highlightthickness=1,
+                relief="flat",
+                borderwidth=0,
+                padx=12,
+                pady=10,
+                font=self._fonts["base"],
+            )
+            combined_templates.grid(row=2, column=0, sticky="nsew")
+            self._bind_scroll_to_widget(combined_templates)
+            self.combined_templates_text = combined_templates
+            self._register_session_template_widget(combined_templates)
+
+            combined_session_panel = self._create_inline_panel(
+                body,
+                "Сводка по контактам и сессиям",
+                "Слева — состояние шага добавления, справа — последний результат session runner.",
+            )
+            combined_session_panel.grid(row=11, column=1, sticky="nsew", pady=(14, 0))
+            combined_session_panel.columnconfigure(0, weight=1)
+            combined_session_panel.rowconfigure(2, weight=1)
+            combined_split = ttk.Frame(combined_session_panel, style="Card.TFrame")
+            combined_split.grid(row=2, column=0, sticky="nsew")
+            combined_split.columnconfigure(0, weight=1)
+            combined_split.columnconfigure(1, weight=1)
+            self.combined_contact_text = self._create_readonly_text(combined_split, height=8)
+            self.combined_contact_text.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+            self._bind_scroll_to_widget(self.combined_contact_text)
+            self.combined_session_text = self._create_readonly_text(combined_split, height=8)
+            self.combined_session_text.grid(row=0, column=1, sticky="nsew")
+            self._bind_scroll_to_widget(self.combined_session_text)
+
+            ttk.Label(body, text="Общий лог совместного режима", style="Field.TLabel").grid(
+                row=12, column=0, sticky="w", pady=(16, 0)
+            )
+            self.combined_output = self._create_readonly_text(body, height=16)
+            self.combined_output.grid(row=13, column=0, columnspan=2, sticky="nsew", pady=(6, 0))
+            self._bind_scroll_to_widget(self.combined_output)
+            body.rowconfigure(13, weight=1)
 
         def _refresh_summary(self) -> None:
             selected_profile = self._selected_profile()
@@ -1709,7 +2134,11 @@ if tk is not None:
             active_label = (
                 "Добавление контактов из TXT"
                 if self._active_tool_id == "telegram_invite_manager"
-                else "Сессия и сообщения"
+                else (
+                    "Сессия и сообщения"
+                    if self._active_tool_id == "telegram_session_runner"
+                    else "Совместный режим"
+                )
             )
             self.summary_var.set(
                 f"Профилей найдено: {len(self._profiles)} · Выбранный профиль: {profile_part} · Активный режим: {active_label}"
@@ -1771,6 +2200,10 @@ if tk is not None:
                 self._show_profile(profile)
                 if self.invite_input_path_var.get().strip() and not self.invite_job_dir_var.get().strip():
                     self._sync_contact_job_dir()
+                if self.combined_input_path_var.get().strip() and not self.combined_job_dir_var.get().strip():
+                    self._sync_combined_job_dir()
+                if self._active_tool_id == "telegram_combined_flow":
+                    self._refresh_combined_dashboard()
                 self._refresh_summary()
 
         def _launch_selected_profile(self) -> None:
@@ -1867,6 +2300,19 @@ if tk is not None:
                     ),
                 )
                 self._refresh_session_dashboard()
+            elif tool_id == "telegram_combined_flow":
+                self._set_readonly_text(
+                    self.combined_output,
+                    "\n".join(
+                        [
+                            "Совместный режим `Добавить → Сессия`",
+                            "1. Сверху выбери Telegram-профиль.",
+                            "2. Загрузи файл контактов и нажми `1. Старт добавления`.",
+                            "3. После шага добавления перейди к сессии и нажми `2. Старт сессии`.",
+                        ]
+                    ),
+                )
+                self._refresh_combined_dashboard()
             self._refresh_summary()
 
         def _build_profile_manager_form(self, parent: ttk.Frame) -> None:
@@ -2083,6 +2529,34 @@ if tk is not None:
                 self._log_event("telegram_invite_manager", f"Выбран файл списка: {selected}")
                 self._refresh_invite_dashboard()
 
+        def _choose_combined_input(self) -> None:
+            if filedialog is None:  # pragma: no cover - depends on tkinter extras
+                return
+            selected = filedialog.askopenfilename(
+                title="Выбери файл контактов для совместного режима",
+                filetypes=[
+                    ("Поддерживаемые файлы", "*.txt *.csv *.json"),
+                    ("Текстовые файлы", "*.txt"),
+                    ("CSV", "*.csv"),
+                    ("JSON", "*.json"),
+                    ("Все файлы", "*"),
+                ],
+            )
+            if selected:
+                self.combined_input_path_var.set(selected)
+                self.combined_job_dir_var.set("")
+                self._sync_combined_job_dir()
+                self.combined_status_var.set("Файл выбран")
+                self._log_event("telegram_combined_flow", f"Выбран файл контактов: {selected}")
+                self._set_combined_phase(
+                    "contact_add",
+                    input_path=selected,
+                    invite_job_dir=self.combined_job_dir_var.get().strip(),
+                    last_action="chosen_contact_file",
+                    last_status="ready",
+                )
+                self._refresh_combined_dashboard()
+
         def _choose_session_config(self) -> None:
             if filedialog is None:  # pragma: no cover - depends on tkinter extras
                 return
@@ -2094,6 +2568,11 @@ if tk is not None:
                 self.session_config_path_var.set(selected)
                 self.session_status_var.set("Конфиг выбран")
                 self._log_event("telegram_session_runner", f"Выбран конфиг: {selected}")
+                if self._active_tool_id == "telegram_combined_flow":
+                    try:
+                        self._save_combined_state(session_config_path=selected)
+                    except Exception:
+                        pass
                 self._load_session_targets(show_feedback=False)
 
         def _refresh_invite_dashboard(self) -> None:
@@ -2158,6 +2637,135 @@ if tk is not None:
             self._set_readonly_text(self.session_summary_text, format_session_dashboard_snapshot(snapshot))
             self._set_readonly_text(self.session_history_text, format_session_history(snapshot))
 
+        def _sync_combined_job_dir(self, *_args: object) -> None:
+            input_path = self.combined_input_path_var.get().strip()
+            if not input_path or self.combined_job_dir_var.get().strip():
+                return
+            profile = self._selected_profile()
+            profile_name = str((profile or {}).get("profile_name") or "profile").strip() or "profile"
+            self.combined_job_dir_var.set(
+                str(
+                    default_contact_add_job_dir(
+                        profile_name=profile_name,
+                        input_path=input_path,
+                        output_root=DEFAULT_INVITE_OUTPUT_ROOT,
+                    )
+                )
+            )
+
+        def _selected_profile_identity(self) -> tuple[str, str]:
+            profile = self._selected_profile()
+            if profile is None:
+                raise ValueError("Сначала выбери Telegram-профиль сверху.")
+            return (
+                str(profile.get("profile_name") or "").strip() or "profile",
+                str(profile.get("profile_dir") or "").strip(),
+            )
+
+        def _load_combined_state(self) -> dict[str, Any]:
+            profile_name, profile_dir = self._selected_profile_identity()
+            return load_combined_flow_state(
+                profile_name=profile_name,
+                profile_dir=profile_dir,
+                state_root=DEFAULT_PANEL_STATE_ROOT,
+            )
+
+        def _save_combined_state(self, **updates: Any) -> dict[str, Any]:
+            profile_name, profile_dir = self._selected_profile_identity()
+            current = load_combined_flow_state(
+                profile_name=profile_name,
+                profile_dir=profile_dir,
+                state_root=DEFAULT_PANEL_STATE_ROOT,
+            )
+            current.update(updates)
+            save_combined_flow_state(
+                profile_name=profile_name,
+                profile_dir=profile_dir,
+                payload=current,
+                state_root=DEFAULT_PANEL_STATE_ROOT,
+            )
+            return current
+
+        def _set_combined_phase(self, phase: str, **extra: Any) -> dict[str, Any]:
+            state = self._save_combined_state(phase=phase, **extra)
+            self.combined_phase_var.set(combined_phase_label(phase))
+            return state
+
+        def _combined_targets_summary(self) -> str:
+            return format_session_targets_summary(self._session_targets)
+
+        def _combined_switch_to_session(self) -> None:
+            self._switch_tool("telegram_session_runner")
+
+        def _refresh_combined_dashboard(self) -> None:
+            profile = self._selected_profile()
+            if profile is None:
+                self._set_readonly_text(
+                    self.combined_state_text,
+                    "Совместный режим\nСначала выбери Telegram-профиль сверху.",
+                )
+                self._set_readonly_text(self.combined_contact_text, "Контакты\nПрофиль не выбран.")
+                self._set_readonly_text(self.combined_session_text, "Сессия\nПрофиль не выбран.")
+                self._set_readonly_text(self.combined_targets_text, "Адресаты\nПрофиль не выбран.")
+                return
+            state = self._load_combined_state()
+            self.combined_phase_var.set(combined_phase_label(str(state.get("phase") or "contact_add")))
+            if state.get("input_path"):
+                self.combined_input_path_var.set(str(state.get("input_path") or ""))
+            if state.get("invite_job_dir"):
+                self.combined_job_dir_var.set(str(state.get("invite_job_dir") or ""))
+            if state.get("session_config_path"):
+                self.session_config_path_var.set(str(state.get("session_config_path") or ""))
+            input_path = self.combined_input_path_var.get().strip()
+            invite_snapshot: dict[str, Any] | None = None
+            preview_text = "Список ещё не выбран"
+            if self.combined_job_dir_var.get().strip():
+                invite_snapshot = contact_job_snapshot(self.combined_job_dir_var.get().strip())
+            if input_path:
+                try:
+                    preview = preview_invite_input_file(input_path)
+                    preview_text = (
+                        f"Уникальных username: {preview.get('unique_usernames') or 0} · "
+                        f"дубликатов: {preview.get('duplicates') or 0} · "
+                        f"ошибок: {preview.get('invalid_count') or 0}"
+                    )
+                except Exception as exc:
+                    preview_text = f"Не удалось прочитать файл: {exc}"
+            self.combined_preview_var.set(preview_text)
+            session_snapshot = session_history_snapshot(
+                state_file=DEFAULT_SESSION_STATE_FILE,
+                runs_dir=DEFAULT_SESSION_RUNS_DIR,
+            )
+            profile_label = format_profile_label(profile)
+            self._set_readonly_text(
+                self.combined_state_text,
+                format_combined_flow_state(
+                    state,
+                    profile_label=profile_label,
+                    session_targets=self._session_targets,
+                    invite_snapshot=invite_snapshot,
+                    session_snapshot=session_snapshot,
+                ),
+            )
+            if invite_snapshot is None:
+                if input_path:
+                    try:
+                        preview = preview_invite_input_file(input_path)
+                        self._set_readonly_text(self.combined_contact_text, format_invite_input_preview(preview))
+                    except Exception as exc:
+                        self._set_readonly_text(self.combined_contact_text, f"Не удалось прочитать список username:\n{exc}")
+                else:
+                    self._set_readonly_text(
+                        self.combined_contact_text,
+                        "Контакты\nВыбери файл контактов и нажми `1. Старт добавления`.",
+                    )
+            else:
+                contact_text = format_contact_dashboard_snapshot(invite_snapshot)
+                contact_text += "\n\n" + format_contact_errors(invite_snapshot)
+                self._set_readonly_text(self.combined_contact_text, contact_text)
+            self._set_readonly_text(self.combined_session_text, format_session_dashboard_snapshot(session_snapshot))
+            self._set_readonly_text(self.combined_targets_text, self._combined_targets_summary())
+
         def _invite_batch_command(
             self,
             *,
@@ -2193,6 +2801,139 @@ if tk is not None:
                 command=command,
                 on_success=self._on_invite_init_success,
                 monitor_active_state=True,
+                profile_dir=str(selected_profile.get("profile_dir") or ""),
+            )
+
+        def _combined_resolved_job_dir(self) -> Path:
+            job_dir = self.combined_job_dir_var.get().strip()
+            if job_dir:
+                return Path(job_dir).expanduser().resolve()
+            input_path = self.combined_input_path_var.get().strip()
+            if not input_path:
+                raise ValueError("Выбери файл контактов для совместного режима.")
+            profile = self._selected_profile()
+            profile_name = str((profile or {}).get("profile_name") or "profile").strip() or "profile"
+            resolved = default_contact_add_job_dir(
+                profile_name=profile_name,
+                input_path=input_path,
+                output_root=DEFAULT_INVITE_OUTPUT_ROOT,
+            )
+            self.combined_job_dir_var.set(str(resolved))
+            return resolved
+
+        def _combined_start_contact_add(self) -> None:
+            input_path = self.combined_input_path_var.get().strip()
+            if not input_path:
+                messagebox.showinfo("Панель Telegram", "Сначала выбери файл контактов для совместного режима.")
+                return
+            selected_profile = self._selected_profile()
+            if selected_profile is None:
+                messagebox.showinfo("Панель Telegram", "Сначала выбери Telegram-профиль сверху.")
+                return
+            try:
+                limit = max(int(self.invite_limit_var.get() or "0"), 0)
+            except ValueError:
+                limit = 0
+            try:
+                job_dir = self._combined_resolved_job_dir()
+                command = contact_add_batch_command(
+                    input_path=input_path,
+                    job_dir=job_dir,
+                    profile_name=str(selected_profile.get("profile_name") or ""),
+                    portable_profile_dir=str(selected_profile.get("profile_dir") or ""),
+                    account_username=str((selected_profile.get("account") or {}).get("username") or ""),
+                    account_label=str((selected_profile.get("account") or {}).get("label") or ""),
+                    limit=limit,
+                    statuses=["new", "checked"],
+                )
+            except Exception as exc:
+                messagebox.showerror("Панель Telegram", f"Не удалось подготовить совместный шаг добавления:\n{exc}")
+                return
+            self._set_combined_phase(
+                "contact_add",
+                input_path=input_path,
+                invite_job_dir=str(job_dir),
+                last_action="combined_contact_add_started",
+                last_status="running",
+                session_config_path=self.session_config_path_var.get().strip(),
+            )
+            self._start_json_command(
+                tool_id="telegram_combined_flow",
+                action_label="совместный шаг: добавление контактов",
+                command=command,
+                on_success=self._on_combined_contact_add_success,
+                monitor_active_state=True,
+                profile_dir=str(selected_profile.get("profile_dir") or ""),
+            )
+
+        def _combined_allow_session(self) -> None:
+            try:
+                state = self._load_combined_state()
+            except Exception as exc:
+                messagebox.showerror("Панель Telegram", f"Не удалось прочитать состояние совместного режима:\n{exc}")
+                return
+            phase = str(state.get("phase") or "contact_add")
+            if phase not in {"review", "contact_add", "stopped"}:
+                messagebox.showinfo("Панель Telegram", "Переход к сессии уже разрешён или сейчас выполняется другой шаг.")
+                return
+            self._set_combined_phase(
+                "session_ready",
+                input_path=self.combined_input_path_var.get().strip(),
+                invite_job_dir=self.combined_job_dir_var.get().strip(),
+                session_config_path=self.session_config_path_var.get().strip(),
+                last_action="combined_session_allowed",
+                last_status="ready",
+            )
+            self.combined_status_var.set("Можно запускать сессию")
+            self._log_event("telegram_combined_flow", "Оператор разрешил переход к шагу сессии.")
+            self._refresh_combined_dashboard()
+
+        def _combined_start_session(self) -> None:
+            try:
+                state = self._load_combined_state()
+            except Exception as exc:
+                messagebox.showerror("Панель Telegram", f"Не удалось прочитать состояние совместного режима:\n{exc}")
+                return
+            phase = str(state.get("phase") or "contact_add")
+            if phase not in {"session_ready", "stopped"}:
+                messagebox.showinfo(
+                    "Панель Telegram",
+                    "Сначала заверши шаг добавления контактов. Если были частичные ошибки, нажми `Разрешить переход к сессии`.",
+                )
+                return
+            selected_profile = self._selected_profile()
+            if selected_profile is None:
+                messagebox.showinfo("Панель Telegram", "Сначала выбери Telegram-профиль сверху.")
+                return
+            try:
+                runtime_config = self._build_session_runtime_config()
+                command = session_run_command(
+                    config_path=runtime_config,
+                    auto_send=bool(self.session_auto_send_var.get()),
+                    continuous=bool(self.session_continuous_var.get()),
+                )
+            except Exception as exc:
+                messagebox.showerror("Панель Telegram", f"Не удалось подготовить совместный шаг сессии:\n{exc}")
+                return
+            self._set_combined_phase(
+                "session_running",
+                input_path=self.combined_input_path_var.get().strip(),
+                invite_job_dir=self.combined_job_dir_var.get().strip(),
+                session_config_path=self.session_config_path_var.get().strip(),
+                last_runtime_config_path=str(runtime_config),
+                last_action="combined_session_started",
+                last_status="running",
+            )
+            self._start_json_command(
+                tool_id="telegram_combined_flow",
+                action_label="совместный шаг: запуск сессии",
+                command=command,
+                on_success=lambda payload, runtime_config=runtime_config: self._on_combined_session_success(
+                    payload,
+                    runtime_config,
+                ),
+                monitor_active_state=True,
+                profile_dir=str(selected_profile.get("profile_dir") or ""),
             )
 
         def _import_profile(self) -> None:
@@ -2364,6 +3105,7 @@ if tk is not None:
                 ),
             )
             self._refresh_session_dashboard()
+            self._refresh_combined_dashboard()
             if show_feedback:
                 messagebox.showinfo(
                     "Панель Telegram",
@@ -2405,6 +3147,7 @@ if tk is not None:
             self.session_new_target_label_var.set("")
             self.session_new_target_kind_var.set("Контакт")
             self._render_session_targets()
+            self._refresh_combined_dashboard()
 
         def _remove_session_targets(self) -> None:
             if self.session_targets_list is None:
@@ -2420,6 +3163,7 @@ if tk is not None:
             ]
             self._session_targets = keep
             self._render_session_targets()
+            self._refresh_combined_dashboard()
 
         def _session_runtime_config_path(self) -> Path:
             temp_dir = Path("/tmp/telegram-control-center")
@@ -2509,6 +3253,7 @@ if tk is not None:
                     runtime_config,
                 ),
                 monitor_active_state=True,
+                profile_dir=str((self._selected_profile() or {}).get("profile_dir") or ""),
             )
 
         def _on_invite_init_success(self, payload: dict[str, Any]) -> None:
@@ -2533,6 +3278,53 @@ if tk is not None:
             summary += f"\n\nRuntime config:\n{runtime_config}"
             self._set_readonly_text(self.session_output, summary)
             self._refresh_session_dashboard()
+
+        def _on_combined_contact_add_success(self, payload: dict[str, Any]) -> None:
+            if payload.get("job_dir"):
+                self.combined_job_dir_var.set(str(payload["job_dir"]))
+            self._set_readonly_text(self.combined_output, format_contact_batch_payload(payload))
+            payload_status = str(payload.get("status") or "").strip().lower()
+            next_phase = "review" if payload_status == "completed_with_errors" else "session_ready"
+            self._set_combined_phase(
+                next_phase,
+                input_path=self.combined_input_path_var.get().strip(),
+                invite_job_dir=self.combined_job_dir_var.get().strip(),
+                session_config_path=self.session_config_path_var.get().strip(),
+                last_action="combined_contact_add_finished",
+                last_status=payload_status or "completed",
+                last_summary=format_contact_batch_payload(payload),
+                last_invite_status=payload_status or "completed",
+            )
+            if next_phase == "session_ready":
+                self.combined_status_var.set("Контакты добавлены, можно запускать сессию")
+            else:
+                self.combined_status_var.set("Есть ошибки, проверь и разреши переход к сессии")
+            self._refresh_combined_dashboard()
+
+        def _on_combined_session_success(self, payload: dict[str, Any], runtime_config: Path) -> None:
+            summary = format_session_run_payload(payload)
+            summary += f"\n\nRuntime config:\n{runtime_config}"
+            self._set_readonly_text(self.combined_output, summary)
+            payload_status = str(payload.get("status") or "").strip().lower() or "completed"
+            run_dir = str(payload.get("run_dir") or "")
+            if not run_dir:
+                run_info = payload.get("run")
+                if isinstance(run_info, dict):
+                    run_dir = str(run_info.get("run_dir") or run_info.get("run_id") or "")
+            self._set_combined_phase(
+                "stopped",
+                input_path=self.combined_input_path_var.get().strip(),
+                invite_job_dir=self.combined_job_dir_var.get().strip(),
+                session_config_path=self.session_config_path_var.get().strip(),
+                last_runtime_config_path=str(runtime_config),
+                last_action="combined_session_finished",
+                last_status=payload_status,
+                last_summary=summary,
+                last_session_status=payload_status,
+                last_session_run_dir=run_dir,
+            )
+            self.combined_status_var.set("Совместный режим завершил шаг сессии")
+            self._refresh_combined_dashboard()
 
 else:
 
