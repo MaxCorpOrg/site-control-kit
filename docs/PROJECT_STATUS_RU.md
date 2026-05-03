@@ -154,7 +154,8 @@
   - не хардкодить список Telegram-инструментов в GUI;
   - показывать portable-пользователей в dropdown;
   - импортировать нового пользователя по `tdata.zip`;
-  - принимать в управление уже существующую portable-папку через adopt прямо из панели.
+  - принимать в управление уже существующую portable-папку через adopt прямо из панели;
+  - рендерить profile/workflow details в читаемых text-card блоках вместо тесных table rows, чтобы UI не ломался на Linux HiDPI scaling.
 - Отдельно собран новый видимый Telegram tools hub:
   - `tools/telegram/`
   - `platform/`
@@ -795,7 +796,8 @@
     - отдельный `telegram-portable-session-tool` остался standalone-репозиторием, но теперь виден через `tools/telegram/session_runner/`;
     - встроенные `telegram_invite_manager`, `telegram_portable_helper`, `telegram_export` и visible wrapper `telegram_session_runner` собраны в `tools/telegram/`;
     - общая панель теперь видит все эти workflow как единый Telegram catalog;
-    - панель уже умеет выбирать пользователя из списка portable-профилей и добавлять нового по `tdata.zip`.
+    - панель уже умеет выбирать пользователя из списка portable-профилей и добавлять нового по `tdata.zip`;
+    - после UI-refresh details больше не клиппятся в `Treeview` на текущем Linux окружении с `tk scaling ~= 2.0`, потому что панель переведена на text-card layout и tabbed intake forms.
 - Живой no-history run на новом runtime подтвердил, что основной export path уже собирает новые `@username` без помощи `identity_history.json` и обрабатывает несколько peer в одном deep-step.
 - Артефакты проверки:
   - `/tmp/tg_live_batch_boost3.7ErTfD/snapshot.md`

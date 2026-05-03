@@ -8,6 +8,7 @@ from unittest import mock
 
 from tool_platform.catalog import find_action, find_tool, load_catalog
 from tool_platform.cli import execute_action
+from tool_platform.gui import format_profile_details, format_workflow_details
 from tool_platform.telegram_profiles import (
     adopt_existing_profile,
     format_profile_label,
@@ -253,6 +254,78 @@ class ToolPlatformCatalogTests(unittest.TestCase):
         )
         self.assertIn("--account-username", argv)
         self.assertIn("--account-label", argv)
+
+    def test_format_profile_details_includes_paths_and_window(self) -> None:
+        details = format_profile_details(
+            {
+                "profile_name": "AK",
+                "running": False,
+                "profile_dir": "/home/max/TelegramPortableAK",
+                "tdata_dir": "/home/max/TelegramPortableAK/TelegramForcePortable/tdata",
+                "metadata_path": "/home/max/TelegramPortableAK/portable-profile.json",
+                "telegram_log_path": "/home/max/TelegramPortableAK/TelegramForcePortable/log.txt",
+                "account": {
+                    "username": "@M_a_g_g_i_e",
+                    "label": "Maggie",
+                },
+                "pids": [],
+                "windows": [{"title": "Макс Михайлов", "window_id": "0x1"}],
+            }
+        )
+
+        self.assertIn("Profile Overview", details)
+        self.assertIn("@M_a_g_g_i_e", details)
+        self.assertIn("Window title: Макс Михайлов", details)
+        self.assertIn("Profile dir: /home/max/TelegramPortableAK", details)
+
+    def test_format_workflow_details_includes_docs_and_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            manifest_dir = root / "tool"
+            registry_dir = root / "registry"
+            manifest_dir.mkdir()
+            registry_dir.mkdir()
+            manifest_path = manifest_dir / "tool_manifest.json"
+            registry_path = registry_dir / "tools.json"
+
+            self._write_json(
+                manifest_path,
+                {
+                    "schema_version": 1,
+                    "tool_id": "sample_tool",
+                    "display_name": "Sample Tool",
+                    "description": "Readable workflow summary",
+                    "root_dir": ".",
+                    "docs": [{"doc_id": "readme", "label": "README", "path": "README.md"}],
+                    "actions": [
+                        {
+                            "action_id": "echo_help",
+                            "label": "Echo",
+                            "argv": ["echo", "hello"],
+                            "workdir": ".",
+                        }
+                    ],
+                    "capabilities": ["alpha", "beta"],
+                    "tags": ["telegram", "demo"],
+                    "artifacts": {"runs_dir": "runs"},
+                },
+            )
+            self._write_json(
+                registry_path,
+                {
+                    "schema_version": 1,
+                    "tools": [{"manifest_path": str(manifest_path), "enabled": True}],
+                },
+            )
+
+            catalog = load_catalog(registry_path)
+            tool = find_tool(catalog, "sample_tool")
+            details = format_workflow_details(tool)
+
+        self.assertIn("Workflow Overview", details)
+        self.assertIn("Readable workflow summary", details)
+        self.assertIn("- README:", details)
+        self.assertIn("- runs_dir: runs", details)
 
 
 if __name__ == "__main__":

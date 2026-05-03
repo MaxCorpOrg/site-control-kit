@@ -48,7 +48,8 @@ cd /home/max/site-control-kit/tools/telegram/platform
 - показывает статус выбранного профиля;
 - умеет импортировать новый профиль по `tdata.zip`;
 - умеет принять в управление уже существующую portable-папку;
-- справа оставляет компактный список Telegram workflow и их actions.
+- справа оставляет компактный список Telegram workflow и их actions;
+- рендерит details в читаемых text-card блоках, а не в тесных row-таблицах, чтобы длинные пути и описания не клиппились на Linux HiDPI.
 
 ## Что Даёт Registry
 
