@@ -8,7 +8,12 @@ from unittest import mock
 
 from tool_platform.catalog import find_action, find_tool, load_catalog
 from tool_platform.cli import execute_action
-from tool_platform.gui import format_profile_details, format_workflow_details
+from tool_platform.gui import (
+    format_combined_flow_state,
+    format_profile_details,
+    format_session_operator_summary,
+    format_workflow_details,
+)
 from tool_platform.telegram_gui_helpers import (
     active_profile_conflict,
     build_session_runtime_config,
@@ -749,6 +754,94 @@ class ToolPlatformCatalogTests(unittest.TestCase):
         self.assertEqual(payload["session"]["view_min_seconds"], 4)
         self.assertEqual(payload["session"]["view_max_seconds"], 8)
 
+    def test_format_session_operator_summary_shows_next_target_templates_and_last_send(self) -> None:
+        summary = format_session_operator_summary(
+            {
+                "status": "ready",
+                "messages_sent_total": 2,
+                "message_cursor": 1,
+                "message_target_cursor": 0,
+                "last_run": {
+                    "run_id": "20260503T120000Z-test",
+                    "status": "completed",
+                    "visit_count": 2,
+                    "message_count": 2,
+                    "sent_count": 1,
+                    "message_target_username": "@alice_test",
+                    "sent_messages": [
+                        {"index": 1, "text": "Первое", "sent": True, "send_mode": "auto"}
+                    ],
+                    "unsent_messages": [
+                        {"index": 2, "text": "Третье", "sent": False, "send_mode": "draft_only"}
+                    ],
+                },
+            },
+            session_targets=[{"label": "Alice", "handle": "@alice_test", "kind": "contact"}],
+            session_templates=["Первое", "Второе", "Третье"],
+            visits_per_cycle=4,
+            view_min_seconds=3,
+            view_max_seconds=7,
+            messages_per_cycle=2,
+            total_message_limit=4,
+            auto_send=True,
+            continuous=False,
+        )
+
+        self.assertIn("Следующий адресат: Alice · @alice_test · контакт", summary)
+        self.assertIn("- #1 · Второе", summary)
+        self.assertIn("- #2 · Третье", summary)
+        self.assertIn("После этого цикла общий лимит будет исчерпан.", summary)
+        self.assertIn("Последние реально отправленные", summary)
+        self.assertIn("Неотправленные / оставшиеся в строке ввода", summary)
+
+    def test_format_combined_flow_state_shows_next_username_and_session_preview(self) -> None:
+        summary = format_combined_flow_state(
+            {
+                "phase": "contact_add",
+                "last_action": "combined_session_finished_next_contact",
+                "last_status": "completed",
+                "input_path": "/tmp/users.txt",
+                "invite_job_dir": "/tmp/job",
+            },
+            profile_label="@M_a_g_g_i_e (AK) [запущен]",
+            session_targets=[{"label": "Alice", "handle": "@alice_test", "kind": "contact"}],
+            session_templates=["Первое", "Второе"],
+            visits_per_cycle=3,
+            view_min_seconds=4,
+            view_max_seconds=8,
+            messages_per_cycle=2,
+            total_message_limit=0,
+            auto_send=True,
+            continuous=False,
+            invite_snapshot={
+                "status": "ready",
+                "pending_total": 5,
+                "added_total": 2,
+                "failed_total": 1,
+                "pending_usernames": ["@next_contact"],
+            },
+            session_snapshot={
+                "status": "ready",
+                "messages_sent_total": 1,
+                "message_cursor": 0,
+                "message_target_cursor": 0,
+                "last_run": {
+                    "status": "completed",
+                    "visit_count": 2,
+                    "sent_count": 1,
+                    "sent_messages": [
+                        {"index": 1, "text": "Первое", "sent": True, "send_mode": "auto"}
+                    ],
+                },
+            },
+        )
+
+        self.assertIn("Следующий username в очереди: @next_contact", summary)
+        self.assertIn("Следующий адресат для сообщения: Alice · @alice_test · контакт", summary)
+        self.assertIn("Следующие тексты для сессии:", summary)
+        self.assertIn("- #1 · Первое", summary)
+        self.assertIn("Что дальше: система сама запускает следующий шаг добавления.", summary)
+
     def test_session_history_snapshot_reads_state_and_run_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
@@ -798,6 +891,7 @@ class ToolPlatformCatalogTests(unittest.TestCase):
         self.assertEqual(snapshot["messages_sent_total"], 3)
         self.assertEqual(snapshot["last_run"]["run_id"], "20260503T100000Z-aaaa")
         self.assertEqual(snapshot["last_run"]["sent_count"], 1)
+        self.assertEqual(snapshot["last_run"]["sent_messages"][0]["text"], "Привет")
         self.assertEqual(snapshot["last_run"]["unsent_messages"][0]["text"], "Напомни")
 
     def test_session_plan_command_targets_standalone_cli(self) -> None:

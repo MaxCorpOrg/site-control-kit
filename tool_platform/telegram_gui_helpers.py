@@ -780,6 +780,16 @@ def session_history_snapshot(
                 continue
             messages = run_payload.get("messages") if isinstance(run_payload.get("messages"), list) else []
             sent_count = _safe_int(run_payload.get("sent_count"))
+            sent_messages = [
+                {
+                    "index": _safe_int(item.get("index")),
+                    "text": str(item.get("text") or ""),
+                    "sent": bool(item.get("sent")),
+                    "send_mode": str(item.get("send_mode") or ""),
+                }
+                for item in messages
+                if isinstance(item, dict) and bool(item.get("sent"))
+            ]
             unsent_messages = [
                 {
                     "index": _safe_int(item.get("index")),
@@ -803,6 +813,7 @@ def session_history_snapshot(
                     ),
                     "run_dir": str(path.parent),
                     "path": str(path),
+                    "sent_messages": sent_messages[:5],
                     "unsent_messages": unsent_messages[:5],
                 }
             )

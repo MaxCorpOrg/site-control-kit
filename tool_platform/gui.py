@@ -303,6 +303,179 @@ def format_session_targets_summary(targets: list[dict[str, Any]], *, limit: int 
     return "\n".join(lines)
 
 
+def _safe_preview_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def preview_next_session_target(
+    targets: list[dict[str, Any]],
+    *,
+    message_target_cursor: int,
+) -> dict[str, Any] | None:
+    normalized = [
+        item
+        for item in targets
+        if isinstance(item, dict) and str(item.get("handle") or item.get("label") or "").strip()
+    ]
+    if not normalized:
+        return None
+    cursor = max(0, _safe_preview_int(message_target_cursor))
+    index = cursor % len(normalized)
+    selected = normalized[index]
+    return {
+        "index": index + 1,
+        "count": len(normalized),
+        "label": format_session_target_label(selected),
+        "handle": str(selected.get("handle") or "").strip(),
+        "kind": str(selected.get("kind") or "").strip(),
+    }
+
+
+def preview_next_session_messages(
+    templates: list[str],
+    *,
+    message_cursor: int,
+    messages_sent_total: int,
+    messages_per_cycle: int,
+    total_message_limit: int,
+) -> dict[str, Any]:
+    clean_templates = [str(item).strip() for item in templates if str(item).strip()]
+    requested_count = max(0, _safe_preview_int(messages_per_cycle))
+    cursor = max(0, _safe_preview_int(message_cursor))
+    sent_total = max(0, _safe_preview_int(messages_sent_total))
+    total_limit_value = max(0, _safe_preview_int(total_message_limit))
+    remaining_before_cycle = None if total_limit_value <= 0 else max(0, total_limit_value - sent_total)
+    payload: dict[str, Any] = {
+        "requested_count": requested_count,
+        "count": 0,
+        "messages": [],
+        "remaining_before_cycle": remaining_before_cycle,
+        "remaining_after_cycle": remaining_before_cycle,
+        "total_limit": total_limit_value,
+        "reason": "",
+    }
+    if not clean_templates:
+        payload["reason"] = "шаблоны сообщений не заданы"
+        return payload
+    if requested_count <= 0:
+        payload["reason"] = "сообщения за цикл = 0"
+        return payload
+    count = min(requested_count, len(clean_templates))
+    if total_limit_value > 0:
+        count = min(count, remaining_before_cycle or 0)
+        if count <= 0:
+            payload["reason"] = "общий лимит сообщений уже исчерпан"
+            return payload
+    payload["messages"] = [
+        {
+            "index": index + 1,
+            "template_index": ((cursor + index) % len(clean_templates)) + 1,
+            "text": clean_templates[(cursor + index) % len(clean_templates)],
+        }
+        for index in range(count)
+    ]
+    payload["count"] = len(payload["messages"])
+    if remaining_before_cycle is None:
+        payload["remaining_after_cycle"] = None
+    else:
+        payload["remaining_after_cycle"] = max(0, remaining_before_cycle - payload["count"])
+    return payload
+
+
+def _append_message_items(lines: list[str], title: str, items: list[dict[str, Any]]) -> None:
+    if not items:
+        return
+    lines.extend(["", title])
+    for item in items[:5]:
+        text = str(item.get("text") or "").strip() or "(пусто)"
+        send_mode = str(item.get("send_mode") or "").strip()
+        suffix = f" · режим {send_mode}" if send_mode else ""
+        lines.append(f"- #{_safe_preview_int(item.get('index'))} · {text}{suffix}")
+
+
+def format_session_operator_summary(
+    snapshot: dict[str, Any],
+    *,
+    session_targets: list[dict[str, Any]],
+    session_templates: list[str],
+    visits_per_cycle: int,
+    view_min_seconds: int,
+    view_max_seconds: int,
+    messages_per_cycle: int,
+    total_message_limit: int,
+    auto_send: bool,
+    continuous: bool,
+) -> str:
+    messages_sent_total = _safe_preview_int(snapshot.get("messages_sent_total"))
+    next_target = preview_next_session_target(
+        session_targets,
+        message_target_cursor=_safe_preview_int(snapshot.get("message_target_cursor")),
+    )
+    next_messages = preview_next_session_messages(
+        session_templates,
+        message_cursor=_safe_preview_int(snapshot.get("message_cursor")),
+        messages_sent_total=messages_sent_total,
+        messages_per_cycle=messages_per_cycle,
+        total_message_limit=total_message_limit,
+    )
+    last_run = snapshot.get("last_run") if isinstance(snapshot.get("last_run"), dict) else {}
+    limit_text = "без лимита" if _safe_preview_int(total_message_limit) <= 0 else str(_safe_preview_int(total_message_limit))
+    send_mode_text = "реальная автоотправка" if auto_send else "черновик в поле ввода"
+    run_mode_text = "до ручного Стопа" if continuous else "один цикл за запуск"
+    lines = [
+        "Что сделает следующий запуск",
+        f"Режим: {send_mode_text} · {run_mode_text}",
+        f"Визитов за цикл: {max(0, _safe_preview_int(visits_per_cycle))} · время в чате: {max(0, _safe_preview_int(view_min_seconds))}-{max(0, _safe_preview_int(view_max_seconds))} сек",
+        f"Сообщений за цикл: {max(0, _safe_preview_int(messages_per_cycle))} · общий лимит: {limit_text}",
+        f"Следующий адресат: {next_target.get('label') if next_target else 'не выбран'}",
+    ]
+    if next_messages["count"]:
+        lines.extend(["", "Следующие тексты"])
+        for item in list(next_messages.get("messages") or []):
+            lines.append(f"- #{item.get('index') or 0} · {str(item.get('text') or '').strip()}")
+        remaining_after_cycle = next_messages.get("remaining_after_cycle")
+        if remaining_after_cycle is None:
+            lines.append("После этого цикла общий лимит всё ещё не ограничен.")
+        elif _safe_preview_int(remaining_after_cycle) <= 0:
+            lines.append("После этого цикла общий лимит будет исчерпан.")
+        else:
+            lines.append(f"После этого цикла останется по лимиту: {_safe_preview_int(remaining_after_cycle)}")
+    else:
+        lines.append(f"Следующие тексты: {next_messages.get('reason') or 'в этом цикле сообщений не будет'}")
+
+    lines.extend(
+        [
+            "",
+            "Общий прогресс",
+            f"Всего уже отправлено: {messages_sent_total}",
+            f"Курсор шаблонов: {_safe_preview_int(snapshot.get('message_cursor'))}",
+            f"Курсор адресатов: {_safe_preview_int(snapshot.get('message_target_cursor'))}",
+        ]
+    )
+    if str(snapshot.get("status") or "") == "missing":
+        lines.append("История запусков пока не найдена: первый session-run ещё не сохранён.")
+        return "\n".join(lines)
+
+    if last_run:
+        lines.extend(
+            [
+                "",
+                "Последний запуск",
+                f"- {last_run.get('run_id') or '-'} · статус: {last_run.get('status') or '-'}",
+                f"- Визитов: {last_run.get('visit_count') or 0} · сообщений: {last_run.get('message_count') or 0} · отправлено: {last_run.get('sent_count') or 0}",
+                f"- Адресат: {last_run.get('message_target_username') or 'не выбран'}",
+            ]
+        )
+        sent_messages = last_run.get("sent_messages") if isinstance(last_run.get("sent_messages"), list) else []
+        unsent_messages = last_run.get("unsent_messages") if isinstance(last_run.get("unsent_messages"), list) else []
+        _append_message_items(lines, "Последние реально отправленные", sent_messages)
+        _append_message_items(lines, "Неотправленные / оставшиеся в строке ввода", unsent_messages)
+    return "\n".join(lines)
+
+
 def combined_phase_label(phase: str) -> str:
     mapping = {
         "contact_add": "Шаг 1: добавление контактов",
@@ -319,19 +492,63 @@ def format_combined_flow_state(
     *,
     profile_label: str,
     session_targets: list[dict[str, Any]],
+    session_templates: list[str],
+    visits_per_cycle: int,
+    view_min_seconds: int,
+    view_max_seconds: int,
+    messages_per_cycle: int,
+    total_message_limit: int,
+    auto_send: bool,
+    continuous: bool,
     invite_snapshot: dict[str, Any] | None = None,
     session_snapshot: dict[str, Any] | None = None,
 ) -> str:
     phase = str(state.get("phase") or "contact_add")
+    next_target = preview_next_session_target(
+        session_targets,
+        message_target_cursor=_safe_preview_int((session_snapshot or {}).get("message_target_cursor")),
+    )
+    next_messages = preview_next_session_messages(
+        session_templates,
+        message_cursor=_safe_preview_int((session_snapshot or {}).get("message_cursor")),
+        messages_sent_total=_safe_preview_int((session_snapshot or {}).get("messages_sent_total")),
+        messages_per_cycle=messages_per_cycle,
+        total_message_limit=total_message_limit,
+    )
+    pending_usernames = (
+        list(invite_snapshot.get("pending_usernames") or [])
+        if isinstance(invite_snapshot, dict)
+        else []
+    )
+    next_username = str(pending_usernames[0] or "").strip() if pending_usernames else ""
+    limit_text = "без лимита" if _safe_preview_int(total_message_limit) <= 0 else str(_safe_preview_int(total_message_limit))
     lines = [
         "Совместный режим `Добавить → Сессия`",
         f"Профиль: {profile_label}",
         f"Фаза: {combined_phase_label(phase)}",
         f"Последнее действие: {state.get('last_action') or 'ещё не запускалось'}",
         f"Последний статус: {state.get('last_status') or '-'}",
-        f"Файл контактов: {state.get('input_path') or 'не выбран'}",
-        f"Папка задачи: {state.get('invite_job_dir') or 'не задана'}",
+        "",
+        "Что произойдёт дальше",
+        f"Следующий username в очереди: {next_username or 'очередь сейчас пуста'}",
+        f"Следующий цикл сессии: {max(0, _safe_preview_int(visits_per_cycle))} визитов, {max(0, _safe_preview_int(view_min_seconds))}-{max(0, _safe_preview_int(view_max_seconds))} сек в чате",
+        f"Сообщений за цикл: {max(0, _safe_preview_int(messages_per_cycle))} · общий лимит: {limit_text}",
+        f"Режим отправки: {'автоотправка' if auto_send else 'черновик'} · {'до ручного Стопа' if continuous else 'один цикл за запуск'}",
+        f"Следующий адресат для сообщения: {next_target.get('label') if next_target else 'не выбран'}",
     ]
+    if next_messages["count"]:
+        lines.append("Следующие тексты для сессии:")
+        for item in list(next_messages.get("messages") or []):
+            lines.append(f"- #{item.get('index') or 0} · {str(item.get('text') or '').strip()}")
+    else:
+        lines.append(f"Следующие тексты для сессии: {next_messages.get('reason') or 'в этом цикле сообщений не будет'}")
+    lines.extend(
+        [
+            "",
+            f"Файл контактов: {state.get('input_path') or 'не выбран'}",
+            f"Папка задачи: {state.get('invite_job_dir') or 'не задана'}",
+        ]
+    )
     if state.get("last_session_run_dir"):
         lines.append(f"Последний session run: {state.get('last_session_run_dir')}")
     last_action = str(state.get("last_action") or "").strip()
@@ -363,6 +580,11 @@ def format_combined_flow_state(
         if last_run:
             lines.append(
                 f"Сессии: последнее отправлено {last_run.get('sent_count') or 0}, визитов {last_run.get('visit_count') or 0}, статус {last_run.get('status') or '-'}"
+            )
+            _append_message_items(
+                lines,
+                "Последние реально отправленные",
+                list(last_run.get("sent_messages") or []) if isinstance(last_run.get("sent_messages"), list) else [],
             )
     lines.extend(["", format_session_targets_summary(session_targets)])
     return "\n".join(lines)
@@ -2669,7 +2891,11 @@ if tk is not None:
                 state_file=DEFAULT_SESSION_STATE_FILE,
                 runs_dir=DEFAULT_SESSION_RUNS_DIR,
             )
-            self._set_readonly_text(self.session_summary_text, format_session_dashboard_snapshot(snapshot))
+            preview_context = self._session_preview_context()
+            self._set_readonly_text(
+                self.session_summary_text,
+                format_session_operator_summary(snapshot, **preview_context),
+            )
             self._set_readonly_text(self.session_history_text, format_session_history(snapshot))
 
         def _sync_combined_job_dir(self, *_args: object) -> None:
@@ -2725,6 +2951,19 @@ if tk is not None:
             state = self._save_combined_state(phase=phase, **extra)
             self.combined_phase_var.set(combined_phase_label(phase))
             return state
+
+        def _session_preview_context(self) -> dict[str, Any]:
+            return {
+                "session_targets": list(self._session_targets),
+                "session_templates": self._session_templates(),
+                "visits_per_cycle": _safe_preview_int(self.session_visit_count_var.get()),
+                "view_min_seconds": _safe_preview_int(self.session_view_min_var.get()),
+                "view_max_seconds": _safe_preview_int(self.session_view_max_var.get()),
+                "messages_per_cycle": _safe_preview_int(self.session_messages_per_cycle_var.get()),
+                "total_message_limit": _safe_preview_int(self.session_total_limit_var.get()),
+                "auto_send": bool(self.session_auto_send_var.get()),
+                "continuous": bool(self.session_continuous_var.get()),
+            }
 
         def _combined_targets_summary(self) -> str:
             return format_session_targets_summary(self._session_targets)
@@ -2811,15 +3050,16 @@ if tk is not None:
                 state_file=DEFAULT_SESSION_STATE_FILE,
                 runs_dir=DEFAULT_SESSION_RUNS_DIR,
             )
+            preview_context = self._session_preview_context()
             profile_label = format_profile_label(profile)
             self._set_readonly_text(
                 self.combined_state_text,
                 format_combined_flow_state(
                     state,
                     profile_label=profile_label,
-                    session_targets=self._session_targets,
                     invite_snapshot=invite_snapshot,
                     session_snapshot=session_snapshot,
+                    **preview_context,
                 ),
             )
             if invite_snapshot is None:
