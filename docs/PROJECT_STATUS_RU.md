@@ -318,6 +318,19 @@
       - итог: `status=completed`, `added_count=1`, `already_present_count=1`, `failed_count=0`
       - user-level outcome: `contact_already_present`
       - verify снова подтвердил `Изменить контакт` / `Удалить контакт`, а `Добавить контакт` не видно, поэтому пользователь корректно оставлен в `contact_added`, а не в `failed`.
+  - после живого panel-smoke combined режима дополнительно подтверждены:
+    - `python3 -m py_compile tool_platform/gui.py`
+    - `PYTHONPATH="$PWD" python3 -m unittest tests.test_tool_platform` → `28 OK`
+    - live panel harness `Добавить контакты из TXT`:
+      - `/tmp/telegram-panel-live-harness-logged/panel-live-result.json`
+      - summary уже показывает `добавлено: 1`, `уже было: 1`, `ошибок: 0`;
+      - panel log `/tmp/telegram-control-center-panel.log` фиксирует `Старт` и `Завершено` для живого batch-действия.
+    - live panel harness `Совместный режим`:
+      - `/tmp/telegram-panel-combined-harness-fixed/combined-panel-result.json`
+      - шаг `добавление` завершился как success без ручного `Разрешить переход`;
+      - шаг `сессия` завершился как `completed` с безопасным run без отправки сообщений;
+      - после нового открытия панели combined summary и status корректно восстановились для профиля `AK`;
+      - отдельный GUI-fix: закрытие окна больше не оставляет Tk traceback `invalid command name ... _drain_ui_queue`.
 - Для нового unified tool platform зелёные:
   - `PYTHONPATH="$PWD" python3 -m unittest discover -s tests -p 'test_*.py'`
   - `python3 -m py_compile tool_platform/*.py scripts/telegram_invite_executor.py scripts/telegram_portable.py`
@@ -921,14 +934,13 @@
 ## Следующий Приоритет
 1. Для Invite/Desktop: держать основным рабочим путём `site-control-kit` / Telegram Web flow (`open-chat -> inspect-chat -> add-contact`) и не подменять его Desktop-guessing path.
 2. Для Invite/Desktop: прогнать новый operator flow `Старт добавления -> Продолжить очередь -> Повторить ошибки` уже на панели, чтобы подтвердить не только backend batch, но и новый summary/retry UX end-to-end.
-3. Для unified panel: живым smoke подтвердить `Совместный режим` целиком по цепочке `Добавить -> Разрешить переход -> Старт сессии`, включая restore summary после рестарта панели, уже не только на backend smoke, а через сам Tk-интерфейс.
-4. Для Invite/Desktop: в summary панели вывести `already_present_count` отдельной строкой, чтобы оператор сразу видел разницу между `ново добавлено` и `уже было в контактах`.
+3. Для Telegram control center: прогнать оператором руками долгий `Совместный режим` с реальной отправкой сообщений уже через видимую панель, а не через harness.
+4. Для Telegram control center: добавить быстрые кнопки `Открыть последний batch json`, `Открыть последний session run`, `Открыть последний screenshot`, если оператору станет тесно в текущем summary-режиме.
 5. Снизить runtime-затраты discovery относительно deep, чтобы multi-peer deep чаще успевал проходить следующий слой visible peer.
 6. Поднять приоритеты deep-target'ов: раньше брать тех peer, у кого вероятность успешного `Mention` выше.
 7. Разделить browser capability/runtime compatibility и Telegram export concerns в отдельные модули/слои.
 8. Отделить понятие `best-known latest` от `most-recent run` в UI и документации, если пользователю важно видеть именно последний прогон как основной артефакт.
 9. Декомпозировать `export_telegram_members_non_pii.py` на модули.
-10. Для Telegram control center при необходимости добавить быстрые переходы `Открыть последний лог / Открыть последний run.json / Открыть последний screenshot`, если оператору станет тесно в текущем summary-режиме.
 
 ## Как Продолжать Следующему Агенту
 1. Прочитать `AGENTS.md`.

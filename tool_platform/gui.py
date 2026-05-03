@@ -593,6 +593,7 @@ if tk is not None:
             }
             self._process_lock = threading.Lock()
             self._ui_queue: queue.Queue[tuple[str, str, dict[str, Any] | None, str, bool, Callable[[dict[str, Any]], None]]] = queue.Queue()
+            self._ui_queue_after_id: str | None = None
             self._scroll_canvas: tk.Canvas | None = None
             self._session_timer_started_at: float | None = None
             self._session_timer_after_id: str | None = None
@@ -634,7 +635,7 @@ if tk is not None:
             self._reload_profiles(initial=True)
             self._load_session_targets(show_feedback=False)
             self._switch_tool("telegram_invite_manager")
-            self.after(120, self._drain_ui_queue)
+            self._ui_queue_after_id = self.after(120, self._drain_ui_queue)
 
         def _configure_styles(self) -> None:
             if ttk is None or tkfont is None:
@@ -1118,6 +1119,7 @@ if tk is not None:
             threading.Thread(target=_worker, daemon=True).start()
 
         def _drain_ui_queue(self) -> None:
+            self._ui_queue_after_id = None
             while True:
                 try:
                     (
@@ -1139,7 +1141,26 @@ if tk is not None:
                     on_success=on_success,
                 )
             if self.winfo_exists():
-                self.after(120, self._drain_ui_queue)
+                self._ui_queue_after_id = self.after(120, self._drain_ui_queue)
+
+        def destroy(self) -> None:
+            self._cancel_tool_monitor("telegram_invite_manager")
+            self._cancel_tool_monitor("telegram_session_runner")
+            self._cancel_tool_monitor("telegram_combined_flow")
+            self._stop_session_timer()
+            if self._ui_queue_after_id:
+                try:
+                    self.after_cancel(self._ui_queue_after_id)
+                except tk.TclError:
+                    pass
+                self._ui_queue_after_id = None
+            if self.profile_manager_window is not None and self.profile_manager_window.winfo_exists():
+                try:
+                    self.profile_manager_window.destroy()
+                except tk.TclError:
+                    pass
+                self.profile_manager_window = None
+            super().destroy()
 
         def _complete_json_command(
             self,
@@ -2699,6 +2720,37 @@ if tk is not None:
         def _combined_switch_to_session(self) -> None:
             self._switch_tool("telegram_session_runner")
 
+        def _combined_status_from_state(self, state: dict[str, Any]) -> str:
+            phase = str(state.get("phase") or "contact_add").strip()
+            last_status = str(state.get("last_status") or "").strip().lower()
+            last_action = str(state.get("last_action") or "").strip()
+            if phase == "contact_add":
+                return "Готов к шагу добавления"
+            if phase == "review":
+                return "Есть ошибки, проверь и разреши переход к сессии"
+            if phase == "session_ready":
+                return "Контакты готовы, можно запускать сессию"
+            if phase == "session_running":
+                return "Сессия выполняется"
+            if phase == "stopped":
+                if last_action == "combined_session_finished":
+                    if last_status == "completed":
+                        return "Совместный режим завершил шаг сессии"
+                    if last_status == "stopped":
+                        return "Сессия остановлена"
+                    if last_status:
+                        return f"Сессия завершилась со статусом: {last_status}"
+                if last_action == "combined_contact_add_finished":
+                    if last_status == "completed":
+                        return "Шаг добавления завершён"
+                    if last_status == "completed_with_errors":
+                        return "Шаг добавления завершён с ошибками"
+                    if last_status:
+                        return f"Шаг добавления завершился со статусом: {last_status}"
+                if last_status:
+                    return f"Последний статус: {last_status}"
+            return "Готово"
+
         def _refresh_combined_dashboard(self) -> None:
             profile = self._selected_profile()
             if profile is None:
@@ -2712,6 +2764,7 @@ if tk is not None:
                 return
             state = self._load_combined_state()
             self.combined_phase_var.set(combined_phase_label(str(state.get("phase") or "contact_add")))
+            self.combined_status_var.set(self._combined_status_from_state(state))
             if state.get("input_path"):
                 self.combined_input_path_var.set(str(state.get("input_path") or ""))
             if state.get("invite_job_dir"):
