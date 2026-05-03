@@ -250,6 +250,7 @@
   - `./tools/telegram/platform/bin/tool-platform validate-registry`
   - live GUI smoke: окно `Центр управления Telegram` поднято, `xwininfo` подтвердил `1460x980`, старый английский тестовый экземпляр панели закрыт.
   - дополнительный live UX-fix: блок `Добавить / подключить профили` вынесен в отдельное окно, чтобы кнопки `Инвайты по списку` и `Сессия и сообщения` были видны сразу на основном экране.
+  - дополнительный UX-fix: на главном экране появились явные кнопки `Старт инвайтов` и `Старт сессии`, а загрузка invite-списка названа прямо как `Загрузить TXT / CSV / JSON`.
 - Для нового unified tool platform зелёные:
   - `PYTHONPATH="$PWD" python3 -m unittest discover -s tests -p 'test_*.py'`
   - `python3 -m py_compile tool_platform/*.py scripts/telegram_invite_executor.py scripts/telegram_portable.py`

@@ -555,14 +555,14 @@ if tk is not None:
             body = self._create_card(
                 parent,
                 "2. Выбор инструмента",
-                "Ниже всегда открыт только один рабочий экран. Инвайты и сессии разделены, чтобы не путаться.",
+                "Нажми нужную кнопку старта. Ниже откроется только один рабочий экран, чтобы не путаться.",
             )
             selector = ttk.Frame(body, style="Card.TFrame")
             selector.pack(fill="x")
 
             tools = [
-                ("telegram_invite_manager", "Инвайты по списку"),
-                ("telegram_session_runner", "Сессия и сообщения"),
+                ("telegram_invite_manager", "Старт инвайтов"),
+                ("telegram_session_runner", "Старт сессии"),
             ]
             for tool_id, label in tools:
                 button = tk.Button(
@@ -570,8 +570,8 @@ if tk is not None:
                     text=label,
                     font=self._fonts["label"],
                     bd=0,
-                    padx=18,
-                    pady=12,
+                    padx=28,
+                    pady=16,
                     relief="flat",
                     command=lambda current=tool_id: self._switch_tool(current),
                 )
@@ -579,7 +579,7 @@ if tk is not None:
                 self._tool_buttons[tool_id] = button
             ttk.Label(
                 body,
-                text="Выбери нужную кнопку выше: слева работа со списком username, справа случайные визиты и отправка сообщений.",
+                text="`Старт инвайтов` открывает загрузку списка username из файла. `Старт сессии` открывает запуск random walk и список адресатов сообщений.",
                 style="CardSubtitle.TLabel",
             ).pack(anchor="w", pady=(10, 0))
 
@@ -610,66 +610,66 @@ if tk is not None:
             body.columnconfigure(0, weight=1)
             body.columnconfigure(1, weight=0)
 
+            top_buttons = ttk.Frame(body, style="Card.TFrame")
+            top_buttons.grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 12))
+            ttk.Button(
+                top_buttons,
+                text="Старт инвайтов",
+                style="Accent.TButton",
+                command=self._invite_create_job,
+            ).pack(side=tk.LEFT)
+            ttk.Button(
+                top_buttons,
+                text="Статус задачи",
+                command=self._invite_show_status,
+            ).pack(side=tk.LEFT, padx=(10, 0))
+            ttk.Button(
+                top_buttons,
+                text="Следующие username",
+                command=self._invite_show_next,
+            ).pack(side=tk.LEFT, padx=(10, 0))
+
             ttk.Label(body, text="Ссылка или ID чата", style="Field.TLabel").grid(
-                row=0, column=0, sticky="w"
+                row=1, column=0, sticky="w"
             )
             ttk.Entry(body, textvariable=self.invite_chat_url_var).grid(
-                row=1, column=0, columnspan=2, sticky="ew", pady=(4, 10)
+                row=2, column=0, columnspan=2, sticky="ew", pady=(4, 10)
             )
 
-            ttk.Label(body, text="Файл со списком username", style="Field.TLabel").grid(
-                row=2, column=0, sticky="w"
+            ttk.Label(body, text="Файл со списком username с компьютера", style="Field.TLabel").grid(
+                row=3, column=0, sticky="w"
             )
             file_row = ttk.Frame(body, style="Card.TFrame")
-            file_row.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(4, 10))
+            file_row.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(4, 10))
             file_row.columnconfigure(0, weight=1)
             ttk.Entry(file_row, textvariable=self.invite_input_path_var).grid(
                 row=0, column=0, sticky="ew"
             )
-            ttk.Button(file_row, text="Выбрать файл", command=self._choose_invite_input).grid(
+            ttk.Button(file_row, text="Загрузить TXT / CSV / JSON", command=self._choose_invite_input).grid(
                 row=0, column=1, padx=(10, 0)
             )
 
             ttk.Label(body, text="Папка задачи", style="Field.TLabel").grid(
-                row=4, column=0, sticky="w"
+                row=5, column=0, sticky="w"
             )
             ttk.Entry(body, textvariable=self.invite_job_dir_var).grid(
-                row=5, column=0, columnspan=2, sticky="ew", pady=(4, 10)
+                row=6, column=0, columnspan=2, sticky="ew", pady=(4, 10)
             )
 
             ttk.Label(
                 body,
                 text="Поддерживаются .txt, .csv и .json. Для .txt одна строка = один @username, consent=yes ставится автоматически.",
                 style="CardSubtitle.TLabel",
-            ).grid(row=6, column=0, columnspan=2, sticky="w")
+            ).grid(row=7, column=0, columnspan=2, sticky="w")
 
             next_row = ttk.Frame(body, style="Card.TFrame")
-            next_row.grid(row=7, column=0, columnspan=2, sticky="w", pady=(14, 0))
+            next_row.grid(row=8, column=0, columnspan=2, sticky="w", pady=(14, 0))
             ttk.Label(next_row, text="Сколько показать дальше", style="Field.TLabel").pack(
                 side=tk.LEFT
             )
             ttk.Entry(next_row, textvariable=self.invite_limit_var, width=8).pack(
                 side=tk.LEFT, padx=(10, 0)
             )
-
-            buttons = ttk.Frame(body, style="Card.TFrame")
-            buttons.grid(row=8, column=0, columnspan=2, sticky="w", pady=(14, 0))
-            ttk.Button(
-                buttons,
-                text="Создать задачу из списка",
-                style="Accent.TButton",
-                command=self._invite_create_job,
-            ).pack(side=tk.LEFT)
-            ttk.Button(
-                buttons,
-                text="Показать статус",
-                command=self._invite_show_status,
-            ).pack(side=tk.LEFT, padx=(10, 0))
-            ttk.Button(
-                buttons,
-                text="Показать следующих",
-                command=self._invite_show_next,
-            ).pack(side=tk.LEFT, padx=(10, 0))
 
             ttk.Label(body, text="Результат", style="Field.TLabel").grid(
                 row=9, column=0, sticky="w", pady=(16, 0)
@@ -688,11 +688,25 @@ if tk is not None:
             body.columnconfigure(0, weight=1)
             body.columnconfigure(1, weight=0)
 
+            top_buttons = ttk.Frame(body, style="Card.TFrame")
+            top_buttons.grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 12))
+            ttk.Button(
+                top_buttons,
+                text="Старт сессии",
+                style="Accent.TButton",
+                command=self._session_run,
+            ).pack(side=tk.LEFT)
+            ttk.Button(
+                top_buttons,
+                text="Показать план",
+                command=self._session_show_plan,
+            ).pack(side=tk.LEFT, padx=(10, 0))
+
             ttk.Label(body, text="Конфиг режима сессии", style="Field.TLabel").grid(
-                row=0, column=0, sticky="w"
+                row=1, column=0, sticky="w"
             )
             config_row = ttk.Frame(body, style="Card.TFrame")
-            config_row.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(4, 10))
+            config_row.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(4, 10))
             config_row.columnconfigure(0, weight=1)
             ttk.Entry(config_row, textvariable=self.session_config_path_var).grid(
                 row=0, column=0, sticky="ew"
@@ -700,15 +714,15 @@ if tk is not None:
             ttk.Button(config_row, text="Выбрать конфиг", command=self._choose_session_config).grid(
                 row=0, column=1, padx=(10, 0)
             )
-            ttk.Button(config_row, text="Загрузить адресатов", command=self._load_session_targets).grid(
+            ttk.Button(config_row, text="Загрузить список адресатов", command=self._load_session_targets).grid(
                 row=0, column=2, padx=(10, 0)
             )
 
             ttk.Label(body, text="Список адресатов сообщений", style="Field.TLabel").grid(
-                row=2, column=0, sticky="w"
+                row=3, column=0, sticky="w"
             )
             recipients_row = ttk.Frame(body, style="Card.TFrame")
-            recipients_row.grid(row=3, column=0, columnspan=2, sticky="nsew", pady=(6, 0))
+            recipients_row.grid(row=4, column=0, columnspan=2, sticky="nsew", pady=(6, 0))
             recipients_row.columnconfigure(0, weight=1)
             self.session_targets_list = self._create_listbox(
                 recipients_row,
@@ -763,27 +777,13 @@ if tk is not None:
                 body,
                 text="Отправлять сообщения автоматически",
                 variable=self.session_auto_send_var,
-            ).grid(row=4, column=0, sticky="w", pady=(14, 0))
+            ).grid(row=5, column=0, sticky="w", pady=(14, 0))
 
             ttk.Label(
                 body,
                 text="Текущий профиль сверху будет автоматически подставлен в runtime-config перед запуском.",
                 style="CardSubtitle.TLabel",
-            ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(6, 0))
-
-            buttons = ttk.Frame(body, style="Card.TFrame")
-            buttons.grid(row=6, column=0, columnspan=2, sticky="w", pady=(14, 0))
-            ttk.Button(
-                buttons,
-                text="Показать план",
-                command=self._session_show_plan,
-            ).pack(side=tk.LEFT)
-            ttk.Button(
-                buttons,
-                text="Запустить сессию",
-                style="Accent.TButton",
-                command=self._session_run,
-            ).pack(side=tk.LEFT, padx=(10, 0))
+            ).grid(row=6, column=0, columnspan=2, sticky="w", pady=(6, 0))
 
             ttk.Label(body, text="Результат", style="Field.TLabel").grid(
                 row=7, column=0, sticky="w", pady=(16, 0)
@@ -791,7 +791,7 @@ if tk is not None:
             self.session_output = self._create_readonly_text(body, height=16)
             self.session_output.grid(row=8, column=0, columnspan=2, sticky="nsew", pady=(6, 0))
             body.rowconfigure(8, weight=1)
-            body.rowconfigure(3, weight=0)
+            body.rowconfigure(4, weight=0)
 
         def _refresh_summary(self) -> None:
             selected_profile = self._selected_profile()
@@ -919,6 +919,30 @@ if tk is not None:
                         activebackground=self._colors["field"],
                         activeforeground=self._colors["text"],
                     )
+            if tool_id == "telegram_invite_manager":
+                self._set_readonly_text(
+                    self.invite_output,
+                    "\n".join(
+                        [
+                            "Инвайты по списку",
+                            "1. Укажи ссылку или ID чата.",
+                            "2. Нажми `Загрузить TXT / CSV / JSON` и выбери файл с компьютера.",
+                            "3. Нажми `Старт инвайтов`.",
+                        ]
+                    ),
+                )
+            elif tool_id == "telegram_session_runner":
+                self._set_readonly_text(
+                    self.session_output,
+                    "\n".join(
+                        [
+                            "Сессия и сообщения",
+                            "1. Выбери конфиг режима сессии.",
+                            "2. Загрузить список адресатов или добавь их вручную.",
+                            "3. Нажми `Старт сессии`.",
+                        ]
+                    ),
+                )
             self._refresh_summary()
 
         def _build_profile_manager_form(self, parent: ttk.Frame) -> None:
