@@ -1,6 +1,6 @@
 # Project Status RU
 
-Последнее обновление: 2026-05-02
+Последнее обновление: 2026-05-03
 
 Этот файл нужен как точка входа для любого нового чата и любого нового агента.
 Перед новой задачей его нужно прочитать целиком.
@@ -151,11 +151,15 @@
   - валидировать registry;
   - показывать единый catalog через CLI;
   - открывать Tkinter control panel с docs, actions и artifacts;
-  - не хардкодить список Telegram-инструментов в GUI;
   - показывать portable-пользователей в dropdown;
   - импортировать нового пользователя по `tdata.zip`;
   - принимать в управление уже существующую portable-папку через adopt прямо из панели;
-  - рендерить profile/workflow details в читаемых text-card блоках вместо тесных table rows, чтобы UI не ломался на Linux HiDPI scaling.
+  - рендерить profile/workflow details в читаемых text-card блоках вместо тесных table rows, чтобы UI не ломался на Linux HiDPI scaling;
+  - показывать оператору только два понятных режима:
+    - `Инвайты по списку`
+    - `Сессия и сообщения`
+  - в режиме инвайтов принимать `.txt/.csv/.json` список username и создавать invite-job прямо из панели;
+  - в режиме сессии загружать список адресатов из session-config, позволять править его в панели и запускать session runner кнопкой.
 - Отдельно собран новый видимый Telegram tools hub:
   - `tools/telegram/`
   - `platform/`
@@ -239,6 +243,12 @@
   - при открытии такой страницы расширение вызывает `chrome.runtime.reload()` само.
 
 ## Проверено
+- После перевода Telegram control center в русский двухрежимный UX подтверждены:
+  - `python3 -m py_compile tool_platform/*.py scripts/telegram_portable.py scripts/telegram_invite_executor.py`
+  - `PYTHONPATH="$PWD" python3 -m unittest discover -s tests -p 'test_*.py'` → `192 OK`
+  - `bash -n tools/telegram/platform/bin/tool-platform tools/telegram/platform/bin/tool-platform-panel tools/telegram/session_runner/bin/telegram-session-runner tools/telegram/invite_manager/bin/telegram-invite-manager tools/telegram/invite_manager/bin/telegram-invite-executor`
+  - `./tools/telegram/platform/bin/tool-platform validate-registry`
+  - live GUI smoke: окно `Центр управления Telegram` поднято, `xwininfo` подтвердил `1460x980`, старый английский тестовый экземпляр панели закрыт.
 - Для нового unified tool platform зелёные:
   - `PYTHONPATH="$PWD" python3 -m unittest discover -s tests -p 'test_*.py'`
   - `python3 -m py_compile tool_platform/*.py scripts/telegram_invite_executor.py scripts/telegram_portable.py`
@@ -675,13 +685,19 @@
 
 Следующий резерв уже не в починке path, а в общем балансе runtime между discovery и deep на длинных прогонах.
 
-### 3. Telegram control center уже стал profile-first, но ещё не знает workflow context
-Новая панель уже умеет выбирать portable-пользователя из dropdown, импортировать его по `tdata.zip` и принимать в управление существующие папки.
-Но она пока ещё не подставляет выбранный профиль прямо в команды invite/session/export и не показывает rich live summaries по job/run артефактам.
+### 3. Telegram control center уже стал понятным операторским экраном, но summary-слой ещё можно усилить
+Новая панель уже умеет:
+- выбирать portable-пользователя из dropdown;
+- импортировать нового пользователя по `tdata.zip`;
+- принимать в управление существующие папки;
+- разделять работу на два режима:
+  - `Инвайты по списку`
+  - `Сессия и сообщения`
+- подставлять выбранный профиль в runtime-config session runner;
+- принимать файл со списком username для invite manager;
+- запускать session runner кнопкой с отдельно редактируемым списком адресатов сообщений.
 
-Это нормально для первого шага:
-- сначала нужен стабильный manifest/registry contract;
-- потом можно добавлять profile-aware shortcuts и summaries поверх него.
+Следующий запас уже не в базовом UX, а в более удобных summary и быстрых переходах к последним job/run артефактам.
 
 ## Следующий Приоритет
 
@@ -706,8 +722,9 @@
 ### Для Unified Tool Platform
 - держать registry-driven слой тонким и не переносить туда Telegram-specific business logic;
 - подключать новые инструменты через `tool_manifest.json`, а не через ручную прошивку в GUI;
-- следующим шагом подставлять выбранный portable-профиль в запуск session/invite workflow без ручного копирования пути;
-- потом показывать summaries для последних job/run artifacts без разрастания панели в сложный конструктор экранов.
+- не раздувать операторскую панель сверх двух основных режимов без явной пользы;
+- следующим шагом показывать summaries для последних invite-job и session-run artifacts без разрастания панели в сложный конструктор экранов;
+- при необходимости аккуратно привязать invite-flow к выбранному portable-профилю без смешивания low-level helper логики с UX формы.
 
 ### 4. Reload helper стал рабочим, но fallback-кнопка ещё зависит от геометрии
 Основной stale-runtime блок снят через self-reload страницы расширения.

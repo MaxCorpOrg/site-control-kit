@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
+import tempfile
 import traceback
 from pathlib import Path
 from typing import Any
@@ -19,8 +21,20 @@ except ModuleNotFoundError as exc:  # pragma: no cover - depends on system packa
 else:  # pragma: no cover - trivial branch
     TKINTER_IMPORT_ERROR = None
 
-from .catalog import DEFAULT_REGISTRY_PATH, ToolManifest, find_action, load_catalog
-from .cli import execute_action
+from .catalog import DEFAULT_REGISTRY_PATH, ToolManifest, load_catalog
+from .telegram_gui_helpers import (
+    DEFAULT_INVITE_OUTPUT_ROOT,
+    DEFAULT_SESSION_CONFIG,
+    build_session_runtime_config,
+    default_invite_job_dir,
+    format_session_target_label,
+    invite_manager_init,
+    invite_manager_next,
+    invite_manager_status,
+    session_message_targets,
+    session_plan,
+    session_run,
+)
 from .telegram_profiles import (
     DEFAULT_OUTPUT_ROOT,
     adopt_existing_profile,
@@ -32,55 +46,134 @@ from .telegram_profiles import (
 )
 
 
+USERNAME_RE = re.compile(r"^@?[A-Za-z0-9_]{5,32}$")
+
+
 def format_profile_details(profile: dict[str, Any]) -> str:
     account = profile.get("account") if isinstance(profile.get("account"), dict) else {}
     windows = profile.get("windows") if isinstance(profile.get("windows"), list) else []
     first_window = windows[0] if windows else {}
-    running_text = "running" if profile.get("running") else "stopped"
+    running_text = "Запущен" if profile.get("running") else "Остановлен"
     lines = [
-        "Profile Overview",
-        f"Name: {profile.get('profile_name') or 'unknown'}",
-        f"Account username: {account.get('username') or 'not set'}",
-        f"Account label: {account.get('label') or 'not set'}",
-        f"Runtime state: {running_text}",
-        f"PID count: {len(profile.get('pids') or [])}",
+        "Профиль Telegram",
+        f"Имя профиля: {profile.get('profile_name') or 'неизвестно'}",
+        f"Username аккаунта: {account.get('username') or 'не задан'}",
+        f"Метка аккаунта: {account.get('label') or 'не задана'}",
+        f"Состояние: {running_text}",
+        f"Количество PID: {len(profile.get('pids') or [])}",
         "",
-        "Paths",
-        f"Profile dir: {profile.get('profile_dir') or '-'}",
-        f"tdata dir: {profile.get('tdata_dir') or '-'}",
-        f"Metadata path: {profile.get('metadata_path') or '-'}",
+        "Пути",
+        f"Папка профиля: {profile.get('profile_dir') or '-'}",
+        f"Папка tdata: {profile.get('tdata_dir') or '-'}",
+        f"Metadata: {profile.get('metadata_path') or '-'}",
         f"Telegram log: {profile.get('telegram_log_path') or '-'}",
         "",
-        "Window",
-        f"Window title: {first_window.get('title') or 'not available'}",
-        f"Window id: {first_window.get('window_id') or 'not available'}",
+        "Окно",
+        f"Заголовок окна: {first_window.get('title') or 'недоступно'}",
+        f"ID окна: {first_window.get('window_id') or 'недоступно'}",
     ]
     return "\n".join(lines)
 
 
 def format_workflow_details(tool: ToolManifest) -> str:
     lines = [
-        "Workflow Overview",
-        f"Display name: {tool.display_name}",
-        f"Tool id: {tool.tool_id}",
-        f"Kind: {tool.kind}",
-        f"Source: {tool.source_label}",
-        f"Standalone: {'yes' if tool.standalone else 'no'}",
-        f"Root dir: {tool.root_dir}",
+        "Инструмент Telegram",
+        f"Название: {tool.display_name}",
+        f"Tool ID: {tool.tool_id}",
+        f"Тип: {tool.kind}",
+        f"Источник: {tool.source_label}",
+        f"Standalone: {'да' if tool.standalone else 'нет'}",
+        f"Рабочая папка: {tool.root_dir}",
         f"Manifest: {tool.manifest_path}",
     ]
     if tool.description:
-        lines.extend(["", "Description", tool.description])
+        lines.extend(["", "Описание", tool.description])
     if tool.capabilities:
-        lines.extend(["", "Capabilities", *[f"- {item}" for item in tool.capabilities]])
+        lines.extend(["", "Возможности", *[f"- {item}" for item in tool.capabilities]])
     if tool.tags:
-        lines.extend(["", "Tags", *[f"- {item}" for item in tool.tags]])
+        lines.extend(["", "Теги", *[f"- {item}" for item in tool.tags]])
     if tool.docs:
-        lines.extend(["", "Docs", *[f"- {doc.label}: {doc.path}" for doc in tool.docs]])
+        lines.extend(["", "Документы", *[f"- {doc.label}: {doc.path}" for doc in tool.docs]])
     if tool.artifacts:
         lines.extend(
-            ["", "Artifacts", *[f"- {key}: {value}" for key, value in tool.artifacts.items()]]
+            ["", "Артефакты", *[f"- {key}: {value}" for key, value in tool.artifacts.items()]]
         )
+    return "\n".join(lines)
+
+
+def format_invite_status_payload(payload: dict[str, Any]) -> str:
+    counts = payload.get("counts") if isinstance(payload.get("counts"), dict) else {}
+    next_users = payload.get("users") if isinstance(payload.get("users"), list) else []
+    latest_runs = payload.get("latest_runs") if isinstance(payload.get("latest_runs"), list) else []
+
+    lines = [
+        "Инвайты по списку",
+        f"Папка задачи: {payload.get('job_dir') or '-'}",
+        f"Чат: {payload.get('chat_url') or '-'}",
+        f"Всего пользователей: {payload.get('total_users') or 0}",
+        f"С consent=yes: {payload.get('consent_yes') or 0}",
+        f"С consent=no: {payload.get('consent_no') or 0}",
+        "",
+        "Статусы",
+    ]
+    if counts:
+        for key, value in sorted(counts.items()):
+            lines.append(f"- {key}: {value}")
+    if next_users:
+        lines.extend(["", "Следующие пользователи"])
+        for item in next_users:
+            lines.append(
+                f"- {item.get('username') or '-'} · статус: {item.get('status') or '-'} · попыток: {item.get('attempts') or 0}"
+            )
+    if latest_runs:
+        lines.extend(["", "Последние прогоны"])
+        for run in latest_runs:
+            lines.append(
+                f"- {run.get('run_id') or '-'} · processed={run.get('processed') or 0} · updated={run.get('updated') or 0} · dry_run={int(bool(run.get('dry_run')))}"
+            )
+    return "\n".join(lines)
+
+
+def format_session_plan_payload(payload: dict[str, Any]) -> str:
+    plan = payload.get("plan") if isinstance(payload.get("plan"), dict) else payload
+    visits = plan.get("visits") if isinstance(plan.get("visits"), list) else []
+    drafts = plan.get("message_drafts") if isinstance(plan.get("message_drafts"), list) else []
+    lines = [
+        "Сессия и сообщения",
+        f"Визитов в плане: {len(visits)}",
+        f"Черновиков сообщений: {len(drafts)}",
+        f"Текущий адресат сообщений: {plan.get('message_target_username') or 'не выбран'}",
+    ]
+    if visits:
+        lines.extend(["", "Первые визиты"])
+        for item in visits[:8]:
+            lines.append(
+                f"- {item.get('label') or item.get('target_id') or '-'} · {item.get('kind') or '-'} · {item.get('view_seconds') or 0} сек"
+            )
+    if drafts:
+        lines.extend(["", "Шаблоны сообщений"])
+        for item in drafts:
+            lines.append(f"- {item.get('text') or ''}")
+    return "\n".join(lines)
+
+
+def format_session_run_payload(payload: dict[str, Any]) -> str:
+    run_info = payload.get("run") if isinstance(payload.get("run"), dict) else payload
+    visits = run_info.get("visits") if isinstance(run_info.get("visits"), list) else []
+    drafts = run_info.get("message_drafts") if isinstance(run_info.get("message_drafts"), list) else []
+    lines = [
+        "Сессия и сообщения",
+        f"Статус: {payload.get('status') or run_info.get('status') or 'ok'}",
+        f"Запуск: {payload.get('run_dir') or run_info.get('run_dir') or '-'}",
+        f"Выполнено визитов: {len(visits)}",
+        f"Подготовлено сообщений: {len(drafts)}",
+        f"Адресат сообщений: {run_info.get('message_target_username') or '-'}",
+    ]
+    history = payload.get("history") if isinstance(payload.get("history"), list) else []
+    if history:
+        lines.extend(["", "История"])
+        for item in history[-5:]:
+            lines.append(f"- {item}")
     return "\n".join(lines)
 
 
@@ -91,6 +184,12 @@ if tk is not None:
             super().__init__()
             self.registry_path = registry_path
             self.catalog = load_catalog(registry_path)
+            self.tools_by_id = {tool.tool_id: tool for tool in self.catalog.tools}
+            for required_tool_id in ("telegram_invite_manager", "telegram_session_runner"):
+                if required_tool_id not in self.tools_by_id:
+                    raise RuntimeError(
+                        f"В registry отсутствует обязательный инструмент: {required_tool_id}"
+                    )
             self._colors = {
                 "bg": "#f3efe7",
                 "surface": "#fffaf2",
@@ -102,12 +201,12 @@ if tk is not None:
                 "accent": "#176b87",
                 "accent_active": "#12546a",
                 "accent_text": "#ffffff",
-                "selection": "#dfeef5",
+                "inactive_button": "#efe7d9",
             }
             self._fonts: dict[str, Any] = {}
             self._configure_styles()
 
-            self.title(self.catalog.platform_name)
+            self.title("Центр управления Telegram")
             self.geometry("1460x980")
             self.minsize(1200, 780)
 
@@ -123,19 +222,35 @@ if tk is not None:
             self.adopt_account_username_var = tk.StringVar()
             self.adopt_account_label_var = tk.StringVar()
 
+            self.invite_chat_url_var = tk.StringVar()
+            self.invite_input_path_var = tk.StringVar()
+            self.invite_job_dir_var = tk.StringVar()
+            self.invite_limit_var = tk.StringVar(value="10")
+
+            self.session_config_path_var = tk.StringVar(value=str(DEFAULT_SESSION_CONFIG))
+            self.session_new_target_var = tk.StringVar()
+            self.session_new_target_label_var = tk.StringVar()
+            self.session_new_target_kind_var = tk.StringVar(value="Контакт")
+            self.session_auto_send_var = tk.BooleanVar(value=False)
+
             self._profiles: list[dict[str, Any]] = []
-            self._tool_ids: list[str] = []
+            self._session_targets: list[dict[str, Any]] = []
+            self._active_tool_id = "telegram_invite_manager"
 
             self.profile_combo: ttk.Combobox | None = None
             self.profile_details: tk.Text | None = None
-            self.workflow_details: tk.Text | None = None
+            self.invite_output: tk.Text | None = None
+            self.session_output: tk.Text | None = None
+            self.session_targets_list: tk.Listbox | None = None
+            self._tool_buttons: dict[str, tk.Button] = {}
+            self._tool_frames: dict[str, ttk.Frame] = {}
 
-            self.tool_list = self._create_listbox(self, height=6)
-            self.action_list = self._create_listbox(self, height=6)
+            self.invite_chat_url_var.trace_add("write", self._sync_invite_job_dir)
 
             self._build_ui()
-            self._reload_catalog(initial=True)
             self._reload_profiles(initial=True)
+            self._load_session_targets(show_feedback=False)
+            self._switch_tool("telegram_invite_manager")
 
         def _configure_styles(self) -> None:
             if ttk is None or tkfont is None:
@@ -156,19 +271,15 @@ if tk is not None:
             hero_font.configure(size=20, weight="bold")
             small_font = base_font.copy()
             small_font.configure(size=10)
-            mono_font = tkfont.Font(self, family="Noto Sans Mono", size=10)
             self._fonts = {
                 "base": base_font,
                 "label": label_font,
                 "section": section_font,
                 "hero": hero_font,
                 "small": small_font,
-                "mono": mono_font,
             }
 
             self.configure(bg=self._colors["bg"])
-            self.option_add("*tearOff", False)
-
             style.configure(".", background=self._colors["bg"], foreground=self._colors["text"])
             style.configure("App.TFrame", background=self._colors["bg"])
             style.configure("Card.TFrame", background=self._colors["surface"])
@@ -195,12 +306,6 @@ if tk is not None:
                 background=self._colors["surface"],
                 foreground=self._colors["muted"],
                 font=self._fonts["small"],
-            )
-            style.configure(
-                "Surface.TLabel",
-                background=self._colors["surface"],
-                foreground=self._colors["text"],
-                font=self._fonts["base"],
             )
             style.configure(
                 "Field.TLabel",
@@ -243,10 +348,7 @@ if tk is not None:
                 lightcolor=self._colors["border"],
                 darkcolor=self._colors["border"],
             )
-            style.map(
-                "TButton",
-                background=[("active", self._colors["field"])],
-            )
+            style.map("TButton", background=[("active", self._colors["field"])])
             style.configure(
                 "Accent.TButton",
                 font=self._fonts["label"],
@@ -261,43 +363,6 @@ if tk is not None:
                 "Accent.TButton",
                 background=[("active", self._colors["accent_active"])],
                 foreground=[("active", self._colors["accent_text"])],
-            )
-            style.configure("TNotebook", background=self._colors["surface"], borderwidth=0)
-            style.configure(
-                "TNotebook.Tab",
-                background=self._colors["surface_alt"],
-                foreground=self._colors["muted"],
-                font=self._fonts["base"],
-                padding=(14, 8),
-            )
-            style.map(
-                "TNotebook.Tab",
-                background=[
-                    ("selected", self._colors["field"]),
-                    ("active", self._colors["field"]),
-                ],
-                foreground=[
-                    ("selected", self._colors["text"]),
-                    ("active", self._colors["text"]),
-                ],
-            )
-
-        def _create_listbox(self, parent: tk.Widget, height: int) -> tk.Listbox:
-            return tk.Listbox(
-                parent,
-                activestyle="none",
-                bg=self._colors["field"],
-                fg=self._colors["text"],
-                selectbackground=self._colors["accent"],
-                selectforeground=self._colors["accent_text"],
-                highlightbackground=self._colors["border"],
-                highlightcolor=self._colors["accent"],
-                highlightthickness=1,
-                borderwidth=0,
-                relief="flat",
-                font=self._fonts["base"],
-                exportselection=False,
-                height=height,
             )
 
         def _create_readonly_text(self, parent: ttk.Frame, *, height: int) -> tk.Text:
@@ -330,9 +395,35 @@ if tk is not None:
             widget.insert("1.0", content.strip() + "\n")
             widget.configure(state="disabled")
 
-        def _create_card(self, parent: ttk.Frame, title: str, subtitle: str) -> ttk.Frame:
+        def _create_listbox(self, parent: tk.Widget, *, selectmode: str = tk.SINGLE, height: int = 6) -> tk.Listbox:
+            return tk.Listbox(
+                parent,
+                activestyle="none",
+                bg=self._colors["field"],
+                fg=self._colors["text"],
+                selectbackground=self._colors["accent"],
+                selectforeground=self._colors["accent_text"],
+                highlightbackground=self._colors["border"],
+                highlightcolor=self._colors["accent"],
+                highlightthickness=1,
+                borderwidth=0,
+                relief="flat",
+                font=self._fonts["base"],
+                exportselection=False,
+                selectmode=selectmode,
+                height=height,
+            )
+
+        def _create_card(
+            self,
+            parent: ttk.Frame,
+            title: str,
+            subtitle: str,
+            *,
+            expand: bool = False,
+        ) -> ttk.Frame:
             card = ttk.Frame(parent, style="Card.TFrame", padding=16)
-            card.pack(fill="both", expand=False, pady=(0, 14))
+            card.pack(fill="both", expand=expand, pady=(0, 14))
             ttk.Label(card, text=title, style="CardTitle.TLabel").pack(anchor="w")
             if subtitle:
                 ttk.Label(card, text=subtitle, style="CardSubtitle.TLabel").pack(
@@ -342,274 +433,506 @@ if tk is not None:
             body.pack(fill="both", expand=True)
             return body
 
+        def _create_inline_panel(self, parent: tk.Widget, title: str, subtitle: str) -> tk.Frame:
+            panel = tk.Frame(
+                parent,
+                bg=self._colors["field"],
+                highlightbackground=self._colors["border"],
+                highlightcolor=self._colors["border"],
+                highlightthickness=1,
+                bd=0,
+                padx=12,
+                pady=12,
+            )
+            tk.Label(
+                panel,
+                text=title,
+                bg=self._colors["field"],
+                fg=self._colors["text"],
+                font=self._fonts["label"],
+                anchor="w",
+            ).grid(row=0, column=0, sticky="w")
+            tk.Label(
+                panel,
+                text=subtitle,
+                bg=self._colors["field"],
+                fg=self._colors["muted"],
+                font=self._fonts["small"],
+                justify="left",
+                anchor="w",
+            ).grid(row=1, column=0, sticky="w", pady=(4, 10))
+            return panel
+
         def _build_ui(self) -> None:
             outer = ttk.Frame(self, style="App.TFrame", padding=20)
             outer.pack(fill=tk.BOTH, expand=True)
 
             header = ttk.Frame(outer, style="App.TFrame")
             header.pack(fill="x")
-
             hero = ttk.Frame(header, style="App.TFrame")
             hero.pack(side=tk.LEFT, fill="x", expand=True)
-            ttk.Label(hero, text=self.catalog.platform_name, style="HeroTitle.TLabel").pack(
-                anchor="w"
-            )
+            ttk.Label(hero, text="Центр управления Telegram", style="HeroTitle.TLabel").pack(anchor="w")
             ttk.Label(hero, textvariable=self.summary_var, style="HeroSub.TLabel").pack(
                 anchor="w", pady=(4, 0)
             )
-
             header_actions = ttk.Frame(header, style="App.TFrame")
-            header_actions.pack(side=tk.RIGHT, anchor="ne")
+            header_actions.pack(side=tk.RIGHT)
             ttk.Button(
                 header_actions,
-                text="Refresh Profiles",
+                text="Обновить профили",
                 command=self._reload_profiles,
             ).pack(side=tk.LEFT)
-            ttk.Button(
-                header_actions,
-                text="Refresh Workflows",
-                command=self._reload_catalog,
-            ).pack(side=tk.LEFT, padx=(10, 0))
 
             ttk.Separator(outer, orient="horizontal").pack(fill="x", pady=(16, 18))
 
             content = ttk.Frame(outer, style="App.TFrame")
             content.pack(fill=tk.BOTH, expand=True)
-            content.columnconfigure(0, weight=7)
-            content.columnconfigure(1, weight=5)
-            content.rowconfigure(0, weight=1)
 
-            left_frame = ttk.Frame(content, style="App.TFrame")
-            left_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 12))
-            right_frame = ttk.Frame(content, style="App.TFrame")
-            right_frame.grid(row=0, column=1, sticky="nsew")
+            self._build_profile_section(content)
+            self._build_tool_selector(content)
+            self._build_tool_content(content)
 
-            self._build_profile_ui(left_frame)
-            self._build_workflow_ui(right_frame)
-
-        def _build_profile_ui(self, parent: ttk.Frame) -> None:
-            profile_body = self._create_card(
+        def _build_profile_section(self, parent: ttk.Frame) -> None:
+            body = self._create_card(
                 parent,
-                "Portable Profiles",
-                "Choose the active Telegram Desktop user, then refresh status or launch the profile.",
+                "1. Telegram-профиль",
+                "Сначала выбери рабочего пользователя Telegram. Этот профиль будет использован в запуске сессии и связанных действиях.",
             )
-            profile_body.columnconfigure(1, weight=1)
+            body.columnconfigure(0, weight=1)
+            body.columnconfigure(1, weight=1)
+            body.columnconfigure(2, weight=0)
+            body.columnconfigure(3, weight=0)
 
-            ttk.Label(profile_body, text="Profiles root", style="Field.TLabel").grid(
+            ttk.Label(body, text="Корень профилей", style="Field.TLabel").grid(
                 row=0, column=0, sticky="w"
             )
-            ttk.Entry(profile_body, textvariable=self.output_root_var).grid(
-                row=1, column=0, columnspan=2, sticky="ew", pady=(4, 0)
+            ttk.Entry(body, textvariable=self.output_root_var).grid(
+                row=1, column=0, columnspan=2, sticky="ew", pady=(4, 12)
             )
-            ttk.Button(
-                profile_body,
-                text="Reload",
-                command=self._reload_profiles,
-            ).grid(row=1, column=2, sticky="ew", padx=(10, 0))
+            ttk.Button(body, text="Перечитать", command=self._reload_profiles).grid(
+                row=1, column=2, sticky="ew", padx=(10, 0)
+            )
 
-            ttk.Label(profile_body, text="Current user", style="Field.TLabel").grid(
-                row=2, column=0, sticky="w", pady=(14, 0)
+            ttk.Label(body, text="Текущий пользователь", style="Field.TLabel").grid(
+                row=2, column=0, sticky="w"
             )
             self.profile_combo = ttk.Combobox(
-                profile_body,
+                body,
                 textvariable=self.profile_choice_var,
                 state="readonly",
             )
             self.profile_combo.grid(
-                row=3,
-                column=0,
-                columnspan=2,
-                sticky="ew",
-                pady=(4, 0),
+                row=3, column=0, columnspan=2, sticky="ew", pady=(4, 0)
             )
             self.profile_combo.bind("<<ComboboxSelected>>", self._on_profile_select)
             ttk.Button(
-                profile_body,
-                text="Launch",
+                body,
+                text="Запустить",
                 style="Accent.TButton",
                 command=self._launch_selected_profile,
             ).grid(row=3, column=2, sticky="ew", padx=(10, 0))
             ttk.Button(
-                profile_body,
-                text="Refresh Status",
+                body,
+                text="Обновить статус",
                 command=self._refresh_selected_profile_status,
             ).grid(row=3, column=3, sticky="ew", padx=(10, 0))
 
-            ttk.Label(profile_body, text="Profile details", style="Field.TLabel").grid(
+            ttk.Label(body, text="Детали профиля", style="Field.TLabel").grid(
                 row=4, column=0, sticky="w", pady=(16, 0)
             )
-            self.profile_details = self._create_readonly_text(profile_body, height=12)
-            self.profile_details.grid(
-                row=5,
-                column=0,
-                columnspan=4,
-                sticky="nsew",
-                pady=(6, 0),
+            self.profile_details = self._create_readonly_text(body, height=8)
+            self.profile_details.grid(row=5, column=0, columnspan=4, sticky="nsew", pady=(6, 0))
+            actions = ttk.Frame(body, style="Card.TFrame")
+            actions.grid(row=6, column=0, columnspan=4, sticky="ew", pady=(16, 0))
+            actions.columnconfigure(0, weight=1)
+            actions.columnconfigure(1, weight=1)
+
+            import_panel = self._create_inline_panel(
+                actions,
+                "Добавить нового пользователя",
+                "Импортируй `tdata.zip`, и профиль сразу появится в списке сверху.",
             )
-            profile_body.rowconfigure(5, weight=1)
+            import_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+            import_panel.columnconfigure(0, weight=1)
 
-            intake_body = self._create_card(
-                parent,
-                "Profile Intake",
-                "Bring in a new user by tdata archive or register a folder that already exists on disk.",
-            )
-            notebook = ttk.Notebook(intake_body)
-            notebook.pack(fill="both", expand=True)
-
-            import_tab = ttk.Frame(notebook, style="Card.TFrame", padding=12)
-            adopt_tab = ttk.Frame(notebook, style="Card.TFrame", padding=12)
-            notebook.add(import_tab, text="Import tdata")
-            notebook.add(adopt_tab, text="Adopt Folder")
-            self._build_import_form(import_tab)
-            self._build_adopt_form(adopt_tab)
-
-        def _build_workflow_ui(self, parent: ttk.Frame) -> None:
-            workflows_body = self._create_card(
-                parent,
-                "Telegram Workflows",
-                "Keep the tools separate, inspect what each one does, and preview an action before you run it.",
-            )
-            self.tool_list.pack(in_=workflows_body, fill=tk.X, expand=False)
-            self.tool_list.bind("<<ListboxSelect>>", self._on_tool_select)
-
-            details_body = self._create_card(
-                parent,
-                "Selected Workflow",
-                "Manifest details are rendered as readable text so long paths and descriptions stay visible.",
-            )
-            self.workflow_details = self._create_readonly_text(details_body, height=18)
-            self.workflow_details.pack(fill="both", expand=True)
-
-            actions_body = self._create_card(
-                parent,
-                "Workflow Actions",
-                "Preview first for safe commands, then run the exact workflow action you need.",
-            )
-            action_layout = ttk.Frame(actions_body, style="Card.TFrame")
-            action_layout.pack(fill="both", expand=True)
-            self.action_list.pack(in_=action_layout, side=tk.LEFT, fill=tk.BOTH, expand=True)
-            self.action_list.bind("<<ListboxSelect>>", self._on_action_select)
-            action_buttons = ttk.Frame(action_layout, style="Card.TFrame")
-            action_buttons.pack(side=tk.RIGHT, fill=tk.Y, padx=(12, 0))
-            ttk.Button(
-                action_buttons,
-                text="Run Action",
-                style="Accent.TButton",
-                command=self._run_action,
-            ).pack(fill="x")
-            ttk.Button(
-                action_buttons,
-                text="Preview Action",
-                command=lambda: self._run_action(dry_run=True),
-            ).pack(fill="x", pady=(10, 0))
-
-        def _build_import_form(self, parent: ttk.Frame) -> None:
-            parent.columnconfigure(0, weight=1)
-
-            ttk.Label(parent, text="tdata zip", style="Field.TLabel").grid(
-                row=0, column=0, sticky="w"
-            )
-            zip_row = ttk.Frame(parent, style="Card.TFrame")
-            zip_row.grid(row=1, column=0, sticky="ew", pady=(4, 10))
-            zip_row.columnconfigure(0, weight=1)
-            ttk.Entry(zip_row, textvariable=self.import_zip_var).grid(row=0, column=0, sticky="ew")
-            ttk.Button(zip_row, text="Browse", command=self._choose_import_zip).grid(
+            tk.Label(
+                import_panel,
+                text="Файл tdata.zip",
+                bg=self._colors["field"],
+                fg=self._colors["muted"],
+                font=self._fonts["small"],
+                anchor="w",
+            ).grid(row=2, column=0, sticky="w")
+            import_path_row = ttk.Frame(import_panel, style="Card.TFrame")
+            import_path_row.grid(row=3, column=0, sticky="ew", pady=(4, 8))
+            import_path_row.columnconfigure(0, weight=1)
+            ttk.Entry(import_path_row, textvariable=self.import_zip_var).grid(row=0, column=0, sticky="ew")
+            ttk.Button(import_path_row, text="Выбрать", command=self._choose_import_zip).grid(
                 row=0, column=1, padx=(10, 0)
             )
 
-            ttk.Label(parent, text="Profile name", style="Field.TLabel").grid(
-                row=2, column=0, sticky="w"
-            )
-            ttk.Entry(parent, textvariable=self.import_profile_name_var).grid(
-                row=3, column=0, sticky="ew", pady=(4, 10)
-            )
-
-            ttk.Label(parent, text="Account username", style="Field.TLabel").grid(
-                row=4, column=0, sticky="w"
-            )
-            ttk.Entry(parent, textvariable=self.import_account_username_var).grid(
-                row=5, column=0, sticky="ew", pady=(4, 10)
+            tk.Label(
+                import_panel,
+                text="Имя профиля",
+                bg=self._colors["field"],
+                fg=self._colors["muted"],
+                font=self._fonts["small"],
+                anchor="w",
+            ).grid(row=4, column=0, sticky="w")
+            ttk.Entry(import_panel, textvariable=self.import_profile_name_var).grid(
+                row=5, column=0, sticky="ew", pady=(4, 8)
             )
 
-            ttk.Label(parent, text="Account label", style="Field.TLabel").grid(
-                row=6, column=0, sticky="w"
-            )
-            ttk.Entry(parent, textvariable=self.import_account_label_var).grid(
-                row=7, column=0, sticky="ew", pady=(4, 14)
+            tk.Label(
+                import_panel,
+                text="Username аккаунта",
+                bg=self._colors["field"],
+                fg=self._colors["muted"],
+                font=self._fonts["small"],
+                anchor="w",
+            ).grid(row=6, column=0, sticky="w")
+            ttk.Entry(import_panel, textvariable=self.import_account_username_var).grid(
+                row=7, column=0, sticky="ew", pady=(4, 8)
             )
 
+            tk.Label(
+                import_panel,
+                text="Понятная метка",
+                bg=self._colors["field"],
+                fg=self._colors["muted"],
+                font=self._fonts["small"],
+                anchor="w",
+            ).grid(row=8, column=0, sticky="w")
+            ttk.Entry(import_panel, textvariable=self.import_account_label_var).grid(
+                row=9, column=0, sticky="ew", pady=(4, 12)
+            )
             ttk.Button(
-                parent,
-                text="Import and Launch",
+                import_panel,
+                text="Импортировать и запустить",
                 style="Accent.TButton",
                 command=self._import_profile,
-            ).grid(row=8, column=0, sticky="e")
+            ).grid(row=10, column=0, sticky="e")
 
-        def _build_adopt_form(self, parent: ttk.Frame) -> None:
-            parent.columnconfigure(0, weight=1)
+            adopt_panel = self._create_inline_panel(
+                actions,
+                "Подключить готовую папку",
+                "Если профиль уже лежит на диске, просто добавь его в список без переимпорта.",
+            )
+            adopt_panel.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
+            adopt_panel.columnconfigure(0, weight=1)
 
-            ttk.Label(parent, text="Portable profile folder", style="Field.TLabel").grid(
-                row=0, column=0, sticky="w"
-            )
-            dir_row = ttk.Frame(parent, style="Card.TFrame")
-            dir_row.grid(row=1, column=0, sticky="ew", pady=(4, 10))
-            dir_row.columnconfigure(0, weight=1)
-            ttk.Entry(dir_row, textvariable=self.adopt_profile_dir_var).grid(
-                row=0, column=0, sticky="ew"
-            )
-            ttk.Button(dir_row, text="Browse", command=self._choose_adopt_dir).grid(
+            tk.Label(
+                adopt_panel,
+                text="Папка профиля",
+                bg=self._colors["field"],
+                fg=self._colors["muted"],
+                font=self._fonts["small"],
+                anchor="w",
+            ).grid(row=2, column=0, sticky="w")
+            adopt_path_row = ttk.Frame(adopt_panel, style="Card.TFrame")
+            adopt_path_row.grid(row=3, column=0, sticky="ew", pady=(4, 8))
+            adopt_path_row.columnconfigure(0, weight=1)
+            ttk.Entry(adopt_path_row, textvariable=self.adopt_profile_dir_var).grid(row=0, column=0, sticky="ew")
+            ttk.Button(adopt_path_row, text="Выбрать", command=self._choose_adopt_dir).grid(
                 row=0, column=1, padx=(10, 0)
             )
 
-            ttk.Label(parent, text="Profile name", style="Field.TLabel").grid(
+            tk.Label(
+                adopt_panel,
+                text="Имя профиля",
+                bg=self._colors["field"],
+                fg=self._colors["muted"],
+                font=self._fonts["small"],
+                anchor="w",
+            ).grid(row=4, column=0, sticky="w")
+            ttk.Entry(adopt_panel, textvariable=self.adopt_profile_name_var).grid(
+                row=5, column=0, sticky="ew", pady=(4, 8)
+            )
+
+            tk.Label(
+                adopt_panel,
+                text="Username аккаунта",
+                bg=self._colors["field"],
+                fg=self._colors["muted"],
+                font=self._fonts["small"],
+                anchor="w",
+            ).grid(row=6, column=0, sticky="w")
+            ttk.Entry(adopt_panel, textvariable=self.adopt_account_username_var).grid(
+                row=7, column=0, sticky="ew", pady=(4, 8)
+            )
+
+            tk.Label(
+                adopt_panel,
+                text="Понятная метка",
+                bg=self._colors["field"],
+                fg=self._colors["muted"],
+                font=self._fonts["small"],
+                anchor="w",
+            ).grid(row=8, column=0, sticky="w")
+            ttk.Entry(adopt_panel, textvariable=self.adopt_account_label_var).grid(
+                row=9, column=0, sticky="ew", pady=(4, 12)
+            )
+            ttk.Button(
+                adopt_panel,
+                text="Подключить профиль",
+                command=self._adopt_profile,
+            ).grid(row=10, column=0, sticky="e")
+
+        def _build_tool_selector(self, parent: ttk.Frame) -> None:
+            body = self._create_card(
+                parent,
+                "2. Выбор инструмента",
+                "Ниже всегда открыт только один рабочий экран. Инвайты и сессии разделены, чтобы не путаться.",
+            )
+            selector = ttk.Frame(body, style="Card.TFrame")
+            selector.pack(fill="x")
+
+            tools = [
+                ("telegram_invite_manager", "Инвайты по списку"),
+                ("telegram_session_runner", "Сессия и сообщения"),
+            ]
+            for tool_id, label in tools:
+                button = tk.Button(
+                    selector,
+                    text=label,
+                    font=self._fonts["label"],
+                    bd=0,
+                    padx=18,
+                    pady=12,
+                    relief="flat",
+                    command=lambda current=tool_id: self._switch_tool(current),
+                )
+                button.pack(side=tk.LEFT, padx=(0, 10))
+                self._tool_buttons[tool_id] = button
+            ttk.Label(
+                body,
+                text="Выбери нужную кнопку выше: слева работа со списком username, справа случайные визиты и отправка сообщений.",
+                style="CardSubtitle.TLabel",
+            ).pack(anchor="w", pady=(10, 0))
+
+        def _build_tool_content(self, parent: ttk.Frame) -> None:
+            container = ttk.Frame(parent, style="App.TFrame")
+            container.pack(fill=tk.BOTH, expand=True)
+
+            invite_frame = ttk.Frame(container, style="App.TFrame")
+            session_frame = ttk.Frame(container, style="App.TFrame")
+            invite_frame.grid(row=0, column=0, sticky="nsew")
+            session_frame.grid(row=0, column=0, sticky="nsew")
+            container.columnconfigure(0, weight=1)
+            container.rowconfigure(0, weight=1)
+
+            self._tool_frames["telegram_invite_manager"] = invite_frame
+            self._tool_frames["telegram_session_runner"] = session_frame
+
+            self._build_invite_view(invite_frame)
+            self._build_session_view(session_frame)
+
+        def _build_invite_view(self, parent: ttk.Frame) -> None:
+            body = self._create_card(
+                parent,
+                "Инструмент: Инвайты по списку",
+                "Загрузи файл с username, создай задачу и смотри следующих пользователей. Это отдельный режим и он не смешивается с отправкой сообщений.",
+                expand=True,
+            )
+            body.columnconfigure(0, weight=1)
+            body.columnconfigure(1, weight=0)
+
+            ttk.Label(body, text="Ссылка или ID чата", style="Field.TLabel").grid(
+                row=0, column=0, sticky="w"
+            )
+            ttk.Entry(body, textvariable=self.invite_chat_url_var).grid(
+                row=1, column=0, columnspan=2, sticky="ew", pady=(4, 10)
+            )
+
+            ttk.Label(body, text="Файл со списком username", style="Field.TLabel").grid(
                 row=2, column=0, sticky="w"
             )
-            ttk.Entry(parent, textvariable=self.adopt_profile_name_var).grid(
-                row=3, column=0, sticky="ew", pady=(4, 10)
+            file_row = ttk.Frame(body, style="Card.TFrame")
+            file_row.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(4, 10))
+            file_row.columnconfigure(0, weight=1)
+            ttk.Entry(file_row, textvariable=self.invite_input_path_var).grid(
+                row=0, column=0, sticky="ew"
+            )
+            ttk.Button(file_row, text="Выбрать файл", command=self._choose_invite_input).grid(
+                row=0, column=1, padx=(10, 0)
             )
 
-            ttk.Label(parent, text="Account username", style="Field.TLabel").grid(
+            ttk.Label(body, text="Папка задачи", style="Field.TLabel").grid(
                 row=4, column=0, sticky="w"
             )
-            ttk.Entry(parent, textvariable=self.adopt_account_username_var).grid(
-                row=5, column=0, sticky="ew", pady=(4, 10)
+            ttk.Entry(body, textvariable=self.invite_job_dir_var).grid(
+                row=5, column=0, columnspan=2, sticky="ew", pady=(4, 10)
             )
 
-            ttk.Label(parent, text="Account label", style="Field.TLabel").grid(
-                row=6, column=0, sticky="w"
+            ttk.Label(
+                body,
+                text="Поддерживаются .txt, .csv и .json. Для .txt одна строка = один @username, consent=yes ставится автоматически.",
+                style="CardSubtitle.TLabel",
+            ).grid(row=6, column=0, columnspan=2, sticky="w")
+
+            next_row = ttk.Frame(body, style="Card.TFrame")
+            next_row.grid(row=7, column=0, columnspan=2, sticky="w", pady=(14, 0))
+            ttk.Label(next_row, text="Сколько показать дальше", style="Field.TLabel").pack(
+                side=tk.LEFT
             )
-            ttk.Entry(parent, textvariable=self.adopt_account_label_var).grid(
-                row=7, column=0, sticky="ew", pady=(4, 14)
+            ttk.Entry(next_row, textvariable=self.invite_limit_var, width=8).pack(
+                side=tk.LEFT, padx=(10, 0)
             )
 
+            buttons = ttk.Frame(body, style="Card.TFrame")
+            buttons.grid(row=8, column=0, columnspan=2, sticky="w", pady=(14, 0))
             ttk.Button(
-                parent,
-                text="Adopt Profile",
+                buttons,
+                text="Создать задачу из списка",
                 style="Accent.TButton",
-                command=self._adopt_profile,
-            ).grid(row=8, column=0, sticky="e")
+                command=self._invite_create_job,
+            ).pack(side=tk.LEFT)
+            ttk.Button(
+                buttons,
+                text="Показать статус",
+                command=self._invite_show_status,
+            ).pack(side=tk.LEFT, padx=(10, 0))
+            ttk.Button(
+                buttons,
+                text="Показать следующих",
+                command=self._invite_show_next,
+            ).pack(side=tk.LEFT, padx=(10, 0))
 
-        def _reload_catalog(self, initial: bool = False) -> None:
-            try:
-                self.catalog = load_catalog(self.registry_path)
-            except Exception as exc:  # pragma: no cover - GUI fallback
-                messagebox.showerror("Telegram Control Center", f"Failed to load workflows:\n{exc}")
-                if initial:
-                    raise
-                return
-            self._tool_ids = [tool.tool_id for tool in self.catalog.tools]
-            self.tool_list.delete(0, tk.END)
-            self.action_list.delete(0, tk.END)
-            for tool in self.catalog.tools:
-                self.tool_list.insert(tk.END, tool.display_name)
-            if self.catalog.tools:
-                self.tool_list.selection_clear(0, tk.END)
-                self.tool_list.selection_set(0)
-                self.tool_list.activate(0)
-                self._show_tool(self.catalog.tools[0])
-            else:
-                self._set_readonly_text(self.workflow_details, "No workflows are registered.")
-            self._refresh_summary()
+            ttk.Label(body, text="Результат", style="Field.TLabel").grid(
+                row=9, column=0, sticky="w", pady=(16, 0)
+            )
+            self.invite_output = self._create_readonly_text(body, height=16)
+            self.invite_output.grid(row=10, column=0, columnspan=2, sticky="nsew", pady=(6, 0))
+            body.rowconfigure(10, weight=1)
+
+        def _build_session_view(self, parent: ttk.Frame) -> None:
+            body = self._create_card(
+                parent,
+                "Инструмент: Сессия и сообщения",
+                "Здесь выбирается список адресатов сообщений и запускается сам session runner. Этот экран никак не вмешивается в режим инвайтов.",
+                expand=True,
+            )
+            body.columnconfigure(0, weight=1)
+            body.columnconfigure(1, weight=0)
+
+            ttk.Label(body, text="Конфиг режима сессии", style="Field.TLabel").grid(
+                row=0, column=0, sticky="w"
+            )
+            config_row = ttk.Frame(body, style="Card.TFrame")
+            config_row.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(4, 10))
+            config_row.columnconfigure(0, weight=1)
+            ttk.Entry(config_row, textvariable=self.session_config_path_var).grid(
+                row=0, column=0, sticky="ew"
+            )
+            ttk.Button(config_row, text="Выбрать конфиг", command=self._choose_session_config).grid(
+                row=0, column=1, padx=(10, 0)
+            )
+            ttk.Button(config_row, text="Загрузить адресатов", command=self._load_session_targets).grid(
+                row=0, column=2, padx=(10, 0)
+            )
+
+            ttk.Label(body, text="Список адресатов сообщений", style="Field.TLabel").grid(
+                row=2, column=0, sticky="w"
+            )
+            recipients_row = ttk.Frame(body, style="Card.TFrame")
+            recipients_row.grid(row=3, column=0, columnspan=2, sticky="nsew", pady=(6, 0))
+            recipients_row.columnconfigure(0, weight=1)
+            self.session_targets_list = self._create_listbox(
+                recipients_row,
+                selectmode=tk.EXTENDED,
+                height=8,
+            )
+            self.session_targets_list.grid(row=0, column=0, rowspan=8, sticky="nsew")
+            ttk.Button(
+                recipients_row,
+                text="Удалить выбранных",
+                command=self._remove_session_targets,
+            ).grid(row=0, column=1, sticky="ew", padx=(10, 0))
+
+            ttk.Label(recipients_row, text="Добавить новый адресат", style="Field.TLabel").grid(
+                row=1, column=1, sticky="w", padx=(10, 0), pady=(12, 0)
+            )
+            ttk.Label(recipients_row, text="Username или @ссылка", style="Field.TLabel").grid(
+                row=2, column=1, sticky="w", padx=(10, 0), pady=(8, 0)
+            )
+            ttk.Entry(recipients_row, textvariable=self.session_new_target_var).grid(
+                row=3, column=1, sticky="ew", padx=(10, 0), pady=(4, 0)
+            )
+            ttk.Label(recipients_row, text="Понятное название", style="Field.TLabel").grid(
+                row=4, column=1, sticky="w", padx=(10, 0), pady=(8, 0)
+            )
+            ttk.Entry(recipients_row, textvariable=self.session_new_target_label_var).grid(
+                row=5, column=1, sticky="ew", padx=(10, 0), pady=(4, 0)
+            )
+            ttk.Label(recipients_row, text="Тип адресата", style="Field.TLabel").grid(
+                row=6, column=1, sticky="w", padx=(10, 0), pady=(8, 0)
+            )
+            kind_combo = ttk.Combobox(
+                recipients_row,
+                textvariable=self.session_new_target_kind_var,
+                state="readonly",
+                values=["Контакт", "Группа"],
+            )
+            kind_combo.grid(row=7, column=1, sticky="ew", padx=(10, 0), pady=(4, 0))
+            ttk.Button(
+                recipients_row,
+                text="Добавить адресата",
+                command=self._add_session_target,
+            ).grid(row=8, column=1, sticky="ew", padx=(10, 0), pady=(10, 0))
+
+            ttk.Label(
+                recipients_row,
+                text="Сначала введи @username. Во второй строке можно дать понятное имя, а ниже выбрать тип: контакт или группа.",
+                style="CardSubtitle.TLabel",
+            ).grid(row=9, column=1, sticky="w", padx=(10, 0), pady=(10, 0))
+
+            ttk.Checkbutton(
+                body,
+                text="Отправлять сообщения автоматически",
+                variable=self.session_auto_send_var,
+            ).grid(row=4, column=0, sticky="w", pady=(14, 0))
+
+            ttk.Label(
+                body,
+                text="Текущий профиль сверху будет автоматически подставлен в runtime-config перед запуском.",
+                style="CardSubtitle.TLabel",
+            ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(6, 0))
+
+            buttons = ttk.Frame(body, style="Card.TFrame")
+            buttons.grid(row=6, column=0, columnspan=2, sticky="w", pady=(14, 0))
+            ttk.Button(
+                buttons,
+                text="Показать план",
+                command=self._session_show_plan,
+            ).pack(side=tk.LEFT)
+            ttk.Button(
+                buttons,
+                text="Запустить сессию",
+                style="Accent.TButton",
+                command=self._session_run,
+            ).pack(side=tk.LEFT, padx=(10, 0))
+
+            ttk.Label(body, text="Результат", style="Field.TLabel").grid(
+                row=7, column=0, sticky="w", pady=(16, 0)
+            )
+            self.session_output = self._create_readonly_text(body, height=16)
+            self.session_output.grid(row=8, column=0, columnspan=2, sticky="nsew", pady=(6, 0))
+            body.rowconfigure(8, weight=1)
+            body.rowconfigure(3, weight=0)
+
+        def _refresh_summary(self) -> None:
+            selected_profile = self._selected_profile()
+            profile_part = (
+                format_profile_label(selected_profile) if selected_profile is not None else "профиль не выбран"
+            )
+            active_label = (
+                "Инвайты по списку"
+                if self._active_tool_id == "telegram_invite_manager"
+                else "Сессия и сообщения"
+            )
+            self.summary_var.set(
+                f"Профилей найдено: {len(self._profiles)} · Выбранный профиль: {profile_part} · Активный режим: {active_label}"
+            )
 
         def _reload_profiles(
             self,
@@ -619,7 +942,7 @@ if tk is not None:
             try:
                 self._profiles = list_portable_profiles(self.output_root_var.get())
             except Exception as exc:  # pragma: no cover - GUI fallback
-                messagebox.showerror("Telegram Control Center", f"Failed to load profiles:\n{exc}")
+                messagebox.showerror("Панель Telegram", f"Не удалось прочитать профили:\n{exc}")
                 if initial:
                     raise
                 return
@@ -632,7 +955,7 @@ if tk is not None:
                 self.profile_choice_var.set("")
                 self._set_readonly_text(
                     self.profile_details,
-                    "No Telegram portable profiles were found under the selected root.",
+                    "Профили не найдены. Проверь корень профилей и импортируй нужный tdata.",
                 )
                 self._refresh_summary()
                 return
@@ -648,12 +971,6 @@ if tk is not None:
             self._show_profile(self._profiles[index])
             self._refresh_summary()
 
-        def _refresh_summary(self) -> None:
-            self.summary_var.set(
-                f"{len(self.catalog.tools)} workflows available · "
-                f"{len(self._profiles)} portable profiles found under {self.output_root_var.get()}"
-            )
-
         def _selected_profile(self) -> dict[str, Any] | None:
             if self.profile_combo is None:
                 return None
@@ -662,51 +979,81 @@ if tk is not None:
                 return None
             return self._profiles[index]
 
-        def _selected_tool(self) -> ToolManifest | None:
-            selection = self.tool_list.curselection()
-            if not selection:
-                return None
-            return self.catalog.tools[selection[0]]
-
-        def _selected_action_id(self) -> str | None:
-            selection = self.action_list.curselection()
-            tool = self._selected_tool()
-            if tool is None or not selection:
-                return None
-            return tool.actions[selection[0]].action_id
-
         def _show_profile(self, profile: dict[str, Any]) -> None:
             self._set_readonly_text(self.profile_details, format_profile_details(profile))
-
-        def _show_tool(self, tool: ToolManifest) -> None:
-            self._set_readonly_text(self.workflow_details, format_workflow_details(tool))
-            self.action_list.delete(0, tk.END)
-            for action in tool.actions:
-                self.action_list.insert(tk.END, action.label)
-            if tool.actions:
-                self.action_list.selection_clear(0, tk.END)
-                self.action_list.selection_set(0)
-                self.action_list.activate(0)
 
         def _on_profile_select(self, _event: object) -> None:
             profile = self._selected_profile()
             if profile is not None:
                 self._show_profile(profile)
+                self._refresh_summary()
 
-        def _on_tool_select(self, _event: object) -> None:
-            tool = self._selected_tool()
-            if tool is not None:
-                self._show_tool(tool)
+        def _launch_selected_profile(self) -> None:
+            profile = self._selected_profile()
+            if profile is None:
+                messagebox.showinfo("Панель Telegram", "Сначала выбери Telegram-профиль.")
+                return
+            try:
+                result = launch_profile(str(profile.get("profile_dir") or ""))
+            except Exception as exc:  # pragma: no cover - GUI fallback
+                messagebox.showerror("Панель Telegram", f"Не удалось запустить профиль:\n{exc}")
+                return
+            self._reload_profiles(preferred_profile_dir=str(profile.get("profile_dir") or ""))
+            messagebox.showinfo(
+                "Запуск профиля",
+                json.dumps(result, ensure_ascii=False, indent=2),
+            )
 
-        def _on_action_select(self, _event: object) -> None:
-            return
+        def _refresh_selected_profile_status(self) -> None:
+            profile = self._selected_profile()
+            if profile is None:
+                messagebox.showinfo("Панель Telegram", "Сначала выбери Telegram-профиль.")
+                return
+            try:
+                fresh = get_profile_status(str(profile.get("profile_dir") or ""))
+            except Exception as exc:  # pragma: no cover - GUI fallback
+                messagebox.showerror("Панель Telegram", f"Не удалось обновить статус:\n{exc}")
+                return
+            index = self.profile_combo.current() if self.profile_combo is not None else -1
+            if 0 <= index < len(self._profiles):
+                self._profiles[index] = fresh
+            self._show_profile(fresh)
+            self._refresh_summary()
+
+        def _sync_invite_job_dir(self, *_args: object) -> None:
+            chat_url = self.invite_chat_url_var.get().strip()
+            if not chat_url or self.invite_job_dir_var.get().strip():
+                return
+            self.invite_job_dir_var.set(str(default_invite_job_dir(chat_url, DEFAULT_INVITE_OUTPUT_ROOT)))
+
+        def _switch_tool(self, tool_id: str) -> None:
+            self._active_tool_id = tool_id
+            for current_tool_id, frame in self._tool_frames.items():
+                if current_tool_id == tool_id:
+                    frame.tkraise()
+                button = self._tool_buttons[current_tool_id]
+                if current_tool_id == tool_id:
+                    button.configure(
+                        bg=self._colors["accent"],
+                        fg=self._colors["accent_text"],
+                        activebackground=self._colors["accent_active"],
+                        activeforeground=self._colors["accent_text"],
+                    )
+                else:
+                    button.configure(
+                        bg=self._colors["inactive_button"],
+                        fg=self._colors["text"],
+                        activebackground=self._colors["field"],
+                        activeforeground=self._colors["text"],
+                    )
+            self._refresh_summary()
 
         def _choose_import_zip(self) -> None:
             if filedialog is None:  # pragma: no cover - depends on tkinter extras
                 return
             selected = filedialog.askopenfilename(
-                title="Select tdata zip",
-                filetypes=[("Zip archives", "*.zip"), ("All files", "*")],
+                title="Выбери tdata.zip",
+                filetypes=[("ZIP архивы", "*.zip"), ("Все файлы", "*")],
             )
             if selected:
                 self.import_zip_var.set(selected)
@@ -716,52 +1063,43 @@ if tk is not None:
         def _choose_adopt_dir(self) -> None:
             if filedialog is None:  # pragma: no cover - depends on tkinter extras
                 return
-            selected = filedialog.askdirectory(title="Select existing Telegram portable folder")
+            selected = filedialog.askdirectory(title="Выбери существующую папку Telegram")
             if selected:
                 self.adopt_profile_dir_var.set(selected)
                 if not self.adopt_profile_name_var.get().strip():
                     self.adopt_profile_name_var.set(Path(selected).name)
 
-        def _refresh_selected_profile_status(self) -> None:
-            profile = self._selected_profile()
-            if profile is None:
-                messagebox.showinfo("Telegram Control Center", "Select a Telegram profile first.")
+        def _choose_invite_input(self) -> None:
+            if filedialog is None:  # pragma: no cover - depends on tkinter extras
                 return
-            try:
-                fresh = get_profile_status(str(profile.get("profile_dir") or ""))
-            except Exception as exc:  # pragma: no cover - GUI fallback
-                messagebox.showerror("Telegram Control Center", f"Status refresh failed:\n{exc}")
-                return
-            index = self.profile_combo.current() if self.profile_combo is not None else -1
-            if 0 <= index < len(self._profiles):
-                self._profiles[index] = fresh
-            self._show_profile(fresh)
-            self._refresh_summary()
-            messagebox.showinfo(
-                "Telegram Profile Status",
-                json.dumps(fresh, ensure_ascii=False, indent=2),
+            selected = filedialog.askopenfilename(
+                title="Выбери файл со списком username",
+                filetypes=[
+                    ("Поддерживаемые файлы", "*.txt *.csv *.json"),
+                    ("Текстовые файлы", "*.txt"),
+                    ("CSV", "*.csv"),
+                    ("JSON", "*.json"),
+                    ("Все файлы", "*"),
+                ],
             )
+            if selected:
+                self.invite_input_path_var.set(selected)
 
-        def _launch_selected_profile(self) -> None:
-            profile = self._selected_profile()
-            if profile is None:
-                messagebox.showinfo("Telegram Control Center", "Select a Telegram profile first.")
+        def _choose_session_config(self) -> None:
+            if filedialog is None:  # pragma: no cover - depends on tkinter extras
                 return
-            try:
-                result = launch_profile(str(profile.get("profile_dir") or ""))
-            except Exception as exc:  # pragma: no cover - GUI fallback
-                messagebox.showerror("Telegram Control Center", f"Launch failed:\n{exc}")
-                return
-            self._reload_profiles(preferred_profile_dir=str(profile.get("profile_dir") or ""))
-            messagebox.showinfo(
-                "Launch Result",
-                json.dumps(result, ensure_ascii=False, indent=2),
+            selected = filedialog.askopenfilename(
+                title="Выбери конфиг режима сессии",
+                filetypes=[("JSON", "*.json"), ("Все файлы", "*")],
             )
+            if selected:
+                self.session_config_path_var.set(selected)
+                self._load_session_targets(show_feedback=False)
 
         def _import_profile(self) -> None:
             zip_path = self.import_zip_var.get().strip()
             if not zip_path:
-                messagebox.showinfo("Telegram Control Center", "Select a tdata zip first.")
+                messagebox.showinfo("Панель Telegram", "Сначала выбери файл tdata.zip.")
                 return
             try:
                 result = import_tdata_profile(
@@ -773,21 +1111,18 @@ if tk is not None:
                     launch=True,
                 )
             except Exception as exc:  # pragma: no cover - GUI fallback
-                messagebox.showerror("Telegram Control Center", f"Import failed:\n{exc}")
+                messagebox.showerror("Панель Telegram", f"Импорт профиля не удался:\n{exc}")
                 return
             self._reload_profiles(preferred_profile_dir=str(result.get("profile_dir") or ""))
             messagebox.showinfo(
-                "Import Result",
-                json.dumps(result, ensure_ascii=False, indent=2),
+                "Импорт профиля",
+                f"Профиль импортирован и добавлен в список.\n\n{json.dumps(result, ensure_ascii=False, indent=2)}",
             )
 
         def _adopt_profile(self) -> None:
             profile_dir = self.adopt_profile_dir_var.get().strip()
             if not profile_dir:
-                messagebox.showinfo(
-                    "Telegram Control Center",
-                    "Select an existing Telegram portable folder first.",
-                )
+                messagebox.showinfo("Панель Telegram", "Сначала выбери существующую portable-папку.")
                 return
             try:
                 result = adopt_existing_profile(
@@ -797,48 +1132,209 @@ if tk is not None:
                     account_label=self.adopt_account_label_var.get(),
                 )
             except Exception as exc:  # pragma: no cover - GUI fallback
-                messagebox.showerror("Telegram Control Center", f"Adopt failed:\n{exc}")
+                messagebox.showerror("Панель Telegram", f"Подключение профиля не удалось:\n{exc}")
                 return
             self._reload_profiles(preferred_profile_dir=str(result.get("profile_dir") or ""))
             messagebox.showinfo(
-                "Adopt Result",
-                json.dumps(result, ensure_ascii=False, indent=2),
+                "Подключение профиля",
+                f"Папка профиля подключена и добавлена в список.\n\n{json.dumps(result, ensure_ascii=False, indent=2)}",
             )
 
-        def _run_action(self, dry_run: bool = False) -> None:
-            tool = self._selected_tool()
-            action_id = self._selected_action_id()
-            if tool is None or action_id is None:
-                messagebox.showinfo("Telegram Control Center", "Select a workflow action first.")
+        def _invite_resolved_job_dir(self) -> Path:
+            job_dir = self.invite_job_dir_var.get().strip()
+            if job_dir:
+                return Path(job_dir).expanduser().resolve()
+            chat_url = self.invite_chat_url_var.get().strip()
+            if not chat_url:
+                raise ValueError("Укажи ссылку или ID чата.")
+            resolved = default_invite_job_dir(chat_url, DEFAULT_INVITE_OUTPUT_ROOT)
+            self.invite_job_dir_var.set(str(resolved))
+            return resolved
+
+        def _invite_create_job(self) -> None:
+            chat_url = self.invite_chat_url_var.get().strip()
+            input_path = self.invite_input_path_var.get().strip()
+            if not chat_url:
+                messagebox.showinfo("Панель Telegram", "Укажи ссылку или ID чата.")
                 return
-            action = find_action(tool, action_id)
+            if not input_path:
+                messagebox.showinfo("Панель Telegram", "Выбери файл со списком username.")
+                return
             try:
-                result = execute_action(action, dry_run=dry_run)
-            except Exception as exc:  # pragma: no cover - GUI fallback
-                messagebox.showerror(
-                    "Telegram Control Center",
-                    f"Action failed:\n{exc}\n\n{traceback.format_exc()}",
+                payload = invite_manager_init(
+                    chat_url=chat_url,
+                    input_path=input_path,
+                    job_dir=self.invite_job_dir_var.get().strip() or None,
                 )
+            except Exception as exc:  # pragma: no cover - GUI fallback
+                messagebox.showerror("Панель Telegram", f"Не удалось создать invite-задачу:\n{exc}")
                 return
-            messagebox.showinfo(
-                f"Action: {action.label}",
-                json.dumps(result, ensure_ascii=False, indent=2),
+            if payload.get("job_dir"):
+                self.invite_job_dir_var.set(str(payload["job_dir"]))
+            self._set_readonly_text(self.invite_output, format_invite_status_payload(payload))
+
+        def _invite_show_status(self) -> None:
+            try:
+                payload = invite_manager_status(self._invite_resolved_job_dir())
+            except Exception as exc:  # pragma: no cover - GUI fallback
+                messagebox.showerror("Панель Telegram", f"Не удалось прочитать статус:\n{exc}")
+                return
+            self._set_readonly_text(self.invite_output, format_invite_status_payload(payload))
+
+        def _invite_show_next(self) -> None:
+            try:
+                limit = max(int(self.invite_limit_var.get() or "10"), 1)
+            except ValueError:
+                limit = 10
+            try:
+                payload = invite_manager_next(self._invite_resolved_job_dir(), limit=limit)
+            except Exception as exc:  # pragma: no cover - GUI fallback
+                messagebox.showerror("Панель Telegram", f"Не удалось получить следующих пользователей:\n{exc}")
+                return
+            self._set_readonly_text(self.invite_output, format_invite_status_payload(payload))
+
+        def _render_session_targets(self) -> None:
+            if self.session_targets_list is None:
+                return
+            self.session_targets_list.delete(0, tk.END)
+            for item in self._session_targets:
+                self.session_targets_list.insert(tk.END, format_session_target_label(item))
+
+        def _load_session_targets(self, show_feedback: bool = True) -> None:
+            try:
+                self._session_targets = session_message_targets(self.session_config_path_var.get())
+            except Exception as exc:  # pragma: no cover - GUI fallback
+                messagebox.showerror("Панель Telegram", f"Не удалось прочитать конфиг режима сессии:\n{exc}")
+                return
+            self._render_session_targets()
+            self._set_readonly_text(
+                self.session_output,
+                "\n".join(
+                    [
+                        "Сессия и сообщения",
+                        f"Конфиг: {self.session_config_path_var.get()}",
+                        f"Загружено адресатов: {len(self._session_targets)}",
+                        "Выше показан именно список адресатов сообщений.",
+                    ]
+                ),
             )
+            if show_feedback:
+                messagebox.showinfo(
+                    "Панель Telegram",
+                    f"Из конфига загружено адресатов: {len(self._session_targets)}",
+                )
+
+        def _add_session_target(self) -> None:
+            raw_value = self.session_new_target_var.get().strip()
+            if not raw_value:
+                messagebox.showinfo("Панель Telegram", "Введи @username для добавления.")
+                return
+            if not USERNAME_RE.fullmatch(raw_value):
+                messagebox.showerror("Панель Telegram", f"Некорректный username: {raw_value}")
+                return
+            handle = raw_value if raw_value.startswith("@") else f"@{raw_value}"
+            normalized = handle.lower()
+            for item in self._session_targets:
+                if str(item.get("handle") or "").strip().lower() == normalized:
+                    messagebox.showinfo("Панель Telegram", "Этот адресат уже есть в списке.")
+                    return
+            label = self.session_new_target_label_var.get().strip() or normalized
+            kind = (
+                "group"
+                if self.session_new_target_kind_var.get().strip().lower().startswith("груп")
+                else "contact"
+            )
+            self._session_targets.append(
+                {
+                    "target_id": f"manual_{normalized.lstrip('@')}",
+                    "label": label,
+                    "handle": normalized,
+                    "kind": kind,
+                }
+            )
+            self.session_new_target_var.set("")
+            self.session_new_target_label_var.set("")
+            self.session_new_target_kind_var.set("Контакт")
+            self._render_session_targets()
+
+        def _remove_session_targets(self) -> None:
+            if self.session_targets_list is None:
+                return
+            selection = list(self.session_targets_list.curselection())
+            if not selection:
+                messagebox.showinfo("Панель Telegram", "Выдели одного или нескольких адресатов для удаления.")
+                return
+            keep = [
+                item
+                for index, item in enumerate(self._session_targets)
+                if index not in set(selection)
+            ]
+            self._session_targets = keep
+            self._render_session_targets()
+
+        def _session_runtime_config_path(self) -> Path:
+            temp_dir = Path("/tmp/telegram-control-center")
+            temp_dir.mkdir(parents=True, exist_ok=True)
+            return Path(
+                tempfile.mkstemp(
+                    prefix="session-runner-",
+                    suffix=".json",
+                    dir=str(temp_dir),
+                )[1]
+            )
+
+        def _build_session_runtime_config(self) -> Path:
+            if not self._session_targets:
+                raise ValueError("Добавь хотя бы одного адресата для сообщений.")
+            selected_profile = self._selected_profile()
+            profile_dir = str(selected_profile.get("profile_dir") or "") if selected_profile else ""
+            return build_session_runtime_config(
+                base_config_path=self.session_config_path_var.get(),
+                output_path=self._session_runtime_config_path(),
+                message_targets=self._session_targets,
+                portable_profile_dir=profile_dir,
+                auto_send=bool(self.session_auto_send_var.get()),
+            )
+
+        def _session_show_plan(self) -> None:
+            try:
+                runtime_config = self._build_session_runtime_config()
+                payload = session_plan(config_path=runtime_config)
+            except Exception as exc:  # pragma: no cover - GUI fallback
+                messagebox.showerror("Панель Telegram", f"Не удалось построить session plan:\n{exc}")
+                return
+            summary = format_session_plan_payload(payload)
+            summary += f"\n\nRuntime config:\n{runtime_config}"
+            self._set_readonly_text(self.session_output, summary)
+
+        def _session_run(self) -> None:
+            try:
+                runtime_config = self._build_session_runtime_config()
+                payload = session_run(
+                    config_path=runtime_config,
+                    auto_send=bool(self.session_auto_send_var.get()),
+                )
+            except Exception as exc:  # pragma: no cover - GUI fallback
+                messagebox.showerror("Панель Telegram", f"Не удалось запустить режим сессии:\n{exc}")
+                return
+            summary = format_session_run_payload(payload)
+            summary += f"\n\nRuntime config:\n{runtime_config}"
+            self._set_readonly_text(self.session_output, summary)
 
 else:
 
     class ToolPlatformPanel:
         def __init__(self, _registry_path: str) -> None:
             raise RuntimeError(
-                "tkinter is not installed in this environment; the graphical "
-                "tool platform panel cannot be launched here."
+                "tkinter не установлен в этом окружении, поэтому графическую "
+                "панель Telegram запустить нельзя."
             ) from TKINTER_IMPORT_ERROR
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="tool-platform-panel",
-        description="Open the Telegram graphical control panel for profiles and workflows.",
+        description="Открыть русскую графическую панель управления Telegram-профилями и инструментами.",
     )
     parser.add_argument(
         "--registry",
@@ -849,8 +1345,8 @@ def main(argv: list[str] | None = None) -> int:
     if tk is None:
         parser.exit(
             1,
-            "tkinter is not installed in this environment; "
-            "the graphical control panel is unavailable.\n",
+            "tkinter не установлен в этом окружении; "
+            "графическая панель недоступна.\n",
         )
     panel = ToolPlatformPanel(args.registry)
     panel.mainloop()

@@ -9,6 +9,14 @@ from unittest import mock
 from tool_platform.catalog import find_action, find_tool, load_catalog
 from tool_platform.cli import execute_action
 from tool_platform.gui import format_profile_details, format_workflow_details
+from tool_platform.telegram_gui_helpers import (
+    build_session_runtime_config,
+    default_invite_job_dir,
+    format_session_target_label,
+    parse_plaintext_usernames,
+    prepare_invite_input_file,
+    session_message_targets,
+)
 from tool_platform.telegram_profiles import (
     adopt_existing_profile,
     format_profile_label,
@@ -190,7 +198,7 @@ class ToolPlatformCatalogTests(unittest.TestCase):
                     "running": True,
                 }
             ),
-            "@M_a_g_g_i_e (AK) [running]",
+            "@M_a_g_g_i_e (AK) [запущен]",
         )
 
     def test_list_portable_profiles_sorts_running_first(self) -> None:
@@ -273,10 +281,10 @@ class ToolPlatformCatalogTests(unittest.TestCase):
             }
         )
 
-        self.assertIn("Profile Overview", details)
+        self.assertIn("Профиль Telegram", details)
         self.assertIn("@M_a_g_g_i_e", details)
-        self.assertIn("Window title: Макс Михайлов", details)
-        self.assertIn("Profile dir: /home/max/TelegramPortableAK", details)
+        self.assertIn("Заголовок окна: Макс Михайлов", details)
+        self.assertIn("Папка профиля: /home/max/TelegramPortableAK", details)
 
     def test_format_workflow_details_includes_docs_and_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -322,10 +330,109 @@ class ToolPlatformCatalogTests(unittest.TestCase):
             tool = find_tool(catalog, "sample_tool")
             details = format_workflow_details(tool)
 
-        self.assertIn("Workflow Overview", details)
+        self.assertIn("Инструмент Telegram", details)
         self.assertIn("Readable workflow summary", details)
         self.assertIn("- README:", details)
         self.assertIn("- runs_dir: runs", details)
+
+    def test_default_invite_job_dir_uses_chat_fragment_slug(self) -> None:
+        result = default_invite_job_dir(
+            "https://web.telegram.org/k/#-2465948544",
+            "/tmp/telegram_invite_jobs",
+        )
+        self.assertEqual(str(result), "/tmp/telegram_invite_jobs/chat_-2465948544")
+
+    def test_parse_plaintext_usernames_skips_comments_and_deduplicates(self) -> None:
+        usernames = parse_plaintext_usernames(
+            """
+            # comment
+            @Alice_test
+            bob_test
+            @alice_test
+            """
+        )
+        self.assertEqual(usernames, ["@alice_test", "@bob_test"])
+
+    def test_prepare_invite_input_file_converts_txt_into_csv(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            source = root / "users.txt"
+            source.write_text("@alice_test\nbob_test\n", encoding="utf-8")
+
+            prepared = prepare_invite_input_file(source, root / "tmp")
+            rows = prepared.read_text(encoding="utf-8")
+
+        self.assertTrue(str(prepared).endswith(".invite-import.csv"))
+        self.assertIn("username,consent,source", rows)
+        self.assertIn("@alice_test,yes,panel_txt_import", rows)
+        self.assertIn("@bob_test,yes,panel_txt_import", rows)
+
+    def test_session_message_targets_reads_message_policy_targets(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config_path = Path(tmp_dir) / "config.json"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "message_policy": {
+                            "message_targets": [
+                                {"label": "Alice", "handle": "@alice_test", "kind": "contact"}
+                            ]
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            targets = session_message_targets(config_path)
+
+        self.assertEqual(targets[0]["handle"], "@alice_test")
+
+    def test_format_session_target_label_includes_label_handle_and_kind(self) -> None:
+        self.assertEqual(
+            format_session_target_label(
+                {"label": "Alice", "handle": "@alice_test", "kind": "contact"}
+            ),
+            "Alice · @alice_test · контакт",
+        )
+
+    def test_build_session_runtime_config_overrides_targets_and_profile(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            base = root / "base.json"
+            output = root / "runtime.json"
+            base.write_text(
+                json.dumps(
+                    {
+                        "portable_profile_dir": "/home/max/TelegramPortableAK",
+                        "message_policy": {
+                            "target_mode": "rotating_contacts",
+                            "auto_send": False,
+                            "message_targets": [
+                                {"label": "Old", "handle": "@old_test", "kind": "contact"}
+                            ],
+                        },
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+
+            result = build_session_runtime_config(
+                base_config_path=base,
+                output_path=output,
+                message_targets=[
+                    {"label": "Alice", "handle": "@alice_test", "kind": "contact"},
+                    {"label": "Group", "handle": "@group_test", "kind": "group"},
+                ],
+                portable_profile_dir="/home/max/TelegramPortable-AK2",
+                auto_send=True,
+            )
+            payload = json.loads(result.read_text(encoding="utf-8"))
+
+        self.assertEqual(payload["portable_profile_dir"], "/home/max/TelegramPortable-AK2")
+        self.assertTrue(payload["message_policy"]["auto_send"])
+        self.assertEqual(payload["message_policy"]["target_mode"], "rotating_all")
+        self.assertEqual(len(payload["message_policy"]["message_targets"]), 2)
 
 
 if __name__ == "__main__":

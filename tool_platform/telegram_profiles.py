@@ -48,7 +48,7 @@ def format_profile_label(profile: dict[str, Any]) -> str:
     profile_name = str(profile.get("profile_name") or "").strip()
     if profile_name and profile_name != primary:
         primary = f"{primary} ({profile_name})"
-    status = "running" if profile.get("running") else "stopped"
+    status = "запущен" if profile.get("running") else "остановлен"
     return f"{primary} [{status}]"
 
 

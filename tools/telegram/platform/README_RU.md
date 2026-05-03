@@ -1,4 +1,4 @@
-# Telegram Control Center
+# Центр управления Telegram
 
 Видимая папка Telegram control center внутри `site-control-kit`.
 
@@ -6,7 +6,7 @@
 Его задача другая:
 - держать registry подключённых инструментов;
 - давать одну простую Telegram-точку входа для оператора и агента;
-- открывать графическую panel без раздувания в сложные tool-specific экраны;
+- открывать простую русскую панель без перегруза лишними экранами;
 - позволять выбирать пользователя из списка portable-профилей и добавлять новых по `tdata.zip`.
 
 ## Что Уже Подключено
@@ -14,10 +14,14 @@
 - `telegram_invite_manager` из текущего репозитория;
 - `telegram_portable_helper` как low-level embedded helper;
 - `telegram_export` как embedded export pipeline;
-- `telegram_session_runner` как visible wrapper вокруг `/home/max/telegram-portable-session-tool`.
+- `telegram_session_runner` как wrapper вокруг `/home/max/telegram-portable-session-tool`.
 
 Все workflow продолжают жить как отдельные единицы.
-Control center только регистрирует manifests и даёт общую Telegram-панель.
+Панель поверх них специально упрощена под две основные операторские кнопки:
+- `Инвайты по списку`
+- `Сессия и сообщения`
+
+Low-level helper и export остаются в registry и CLI, но не засоряют основной экран.
 
 ## Структура
 
@@ -26,7 +30,7 @@ Control center только регистрирует manifests и даёт об�
 - `docs/ARCHITECTURE_RU.md` — архитектура registry/panel;
 - `docs/INTEGRATION_GUIDE_RU.md` — как подключать новый инструмент;
 - `bin/tool-platform` — CLI доступа к catalog;
-- `bin/tool-platform-panel` — Tkinter GUI control panel.
+- `bin/tool-platform-panel` — Tkinter GUI-панель.
 
 ## Быстрый Старт
 
@@ -48,8 +52,13 @@ cd /home/max/site-control-kit/tools/telegram/platform
 - показывает статус выбранного профиля;
 - умеет импортировать новый профиль по `tdata.zip`;
 - умеет принять в управление уже существующую portable-папку;
-- справа оставляет компактный список Telegram workflow и их actions;
-- рендерит details в читаемых text-card блоках, а не в тесных row-таблицах, чтобы длинные пути и описания не клиппились на Linux HiDPI.
+- показывает две большие кнопки режима:
+  - `Инвайты по списку`
+  - `Сессия и сообщения`
+- открывает только один рабочий экран за раз, чтобы оператор не путался;
+- в режиме инвайтов умеет загрузить `.txt` / `.csv` / `.json` список username и создать invite-job;
+- в режиме сессии умеет загрузить список адресатов из session-config, отредактировать его и запустить сессию кнопкой;
+- рендерит детали профиля и результаты в читаемых текстовых блоках, а не в тесных таблицах.
 
 ## Что Даёт Registry
 
@@ -60,13 +69,17 @@ cd /home/max/site-control-kit/tools/telegram/platform
 - базовые operator actions;
 - артефакты и capability tags.
 
-Чтобы добавить новый инструмент в платформу, не нужно хардкодить его в GUI.
+Чтобы добавить новый инструмент в платформу, не нужно ломать текущую панель.
 Достаточно:
 1. создать manifest рядом с инструментом;
 2. добавить путь к manifest в `registry/tools.json`;
-3. при необходимости обновить operator docs.
+3. при необходимости обновить operator docs;
+4. отдельно решить, нужен ли этому инструменту собственный операторский режим в панели или ему достаточно CLI/registry-видимости.
 
 ## Граница
 
 Этот слой не должен превращаться в место, где живёт runtime конкретного Telegram workflow.
-Он остаётся orchestration/catalog слоем плюс простой profile-first panel поверх уже существующих инструментов.
+Он остаётся orchestration/catalog слоем плюс простой Telegram-ориентированный экран:
+- сверху выбор и импорт профилей;
+- ниже два понятных рабочих режима;
+- low-level и вспомогательные инструменты остаются под капотом.

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "platform_name": "Telegram Control Center",
+  "platform_name": "Центр управления Telegram",
   "tools": [
     {
       "manifest_path": "../../invite_manager/tool_manifest.json",
