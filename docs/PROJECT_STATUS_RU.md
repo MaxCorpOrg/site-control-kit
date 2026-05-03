@@ -832,8 +832,25 @@
     - `python3 -m unittest /home/max/site-control-kit/tests/test_telegram_portable.py`;
   - live evidence:
     - `~/.local/share/telegram-sandbox-activity-runner/runs/20260502T054306-8c3daf4f/`;
-  - остаточный gap:
-    - exact username verification уже проходит, но автоматический клик по `ДОБАВИТЬ КОНТАКТ` в этом path всё ещё не переводит экран в stable `Новый контакт -> Готово`, поэтому последний submit-step пока остаётся недобитым.
+  - этот исторический gap теперь закрыт новым submit-path через live `match_origin` + dialog geometry; см. evidence `20260503T131500Z-fix-abs11144` ниже.
+- Для batch-добавления контактов через Telegram control center закрыт ложноположительный success-path:
+  - `desktop-add-contact-profile` теперь после `reopen_profile_for_verify` сам снимает явную verify-проверку по доступным кнопкам `Добавить контакт` / `Удалить контакт` / `Изменить контакт`;
+  - если после попытки всё ещё виден `Добавить контакт`, команда теперь возвращает `status=failed`, `outcome=contact_not_added`, а не старый ложный success;
+  - `desktop-add-contact-batch` теперь помечает пользователя как `contact_added` только при `contact_added_verified`; иначе пишет `failed` и поднимает `completed_with_errors` в batch summary;
+  - live evidence на actor `AK/@M_a_g_g_i_e` для `@abs11144`:
+    - `/home/max/telegram_invite_jobs/contact_add__AK__1/executions/20260503T124800Z-debug-abs11144/execution_record.json`;
+    - ключевой факт: verify снова увидел `Добавить контакт`, поэтому новый код честно остановился на `contact_not_added` и не записал фальшивый `contact_added`.
+- Для batch-добавления контактов через Telegram control center подтверждён новый рабочий submit-path на текущем `AK`:
+  - из `/home/max/telegram-portable-session-tool` подтверждена важная операционная деталь: критические X11-клики надо считать в `window_geometry`, а не отдавать в `auto`/`accessible_window`;
+  - сам рабочий add-contact submit-path перенесён из `/home/max/n8n_ai_call_center/tools/telegram_sandbox_activity_runner/telegram_sandbox_activity_runner.py`;
+  - `desktop-add-contact-profile` теперь:
+    - ищет `ДОБАВИТЬ КОНТАКТ` через live accessibility-match;
+    - открывает модалку `Новый контакт` через `window-click --coordinate-space window_geometry` по live `match_origin`;
+    - вычисляет submit `Готово` от live-геометрии dialog ancestor, а не только по статическим fallback ratio;
+  - live evidence на actor `AK/@M_a_g_g_i_e` для `@abs11144`:
+    - `/home/max/telegram_invite_jobs/contact_add__AK__1/executions/20260503T131500Z-fix-abs11144/execution_record.json`;
+    - verify уже показывает `Изменить контакт` и `Удалить контакт`, а `Добавить контакт` исчез;
+    - итог команды: `status=completed`, `outcome=contact_added_verified`.
 - Для unified tool platform подтверждён первый рабочий orchestration layer:
   - registry: `/home/max/site-control-kit/tools/telegram/platform/registry/tools.json`;
   - CLI: `./tools/telegram/platform/bin/tool-platform validate-registry`;
@@ -861,7 +878,7 @@
 
 ## Следующий Приоритет
 1. Для Invite/Desktop: держать основным рабочим путём `site-control-kit` / Telegram Web flow (`open-chat -> inspect-chat -> add-contact`) и не подменять его Desktop-guessing path.
-2. Для Invite/Desktop: обобщить успешный `desktop-add-contact-profile` smoke с `AK/@super_pavlik` на другие профили и UI-варианты Telegram Desktop, чтобы submit больше не требовал ручной докалибровки по каждому кейсу.
+2. Для Invite/Desktop: прогнать уже починенный submit-path не только на одиночном `@abs11144`, но и как минимум на одном реальном batch-цикле из панели `Добавить контакты из TXT`, чтобы подтвердить end-to-end orchestration без ручного CLI.
 3. Снизить runtime-затраты discovery относительно deep, чтобы multi-peer deep чаще успевал проходить следующий слой visible peer.
 4. Поднять приоритеты deep-target'ов: раньше брать тех peer, у кого вероятность успешного `Mention` выше.
 5. Разделить browser capability/runtime compatibility и Telegram export concerns в отдельные модули/слои.

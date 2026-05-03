@@ -266,6 +266,8 @@ Portable-only no-API path для добавления одного username им
 - проверяет `portable_actor`;
 - открывает `tg://resolve?domain=<username>&profile`;
 - идёт по UI-пути `Add to contacts -> Done`;
+- берёт первый клик не из статического blind-point, а из live accessibility-match `ДОБАВИТЬ КОНТАКТ`;
+- для submit старается вычислить `Готово` от геометрии самой модалки `Новый контакт`, а не только от fallback ratio;
 - пишет `execution_record.json` и PNG-скриншоты до/после/verify;
 - не требует Telegram API и не работает массово сама по себе: один запуск = один username.
 
@@ -301,7 +303,7 @@ python3 scripts/telegram_invite_executor.py desktop-add-contact-profile \
 - если `invite_state.json` ещё нет, берёт `--input` и создаёт локальный state;
 - сохраняет `portable_actor` в execution config;
 - обрабатывает очередь по статусам `new/checked/failed`;
-- после успешного live add помечает пользователя как `contact_added`;
+- после успешного live add помечает пользователя как `contact_added` только при verify-статусе `contact_added_verified`;
 - при ошибке помечает пользователя как `failed`;
 - пишет batch summary в `executions/<execution_id>/batch_contact_add.json`.
 

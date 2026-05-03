@@ -81,6 +81,97 @@ class TelegramInviteExecutorTests(unittest.TestCase):
         }
         self.manager.save_state(job_dir, payload)
 
+    def _dialog_window(self) -> dict:
+        return {
+            "x": 328,
+            "y": 128,
+            "width": 2396,
+            "height": 1536,
+        }
+
+    def _dialog_ancestors(self) -> list[dict]:
+        return [
+            {
+                "role": "dialog",
+                "resolved_extents": {
+                    "x": 1162,
+                    "y": 498,
+                    "width": 728,
+                    "height": 832,
+                },
+            }
+        ]
+
+    def _profile_add_match(self) -> dict:
+        return {
+            "name": "ДОБАВИТЬ КОНТАКТ",
+            "role": "push button",
+            "relative_x_ratio": 0.3364,
+            "relative_y_ratio": 0.4688,
+            "relative_extents": {
+                "x": 806,
+                "y": 720,
+                "width": 784,
+                "height": 76,
+            },
+            "resolved_extents": {
+                "x": 1134,
+                "y": 848,
+                "width": 784,
+                "height": 76,
+            },
+            "ancestors": [],
+        }
+
+    def _dialog_first_name_match(self) -> dict:
+        return {
+            "name": "Имя",
+            "role": "text",
+            "relative_x_ratio": 0.3639,
+            "relative_y_ratio": 0.4180,
+            "relative_extents": {
+                "x": 872,
+                "y": 642,
+                "width": 652,
+                "height": 46,
+            },
+            "resolved_extents": {
+                "x": 1200,
+                "y": 770,
+                "width": 652,
+                "height": 46,
+            },
+            "ancestors": self._dialog_ancestors(),
+        }
+
+    def _dialog_done_match(self) -> dict:
+        return {
+            "name": "Готово",
+            "role": "push button",
+            "relative_x_ratio": 0.5785,
+            "relative_y_ratio": 0.7956,
+            "relative_extents": {
+                "x": 1386,
+                "y": 1222,
+                "width": 156,
+                "height": 68,
+            },
+            "resolved_extents": {
+                "x": 1714,
+                "y": 1350,
+                "width": 156,
+                "height": 68,
+            },
+            "ancestors": self._dialog_ancestors(),
+        }
+
+    def test_portable_derive_dialog_submit_ratio_uses_dialog_geometry(self) -> None:
+        ratio = self.executor._portable_derive_dialog_submit_ratio(
+            {"match": self._dialog_first_name_match()},
+            self._dialog_window(),
+        )
+        self.assertEqual(ratio, {"x_ratio": 0.5576, "y_ratio": 0.7611})
+
     def test_configure_persists_execution_section(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             job_dir = Path(tmpdir) / "job"
@@ -704,11 +795,45 @@ class TelegramInviteExecutorTests(unittest.TestCase):
                 ),
             )
 
+            state = {"dialog_open": False, "verified": False}
+
             def fake_portable(_repo_root, command):
                 if "status" in command:
-                    payload = {"status": "completed", "running": True, "pids": [38744], "windows": [{"window_id": "0x04c0002e"}]}
+                    payload = {
+                        "status": "completed",
+                        "running": True,
+                        "pids": [38744],
+                        "windows": [{"window_id": "0x04c0002e", **self._dialog_window()}],
+                    }
                 elif "log-diagnose" in command:
                     payload = {"status": "completed", "alerts": []}
+                elif "accessibility-dump" in command:
+                    query = command[command.index("--query") + 1]
+                    if query == "@alice_123":
+                        payload = {"status": "completed", "matches": [{"name": "@alice_123", "role": "label"}]}
+                    elif query in self.executor.DESKTOP_ADD_CONTACT_BUTTON_TERMS or query in self.executor.DESKTOP_ADD_TO_CONTACTS_CHAT_TERMS:
+                        matches = [] if state["verified"] or state["dialog_open"] else [self._profile_add_match()]
+                        payload = {"status": "completed", "matches": matches}
+                    elif query in self.executor.DESKTOP_FIRST_NAME_TERMS:
+                        matches = [self._dialog_first_name_match()] if state["dialog_open"] else []
+                        payload = {"status": "completed", "matches": matches}
+                    elif query in self.executor.DESKTOP_DONE_BUTTON_TERMS:
+                        matches = [self._dialog_done_match()] if state["dialog_open"] else []
+                        payload = {"status": "completed", "matches": matches}
+                    elif query in self.executor.DESKTOP_CONTACT_DELETE_TERMS:
+                        matches = [{"name": "Удалить контакт", "role": "push button"}] if state["verified"] else []
+                        payload = {"status": "completed", "matches": matches}
+                    else:
+                        payload = {"status": "completed", "matches": []}
+                elif "window-click" in command:
+                    x_ratio = float(command[command.index("--x-ratio") + 1])
+                    y_ratio = float(command[command.index("--y-ratio") + 1])
+                    if abs(x_ratio - 0.3364) < 0.01 and abs(y_ratio - 0.4688) < 0.02:
+                        state["dialog_open"] = True
+                    elif state["dialog_open"]:
+                        state["dialog_open"] = False
+                        state["verified"] = True
+                    payload = {"status": "completed"}
                 elif "window-screenshot" in command:
                     output_path = command[command.index("--output") + 1]
                     payload = {"status": "completed", "output_path": output_path, "window_id": "0x04c0002e"}
@@ -727,10 +852,10 @@ class TelegramInviteExecutorTests(unittest.TestCase):
                         after_add_wait=0,
                         after_done_wait=0,
                         verify_wait=0,
-                        add_click_x_ratio=0.394,
-                        add_click_y_ratio=0.397,
-                        done_click_x_ratio=0.565,
-                        done_click_y_ratio=0.715,
+                        add_click_x_ratio=0.3364,
+                        add_click_y_ratio=0.5417,
+                        done_click_x_ratio=0.5785,
+                        done_click_y_ratio=0.7956,
                         done_click_repeat=1,
                         last_name_text="",
                         press_enter_after_last_name=False,
@@ -742,7 +867,10 @@ class TelegramInviteExecutorTests(unittest.TestCase):
                 )
 
             self.assertEqual(rc, 0)
-            self.assertEqual(payload["outcome"], "contact_submit_clicked")
+            self.assertEqual(payload["outcome"], "contact_added_verified")
+            self.assertTrue(payload["verification"]["success_visible"])
+            self.assertFalse(payload["verification"]["add_visible"])
+            self.assertTrue(any(step.get("label") == "dialog_submit_click" for step in payload["steps"]))
             self.assertTrue(payload["screenshots"]["profile_before"].endswith("desktop_add_contact_profile_before.png"))
             self.assertTrue(payload["screenshots"]["profile_after_actions"].endswith("desktop_add_contact_profile_after_actions.png"))
             self.assertTrue(payload["screenshots"]["profile_verify"].endswith("desktop_add_contact_profile_verify.png"))
@@ -758,11 +886,45 @@ class TelegramInviteExecutorTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
+            state = {"dialog_open": False, "verified": False}
+
             def fake_portable(_repo_root, command):
                 if "status" in command:
-                    payload = {"status": "completed", "running": True, "pids": [38744], "windows": [{"window_id": "0x04c0002e"}]}
+                    payload = {
+                        "status": "completed",
+                        "running": True,
+                        "pids": [38744],
+                        "windows": [{"window_id": "0x04c0002e", **self._dialog_window()}],
+                    }
                 elif "log-diagnose" in command:
                     payload = {"status": "completed", "alerts": []}
+                elif "accessibility-dump" in command:
+                    query = command[command.index("--query") + 1]
+                    if query == "@alice_123":
+                        payload = {"status": "completed", "matches": [{"name": "@alice_123", "role": "label"}]}
+                    elif query in self.executor.DESKTOP_ADD_CONTACT_BUTTON_TERMS or query in self.executor.DESKTOP_ADD_TO_CONTACTS_CHAT_TERMS:
+                        matches = [] if state["verified"] or state["dialog_open"] else [self._profile_add_match()]
+                        payload = {"status": "completed", "matches": matches}
+                    elif query in self.executor.DESKTOP_FIRST_NAME_TERMS:
+                        matches = [self._dialog_first_name_match()] if state["dialog_open"] else []
+                        payload = {"status": "completed", "matches": matches}
+                    elif query in self.executor.DESKTOP_DONE_BUTTON_TERMS:
+                        matches = [self._dialog_done_match()] if state["dialog_open"] else []
+                        payload = {"status": "completed", "matches": matches}
+                    elif query in self.executor.DESKTOP_CONTACT_DELETE_TERMS:
+                        matches = [{"name": "Удалить контакт", "role": "push button"}] if state["verified"] else []
+                        payload = {"status": "completed", "matches": matches}
+                    else:
+                        payload = {"status": "completed", "matches": []}
+                elif "window-click" in command:
+                    x_ratio = float(command[command.index("--x-ratio") + 1])
+                    y_ratio = float(command[command.index("--y-ratio") + 1])
+                    if abs(x_ratio - 0.3364) < 0.01 and abs(y_ratio - 0.4688) < 0.02:
+                        state["dialog_open"] = True
+                    elif state["dialog_open"]:
+                        state["dialog_open"] = False
+                        state["verified"] = True
+                    payload = {"status": "completed"}
                 elif "window-screenshot" in command:
                     output_path = command[command.index("--output") + 1]
                     payload = {"status": "completed", "output_path": output_path, "window_id": "0x04c0002e"}
@@ -791,10 +953,10 @@ class TelegramInviteExecutorTests(unittest.TestCase):
                         after_add_wait=0,
                         after_done_wait=0,
                         verify_wait=0,
-                        add_click_x_ratio=0.394,
-                        add_click_y_ratio=0.397,
-                        done_click_x_ratio=0.565,
-                        done_click_y_ratio=0.715,
+                        add_click_x_ratio=0.3364,
+                        add_click_y_ratio=0.5417,
+                        done_click_x_ratio=0.5785,
+                        done_click_y_ratio=0.7956,
                         done_click_repeat=1,
                         last_name_text="",
                         press_enter_after_last_name=False,
@@ -813,6 +975,87 @@ class TelegramInviteExecutorTests(unittest.TestCase):
             self.assertTrue((Path(payload["run_dir"]) / "batch_contact_add.json").exists())
             state = self.manager.load_state(job_dir)
             self.assertEqual(state["users"][0]["status"], "contact_added")
+
+    def test_desktop_add_contact_batch_marks_failed_when_verify_still_shows_add_contact(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            job_dir = root / "job"
+            input_path = root / "users.csv"
+            input_path.write_text(
+                "username,consent,source\n@alice_123,yes,panel\n",
+                encoding="utf-8",
+            )
+
+            def fake_portable(_repo_root, command):
+                if "status" in command:
+                    payload = {
+                        "status": "completed",
+                        "running": True,
+                        "pids": [38744],
+                        "windows": [{"window_id": "0x04c0002e", **self._dialog_window()}],
+                    }
+                elif "log-diagnose" in command:
+                    payload = {"status": "completed", "alerts": []}
+                elif "accessibility-dump" in command:
+                    query = command[command.index("--query") + 1]
+                    if query == "@alice_123":
+                        payload = {"status": "completed", "matches": [{"name": "@alice_123", "role": "label"}]}
+                    elif query in self.executor.DESKTOP_ADD_CONTACT_BUTTON_TERMS or query in self.executor.DESKTOP_ADD_TO_CONTACTS_CHAT_TERMS:
+                        payload = {"status": "completed", "matches": [self._profile_add_match()]}
+                    elif query in self.executor.DESKTOP_FIRST_NAME_TERMS:
+                        payload = {"status": "completed", "matches": [self._dialog_first_name_match()]}
+                    elif query in self.executor.DESKTOP_DONE_BUTTON_TERMS:
+                        payload = {"status": "completed", "matches": [self._dialog_done_match()]}
+                    else:
+                        payload = {"status": "completed", "matches": []}
+                elif "window-screenshot" in command:
+                    output_path = command[command.index("--output") + 1]
+                    payload = {"status": "completed", "output_path": output_path, "window_id": "0x04c0002e"}
+                else:
+                    payload = {"status": "completed"}
+                return {"command": command, "returncode": 0, "stdout": json.dumps(payload), "stderr": "", "stdout_json": payload}
+
+            with mock.patch.object(self.executor, "_run_portable_json", side_effect=fake_portable), mock.patch.object(
+                self.executor.time, "sleep"
+            ):
+                rc, payload = self._call_json(
+                    self.executor.command_desktop_add_contact_batch,
+                    Namespace(
+                        job_dir=str(job_dir),
+                        input=str(input_path),
+                        chat_url="contacts://AK",
+                        output_root="",
+                        portable_profile_name="AK",
+                        portable_profile_dir="/home/max/TelegramPortableAK",
+                        account_username="@M_a_g_g_i_e",
+                        account_label="@M_a_g_g_i_e",
+                        limit=0,
+                        statuses=["new", "checked", "failed"],
+                        execution_id="20260503T101700Z",
+                        open_wait=0,
+                        after_add_wait=0,
+                        after_done_wait=0,
+                        verify_wait=0,
+                        add_click_x_ratio=0.3364,
+                        add_click_y_ratio=0.5417,
+                        done_click_x_ratio=0.5785,
+                        done_click_y_ratio=0.7956,
+                        done_click_repeat=1,
+                        last_name_text="",
+                        press_enter_after_last_name=False,
+                        launch_if_needed=False,
+                        verify_profile_reopen=True,
+                        confirm_add=True,
+                        dry_run=False,
+                    ),
+                )
+
+            self.assertEqual(rc, 0)
+            self.assertEqual(payload["added_count"], 0)
+            self.assertEqual(payload["failed_count"], 1)
+            self.assertEqual(payload["results"][0]["outcome"], "contact_not_added")
+            state = self.manager.load_state(job_dir)
+            self.assertEqual(state["users"][0]["status"], "failed")
 
     def test_extract_member_count(self) -> None:
         count, count_text = self.executor._extract_member_count("Жиротоп Shop\n2 440 members, 153 online")

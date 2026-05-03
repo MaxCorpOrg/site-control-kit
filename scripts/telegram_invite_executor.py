@@ -63,6 +63,19 @@ DEFAULT_MESSAGE_TEMPLATE = "Привет! Вот ссылка для вступ�
 DEFAULT_EXECUTION_STATUSES = ("checked",)
 DEFAULT_CONTACT_BATCH_STATUSES = ("new", "checked", "failed")
 MEMBER_COUNT_RE = re.compile(r"(?P<count>\d[\d\s,.]*)\s+members?\b", re.IGNORECASE)
+DESKTOP_ADD_CONTACT_X_RATIO = 0.3364
+DESKTOP_ADD_CONTACT_Y_RATIO = 0.5417
+DESKTOP_DONE_CONTACT_X_RATIO = 0.5785
+DESKTOP_DONE_CONTACT_Y_RATIO = 0.7956
+DESKTOP_ADD_CONTACT_BUTTON_TERMS = ("ДОБАВИТЬ КОНТАКТ", "Добавить контакт", "ADD TO CONTACTS", "Add to contacts")
+DESKTOP_ADD_TO_CONTACTS_CHAT_TERMS = ("В КОНТАКТЫ", "TO CONTACTS")
+DESKTOP_DONE_BUTTON_TERMS = ("Готово", "Done")
+DESKTOP_FIRST_NAME_TERMS = ("Имя", "First name")
+DESKTOP_LAST_NAME_TERMS = ("Фамилия", "Last name")
+DESKTOP_CONTACT_EDIT_TERMS = ("ИЗМЕНИТЬ КОНТАКТ", "Изменить контакт", "EDIT CONTACT", "Edit contact")
+DESKTOP_CONTACT_DELETE_TERMS = ("УДАЛИТЬ КОНТАКТ", "Удалить контакт", "DELETE CONTACT", "Delete contact")
+CONTACT_VERIFY_ADD_TERMS = (*DESKTOP_ADD_CONTACT_BUTTON_TERMS, *DESKTOP_ADD_TO_CONTACTS_CHAT_TERMS)
+CONTACT_VERIFY_SUCCESS_TERMS = (*DESKTOP_CONTACT_EDIT_TERMS, *DESKTOP_CONTACT_DELETE_TERMS)
 ADD_MEMBERS_OPEN_SELECTORS = (
     "#column-right .profile-container.can-add-members button.btn-circle.btn-corner",
     "#column-right .profile-container.can-add-members button.btn-circle",
@@ -88,10 +101,6 @@ MEMBERS_TAB_STOP_MARKERS = (
     'search-super-tab-container search-super-container-similar',
 )
 PUBLIC_TELEGRAM_HANDLE_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{4,31}$")
-DESKTOP_ADD_CONTACT_X_RATIO = 0.394
-DESKTOP_ADD_CONTACT_Y_RATIO = 0.397
-DESKTOP_DONE_CONTACT_X_RATIO = 0.565
-DESKTOP_DONE_CONTACT_Y_RATIO = 0.715
 
 
 def _execution_runs_dir(job_dir: Path) -> Path:
@@ -122,6 +131,10 @@ def _bool_flag(value: bool | None, *, default: bool) -> bool:
 
 def _nonempty(value: Any) -> str:
     return str(value or "").strip()
+
+
+def _normalize_space(value: Any) -> str:
+    return " ".join(str(value or "").split())
 
 
 def _merge_execution_config(
@@ -359,6 +372,50 @@ def _write_contact_batch_artifacts(
     return run_dir
 
 
+def _portable_visible_match_count(result: dict[str, Any]) -> int:
+    stdout_json = result.get("stdout_json")
+    if not isinstance(stdout_json, dict):
+        return 0
+    matches = stdout_json.get("matches")
+    if not isinstance(matches, list):
+        return 0
+    return sum(1 for row in matches if isinstance(row, dict))
+
+
+def _portable_contact_verify_summary(results: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    add_visible = False
+    success_visible = False
+    visible_terms: list[str] = []
+    term_counts: dict[str, int] = {}
+    for term in CONTACT_VERIFY_ADD_TERMS:
+        result = results.get(term) or {}
+        count = _portable_visible_match_count(result)
+        term_counts[term] = count
+        if count > 0:
+            add_visible = True
+            visible_terms.append(term)
+    for term in CONTACT_VERIFY_SUCCESS_TERMS:
+        result = results.get(term) or {}
+        count = _portable_visible_match_count(result)
+        term_counts[term] = count
+        if count > 0:
+            success_visible = True
+            visible_terms.append(term)
+    if success_visible:
+        outcome = "contact_added_verified"
+    elif add_visible:
+        outcome = "contact_not_added"
+    else:
+        outcome = "contact_add_unverified"
+    return {
+        "outcome": outcome,
+        "add_visible": add_visible,
+        "success_visible": success_visible,
+        "term_counts": term_counts,
+        "visible_terms": visible_terms,
+    }
+
+
 def _browser_command(
     repo_root: Path,
     *,
@@ -550,6 +607,141 @@ def _chat_snapshot_summary(
     if error:
         payload["error"] = error
     return payload
+
+
+def _portable_accessible_matches(payload: dict[str, Any] | None) -> list[dict[str, Any]]:
+    if not isinstance(payload, dict):
+        return []
+    stdout_json = payload.get("stdout_json") if isinstance(payload.get("stdout_json"), dict) else {}
+    matches = stdout_json.get("matches")
+    if not isinstance(matches, list):
+        return []
+    return [row for row in matches if isinstance(row, dict)]
+
+
+def _portable_find_accessible_match_in_results(
+    results: dict[str, dict[str, Any]] | None,
+    terms: tuple[str, ...] | list[str],
+) -> dict[str, Any] | None:
+    if not isinstance(results, dict):
+        return None
+    for term in terms:
+        payload = results.get(str(term))
+        matches = _portable_accessible_matches(payload)
+        if matches:
+            return {
+                "term": str(term),
+                "result": payload,
+                "match": matches[0],
+            }
+    return None
+
+
+def _portable_resolve_accessible_node_payload(payload: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(payload, dict):
+        return None
+    stdout_json = payload.get("stdout_json") if isinstance(payload.get("stdout_json"), dict) else {}
+    node = stdout_json.get("node")
+    if isinstance(node, dict):
+        return node
+    click_payload = stdout_json.get("click") if isinstance(stdout_json.get("click"), dict) else {}
+    click_node = click_payload.get("node")
+    if isinstance(click_node, dict):
+        return click_node
+    match = payload.get("match")
+    if isinstance(match, dict):
+        return match
+    return None
+
+
+def _portable_match_origin_ratio(match: dict[str, Any]) -> dict[str, float] | None:
+    try:
+        x_ratio = float(match.get("relative_x_ratio"))
+        y_ratio = float(match.get("relative_y_ratio"))
+    except (TypeError, ValueError):
+        return None
+    return {
+        "x_ratio": round(min(max(x_ratio, 0.0), 1.0), 4),
+        "y_ratio": round(min(max(y_ratio, 0.0), 1.0), 4),
+    }
+
+
+def _portable_derive_accessible_click_ratio(
+    match: dict[str, Any],
+    window: dict[str, Any],
+    *,
+    x_anchor: float = 0.18,
+    y_anchor: float = 0.45,
+) -> dict[str, float] | None:
+    extents = match.get("relative_extents") if isinstance(match.get("relative_extents"), dict) else {}
+    try:
+        rel_x = int(extents.get("x", 0) or 0)
+        rel_y = int(extents.get("y", 0) or 0)
+        width = int(extents.get("width", 0) or 0)
+        height = int(extents.get("height", 0) or 0)
+        window_width = int(window.get("width", 0) or 0)
+        window_height = int(window.get("height", 0) or 0)
+    except (TypeError, ValueError):
+        return None
+    if width <= 0 or height <= 0 or window_width <= 1 or window_height <= 1:
+        return None
+    x_inset = min(max(int(round(width * float(x_anchor))), 18), max(width - 4, 1))
+    y_inset = min(max(int(round(height * float(y_anchor))), 10), max(height - 4, 1))
+    click_x = rel_x + x_inset
+    click_y = rel_y + y_inset
+    return {
+        "x_ratio": round(min(max(float(click_x) / float(window_width), 0.0), 1.0), 4),
+        "y_ratio": round(min(max(float(click_y) / float(window_height), 0.0), 1.0), 4),
+    }
+
+
+def _portable_derive_dialog_submit_ratio(
+    payload: dict[str, Any] | None,
+    window: dict[str, Any],
+    *,
+    x_anchor: float = 0.69,
+    y_anchor: float = 0.96,
+) -> dict[str, float] | None:
+    node = _portable_resolve_accessible_node_payload(payload)
+    if not isinstance(node, dict):
+        return None
+    dialog_extents: dict[str, Any] | None = None
+    for ancestor in reversed(node.get("ancestors") or []):
+        if not isinstance(ancestor, dict):
+            continue
+        if str(ancestor.get("role") or "") != "dialog":
+            continue
+        extents = ancestor.get("resolved_extents") if isinstance(ancestor.get("resolved_extents"), dict) else {}
+        if int(extents.get("width", 0) or 0) > 0 and int(extents.get("height", 0) or 0) > 0:
+            dialog_extents = extents
+            break
+    if dialog_extents is None:
+        return None
+    try:
+        dialog_x = int(dialog_extents.get("x", 0) or 0)
+        dialog_y = int(dialog_extents.get("y", 0) or 0)
+        dialog_width = int(dialog_extents.get("width", 0) or 0)
+        dialog_height = int(dialog_extents.get("height", 0) or 0)
+        window_x = int(window.get("x", 0) or 0)
+        window_y = int(window.get("y", 0) or 0)
+        window_width = int(window.get("width", 0) or 0)
+        window_height = int(window.get("height", 0) or 0)
+    except (TypeError, ValueError):
+        return None
+    if dialog_width <= 0 or dialog_height <= 0 or window_width <= 1 or window_height <= 1:
+        return None
+    rel_x = dialog_x - window_x
+    rel_y = dialog_y - window_y
+    max_x = rel_x + dialog_width - 4
+    max_y = rel_y + dialog_height - 4
+    if max_x <= rel_x or max_y <= rel_y:
+        return None
+    click_x = min(max(int(round(rel_x + dialog_width * float(x_anchor))), rel_x + 4), max_x)
+    click_y = min(max(int(round(rel_y + dialog_height * float(y_anchor))), rel_y + 4), max_y)
+    return {
+        "x_ratio": round(min(max(float(click_x) / float(window_width), 0.0), 1.0), 4),
+        "y_ratio": round(min(max(float(click_y) / float(window_height), 0.0), 1.0), 4),
+    }
 
 
 def _snapshot_log_line(label: str, snapshot: dict[str, Any] | None) -> str:
@@ -1594,6 +1786,7 @@ def command_desktop_add_contact_profile(args: argparse.Namespace) -> int:
     steps: list[dict[str, Any]] = []
     screenshots: dict[str, str] = {}
     outcome = "started"
+    verification: dict[str, Any] | None = None
 
     def run_portable_step(label: str, command: list[str], *, required: bool = True) -> dict[str, Any]:
         result = {"label": label, **_run_portable_json(repo_root, command)}
@@ -1615,6 +1808,125 @@ def command_desktop_add_contact_profile(args: argparse.Namespace) -> int:
         )
         payload_json = result.get("stdout_json") if isinstance(result.get("stdout_json"), dict) else {}
         screenshots[label] = str(payload_json.get("output_path") or screenshot_path)
+
+    def dump_accessible_query(label: str, query: str) -> dict[str, Any]:
+        dump_command = _portable_action_command(
+            repo_root,
+            actor,
+            "accessibility-dump",
+            "--query",
+            query,
+            "--visible-only",
+            "--max-results",
+            "20",
+        )
+        return run_portable_step(label, dump_command, required=False)
+
+    def query_accessible(
+        label: str,
+        *,
+        query: str,
+        role: str = "",
+        visible_only: bool = True,
+        state_filters: tuple[str, ...] = ("showing",),
+        max_results: int = 20,
+    ) -> dict[str, Any]:
+        command = _portable_action_command(repo_root, actor, "accessibility-dump", "--query", query)
+        if role:
+            command.extend(["--role", role])
+        if visible_only:
+            command.append("--visible-only")
+        for state_name in state_filters:
+            command.extend(["--state", str(state_name)])
+        command.extend(["--max-results", str(max(int(max_results), 1))])
+        return run_portable_step(label, command, required=False)
+
+    def find_accessible_match(
+        *,
+        terms: tuple[str, ...] | list[str],
+        role: str = "",
+        visible_only: bool = True,
+        state_filters: tuple[str, ...] = ("showing",),
+        label_prefix: str = "find_accessible",
+    ) -> dict[str, Any] | None:
+        results: dict[str, dict[str, Any]] = {}
+        for index, term in enumerate(terms, start=1):
+            result = query_accessible(
+                f"{label_prefix}_{index}",
+                query=str(term),
+                role=role,
+                visible_only=visible_only,
+                state_filters=state_filters,
+            )
+            results[str(term)] = result
+        return _portable_find_accessible_match_in_results(results, terms)
+
+    def click_window_ratio(label: str, *, x_ratio: float, y_ratio: float, required: bool = False) -> dict[str, Any]:
+        command = _portable_action_command(
+            repo_root,
+            actor,
+            "window-click",
+            "--coordinate-space",
+            "window_geometry",
+            "--x-ratio",
+            str(float(x_ratio)),
+            "--y-ratio",
+            str(float(y_ratio)),
+        )
+        if args.dry_run:
+            command.append("--dry-run")
+        return run_portable_step(label, command, required=required)
+
+    def try_accessible_type(label_prefix: str, terms: tuple[str, ...] | list[str], text: str) -> dict[str, Any] | None:
+        for index, term in enumerate(terms, start=1):
+            for node_index in (0, 1):
+                command = _portable_action_command(
+                    repo_root,
+                    actor,
+                    "accessibility-type-text",
+                    "--query",
+                    str(term),
+                    "--role",
+                    "text",
+                    "--visible-only",
+                    "--state",
+                    "showing",
+                    "--index",
+                    str(node_index),
+                    "--text",
+                    text,
+                    "--clear-first",
+                )
+                if args.dry_run:
+                    command.append("--dry-run")
+                result = run_portable_step(f"{label_prefix}_{index}_{node_index}", command, required=False)
+                if int(result.get("returncode", 1) or 0) == 0:
+                    return result
+        return None
+
+    def find_add_contact_button() -> dict[str, Any] | None:
+        return find_accessible_match(
+            terms=(*DESKTOP_ADD_TO_CONTACTS_CHAT_TERMS, *DESKTOP_ADD_CONTACT_BUTTON_TERMS),
+            role="push button",
+            visible_only=True,
+            label_prefix="find_add_contact_button",
+        )
+
+    def find_exact_username_label(target_username: str) -> dict[str, Any] | None:
+        normalized_target = target_username if str(target_username or "").startswith("@") else f"@{target_username}"
+        for role in ("label", "text"):
+            match = find_accessible_match(
+                terms=(normalized_target,),
+                role=role,
+                visible_only=True,
+                label_prefix=f"find_exact_username_{role}",
+            )
+            if not match:
+                continue
+            match_name = _normalize_space(match["match"].get("name"))
+            if match_name.casefold() == normalized_target.casefold():
+                return match
+        return None
 
     log_lines = [
         f"INFO: desktop-add-contact-profile started execution_id={execution_id}",
@@ -1638,49 +1950,194 @@ def command_desktop_add_contact_profile(args: argparse.Namespace) -> int:
         capture_screenshot("profile_before", "desktop_add_contact_profile_before.png")
 
         if args.confirm_add:
-            click_add_command = _portable_action_command(
-                repo_root,
-                actor,
-                "window-click",
-                "--x-ratio",
-                str(float(args.add_click_x_ratio)),
-                "--y-ratio",
-                str(float(args.add_click_y_ratio)),
-            )
             if args.dry_run:
-                click_add_command.append("--dry-run")
-            run_portable_step("click_add_to_contacts", click_add_command)
-            if not args.dry_run:
+                click_window_ratio(
+                    "click_add_to_contacts",
+                    x_ratio=float(args.add_click_x_ratio),
+                    y_ratio=float(args.add_click_y_ratio),
+                    required=False,
+                )
+                last_name_text = _nonempty(args.last_name_text)
+                if last_name_text:
+                    type_command = _portable_action_command(repo_root, actor, "type-text", "--text", last_name_text)
+                    if bool(args.press_enter_after_last_name):
+                        type_command.append("--press-enter")
+                    type_command.append("--dry-run")
+                    run_portable_step("type_last_name", type_command, required=False)
+                done_repeat = max(int(args.done_click_repeat), 1)
+                for index in range(done_repeat):
+                    click_window_ratio(
+                        f"click_done_{index + 1}",
+                        x_ratio=float(args.done_click_x_ratio),
+                        y_ratio=float(args.done_click_y_ratio),
+                        required=False,
+                    )
+            else:
+                window_geometry = portable["windows"][0] if portable.get("windows") else {}
+                add_button_match = find_add_contact_button()
+                username_match = find_exact_username_label(username)
+                if add_button_match:
+                    steps.append(
+                        {
+                            "label": "probe_add_contact_button",
+                            "term": add_button_match["term"],
+                            "match": add_button_match["match"],
+                        }
+                    )
+                if username_match:
+                    steps.append(
+                        {
+                            "label": "profile_username_exact_match",
+                            "term": username_match["term"],
+                            "match": username_match["match"],
+                        }
+                    )
+                if add_button_match is None:
+                    outcome = "ui_add_button_not_found"
+                    raise RuntimeError("Add to contacts button is not visible in the opened profile")
+                if username_match is None:
+                    outcome = "ui_profile_username_mismatch"
+                    raise RuntimeError(f"Exact username label is not visible for {username}")
+
+                add_click_ratio = (
+                    _portable_match_origin_ratio(add_button_match["match"])
+                    or _portable_derive_accessible_click_ratio(add_button_match["match"], window_geometry)
+                    or {"x_ratio": float(args.add_click_x_ratio), "y_ratio": float(args.add_click_y_ratio)}
+                )
+                steps.append(
+                    {
+                        "label": "resolved_add_contact_click",
+                        "x_ratio": add_click_ratio["x_ratio"],
+                        "y_ratio": add_click_ratio["y_ratio"],
+                    }
+                )
+                click_window_ratio(
+                    "click_add_to_contacts",
+                    x_ratio=float(add_click_ratio["x_ratio"]),
+                    y_ratio=float(add_click_ratio["y_ratio"]),
+                    required=False,
+                )
                 time.sleep(max(float(args.after_add_wait), 0.0))
 
-            last_name_text = _nonempty(args.last_name_text)
-            if last_name_text:
-                type_command = _portable_action_command(repo_root, actor, "type-text", "--text", last_name_text)
-                if bool(args.press_enter_after_last_name):
-                    type_command.append("--press-enter")
-                if args.dry_run:
-                    type_command.append("--dry-run")
-                run_portable_step("type_last_name", type_command)
-                if not args.dry_run:
+                post_add_first_name = find_accessible_match(
+                    terms=DESKTOP_FIRST_NAME_TERMS,
+                    role="text",
+                    visible_only=True,
+                    label_prefix="find_first_name",
+                )
+                post_add_done_button = find_accessible_match(
+                    terms=DESKTOP_DONE_BUTTON_TERMS,
+                    role="push button",
+                    visible_only=True,
+                    label_prefix="find_done_button",
+                )
+                post_add_button = find_add_contact_button()
+                dialog_detected = bool(post_add_first_name or post_add_done_button)
+                steps.append(
+                    {
+                        "label": "post_add_dialog_state",
+                        "dialog_detected": dialog_detected,
+                        "add_button_still_visible": bool(post_add_button),
+                        "first_name_visible": bool(post_add_first_name),
+                        "done_button_visible": bool(post_add_done_button),
+                    }
+                )
+                if not dialog_detected and post_add_button is not None:
+                    retry_click_ratio = (
+                        _portable_match_origin_ratio(post_add_button["match"])
+                        or _portable_derive_accessible_click_ratio(post_add_button["match"], window_geometry)
+                    )
+                    if retry_click_ratio:
+                        steps.append(
+                            {
+                                "label": "retry_add_contact_click",
+                                "x_ratio": retry_click_ratio["x_ratio"],
+                                "y_ratio": retry_click_ratio["y_ratio"],
+                            }
+                        )
+                        click_window_ratio(
+                            "retry_add_to_contacts",
+                            x_ratio=float(retry_click_ratio["x_ratio"]),
+                            y_ratio=float(retry_click_ratio["y_ratio"]),
+                            required=False,
+                        )
+                        time.sleep(max(float(args.after_add_wait), 0.0))
+                        post_add_first_name = find_accessible_match(
+                            terms=DESKTOP_FIRST_NAME_TERMS,
+                            role="text",
+                            visible_only=True,
+                            label_prefix="retry_find_first_name",
+                        )
+                        post_add_done_button = find_accessible_match(
+                            terms=DESKTOP_DONE_BUTTON_TERMS,
+                            role="push button",
+                            visible_only=True,
+                            label_prefix="retry_find_done_button",
+                        )
+                        dialog_detected = bool(post_add_first_name or post_add_done_button)
+                if not dialog_detected:
+                    outcome = "ui_add_dialog_not_detected"
+                    raise RuntimeError("Add contact dialog did not appear after clicking Add to contacts")
+
+                last_name_text = _nonempty(args.last_name_text)
+                last_name_result: dict[str, Any] | None = None
+                if last_name_text:
+                    last_name_result = try_accessible_type("type_last_name_accessible", DESKTOP_LAST_NAME_TERMS, last_name_text)
+                    if last_name_result is None:
+                        type_command = _portable_action_command(repo_root, actor, "type-text", "--text", last_name_text)
+                        if bool(args.press_enter_after_last_name):
+                            type_command.append("--press-enter")
+                        run_portable_step("type_last_name_fallback", type_command, required=False)
                     time.sleep(0.15)
 
-            done_repeat = max(int(args.done_click_repeat), 1)
-            for index in range(done_repeat):
-                click_done_command = _portable_action_command(
-                    repo_root,
-                    actor,
-                    "window-click",
-                    "--x-ratio",
-                    str(float(args.done_click_x_ratio)),
-                    "--y-ratio",
-                    str(float(args.done_click_y_ratio)),
+                dialog_submit_ratio = (
+                    _portable_derive_dialog_submit_ratio(last_name_result, window_geometry)
+                    or _portable_derive_dialog_submit_ratio(post_add_done_button, window_geometry)
+                    or _portable_derive_dialog_submit_ratio(post_add_first_name, window_geometry)
                 )
-                if args.dry_run:
-                    click_done_command.append("--dry-run")
-                run_portable_step(f"click_done_{index + 1}", click_done_command)
-                if not args.dry_run:
-                    time.sleep(0.12)
-            if not args.dry_run:
+                if dialog_submit_ratio:
+                    steps.append(
+                        {
+                            "label": "dialog_submit_click",
+                            "x_ratio": dialog_submit_ratio["x_ratio"],
+                            "y_ratio": dialog_submit_ratio["y_ratio"],
+                        }
+                    )
+                    click_window_ratio(
+                        "click_done_dialog_submit",
+                        x_ratio=float(dialog_submit_ratio["x_ratio"]),
+                        y_ratio=float(dialog_submit_ratio["y_ratio"]),
+                        required=False,
+                    )
+                elif post_add_done_button is not None:
+                    done_click_ratio = (
+                        _portable_match_origin_ratio(post_add_done_button["match"])
+                        or _portable_derive_accessible_click_ratio(post_add_done_button["match"], window_geometry)
+                        or {"x_ratio": float(args.done_click_x_ratio), "y_ratio": float(args.done_click_y_ratio)}
+                    )
+                    steps.append(
+                        {
+                            "label": "resolved_done_contact_click",
+                            "x_ratio": done_click_ratio["x_ratio"],
+                            "y_ratio": done_click_ratio["y_ratio"],
+                        }
+                    )
+                    click_window_ratio(
+                        "click_done_button",
+                        x_ratio=float(done_click_ratio["x_ratio"]),
+                        y_ratio=float(done_click_ratio["y_ratio"]),
+                        required=False,
+                    )
+                else:
+                    done_repeat = max(int(args.done_click_repeat), 1)
+                    for index in range(done_repeat):
+                        click_window_ratio(
+                            f"click_done_{index + 1}",
+                            x_ratio=float(args.done_click_x_ratio),
+                            y_ratio=float(args.done_click_y_ratio),
+                            required=False,
+                        )
+                        time.sleep(0.12)
                 time.sleep(max(float(args.after_done_wait), 0.0))
 
         capture_screenshot("profile_after_actions", "desktop_add_contact_profile_after_actions.png")
@@ -1693,9 +2150,26 @@ def command_desktop_add_contact_profile(args: argparse.Namespace) -> int:
             if not args.dry_run:
                 time.sleep(max(float(args.verify_wait), 0.0))
             capture_screenshot("profile_verify", "desktop_add_contact_profile_verify.png")
+            if not args.dry_run and args.confirm_add:
+                verify_results = {
+                    term: dump_accessible_query(
+                        f"verify_term:{term}",
+                        term,
+                    )
+                    for term in (*CONTACT_VERIFY_ADD_TERMS, *CONTACT_VERIFY_SUCCESS_TERMS)
+                }
+                verification = _portable_contact_verify_summary(verify_results)
+                log_lines.append(
+                    "INFO: verify outcome="
+                    f"{verification['outcome']} add_visible={int(bool(verification['add_visible']))} "
+                    f"success_visible={int(bool(verification['success_visible']))} "
+                    f"term_counts={json.dumps(verification['term_counts'], ensure_ascii=False)}"
+                )
 
         if args.dry_run:
             outcome = "dry_run"
+        elif verification is not None:
+            outcome = str(verification.get("outcome") or "contact_add_unverified")
         elif args.confirm_add:
             outcome = "contact_submit_clicked"
         else:
@@ -1714,6 +2188,7 @@ def command_desktop_add_contact_profile(args: argparse.Namespace) -> int:
             "portable_actor": actor,
             "portable": portable,
             "screenshots": screenshots,
+            "verification": verification,
             "error": str(exc),
             "steps": steps,
         }
@@ -1722,8 +2197,14 @@ def command_desktop_add_contact_profile(args: argparse.Namespace) -> int:
         print(json.dumps(response, ensure_ascii=False, indent=2))
         return 0 if args.dry_run else 1
 
+    status = "completed"
+    return_code = 0
+    if args.confirm_add and verification is not None and outcome != "contact_added_verified":
+        status = "failed"
+        return_code = 1
+
     response = {
-        "status": "completed",
+        "status": status,
         "outcome": outcome,
         "job_dir": str(job_dir),
         "execution_id": execution_id,
@@ -1732,12 +2213,13 @@ def command_desktop_add_contact_profile(args: argparse.Namespace) -> int:
         "portable_actor": actor,
         "portable": portable,
         "screenshots": screenshots,
+        "verification": verification,
         "steps": steps,
     }
     run_dir = _write_execution_record(job_dir, execution_id, response, log_lines)
     response["run_dir"] = str(run_dir)
     print(json.dumps(response, ensure_ascii=False, indent=2))
-    return 0
+    return return_code
 
 
 def command_desktop_add_contact_batch(args: argparse.Namespace) -> int:
@@ -1838,8 +2320,12 @@ def command_desktop_add_contact_batch(args: argparse.Namespace) -> int:
                 "status": str(user_payload.get("status") or ""),
                 "outcome": str(user_payload.get("outcome") or ""),
                 "run_dir": str(user_payload.get("run_dir") or ""),
+                "verification": user_payload.get("verification")
+                if isinstance(user_payload.get("verification"), dict)
+                else None,
             }
-            if user_rc == 0 and str(user_payload.get("status") or "") == "completed":
+            verified_added = str(user_payload.get("outcome") or "") == "contact_added_verified"
+            if user_rc == 0 and str(user_payload.get("status") or "") == "completed" and verified_added:
                 if not args.dry_run and args.confirm_add:
                     state_payload = load_state(job_dir)
                     current_user = _find_state_user(state_payload, username)
@@ -1857,7 +2343,14 @@ def command_desktop_add_contact_batch(args: argparse.Namespace) -> int:
                 log_lines.append(f"INFO: success {username} outcome={result['outcome']}")
             else:
                 failed_count += 1
-                result["error"] = str(user_payload.get("error") or f"command failed with code {user_rc}")
+                result["error"] = str(
+                    user_payload.get("error")
+                    or (
+                        "contact add was not verified after profile reopen"
+                        if str(user_payload.get("outcome") or "") in {"contact_not_added", "contact_add_unverified"}
+                        else f"command failed with code {user_rc}"
+                    )
+                )
                 if not args.dry_run:
                     state_payload = load_state(job_dir)
                     current_user = _find_state_user(state_payload, username)
@@ -1867,7 +2360,11 @@ def command_desktop_add_contact_batch(args: argparse.Namespace) -> int:
                             state_payload,
                             current_user,
                             status="failed",
-                            reason="desktop_contact_batch_failed",
+                            reason=(
+                                "desktop_contact_batch_not_verified"
+                                if str(user_payload.get("outcome") or "") in {"contact_not_added", "contact_add_unverified"}
+                                else "desktop_contact_batch_failed"
+                            ),
                         )
                 log_lines.append(f"WARN: failed {username} error={result.get('error')!r}")
             results.append(result)
