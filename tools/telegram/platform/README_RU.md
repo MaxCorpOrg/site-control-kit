@@ -131,6 +131,18 @@ cd /home/max/site-control-kit/tools/telegram/platform
   - `jobs/index.json`
   - `locks/profiles.json`
   - `panel_state/combined_flows/*`
+- unified workflow engine теперь живёт в `tool_platform/workflows.py` и уже реально управляет тремя workflow-kind:
+  - `invite_batch`
+  - `session_run`
+  - `combined_pattern`
+- combined workflow хранит ordered `steps` и aggregated `artifact_paths` прямо в unified jobs, поэтому combined-state панели больше не должен быть единственным source of truth;
+- в блоке `Состояние профиля` есть быстрые operator actions:
+  - `Открыть лог панели`
+  - `Открыть batch json`
+  - `Открыть session run`
+  - `Открыть execution record`
+  - `Открыть screenshot`
+- экраны `Добавить контакты`, `Сессия` и `Совместный режим` теперь сверху выводят unified jobs summary для выбранного профиля и соответствующего workflow-kind.
 - длинный экран теперь можно прокручивать мышью вниз;
 - рендерит детали профиля и результаты в читаемых текстовых блоках, а не в тесных таблицах.
 

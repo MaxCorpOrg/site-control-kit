@@ -16,12 +16,16 @@ from tool_platform.gui import (
     format_workflow_details,
 )
 from tool_platform.jobs import (
+    active_workflow_job,
+    append_job_step,
     finish_job,
     get_job,
     list_jobs,
     profile_id_for,
     profile_workspace_snapshot,
     start_job,
+    update_job_step,
+    workflow_artifact_index,
 )
 from tool_platform.locks import (
     acquire_profile_lock,
@@ -63,7 +67,16 @@ from tool_platform.telegram_profiles import (
     import_tdata_profile,
     list_portable_profiles,
 )
-from tool_platform.workflows import migrate_legacy_combined_state
+from tool_platform.workflows import (
+    CommandSpec as WorkflowCommandSpec,
+    combined_state_from_jobs,
+    complete_workflow_step,
+    default_combined_workflow_context,
+    migrate_legacy_combined_state,
+    plan_workflow,
+    resume_workflow,
+    run_workflow,
+)
 
 
 class ToolPlatformCatalogTests(unittest.TestCase):
@@ -892,10 +905,24 @@ class ToolPlatformCatalogTests(unittest.TestCase):
         summary = format_combined_flow_state(
             {
                 "phase": "contact_add",
+                "workflow_job_id": "20260504T100000Z-abcd1234",
+                "job_status": "running",
+                "job_summary": "Автопереход к следующему шагу",
+                "next_hint": "Дождись завершения текущего subprocess.",
+                "steps_total": 3,
                 "last_action": "combined_session_finished_next_contact",
                 "last_status": "completed",
                 "input_path": "/tmp/users.txt",
                 "invite_job_dir": "/tmp/job",
+                "recent_step": {
+                    "step_index": 2,
+                    "step_code": "1",
+                    "step_kind": "invite_batch",
+                    "step_status": "completed",
+                    "started_at": "2026-05-04T10:00:00Z",
+                    "completed_at": "2026-05-04T10:00:05Z",
+                    "artifact_paths": {"job_dir": "/tmp/job"},
+                },
             },
             profile_label="@M_a_g_g_i_e (AK) [запущен]",
             session_targets=[{"label": "Alice", "handle": "@alice_test", "kind": "contact"}],
@@ -932,6 +959,11 @@ class ToolPlatformCatalogTests(unittest.TestCase):
 
         self.assertIn("Следующий username в очереди: @next_contact", summary)
         self.assertIn("Следующий адресат для сообщения: Alice · @alice_test · контакт", summary)
+        self.assertIn("Workflow job: 20260504T100000Z-abcd1234", summary)
+        self.assertIn("Workflow status: running", summary)
+        self.assertIn("Подсказка engine: Дождись завершения текущего subprocess.", summary)
+        self.assertIn("Последний шаг engine", summary)
+        self.assertIn("код 1", summary)
         self.assertIn("Следующие тексты для сессии:", summary)
         self.assertIn("- #1 · Первое", summary)
         self.assertIn("Что дальше: система сама запускает следующий шаг добавления.", summary)
@@ -1049,6 +1081,313 @@ class ToolPlatformCatalogTests(unittest.TestCase):
         self.assertEqual(record["artifact_paths"]["run_dir"], "/tmp/run-1")
         self.assertEqual(workspace["profile_id"], profile_id_for("AK", "/home/max/TelegramPortableAK"))
         self.assertEqual(workspace["last_successful_job"]["job_id"], started["job_id"])
+
+    def test_job_steps_and_artifact_index_accumulate_child_history(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            index_path = Path(tmp_dir) / "jobs" / "index.json"
+            started = start_job(
+                tool_id="telegram_combined_flow",
+                workflow_kind="combined_pattern",
+                profile_name="AK",
+                profile_dir="/home/max/TelegramPortableAK",
+                phase="contact_add",
+                status="planned",
+                summary="Combined ready",
+                context={"step_pattern": "12"},
+                index_path=index_path,
+            )
+            step = append_job_step(
+                started["job_id"],
+                step_code="1",
+                step_kind="invite_batch",
+                action_label="combined contact add",
+                status="running",
+                summary="Running step",
+                index_path=index_path,
+            )
+            update_job_step(
+                started["job_id"],
+                step_id=step["step_id"],
+                status="completed",
+                summary="Done step",
+                artifact_paths={"job_dir": "/tmp/job-1"},
+                completed=True,
+                index_path=index_path,
+            )
+
+            job = get_job(started["job_id"], index_path)
+            artifacts = workflow_artifact_index(started["job_id"], index_path=index_path)
+
+        self.assertIsNotNone(job)
+        assert job is not None
+        self.assertEqual(len(job["steps"]), 1)
+        self.assertEqual(job["steps"][0]["step_kind"], "invite_batch")
+        self.assertEqual(artifacts["job_dir"], "/tmp/job-1")
+
+    def test_plan_and_run_invite_workflow_generates_command(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            index_path = Path(tmp_dir) / "jobs" / "index.json"
+            with mock.patch("tool_platform.workflows._build_invite_batch_command") as builder:
+                builder.return_value = WorkflowCommandSpec(argv=["python3", "invite.py"], cwd=Path(tmp_dir))
+                planned = plan_workflow(
+                    workflow_kind="invite_batch",
+                    tool_id="telegram_invite_manager",
+                    profile_name="AK",
+                    profile_dir="/home/max/TelegramPortableAK",
+                    context={"invite_job_dir": "/tmp/job", "input_path": "/tmp/users.txt"},
+                    summary="Invite planned",
+                    index_path=index_path,
+                )
+                execution = run_workflow(planned["job_id"], index_path=index_path)
+
+        self.assertEqual(execution["status"], "ready")
+        self.assertEqual(execution["command"].argv, ["python3", "invite.py"])
+        self.assertEqual(execution["step"]["step_kind"], "invite_batch")
+
+    def test_combined_workflow_auto_advances_from_contact_step_to_session_step(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            index_path = Path(tmp_dir) / "jobs" / "index.json"
+            combined_context = default_combined_workflow_context("AK", "/home/max/TelegramPortableAK")
+            combined_context.update(
+                {
+                    "input_path": "/tmp/users.txt",
+                    "invite_job_dir": "/tmp/job",
+                    "session_config_path": "/tmp/session.json",
+                    "continuous_session": False,
+                    "step_pattern": "12",
+                    "message_settings": {
+                        "base_config_path": "/tmp/session.json",
+                        "message_targets": [],
+                        "message_templates": [],
+                        "messages_per_cycle": 0,
+                        "total_message_limit": 0,
+                        "visits_per_cycle": 2,
+                        "view_min_seconds": 3,
+                        "view_max_seconds": 4,
+                        "auto_send": False,
+                    },
+                }
+            )
+            with mock.patch("tool_platform.workflows._build_invite_batch_command") as invite_builder, mock.patch(
+                "tool_platform.workflows._build_session_run_command"
+            ) as session_builder:
+                invite_builder.return_value = WorkflowCommandSpec(argv=["python3", "invite.py"], cwd=Path(tmp_dir))
+                session_builder.return_value = (
+                    WorkflowCommandSpec(argv=["python3", "session.py"], cwd=Path(tmp_dir)),
+                    Path(tmp_dir) / "runtime.json",
+                )
+                planned = plan_workflow(
+                    workflow_kind="combined_pattern",
+                    tool_id="telegram_combined_flow",
+                    profile_name="AK",
+                    profile_dir="/home/max/TelegramPortableAK",
+                    context=combined_context,
+                    summary="Combined planned",
+                    index_path=index_path,
+                )
+                first = run_workflow(planned["job_id"], index_path=index_path)
+                result = complete_workflow_step(
+                    planned["job_id"],
+                    payload={
+                        "status": "completed",
+                        "selected_users": 1,
+                        "failed_count": 0,
+                        "remaining_candidates": 3,
+                        "job_dir": "/tmp/job",
+                    },
+                    index_path=index_path,
+                )
+                job = get_job(planned["job_id"], index_path=index_path)
+
+        self.assertEqual(first["step"]["step_code"], "1")
+        self.assertEqual(result["status"], "continued")
+        self.assertEqual(result["next_step"]["step_code"], "2")
+        assert job is not None
+        self.assertEqual(job["workflow_kind"], "combined_pattern")
+        self.assertEqual(job["steps"][0]["status"], "completed")
+        self.assertEqual(job["steps"][1]["status"], "running")
+
+    def test_combined_workflow_finishes_when_contact_queue_is_empty(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            index_path = Path(tmp_dir) / "jobs" / "index.json"
+            combined_context = default_combined_workflow_context("AK", "/home/max/TelegramPortableAK")
+            combined_context.update(
+                {
+                    "input_path": "/tmp/users.txt",
+                    "invite_job_dir": "/tmp/job",
+                    "session_config_path": "/tmp/session.json",
+                    "continuous_session": False,
+                    "step_pattern": "12",
+                    "message_settings": {
+                        "base_config_path": "/tmp/session.json",
+                        "message_targets": [],
+                        "message_templates": [],
+                        "messages_per_cycle": 0,
+                        "total_message_limit": 0,
+                        "visits_per_cycle": 2,
+                        "view_min_seconds": 3,
+                        "view_max_seconds": 4,
+                        "auto_send": False,
+                    },
+                }
+            )
+            with mock.patch("tool_platform.workflows._build_invite_batch_command") as invite_builder:
+                invite_builder.return_value = WorkflowCommandSpec(argv=["python3", "invite.py"], cwd=Path(tmp_dir))
+                planned = plan_workflow(
+                    workflow_kind="combined_pattern",
+                    tool_id="telegram_combined_flow",
+                    profile_name="AK",
+                    profile_dir="/home/max/TelegramPortableAK",
+                    context=combined_context,
+                    summary="Combined planned",
+                    index_path=index_path,
+                )
+                run_workflow(planned["job_id"], index_path=index_path)
+                result = complete_workflow_step(
+                    planned["job_id"],
+                    payload={
+                        "status": "completed",
+                        "selected_users": 0,
+                        "failed_count": 0,
+                        "remaining_candidates": 0,
+                        "job_dir": "/tmp/job",
+                    },
+                    index_path=index_path,
+                )
+                job = get_job(planned["job_id"], index_path=index_path)
+
+        self.assertEqual(result["status"], "completed")
+        self.assertIsNone(result["next_command"])
+        assert job is not None
+        self.assertEqual(job["status"], "completed")
+        self.assertEqual(job["phase"], "stopped")
+        self.assertEqual(job["context"]["last_action"], "combined_contact_add_noop")
+
+    def test_combined_workflow_continuous_session_stops_pattern_advancement(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            index_path = Path(tmp_dir) / "jobs" / "index.json"
+            combined_context = default_combined_workflow_context("AK", "/home/max/TelegramPortableAK")
+            combined_context.update(
+                {
+                    "input_path": "/tmp/users.txt",
+                    "invite_job_dir": "/tmp/job",
+                    "session_config_path": "/tmp/session.json",
+                    "continuous_session": True,
+                    "step_pattern": "12",
+                    "message_settings": {
+                        "base_config_path": "/tmp/session.json",
+                        "message_targets": [],
+                        "message_templates": [],
+                        "messages_per_cycle": 0,
+                        "total_message_limit": 0,
+                        "visits_per_cycle": 2,
+                        "view_min_seconds": 3,
+                        "view_max_seconds": 4,
+                        "auto_send": False,
+                    },
+                }
+            )
+            with mock.patch("tool_platform.workflows._build_invite_batch_command") as invite_builder, mock.patch(
+                "tool_platform.workflows._build_session_run_command"
+            ) as session_builder, mock.patch(
+                "tool_platform.workflows._combined_invite_snapshot",
+                return_value={"pending_total": 7},
+            ):
+                invite_builder.return_value = WorkflowCommandSpec(argv=["python3", "invite.py"], cwd=Path(tmp_dir))
+                session_builder.return_value = (
+                    WorkflowCommandSpec(argv=["python3", "session.py"], cwd=Path(tmp_dir)),
+                    Path(tmp_dir) / "runtime.json",
+                )
+                planned = plan_workflow(
+                    workflow_kind="combined_pattern",
+                    tool_id="telegram_combined_flow",
+                    profile_name="AK",
+                    profile_dir="/home/max/TelegramPortableAK",
+                    context=combined_context,
+                    summary="Combined planned",
+                    index_path=index_path,
+                )
+                run_workflow(planned["job_id"], index_path=index_path)
+                complete_workflow_step(
+                    planned["job_id"],
+                    payload={
+                        "status": "completed",
+                        "selected_users": 1,
+                        "failed_count": 0,
+                        "remaining_candidates": 7,
+                        "job_dir": "/tmp/job",
+                    },
+                    index_path=index_path,
+                )
+                result = complete_workflow_step(
+                    planned["job_id"],
+                    payload={
+                        "status": "completed",
+                        "run_dir": "/tmp/run",
+                        "sent_count": 0,
+                    },
+                    index_path=index_path,
+                )
+                job = get_job(planned["job_id"], index_path=index_path)
+
+        self.assertEqual(result["status"], "completed")
+        self.assertIsNone(result["next_command"])
+        assert job is not None
+        self.assertEqual(job["status"], "completed")
+        self.assertEqual(job["phase"], "stopped")
+        self.assertEqual(job["context"]["last_action"], "combined_session_finished")
+
+    def test_resume_workflow_returns_current_running_step_or_next_command(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            index_path = Path(tmp_dir) / "jobs" / "index.json"
+            with mock.patch("tool_platform.workflows._build_invite_batch_command") as builder:
+                builder.return_value = WorkflowCommandSpec(argv=["python3", "invite.py"], cwd=Path(tmp_dir))
+                planned = plan_workflow(
+                    workflow_kind="invite_batch",
+                    tool_id="telegram_invite_manager",
+                    profile_name="AK",
+                    profile_dir="/home/max/TelegramPortableAK",
+                    context={"invite_job_dir": "/tmp/job", "input_path": "/tmp/users.txt"},
+                    summary="Invite planned",
+                    index_path=index_path,
+                )
+                run_workflow(planned["job_id"], index_path=index_path)
+                running = resume_workflow(planned["job_id"], index_path=index_path)
+                complete_workflow_step(
+                    planned["job_id"],
+                    payload={"status": "completed", "job_dir": "/tmp/job"},
+                    index_path=index_path,
+                )
+                resumed = resume_workflow(planned["job_id"], index_path=index_path)
+
+        self.assertEqual(running["status"], "already_running")
+        self.assertEqual(resumed["status"], "terminal")
+
+    def test_combined_state_from_jobs_prefers_job_context_over_legacy_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            index_path = Path(tmp_dir) / "jobs" / "index.json"
+            context = default_combined_workflow_context("AK", "/home/max/TelegramPortableAK")
+            context.update({"phase": "session_ready", "step_pattern": "11,2", "step_cursor": 2})
+            planned = plan_workflow(
+                workflow_kind="combined_pattern",
+                tool_id="telegram_combined_flow",
+                profile_name="AK",
+                profile_dir="/home/max/TelegramPortableAK",
+                context=context,
+                summary="Combined planned",
+                index_path=index_path,
+            )
+
+            state = combined_state_from_jobs(
+                profile_name="AK",
+                profile_dir="/home/max/TelegramPortableAK",
+                index_path=index_path,
+            )
+
+        self.assertEqual(state["workflow_job_id"], planned["job_id"])
+        self.assertEqual(state["phase"], "session_ready")
+        self.assertEqual(state["step_pattern"], "11,2")
+        self.assertEqual(state["step_cursor"], 2)
 
     def test_profile_locks_detect_conflict_and_force_release(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

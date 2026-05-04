@@ -77,6 +77,7 @@
 - panel-harness на самом `ToolPlatformPanel` уже подтвердил, что шаблон с запятыми может давать правильную последовательность шагов;
 - но пользователь всё ещё сообщает, что в реальном GUI это “не чередует”, поэтому считать баг закрытым нельзя.
 - foundation-слой уже начал выноситься из GUI:
+- foundation-слой уже не только начат, но и частично включён в реальный control-plane:
   - versioned agent-pack defaults:
     - `/home/max/site-control-kit/tools/telegram/agent_pack/agent_state.template.json`
     - `/home/max/site-control-kit/tools/telegram/agent_pack/VERIFICATION_MATRIX_RU.md`
@@ -86,6 +87,25 @@
   - persistent combined state: `~/.site-control-kit/telegram/panel_state/combined_flows/*`;
   - tool manifests уже знают `supported_platforms`, `required_capabilities`, `degraded_modes`;
   - `tool-platform` уже умеет `doctor`, `capabilities`, `show-agent-state`, `list-jobs`, `list-locks`.
+- новый workflow engine уже живёт в:
+  - `/home/max/site-control-kit/tool_platform/workflows.py`;
+  - `/home/max/site-control-kit/tool_platform/jobs.py`;
+- сейчас через него уже реально запускаются из панели:
+  - `invite_batch`;
+  - `session_run`;
+  - `combined_pattern`;
+- combined workflow теперь хранит ordered child step history и aggregated artifact index в unified jobs, а `load_combined_flow_state()` предпочитает jobs как primary truth;
+- в `gui.py` уже удалены старые ручные combined auto-step handlers, а `Старт добавления` / `Старт сессии` / `Старт совместного режима` идут через:
+  - `plan_workflow()`;
+  - `run_workflow()`;
+  - `complete_workflow_step()`;
+  - `stop_workflow_job()`;
+- панель уже показывает unified jobs summary по каждому из трёх режимов и quick actions для артефактов профиля:
+  - лог панели;
+  - batch json;
+  - session run;
+  - execution record;
+  - screenshot.
 
 Что сейчас важно не потерять:
 - session-runner не копировать вручную в site-control-kit без отдельного решения;
@@ -127,19 +147,28 @@
   - /home/max/telegram-portable-session-tool/*
 
 Текущий логичный следующий шаг:
-- первым делом не добавлять новые фичи, а воспроизвести живой GUI-баг пользователя в `Совместном режиме`;
+- первым делом не добавлять новые фичи, а воспроизвести живой GUI-баг пользователя в `Совместном режиме` уже на новом workflow/job engine;
 - проверить именно реальную панель, а не только panel-harness:
   - какой шаблон введён;
   - что лежит в `~/.site-control-kit/telegram/panel_state/combined_flows/AK__TelegramPortableAK.json`;
   - что попало в `~/.site-control-kit/telegram/jobs/index.json`;
   - что попало в `~/.site-control-kit/telegram/locks/profiles.json`;
   - что пишет `/tmp/telegram-control-center-panel.log`;
-  - какая фактическая последовательность start/complete у add/session шагов;
+  - какая фактическая последовательность:
+    - child step start;
+    - child step complete;
+    - cursor advance;
+    - auto-start next step;
+    - lock acquire/release;
 - если баг подтверждается только в реальном окне, искать расхождение между:
   - live Tk event flow;
-  - сохранённым combined-state;
-  - `_start_json_command` / `_complete_json_command`;
-- только после этого продолжать UX-полировку и стратегические шаги из `docs/TELEGRAM_SUPERTOOL_ROADMAP_RU.md`.
+  - unified job record;
+  - cached combined flow state;
+  - live subprocess lifecycle;
+- только после этого продолжать:
+  - resume/retry UX поверх `resume_workflow()`;
+  - отдельный artifact center / history center;
+  - следующий tranche cross-platform adapters из `docs/TELEGRAM_SUPERTOOL_ROADMAP_RU.md`.
 
 Как работать:
 - сначала восстанови контекст по этим файлам, потом меняй код;

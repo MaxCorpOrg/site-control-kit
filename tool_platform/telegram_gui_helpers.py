@@ -13,6 +13,7 @@ from typing import Any
 from .jobs import DEFAULT_TELEGRAM_STATE_ROOT
 from .workflows import (
     DEFAULT_WORKFLOW_STATE_ROOT,
+    combined_state_from_jobs,
     combined_flow_state_path as persistent_combined_flow_state_path,
     migrate_legacy_combined_state,
 )
@@ -131,6 +132,11 @@ def combined_flow_state_path(
 
 def default_combined_flow_state(profile_name: str, profile_dir: str | Path) -> dict[str, Any]:
     return {
+        "workflow_job_id": "",
+        "job_status": "planned",
+        "job_summary": "",
+        "next_hint": "",
+        "steps_total": 0,
         "profile_name": str(profile_name or "").strip() or "profile",
         "profile_dir": str(Path(profile_dir).expanduser().resolve()) if str(profile_dir or "").strip() else "",
         "phase": "contact_add",
@@ -147,6 +153,7 @@ def default_combined_flow_state(profile_name: str, profile_dir: str | Path) -> d
         "last_invite_status": "",
         "last_session_status": "",
         "last_session_run_dir": "",
+        "recent_step": {},
         "updated_at": "",
     }
 
@@ -157,6 +164,16 @@ def load_combined_flow_state(
     profile_dir: str | Path,
     state_root: str | Path = DEFAULT_PANEL_STATE_ROOT,
 ) -> dict[str, Any]:
+    state_from_jobs = combined_state_from_jobs(
+        profile_name=profile_name,
+        profile_dir=profile_dir,
+    )
+    if isinstance(state_from_jobs, dict):
+        state = default_combined_flow_state(profile_name, profile_dir)
+        state.update({key: value for key, value in state_from_jobs.items() if key in state})
+        if str(state.get("phase") or "") not in COMBINED_PHASES:
+            state["phase"] = "contact_add"
+        return state
     path = combined_flow_state_path(
         profile_name=profile_name,
         profile_dir=profile_dir,

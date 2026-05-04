@@ -21,6 +21,7 @@ from .catalog import (
 from .jobs import get_job, list_jobs
 from .locks import list_profile_locks
 from .platform_adapters import current_platform_id, platform_capabilities, platform_doctor_report
+from .workflows import artifacts_workflow, profile_health, resume_workflow, stop_workflow_job
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -49,6 +50,20 @@ def _build_parser() -> argparse.ArgumentParser:
 
     show_job = subparsers.add_parser("show-job", help="Show one unified Telegram job by id.")
     show_job.add_argument("--job-id", required=True)
+
+    show_artifacts = subparsers.add_parser("show-artifacts", help="Show aggregated artifact index for one job.")
+    show_artifacts.add_argument("--job-id", required=True)
+
+    stop_job = subparsers.add_parser("stop-job", help="Mark one unified Telegram workflow job as stopped.")
+    stop_job.add_argument("--job-id", required=True)
+    stop_job.add_argument("--summary", default="Остановлено оператором")
+
+    resume_job = subparsers.add_parser("resume-job", help="Resolve the next command for one unified Telegram workflow job.")
+    resume_job.add_argument("--job-id", required=True)
+
+    profile_health = subparsers.add_parser("profile-health", help="Show current workspace and health for one Telegram profile.")
+    profile_health.add_argument("--profile-name", required=True)
+    profile_health.add_argument("--profile-dir", required=True)
 
     subparsers.add_parser("list-locks", help="Show active Telegram profile locks.")
 
@@ -227,6 +242,57 @@ def _cmd_show_job(job_id: str) -> int:
     return 0
 
 
+def _cmd_show_artifacts(job_id: str) -> int:
+    try:
+        payload = artifacts_workflow(job_id)
+    except KeyError:
+        print(json.dumps({"status": "missing", "job_id": job_id}, ensure_ascii=False, indent=2))
+        return 1
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return 0
+
+
+def _cmd_stop_job(job_id: str, summary: str) -> int:
+    try:
+        payload = stop_workflow_job(job_id, summary=summary)
+    except KeyError:
+        print(json.dumps({"status": "missing", "job_id": job_id}, ensure_ascii=False, indent=2))
+        return 1
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return 0
+
+
+def _cmd_resume_job(job_id: str) -> int:
+    try:
+        payload = resume_workflow(job_id)
+    except KeyError:
+        print(json.dumps({"status": "missing", "job_id": job_id}, ensure_ascii=False, indent=2))
+        return 1
+    command = payload.get("command")
+    step = payload.get("step") if isinstance(payload.get("step"), dict) else {}
+    serializable = dict(payload)
+    if command is not None:
+        serializable["command"] = {
+            "argv": list(command.argv),
+            "cwd": str(command.cwd),
+        }
+    if step:
+        serializable["step"] = step
+    print(json.dumps(serializable, ensure_ascii=False, indent=2))
+    return 0
+
+
+def _cmd_profile_health(profile_name_value: str, profile_dir_value: str) -> int:
+    print(
+        json.dumps(
+            profile_health(profile_name=profile_name_value, profile_dir=profile_dir_value),
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+    return 0
+
+
 def _cmd_list_locks() -> int:
     print(json.dumps({"locks": list_profile_locks()}, ensure_ascii=False, indent=2))
     return 0
@@ -277,6 +343,14 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_list_jobs()
     if args.command == "show-job":
         return _cmd_show_job(args.job_id)
+    if args.command == "show-artifacts":
+        return _cmd_show_artifacts(args.job_id)
+    if args.command == "stop-job":
+        return _cmd_stop_job(args.job_id, args.summary)
+    if args.command == "resume-job":
+        return _cmd_resume_job(args.job_id)
+    if args.command == "profile-health":
+        return _cmd_profile_health(args.profile_name, args.profile_dir)
     if args.command == "list-locks":
         return _cmd_list_locks()
     if args.command == "run-action":
