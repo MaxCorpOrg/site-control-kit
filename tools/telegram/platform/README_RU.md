@@ -52,6 +52,7 @@ cd /home/max/site-control-kit/tools/telegram/platform
 ./bin/tool-platform capabilities
 ./bin/tool-platform show-agent-state
 ./bin/tool-platform list-jobs
+./bin/tool-platform list-jobs --profile-name AK --workflow-kind combined_pattern --limit 5
 ./bin/tool-platform show-job --job-id <job_id>
 ./bin/tool-platform show-artifacts --job-id <job_id>
 ./bin/tool-platform stop-job --job-id <job_id>
@@ -146,13 +147,42 @@ cd /home/max/site-control-kit/tools/telegram/platform
   - `session_run`
   - `combined_pattern`
 - combined workflow хранит ordered `steps` и aggregated `artifact_paths` прямо в unified jobs, поэтому combined-state панели больше не должен быть единственным source of truth;
+- `profile_workspace_snapshot()` теперь собирает operator workspace по профилю:
+  - `active_jobs`
+  - `recent_jobs`
+  - `current_lock`
+  - `health`
+  - `last_successful_job`
+  - `artifact_index`
+  - `workflow_buckets`
+- `workflow_buckets` теперь есть для:
+  - `invite_batch`
+  - `session_run`
+  - `combined_pattern`
+- каждый bucket теперь хранит:
+  - `active_job`
+  - `last_job`
+  - `recent_jobs`
+  - `timeline`
+  - `artifact_index`
+  - `recoverable_job`
 - в блоке `Состояние профиля` есть быстрые operator actions:
   - `Открыть лог панели`
   - `Открыть batch json`
   - `Открыть session run`
   - `Открыть execution record`
   - `Открыть screenshot`
-- экраны `Добавить контакты`, `Сессия` и `Совместный режим` теперь сверху выводят unified jobs summary для выбранного профиля и соответствующего workflow-kind.
+- экраны `Добавить контакты`, `Сессия` и `Совместный режим` теперь сверху выводят один и тот же operator workspace pattern:
+  - current workflow summary;
+  - workflow timeline;
+  - artifact center;
+  - затем mode-specific details;
+- `Продолжить workflow` теперь выбирает workflow по unified bucket policy:
+  - `active_job`
+  - `recoverable_job`
+  - `last_job`
+- `Продолжить очередь` и `Повторить ошибки` в invite-режиме теперь сначала используют latest recoverable unified invite job context, а уже потом падают обратно на UI `job_dir`;
+- для combined readback timeline anchor теперь идёт от `active -> last -> recoverable`, поэтому старый recoverable run не должен перетирать верхний timeline нового parent workflow;
 - длинный экран теперь можно прокручивать мышью вниз;
 - рендерит детали профиля и результаты в читаемых текстовых блоках, а не в тесных таблицах.
 

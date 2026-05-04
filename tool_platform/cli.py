@@ -46,7 +46,12 @@ def _build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("doctor", help="Show current platform doctor report for the Telegram control layer.")
     subparsers.add_parser("capabilities", help="Show current platform capabilities snapshot.")
     subparsers.add_parser("show-agent-state", help="Show persistent machine-readable agent state.")
-    subparsers.add_parser("list-jobs", help="Show recent unified Telegram jobs.")
+    list_jobs_parser = subparsers.add_parser("list-jobs", help="Show recent unified Telegram jobs.")
+    list_jobs_parser.add_argument("--profile-name")
+    list_jobs_parser.add_argument("--profile-dir")
+    list_jobs_parser.add_argument("--workflow-kind")
+    list_jobs_parser.add_argument("--status")
+    list_jobs_parser.add_argument("--limit", type=int, default=20)
 
     show_job = subparsers.add_parser("show-job", help="Show one unified Telegram job by id.")
     show_job.add_argument("--job-id", required=True)
@@ -228,8 +233,29 @@ def _cmd_show_agent_state() -> int:
     return 0
 
 
-def _cmd_list_jobs() -> int:
-    print(json.dumps({"jobs": list_jobs()}, ensure_ascii=False, indent=2))
+def _cmd_list_jobs(
+    *,
+    profile_name: str | None = None,
+    profile_dir: str | None = None,
+    workflow_kind: str | None = None,
+    status: str | None = None,
+    limit: int = 20,
+) -> int:
+    print(
+        json.dumps(
+            {
+                "jobs": list_jobs(
+                    profile_name=profile_name,
+                    profile_dir=profile_dir,
+                    workflow_kind=workflow_kind,
+                    status=status,
+                    limit=limit,
+                )
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
     return 0
 
 
@@ -340,7 +366,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "show-agent-state":
         return _cmd_show_agent_state()
     if args.command == "list-jobs":
-        return _cmd_list_jobs()
+        return _cmd_list_jobs(
+            profile_name=args.profile_name,
+            profile_dir=args.profile_dir,
+            workflow_kind=args.workflow_kind,
+            status=args.status,
+            limit=args.limit,
+        )
     if args.command == "show-job":
         return _cmd_show_job(args.job_id)
     if args.command == "show-artifacts":

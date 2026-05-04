@@ -11,6 +11,7 @@ from typing import Any
 DEFAULT_TELEGRAM_STATE_ROOT = Path.home() / ".site-control-kit" / "telegram"
 DEFAULT_JOB_INDEX_PATH = DEFAULT_TELEGRAM_STATE_ROOT / "jobs" / "index.json"
 DEFAULT_TIMELINE_LIMIT = 20
+WORKSPACE_WORKFLOW_KINDS = ("invite_batch", "session_run", "combined_pattern")
 JOB_STATUSES = {
     "idle",
     "planned",
@@ -530,6 +531,8 @@ def list_jobs(
     tool_id: str | None = None,
     workflow_kind: str | None = None,
     profile_id: str | None = None,
+    profile_name: str | None = None,
+    profile_dir: str | Path | None = None,
     status: str | None = None,
     limit: int = DEFAULT_TIMELINE_LIMIT,
     index_path: str | Path = DEFAULT_JOB_INDEX_PATH,
@@ -541,6 +544,11 @@ def list_jobs(
         jobs = [item for item in jobs if str(item.get("workflow_kind") or "") == str(workflow_kind)]
     if profile_id is not None:
         jobs = [item for item in jobs if str(item.get("profile_id") or "") == str(profile_id)]
+    if profile_name is not None:
+        jobs = [item for item in jobs if str(item.get("profile_name") or "") == str(profile_name)]
+    if profile_dir is not None:
+        resolved_profile_dir = str(Path(profile_dir).expanduser().resolve())
+        jobs = [item for item in jobs if str(item.get("profile_dir") or "") == resolved_profile_dir]
     if status is not None:
         jobs = [item for item in jobs if str(item.get("status") or "") == str(status)]
     jobs.sort(key=lambda item: str(item.get("updated_at") or item.get("started_at") or ""), reverse=True)
@@ -566,6 +574,55 @@ def workflow_artifact_index(job_id: str, index_path: str | Path = DEFAULT_JOB_IN
     return artifacts
 
 
+def _job_timeline(job: dict[str, Any], *, limit: int = DEFAULT_TIMELINE_LIMIT) -> list[dict[str, Any]]:
+    steps = [
+        _normalize_step_record(item, position=index)
+        for index, item in enumerate(job.get("steps") or [])
+        if isinstance(item, dict)
+    ]
+    return steps[-max(int(limit), 1) :]
+
+
+def _recoverable_job(jobs: list[dict[str, Any]]) -> dict[str, Any] | None:
+    for status in ("planned", "stopped", "completed_with_errors", "error"):
+        for item in jobs:
+            if str(item.get("status") or "") != status:
+                continue
+            if status in {"stopped", "completed_with_errors", "error"} and not bool(item.get("recoverable", True)):
+                continue
+            return item
+    return None
+
+
+def _workflow_bucket_snapshot(
+    jobs: list[dict[str, Any]],
+    *,
+    workflow_kind: str,
+    index_path: str | Path,
+    limit: int,
+    timeline_limit: int,
+) -> dict[str, Any]:
+    workflow_jobs = [item for item in jobs if str(item.get("workflow_kind") or "") == str(workflow_kind)]
+    active_job = next((item for item in workflow_jobs if str(item.get("status") or "") == "running"), None)
+    last_job = workflow_jobs[0] if workflow_jobs else None
+    recoverable_job = _recoverable_job(workflow_jobs)
+    anchor_job = active_job or last_job or recoverable_job
+    artifact_index = (
+        workflow_artifact_index(str(anchor_job.get("job_id") or ""), index_path=index_path)
+        if isinstance(anchor_job, dict)
+        else {}
+    )
+    return {
+        "workflow_kind": workflow_kind,
+        "active_job": active_job,
+        "last_job": last_job,
+        "recent_jobs": workflow_jobs[:limit],
+        "timeline": _job_timeline(anchor_job or {}, limit=timeline_limit),
+        "artifact_index": artifact_index,
+        "recoverable_job": recoverable_job,
+    }
+
+
 def active_workflow_job(
     *,
     profile_name: str,
@@ -583,10 +640,15 @@ def profile_workspace_snapshot(
     profile_name: str,
     profile_dir: str | Path,
     limit: int = 5,
+    timeline_limit: int = 8,
     index_path: str | Path = DEFAULT_JOB_INDEX_PATH,
 ) -> dict[str, Any]:
+    from .locks import get_profile_lock
+    from .platform_adapters import current_platform_id, platform_capabilities
+    from .telegram_profiles import get_profile_status
+
     profile_id = profile_id_for(profile_name, profile_dir)
-    jobs = list_jobs(profile_id=profile_id, limit=max(limit * 4, 10), index_path=index_path)
+    jobs = list_jobs(profile_id=profile_id, limit=max(limit * 8, 24), index_path=index_path)
     active_jobs = [item for item in jobs if str(item.get("status") or "") == "running"][:limit]
     recent_jobs = jobs[:limit]
     last_success = next(
@@ -597,11 +659,52 @@ def profile_workspace_snapshot(
         ),
         None,
     )
-    artifact_index = workflow_artifact_index(str(last_success.get("job_id") or ""), index_path=index_path) if isinstance(last_success, dict) else {}
+    artifact_index = (
+        workflow_artifact_index(str(last_success.get("job_id") or ""), index_path=index_path)
+        if isinstance(last_success, dict)
+        else {}
+    )
+    workflow_buckets = {
+        workflow_kind: _workflow_bucket_snapshot(
+            jobs,
+            workflow_kind=workflow_kind,
+            index_path=index_path,
+            limit=max(limit, timeline_limit),
+            timeline_limit=timeline_limit,
+        )
+        for workflow_kind in WORKSPACE_WORKFLOW_KINDS
+    }
+    current_lock = get_profile_lock(profile_name=profile_name, profile_dir=profile_dir)
+    try:
+        profile_status = get_profile_status(profile_dir)
+    except Exception as exc:
+        profile_status = {"status": "error", "error": str(exc), "running": False, "windows": []}
+    capabilities = platform_capabilities()
+    health = {
+        "platform_id": current_platform_id(),
+        "profile_running": bool(profile_status.get("running")),
+        "window_automation_available": bool((capabilities.get("window_automation") or {}).get("available")),
+        "accessibility_available": bool((capabilities.get("accessibility") or {}).get("available")),
+        "session_runtime_reachable": (Path("/home/max/telegram-portable-session-tool") / "bin" / "telegram-portable-session-tool").exists(),
+        "panel_backend_status": "ready",
+    }
+    for workflow_kind in WORKSPACE_WORKFLOW_KINDS:
+        bucket_artifacts = workflow_buckets[workflow_kind].get("artifact_index")
+        if isinstance(bucket_artifacts, dict):
+            artifact_index.update(
+                {
+                    str(key): str(value)
+                    for key, value in bucket_artifacts.items()
+                    if str(key).strip() and str(value).strip()
+                }
+            )
     return {
         "profile_id": profile_id,
         "active_jobs": active_jobs,
         "recent_jobs": recent_jobs,
+        "current_lock": current_lock,
+        "health": health,
         "last_successful_job": last_success,
         "artifact_index": artifact_index,
+        "workflow_buckets": workflow_buckets,
     }

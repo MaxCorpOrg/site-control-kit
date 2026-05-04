@@ -109,6 +109,43 @@
   - session run;
   - execution record;
   - screenshot.
+- operator workspace tranche уже тоже частично закрыт:
+  - `profile_workspace_snapshot()` теперь отдаёт:
+    - `active_jobs`
+    - `recent_jobs`
+    - `current_lock`
+    - `health`
+    - `last_successful_job`
+    - `artifact_index`
+    - `workflow_buckets`
+  - `workflow_buckets` уже есть для:
+    - `invite_batch`
+    - `session_run`
+    - `combined_pattern`
+  - каждый bucket теперь содержит:
+    - `active_job`
+    - `last_job`
+    - `recent_jobs`
+    - `timeline`
+    - `artifact_index`
+    - `recoverable_job`
+  - `list-jobs` теперь поддерживает filters:
+    - `--profile-name`
+    - `--profile-dir`
+    - `--workflow-kind`
+    - `--status`
+    - `--limit`
+  - invite/session/combined экраны в `gui.py` теперь сверху рендерят один и тот же pattern:
+    - current workflow summary
+    - workflow timeline
+    - artifact center
+    - mode-specific details
+  - `Продолжить workflow` теперь выбирает workflow по bucket-правилу:
+    - `active_job`
+    - `recoverable_job`
+    - `last_job`
+  - `Продолжить очередь` / `Повторить ошибки` теперь используют latest recoverable unified invite job context, а не только текущий UI `job_dir`;
+  - timeline anchor для combined readback уже поправлен на `active -> last -> recoverable`, чтобы старый recoverable run не перетирал верхний timeline.
 
 Что сейчас важно не потерять:
 - session-runner не копировать вручную в site-control-kit без отдельного решения;
@@ -151,9 +188,10 @@
 
 Текущий логичный следующий шаг:
 - не возвращаться к старому расследованию `не чередует`: этот live-баг уже закрыт;
-- двигаться дальше по unified operator workspace:
-  - поднимать отдельный timeline/history center поверх unified jobs;
-  - делать отдельный artifact center по профилю;
+- не возвращаться и к старой постановке `сделать timeline/history поверх unified jobs`: базовый operator workspace уже реализован;
+- двигаться дальше по следующему tranche:
+  - делать richer history/timeline center по профилю, а не только summary blocks;
+  - делать отдельный, более явный artifact center по профилю;
   - усиливать `Resume / Retry / Continue queue` UX поверх `resume_workflow()` и unified context;
   - ещё сильнее утончать `gui.py`, чтобы он оставался thin client над `tool_platform/workflows.py`;
 - параллельно продолжать следующий tranche cross-platform adapters из `docs/TELEGRAM_SUPERTOOL_ROADMAP_RU.md`, не пытаясь сразу вытянуть full Telegram Desktop parity на Windows/macOS.

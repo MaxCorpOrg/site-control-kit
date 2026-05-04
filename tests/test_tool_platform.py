@@ -1,19 +1,23 @@
 from __future__ import annotations
 
 import json
+import io
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest import mock
 
 from tool_platform.agent_state import default_agent_state, ensure_agent_state, load_agent_state, save_agent_state
 from tool_platform.catalog import find_action, find_tool, load_catalog
-from tool_platform.cli import execute_action
+from tool_platform.cli import execute_action, main as cli_main
 from tool_platform.gui import (
+    ToolPlatformPanel,
     build_combined_start_context,
     format_combined_flow_state,
     format_profile_details,
     format_session_operator_summary,
+    format_workflow_timeline,
     format_workflow_details,
 )
 from tool_platform.jobs import (
@@ -1100,6 +1104,154 @@ class ToolPlatformCatalogTests(unittest.TestCase):
         self.assertEqual(workspace["profile_id"], profile_id_for("AK", "/home/max/TelegramPortableAK"))
         self.assertEqual(workspace["last_successful_job"]["job_id"], started["job_id"])
 
+    def test_workspace_snapshot_builds_buckets_and_health_from_unified_jobs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            index_path = Path(tmp_dir) / "jobs" / "index.json"
+            invite_job = start_job(
+                tool_id="telegram_invite_manager",
+                workflow_kind="invite_batch",
+                profile_name="AK",
+                profile_dir="/home/max/TelegramPortableAK",
+                phase="stopped",
+                status="completed_with_errors",
+                summary="Invite needs retry",
+                recoverable=True,
+                context={"invite_job_dir": "/tmp/invite-job"},
+                steps=[
+                    {
+                        "step_id": "invite-step-1",
+                        "step_index": 0,
+                        "step_code": "1",
+                        "step_kind": "invite_batch",
+                        "status": "completed_with_errors",
+                        "summary": "Invite partial",
+                        "started_at": "2026-05-04T07:00:00Z",
+                        "completed_at": "2026-05-04T07:00:05Z",
+                        "artifact_paths": {"job_dir": "/tmp/invite-job"},
+                    }
+                ],
+                index_path=index_path,
+            )
+            session_job = start_job(
+                tool_id="telegram_session_runner",
+                workflow_kind="session_run",
+                profile_name="AK",
+                profile_dir="/home/max/TelegramPortableAK",
+                phase="session_running",
+                status="running",
+                summary="Session running",
+                steps=[
+                    {
+                        "step_id": "session-step-1",
+                        "step_index": 0,
+                        "step_code": "2",
+                        "step_kind": "session_run",
+                        "status": "running",
+                        "summary": "Running session",
+                        "started_at": "2026-05-04T07:10:00Z",
+                        "completed_at": "",
+                        "artifact_paths": {"run_dir": "/tmp/session-run"},
+                    }
+                ],
+                index_path=index_path,
+            )
+            combined_job = start_job(
+                tool_id="telegram_combined_flow",
+                workflow_kind="combined_pattern",
+                profile_name="AK",
+                profile_dir="/home/max/TelegramPortableAK",
+                phase="stopped",
+                status="completed",
+                summary="Combined done",
+                artifact_paths={"run_dir": "/tmp/combined-run"},
+                steps=[
+                    {
+                        "step_id": "combined-step-1",
+                        "step_index": 0,
+                        "step_code": "1",
+                        "step_kind": "invite_batch",
+                        "status": "completed",
+                        "summary": "Contact step done",
+                        "started_at": "2026-05-04T07:20:00Z",
+                        "completed_at": "2026-05-04T07:20:05Z",
+                        "artifact_paths": {"execution_record": "/tmp/combined-record.json"},
+                    }
+                ],
+                index_path=index_path,
+            )
+            workspace = profile_workspace_snapshot(
+                profile_name="AK",
+                profile_dir="/home/max/TelegramPortableAK",
+                index_path=index_path,
+            )
+
+        self.assertEqual(workspace["current_lock"], None)
+        self.assertTrue(workspace["health"]["session_runtime_reachable"])
+        invite_bucket = workspace["workflow_buckets"]["invite_batch"]
+        session_bucket = workspace["workflow_buckets"]["session_run"]
+        combined_bucket = workspace["workflow_buckets"]["combined_pattern"]
+        self.assertEqual(invite_bucket["recoverable_job"]["job_id"], invite_job["job_id"])
+        self.assertEqual(session_bucket["active_job"]["job_id"], session_job["job_id"])
+        self.assertEqual(combined_bucket["last_job"]["job_id"], combined_job["job_id"])
+        self.assertEqual(invite_bucket["timeline"][0]["summary"], "Invite partial")
+        self.assertEqual(session_bucket["artifact_index"]["run_dir"], "/tmp/session-run")
+        self.assertEqual(combined_bucket["artifact_index"]["execution_record"], "/tmp/combined-record.json")
+
+    def test_list_jobs_accepts_profile_filters(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            index_path = Path(tmp_dir) / "jobs" / "index.json"
+            start_job(
+                tool_id="telegram_invite_manager",
+                workflow_kind="invite_batch",
+                profile_name="AK",
+                profile_dir="/home/max/TelegramPortableAK",
+                phase="stopped",
+                status="completed",
+                summary="Invite done",
+                index_path=index_path,
+            )
+            start_job(
+                tool_id="telegram_session_runner",
+                workflow_kind="session_run",
+                profile_name="BK",
+                profile_dir="/home/max/TelegramPortableBK",
+                phase="stopped",
+                status="completed",
+                summary="Session done",
+                index_path=index_path,
+            )
+
+            by_name = list_jobs(profile_name="AK", index_path=index_path)
+            by_dir = list_jobs(profile_dir="/home/max/TelegramPortableBK", index_path=index_path)
+
+        self.assertEqual(len(by_name), 1)
+        self.assertEqual(by_name[0]["profile_name"], "AK")
+        self.assertEqual(len(by_dir), 1)
+        self.assertEqual(by_dir[0]["profile_name"], "BK")
+
+    def test_cli_list_jobs_supports_workspace_filters(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            index_path = Path(tmp_dir) / "jobs" / "index.json"
+            start_job(
+                tool_id="telegram_session_runner",
+                workflow_kind="session_run",
+                profile_name="AK",
+                profile_dir="/home/max/TelegramPortableAK",
+                phase="stopped",
+                status="completed",
+                summary="Session done",
+                index_path=index_path,
+            )
+            stdout = io.StringIO()
+            with mock.patch("tool_platform.cli.list_jobs") as list_jobs_mock, redirect_stdout(stdout):
+                list_jobs_mock.side_effect = lambda **kwargs: list_jobs(index_path=index_path, **kwargs)
+                exit_code = cli_main(["list-jobs", "--profile-name", "AK", "--workflow-kind", "session_run", "--limit", "5"])
+
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(len(payload["jobs"]), 1)
+        self.assertEqual(payload["jobs"][0]["workflow_kind"], "session_run")
+
     def test_job_steps_and_artifact_index_accumulate_child_history(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             index_path = Path(tmp_dir) / "jobs" / "index.json"
@@ -1141,6 +1293,29 @@ class ToolPlatformCatalogTests(unittest.TestCase):
         self.assertEqual(len(job["steps"]), 1)
         self.assertEqual(job["steps"][0]["step_kind"], "invite_batch")
         self.assertEqual(artifacts["job_dir"], "/tmp/job-1")
+
+    def test_format_workflow_timeline_includes_summary_and_times(self) -> None:
+        text = format_workflow_timeline(
+            {
+                "job_id": "job-1",
+                "status": "stopped",
+                "phase": "stopped",
+                "steps": [
+                    {
+                        "step_index": 0,
+                        "step_code": "1",
+                        "step_kind": "invite_batch",
+                        "status": "completed",
+                        "summary": "Добавление завершено",
+                        "started_at": "2026-05-04T07:00:00Z",
+                        "completed_at": "2026-05-04T07:00:05Z",
+                    }
+                ],
+            }
+        )
+
+        self.assertIn("Добавление завершено", text)
+        self.assertIn("2026-05-04T07:00:00Z -> 2026-05-04T07:00:05Z", text)
 
     def test_plan_and_run_invite_workflow_generates_command(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -1380,6 +1555,50 @@ class ToolPlatformCatalogTests(unittest.TestCase):
 
         self.assertEqual(running["status"], "already_running")
         self.assertEqual(resumed["status"], "terminal")
+
+    def test_gui_resume_candidate_prefers_active_then_recoverable_job(self) -> None:
+        panel = object.__new__(ToolPlatformPanel)
+        panel._selected_profile_workflow_bucket = lambda workflow_kind, limit=12: {
+            "active_job": {"job_id": "running-job", "status": "running"},
+            "recoverable_job": {"job_id": "recoverable-job", "status": "stopped", "recoverable": True},
+            "last_job": {"job_id": "last-job", "status": "completed"},
+        }
+
+        candidate = ToolPlatformPanel._resume_candidate_workflow_job(panel, "session_run")
+
+        self.assertEqual(candidate["job_id"], "running-job")
+
+    def test_gui_invite_recoverable_context_prefers_latest_recoverable_job_context(self) -> None:
+        class DummyVar:
+            def __init__(self) -> None:
+                self.value = ""
+
+            def set(self, value: str) -> None:
+                self.value = value
+
+            def get(self) -> str:
+                return self.value
+
+        panel = object.__new__(ToolPlatformPanel)
+        panel.invite_input_path_var = DummyVar()
+        panel.invite_job_dir_var = DummyVar()
+        panel._selected_profile_workflow_bucket = lambda workflow_kind: {
+            "recoverable_job": {
+                "job_id": "recoverable-invite",
+                "status": "stopped",
+                "recoverable": True,
+                "context": {
+                    "input_path": "/tmp/users.txt",
+                    "invite_job_dir": "/tmp/invite-job",
+                },
+            }
+        }
+
+        context = ToolPlatformPanel._invite_recoverable_context(panel)
+
+        self.assertEqual(context["input_path"], "/tmp/users.txt")
+        self.assertEqual(panel.invite_input_path_var.get(), "/tmp/users.txt")
+        self.assertEqual(panel.invite_job_dir_var.get(), "/tmp/invite-job")
 
     def test_stop_workflow_job_updates_recent_step_and_recoverable_hint(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

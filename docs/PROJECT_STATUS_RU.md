@@ -1251,27 +1251,101 @@
   - `./tools/telegram/platform/bin/tool-platform validate-registry`
   - `./tools/telegram/platform/bin/tool-platform doctor`
   - `./tools/telegram/platform/bin/tool-platform capabilities`
+- Следующий tranche для operator workspace поверх unified jobs реализован:
+  - `tool_platform/jobs.py` теперь строит profile-centric workspace snapshot:
+    - `active_jobs`
+    - `recent_jobs`
+    - `current_lock`
+    - `health`
+    - `last_successful_job`
+    - `artifact_index`
+    - `workflow_buckets`
+  - `workflow_buckets` теперь есть для:
+    - `invite_batch`
+    - `session_run`
+    - `combined_pattern`
+  - каждый bucket теперь хранит:
+    - `active_job`
+    - `last_job`
+    - `recent_jobs`
+    - `timeline`
+    - `artifact_index`
+    - `recoverable_job`
+  - `list-jobs` в `tool_platform/cli.py` теперь поддерживает фильтры:
+    - `--profile-name`
+    - `--profile-dir`
+    - `--workflow-kind`
+    - `--status`
+    - `--limit`
+  - `profile-health` теперь отдаёт не только doctor/capabilities и jobs, но и:
+    - `last_successful_job`
+    - `artifact_index`
+    - `workflow_buckets`
+  - `tool_platform/gui.py` теперь рендерит operator workspace как thin readback над unified jobs:
+    - сверху current workflow summary;
+    - затем unified timeline;
+    - затем artifact center;
+    - затем mode-specific content;
+  - это выровнено для:
+    - `Добавить контакты из TXT`
+    - `Сессия и сообщения`
+    - `Совместный режим`
+  - `Продолжить workflow` теперь выбирает workflow через bucket-модель:
+    - сначала `active_job` для честного статуса;
+    - затем `recoverable_job`;
+    - затем `last_job`;
+    - UI больше не решает progression вручную;
+  - `Продолжить очередь` и `Повторить ошибки` в invite-режиме теперь сначала берут `input_path` и `invite_job_dir` из latest recoverable unified invite job context и только потом, если такого workflow нет, падают обратно на UI `job_dir`;
+  - profile artifact center теперь сначала берёт артефакты из bucket текущего режима, а потом использует profile-wide fallback;
+  - combined timeline anchor поправлен на `active -> last -> recoverable`, чтобы свежий parent workflow не подменялся старым recoverable run в верхнем timeline.
+- Regression для operator workspace расширен:
+  - `tests/test_tool_platform.py` теперь проверяет:
+    - bucketization profile workspace;
+    - CLI filters `list-jobs`;
+    - timeline render c summary и временем;
+    - GUI resume candidate policy `active -> recoverable -> last`;
+    - invite recoverable context для `Продолжить очередь` / `Повторить ошибки`.
+- Проверки после operator workspace tranche:
+  - `python3 -m py_compile tool_platform/*.py tool_platform/platform_adapters/*.py tests/test_tool_platform.py`
+  - `PYTHONPATH="$PWD" python3 -m unittest tests.test_tool_platform` → `59 OK`
+  - `PYTHONPATH="$PWD" python3 -m unittest discover -s tests -p 'test_*.py'` → `241 OK`
+  - `bash -n tools/telegram/platform/bin/tool-platform tools/telegram/platform/bin/tool-platform-panel tools/telegram/session_runner/bin/telegram-session-runner tools/telegram/invite_manager/bin/telegram-invite-manager tools/telegram/invite_manager/bin/telegram-invite-executor`
+  - `./tools/telegram/platform/bin/tool-platform validate-registry`
+  - `./tools/telegram/platform/bin/tool-platform doctor`
+  - `./tools/telegram/platform/bin/tool-platform capabilities`
+- Живой panel smoke после operator workspace tranche:
+  - реальный `ToolPlatformPanel` прогнан на профиле `AK` через `Совместный режим` и unified readback;
+  - safe no-send workspace smoke:
+    - `/tmp/telegram-operator-workspace-live/result.json`
+  - повторный smoke после фикса timeline anchor:
+    - `/tmp/telegram-operator-workspace-live-2/result.json`
+  - подтверждено:
+    - summary/timeline/artifacts читаются из unified jobs, а не только из cached panel state;
+    - combined parent workflow рендерится как anchor timeline;
+    - recoverable workflow остаётся отдельной подсказкой, но не перетирает верхний timeline.
 
 ## Следующий Приоритет
-1. Для operator workspace: поднять более явный timeline/history center и отдельный artifact center уже поверх unified jobs, а не поверх разрозненных run-state файлов:
-   - current job summary;
-   - child step timeline;
-   - unified artifact shortcuts;
-   - last successful runs per profile.
+1. Для operator workspace:
+   - поднять уже не только summary/timeline text blocks, а отдельный более явный history/timeline center по профилю;
+   - сделать richer artifact center с более понятным preview, а не только quick-open actions;
+   - добавить profile workspace block с явным `active / recoverable / last_successful`.
 2. Дочистить thin-client роль `gui.py`:
-   - ещё сильнее сократить локальные readback-решения;
-   - переводить invite/session/combined summary на единый job-driven формат;
-   - оставить cached panel-state только как compatibility/readback cache, а не как второй источник truth.
+   - ещё сильнее сократить прямой доступ к cached panel-state;
+   - использовать unified bucket snapshot как primary readback почти везде;
+   - оставить cached panel-state только как compatibility fallback для combined flow.
 3. Для resume/retry UX:
-   - сделать более явный `Продолжить workflow` / `Retry failed` / `Continue queue` flow поверх unified job context;
-   - добавить отдельные operator hints, когда workflow можно безопасно resume-ить, а когда лучше стартовать заново.
+   - добавить операторские подсказки, когда workflow уже `running`, а когда его можно безопасно `resume`;
+   - довести `Продолжить очередь` / `Повторить ошибки` до полностью job-driven UX и показать это прямо в панели;
+   - сделать отдельный human-readable explain block для recoverable workflows.
 4. Для Invite/Desktop: прогнать end-to-end операторский сценарий в панели:
    - `Старт добавления`;
    - `Продолжить очередь`;
    - `Повторить ошибки`;
    - `Открыть batch json` / `execution record`;
    чтобы подтвердить уже не только backend batch, но и новый workspace UX.
-5. Для Session/Combined: добавить более явный human-readable hint в UI, что `Непрерывно до Стопа` останавливает дальнейшее pattern advancement и удерживает workflow в длинной сессии.
+5. Для Session/Combined:
+   - добавить более явный human-readable hint в UI, что `Непрерывно до Стопа` останавливает дальнейшее pattern advancement и удерживает workflow в длинной сессии;
+   - отдельно усилить session timeline на sent/draft level для operator readback.
 6. Для cross-platform core: продолжать adapter-first расширение Windows/macOS через `doctor/capabilities/launch/open-uri/focus/screenshot`, не пытаясь сразу вытащить full Telegram Desktop parity.
 
 ## Как Продолжать Следующему Агенту

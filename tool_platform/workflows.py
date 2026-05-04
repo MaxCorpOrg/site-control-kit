@@ -17,6 +17,7 @@ from .jobs import (
     normalize_runtime_payload,
     now_utc,
     profile_id_for,
+    profile_workspace_snapshot,
     start_job,
     stop_job,
     update_job,
@@ -1033,6 +1034,13 @@ def profile_health(
         profile_status = get_profile_status(profile_dir)
     except Exception as exc:
         profile_status = {"status": "error", "error": str(exc), "running": False, "windows": []}
+    workspace = profile_workspace_snapshot(
+        profile_name=profile_name,
+        profile_dir=profile_dir,
+        limit=5,
+        timeline_limit=8,
+        index_path=index_path,
+    )
     return {
         "profile_id": profile_id,
         "profile_name": str(profile_name or ""),
@@ -1041,6 +1049,9 @@ def profile_health(
         "lock": lock,
         "active_jobs": active_jobs,
         "recent_jobs": jobs[:5],
+        "last_successful_job": workspace.get("last_successful_job"),
+        "artifact_index": workspace.get("artifact_index"),
+        "workflow_buckets": workspace.get("workflow_buckets"),
         "doctor": doctor,
         "capabilities": capabilities,
     }
