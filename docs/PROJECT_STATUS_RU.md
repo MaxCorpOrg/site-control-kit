@@ -1490,6 +1490,18 @@
    - усилить readback по текущему next cycle / next target / next template.
 6. Для cross-platform core: продолжать adapter-first расширение Windows/macOS через `doctor/capabilities/launch/open-uri/focus/screenshot`, не пытаясь сразу вытащить full Telegram Desktop parity.
 
+## Контрольная Точка
+- Git checkpoint:
+  - ветка: `codex/telegram-client-hardening`
+  - commit: `241a903` `Усилить timeline и artifact center Telegram панели`
+- Human handoff:
+  - `/home/max/site-control-kit/docs/PROJECT_STATUS_RU.md`
+  - `/home/max/site-control-kit/tools/telegram/NEXT_CHAT_AGENT_PROMPT_RU.md`
+  - `/home/max/site-control-kit/tools/telegram/platform/README_RU.md`
+- Machine-readable handoff:
+  - `/home/max/.site-control-kit/telegram/agent/agent_state.json`
+  - `/home/max/.site-control-kit/telegram/agent/workspace_checkpoint.json`
+
 ## Как Продолжать Следующему Агенту
 1. Прочитать `AGENTS.md`.
 2. Прочитать `docs/PROJECT_WORKFLOW_RU.md`.

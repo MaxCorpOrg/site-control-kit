@@ -27,6 +27,7 @@
    - /home/max/site-control-kit/tools/telegram/agent_pack/VERIFICATION_MATRIX_RU.md
    - /home/max/site-control-kit/tools/telegram/agent_pack/agent_state.template.json
    - ~/.site-control-kit/telegram/agent/agent_state.json
+   - ~/.site-control-kit/telegram/agent/workspace_checkpoint.json
    - /home/max/site-control-kit/tools/telegram/README_RU.md
    - /home/max/site-control-kit/tools/telegram/AGENT_GUIDE_RU.md
    - /home/max/site-control-kit/tools/telegram/platform/README_RU.md
@@ -42,6 +43,7 @@
 - site-control-kit:
   - ветка: codex/telegram-client-hardening
   - последние checkpoint commits:
+    - `241a903` — усилен timeline и artifact center Telegram панели
     - `188f2bd` — шаблонный совместный режим Telegram панели
     - `2be8229` — сохранение `step_pattern/step_cursor` в combined-state
   - смысл текущей точки: live combined bug уже закрыт на новом workflow/job engine, и текущий приоритет смещён в operator workspace / timeline / artifact center
@@ -229,6 +231,7 @@
 - /home/max/site-control-kit/docs/PROJECT_STATUS_RU.md
 - /home/max/site-control-kit/docs/TELEGRAM_SUPERTOOL_ROADMAP_RU.md
 - ~/.site-control-kit/telegram/agent/agent_state.json
+- ~/.site-control-kit/telegram/agent/workspace_checkpoint.json
 
 Если задача про panel/control center, куда лезть:
 - /home/max/site-control-kit/tool_platform/gui.py

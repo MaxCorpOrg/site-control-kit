@@ -50,6 +50,7 @@
 14. если задача про Telegram control center или подключение новых инструментов: `tools/telegram/platform/README_RU.md` и `tools/telegram/platform/AGENT_GUIDE_RU.md`
 15. если задача вообще про Telegram operator layer: `tools/telegram/NEXT_CHAT_AGENT_PROMPT_RU.md`, потом `tools/telegram/README_RU.md` и `tools/telegram/AGENT_GUIDE_RU.md`
 16. если задача про текущий Telegram control plane: `tools/telegram/agent_pack/README_RU.md`, `tools/telegram/agent_pack/VERIFICATION_MATRIX_RU.md`, `tools/telegram/agent_pack/agent_state.template.json`, затем `~/.site-control-kit/telegram/agent/agent_state.json`
+17. если нужен самый короткий machine-readable handoff по текущему Telegram workspace: `~/.site-control-kit/telegram/agent/workspace_checkpoint.json`
 
 ## Что Нужно Понять До Любых Правок
 До правок ты обязан ответить себе на четыре вопроса:
@@ -59,6 +60,13 @@
 
 2. Где проект остановился в последний раз?
 Источник истины: секции `Текущие Проблемы`, `Следующий Приоритет`, `Последний Подтверждённый Полезный Результат` в `docs/PROJECT_STATUS_RU.md`
+
+На текущей контрольной точке Telegram control center зафиксирован commit:
+- `241a903` — `Усилить timeline и artifact center Telegram панели`
+
+Если нужно быстро восстановить именно эту рабочую точку без перечитывания длинных логов, используй:
+- `tools/telegram/NEXT_CHAT_AGENT_PROMPT_RU.md`
+- `~/.site-control-kit/telegram/agent/workspace_checkpoint.json`
 
 3. Что изменялось недавно?
 Источник истины:
