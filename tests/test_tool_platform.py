@@ -26,6 +26,8 @@ from tool_platform.jobs import (
     finish_job,
     get_job,
     list_jobs,
+    profile_artifact_index,
+    profile_history_groups,
     profile_id_for,
     profile_workspace_snapshot,
     start_job,
@@ -1197,6 +1199,107 @@ class ToolPlatformCatalogTests(unittest.TestCase):
         self.assertEqual(session_bucket["artifact_index"]["run_dir"], "/tmp/session-run")
         self.assertEqual(combined_bucket["artifact_index"]["execution_record"], "/tmp/combined-record.json")
 
+    def test_profile_workspace_snapshot_prefers_active_artifacts_then_recent_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            index_path = Path(tmp_dir) / "jobs" / "index.json"
+            start_job(
+                tool_id="telegram_invite_manager",
+                workflow_kind="invite_batch",
+                profile_name="AK",
+                profile_dir="/home/max/TelegramPortableAK",
+                phase="stopped",
+                status="completed",
+                summary="Invite done",
+                artifact_paths={"batch_json": "/tmp/invite-batch.json"},
+                index_path=index_path,
+            )
+            start_job(
+                tool_id="telegram_session_runner",
+                workflow_kind="session_run",
+                profile_name="AK",
+                profile_dir="/home/max/TelegramPortableAK",
+                phase="session_running",
+                status="running",
+                summary="Session running",
+                artifact_paths={"run_dir": "/tmp/session-run"},
+                index_path=index_path,
+            )
+            start_job(
+                tool_id="telegram_combined_flow",
+                workflow_kind="combined_pattern",
+                profile_name="AK",
+                profile_dir="/home/max/TelegramPortableAK",
+                phase="stopped",
+                status="completed",
+                summary="Combined done",
+                artifact_paths={"execution_record": "/tmp/combined-record.json"},
+                index_path=index_path,
+            )
+
+            workspace = profile_workspace_snapshot(
+                profile_name="AK",
+                profile_dir="/home/max/TelegramPortableAK",
+                index_path=index_path,
+            )
+            artifacts = profile_artifact_index(
+                profile_name="AK",
+                profile_dir="/home/max/TelegramPortableAK",
+                index_path=index_path,
+            )
+
+        self.assertEqual(workspace["artifact_index"]["run_dir"], "/tmp/session-run")
+        self.assertEqual(artifacts["run_dir"], "/tmp/session-run")
+        self.assertEqual(artifacts["batch_json"], "/tmp/invite-batch.json")
+        self.assertEqual(artifacts["execution_record"], "/tmp/combined-record.json")
+
+    def test_profile_history_groups_preserve_unified_step_order(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            index_path = Path(tmp_dir) / "jobs" / "index.json"
+            started = start_job(
+                tool_id="telegram_combined_flow",
+                workflow_kind="combined_pattern",
+                profile_name="AK",
+                profile_dir="/home/max/TelegramPortableAK",
+                phase="contact_add",
+                status="running",
+                summary="Combined running",
+                steps=[
+                    {
+                        "step_id": "step-1",
+                        "step_index": 0,
+                        "step_code": "1",
+                        "step_kind": "invite_batch",
+                        "status": "completed",
+                        "summary": "Contact batch done",
+                        "started_at": "2026-05-04T08:00:00Z",
+                        "completed_at": "2026-05-04T08:00:02Z",
+                    },
+                    {
+                        "step_id": "step-2",
+                        "step_index": 1,
+                        "step_code": "2",
+                        "step_kind": "session_run",
+                        "status": "running",
+                        "summary": "Session running",
+                        "started_at": "2026-05-04T08:00:03Z",
+                        "completed_at": "",
+                    },
+                ],
+                index_path=index_path,
+            )
+
+            groups = profile_history_groups(
+                profile_name="AK",
+                profile_dir="/home/max/TelegramPortableAK",
+                limit=3,
+                step_limit=4,
+                index_path=index_path,
+            )
+
+        self.assertEqual(len(groups), 1)
+        self.assertEqual(groups[0]["job"]["job_id"], started["job_id"])
+        self.assertEqual([step["step_code"] for step in groups[0]["steps"]], ["1", "2"])
+
     def test_list_jobs_accepts_profile_filters(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             index_path = Path(tmp_dir) / "jobs" / "index.json"
@@ -1599,6 +1702,45 @@ class ToolPlatformCatalogTests(unittest.TestCase):
         self.assertEqual(context["input_path"], "/tmp/users.txt")
         self.assertEqual(panel.invite_input_path_var.get(), "/tmp/users.txt")
         self.assertEqual(panel.invite_job_dir_var.get(), "/tmp/invite-job")
+
+    def test_complete_workflow_event_refreshes_profile_dashboard_after_mode_callback(self) -> None:
+        panel = object.__new__(ToolPlatformPanel)
+        panel._set_tool_busy = mock.Mock()
+        panel._cancel_tool_monitor = mock.Mock()
+        panel._stop_session_timer = mock.Mock()
+        panel._render_workflow_status = mock.Mock()
+        panel._log_event = mock.Mock()
+        panel._refresh_profile_workspace_dashboard = mock.Mock()
+        panel._active_job_ids = {}
+        panel._active_job_contexts = {}
+        mode_refresh = mock.Mock()
+
+        with mock.patch(
+            "tool_platform.gui.complete_workflow_step",
+            return_value={
+                "job": {"status": "completed", "summary": "Done", "profile_dir": "/home/max/TelegramPortableAK"},
+                "next_command": None,
+                "next_action_label": "",
+                "next_step": {},
+            },
+        ):
+            ToolPlatformPanel._complete_workflow_event(
+                panel,
+                {
+                    "tool_id": "telegram_combined_flow",
+                    "workflow_job_id": "job-1",
+                    "action_label": "combined step",
+                    "payload": {"status": "completed", "summary": "Done"},
+                    "error_text": "",
+                    "stopped": False,
+                    "refresh_callback": mode_refresh,
+                    "on_payload_success": None,
+                    "step_kind": "invite_batch",
+                },
+            )
+
+        mode_refresh.assert_called_once()
+        panel._refresh_profile_workspace_dashboard.assert_called_once()
 
     def test_stop_workflow_job_updates_recent_step_and_recoverable_hint(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

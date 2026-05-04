@@ -1323,20 +1323,69 @@
     - summary/timeline/artifacts читаются из unified jobs, а не только из cached panel state;
     - combined parent workflow рендерится как anchor timeline;
     - recoverable workflow остаётся отдельной подсказкой, но не перетирает верхний timeline.
+- Profile workspace dashboard tranche завершён:
+  - блок `3. Состояние профиля` перестроен в единый `Workspace профиля`:
+    - слева `Профиль и workflow`;
+    - по центру `История профиля`;
+    - справа `Артефакты и здоровье`;
+  - верхний dashboard теперь рендерится из unified jobs и profile workspace snapshot, а не из локального panel-state;
+  - `profile_workspace_snapshot()` и profile-level helpers теперь отдают:
+    - `active_jobs`
+    - `recent_jobs`
+    - `current_lock`
+    - `health`
+    - `last_successful_job`
+    - `artifact_index`
+    - `workflow_buckets`
+  - profile-wide artifact fallback больше не зависит от случайного порядка buckets:
+    - сначала active workflow artifacts;
+    - затем last successful / recent fallback;
+    - затем bucket-level missing artifacts;
+  - timeline профиля теперь показывает ordered child steps с `step_code / step_kind / status / summary / started -> completed`;
+  - нижние mode screens облегчены:
+    - `Добавить контакты из TXT` больше не дублирует сверху operator workspace;
+    - `Сессия и сообщения` показывает только session-specific summary/history;
+    - `Совместный режим` показывает только combined-specific state/contact/session summary;
+  - при смене профиля, `Перечитать`, `Обновить статус` и после завершения любого workflow верхний dashboard теперь всегда перерисовывается;
+  - live-bug класса `mode refresh обновился, а верхний workspace остался stale` закрыт и покрыт regression-тестом.
+- Проверки после profile workspace dashboard tranche:
+  - `python3 -m py_compile tool_platform/*.py tool_platform/platform_adapters/*.py tests/test_tool_platform.py`
+  - `PYTHONPATH="$PWD" python3 -m unittest tests.test_tool_platform` → `62 OK`
+  - `PYTHONPATH="$PWD" python3 -m unittest discover -s tests -p 'test_*.py'` → `243 OK`
+  - `bash -n tools/telegram/platform/bin/tool-platform tools/telegram/platform/bin/tool-platform-panel tools/telegram/session_runner/bin/telegram-session-runner tools/telegram/invite_manager/bin/telegram-invite-manager tools/telegram/invite_manager/bin/telegram-invite-executor`
+  - `./tools/telegram/platform/bin/tool-platform validate-registry`
+  - `./tools/telegram/platform/bin/tool-platform doctor`
+  - `./tools/telegram/platform/bin/tool-platform capabilities`
+- Живой smoke после profile workspace dashboard tranche:
+  - реальное окно `Центр управления Telegram` поднято через `env PYTHONPATH=\"$PWD\" python3 -m tool_platform.gui`;
+  - X11-окно подтверждено через `wmctrl` / `xwininfo`;
+  - screenshot dashboard:
+    - `/tmp/telegram-profile-workspace-dashboard.png`
+  - hidden panel-layer safe smoke после layout/refactor:
+    - `/tmp/telegram-profile-dashboard-safe-live/result.json`
+  - повторный smoke после фикса stale dashboard refresh:
+    - `/tmp/telegram-profile-dashboard-safe-live-2/result.json`
+  - подтверждено:
+    - новый верхний workspace реально виден в панели;
+    - `Последний успешный workflow` и верхний timeline обновляются по только что завершённому job;
+    - stale подмена старым recoverable workflow после completion больше не воспроизводится.
 
 ## Следующий Приоритет
 1. Для operator workspace:
-   - поднять уже не только summary/timeline text blocks, а отдельный более явный history/timeline center по профилю;
-   - сделать richer artifact center с более понятным preview, а не только quick-open actions;
-   - добавить profile workspace block с явным `active / recoverable / last_successful`.
+   - сделать richer `Resume / Retry / Continue queue` UX поверх уже готового dashboard;
+   - показать human-readable operator hints:
+     - `workflow уже выполняется`;
+     - `можно продолжить`;
+     - `лучше перезапустить`;
+   - усилить invite/session/combined action rows так, чтобы оператору было понятно, что именно продолжится и откуда возьмётся context.
 2. Дочистить thin-client роль `gui.py`:
    - ещё сильнее сократить прямой доступ к cached panel-state;
    - использовать unified bucket snapshot как primary readback почти везде;
    - оставить cached panel-state только как compatibility fallback для combined flow.
-3. Для resume/retry UX:
-   - добавить операторские подсказки, когда workflow уже `running`, а когда его можно безопасно `resume`;
-   - довести `Продолжить очередь` / `Повторить ошибки` до полностью job-driven UX и показать это прямо в панели;
-   - сделать отдельный human-readable explain block для recoverable workflows.
+3. Для history/artifact center:
+   - поднять более сильный profile timeline center по профилю;
+   - сделать richer artifact center с более явными quick-open и preview-подсказками;
+   - добавить profile workspace block с ещё более явным `active / recoverable / last_successful`.
 4. Для Invite/Desktop: прогнать end-to-end операторский сценарий в панели:
    - `Старт добавления`;
    - `Продолжить очередь`;

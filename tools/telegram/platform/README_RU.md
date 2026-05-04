@@ -166,23 +166,31 @@ cd /home/max/site-control-kit/tools/telegram/platform
   - `timeline`
   - `artifact_index`
   - `recoverable_job`
-- в блоке `Состояние профиля` есть быстрые operator actions:
+- блок `3. Workspace профиля` теперь перестроен в единый profile dashboard:
+  - слева `Профиль и workflow`;
+  - по центру `История профиля`;
+  - справа `Артефакты и здоровье`;
+- profile-wide artifact fallback теперь идёт по логике:
+  - active workflow artifacts;
+  - last successful / recent fallback;
+  - bucket-level missing artifacts;
+- в profile dashboard есть быстрые operator actions:
   - `Открыть лог панели`
   - `Открыть batch json`
   - `Открыть session run`
   - `Открыть execution record`
   - `Открыть screenshot`
-- экраны `Добавить контакты`, `Сессия` и `Совместный режим` теперь сверху выводят один и тот же operator workspace pattern:
-  - current workflow summary;
-  - workflow timeline;
-  - artifact center;
-  - затем mode-specific details;
+- экраны `Добавить контакты`, `Сессия` и `Совместный режим` теперь не дублируют верхний dashboard длинными readback-блоками:
+  - сверху остаётся единый profile workspace;
+  - ниже в режиме показываются только mode-specific детали;
 - `Продолжить workflow` теперь выбирает workflow по unified bucket policy:
   - `active_job`
   - `recoverable_job`
   - `last_job`
 - `Продолжить очередь` и `Повторить ошибки` в invite-режиме теперь сначала используют latest recoverable unified invite job context, а уже потом падают обратно на UI `job_dir`;
 - для combined readback timeline anchor теперь идёт от `active -> last -> recoverable`, поэтому старый recoverable run не должен перетирать верхний timeline нового parent workflow;
+- после завершения workflow верхний profile workspace теперь тоже перерисовывается сразу;
+  - закрыт live-bug, когда нижний mode-screen уже обновился, а верхний dashboard оставался stale до ручного переключения профиля;
 - длинный экран теперь можно прокручивать мышью вниз;
 - рендерит детали профиля и результаты в читаемых текстовых блоках, а не в тесных таблицах.
 

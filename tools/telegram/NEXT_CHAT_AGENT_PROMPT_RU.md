@@ -146,6 +146,24 @@
     - `last_job`
   - `Продолжить очередь` / `Повторить ошибки` теперь используют latest recoverable unified invite job context, а не только текущий UI `job_dir`;
   - timeline anchor для combined readback уже поправлен на `active -> last -> recoverable`, чтобы старый recoverable run не перетирал верхний timeline.
+  - верхний блок `3. Workspace профиля` теперь реально перестроен в dashboard:
+    - `Профиль и workflow`
+    - `История профиля`
+    - `Артефакты и здоровье`
+  - workspace dashboard теперь берёт source of truth из unified jobs и profile workspace snapshot, а не из cached panel-state;
+  - profile-wide artifact fallback уже починен на логику:
+    - active workflow artifacts
+    - last successful / recent fallback
+    - bucket-level missing artifacts
+  - live-bug класса `нижний mode refresh обновился, а верхний workspace остался stale` уже закрыт и покрыт regression-тестом;
+  - живой screenshot нового dashboard сохранён в:
+    - `/tmp/telegram-profile-workspace-dashboard.png`
+  - panel-layer smoke после фикса stale dashboard refresh:
+    - `/tmp/telegram-profile-dashboard-safe-live-2/result.json`
+  - в этом smoke подтвердилось:
+    - `Последний успешный workflow` обновился до только что завершённого job;
+    - верхний timeline сразу показал новый parent workflow и его child step;
+    - stale подмена старым recoverable workflow больше не воспроизводится.
 
 Что сейчас важно не потерять:
 - session-runner не копировать вручную в site-control-kit без отдельного решения;
@@ -190,9 +208,12 @@
 - не возвращаться к старому расследованию `не чередует`: этот live-баг уже закрыт;
 - не возвращаться и к старой постановке `сделать timeline/history поверх unified jobs`: базовый operator workspace уже реализован;
 - двигаться дальше по следующему tranche:
-  - делать richer history/timeline center по профилю, а не только summary blocks;
-  - делать отдельный, более явный artifact center по профилю;
-  - усиливать `Resume / Retry / Continue queue` UX поверх `resume_workflow()` и unified context;
+  - усиливать `Resume / Retry / Continue queue` UX поверх уже готового profile workspace dashboard;
+  - показывать оператору явные hints:
+    - `workflow уже выполняется`
+    - `можно продолжить`
+    - `лучше перезапустить`
+  - делать richer history/timeline center по профилю и чуть более сильный artifact center;
   - ещё сильнее утончать `gui.py`, чтобы он оставался thin client над `tool_platform/workflows.py`;
 - параллельно продолжать следующий tranche cross-platform adapters из `docs/TELEGRAM_SUPERTOOL_ROADMAP_RU.md`, не пытаясь сразу вытянуть full Telegram Desktop parity на Windows/macOS.
 

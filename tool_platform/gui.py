@@ -58,12 +58,16 @@ from .agent_state import ensure_agent_state, load_agent_state
 from .catalog import tool_platform_support
 from .jobs import (
     DEFAULT_TELEGRAM_STATE_ROOT,
+    active_workflow_job,
     fail_job,
     finish_job,
     get_job,
     list_jobs,
+    profile_artifact_index,
+    profile_history_groups,
     profile_id_for,
     profile_workspace_snapshot,
+    recoverable_workflow_job,
     start_job,
     stop_job,
 )
@@ -209,6 +213,108 @@ def format_profile_workspace_details(profile: dict[str, Any]) -> str:
         lines.extend(["", "Последние артефакты"])
         for key, value in sorted(artifact_index.items()):
             lines.append(f"- {key}: {value}")
+    return "\n".join(lines)
+
+
+def format_workflow_resume_hint(job: dict[str, Any] | None) -> str:
+    if not isinstance(job, dict) or not job:
+        return "нет подходящего workflow"
+    status = str(job.get("status") or "").strip().lower()
+    if status == "running":
+        return "workflow уже выполняется"
+    if status == "planned":
+        return "можно продолжить"
+    if status in {"stopped", "completed_with_errors", "error"} and bool(job.get("recoverable", True)):
+        return "можно продолжить"
+    return "лучше перезапустить"
+
+
+def format_profile_workspace_summary(profile: dict[str, Any]) -> str:
+    profile_name = str(profile.get("profile_name") or "").strip() or "profile"
+    profile_dir = str(profile.get("profile_dir") or "").strip()
+    account = profile.get("account") if isinstance(profile.get("account"), dict) else {}
+    windows = profile.get("windows") if isinstance(profile.get("windows"), list) else []
+    first_window = windows[0] if windows else {}
+    workspace = profile_workspace_snapshot(profile_name=profile_name, profile_dir=profile_dir)
+    active_job = active_workflow_job(profile_name=profile_name, profile_dir=profile_dir)
+    recoverable_job = recoverable_workflow_job(profile_name=profile_name, profile_dir=profile_dir)
+    lock = workspace.get("current_lock") if isinstance(workspace.get("current_lock"), dict) else None
+    last_success = workspace.get("last_successful_job") if isinstance(workspace.get("last_successful_job"), dict) else None
+    lines = [
+        "Профиль и workflow",
+        f"Профиль: {profile_name}",
+        f"Аккаунт: {account.get('username') or 'не задан'}",
+        f"Метка: {account.get('label') or 'не задана'}",
+        f"Состояние: {'запущен' if profile.get('running') else 'остановлен'}",
+        f"Окно: {first_window.get('title') or 'недоступно'}",
+        f"Папка профиля: {profile_dir or '-'}",
+        "",
+        f"Активный workflow: {format_workflow_job_line(active_job) if active_job else 'нет'}",
+        f"Recoverable workflow: {format_workflow_job_line(recoverable_job) if recoverable_job else 'нет'}",
+        f"Подсказка resume: {format_workflow_resume_hint(recoverable_job or active_job)}",
+    ]
+    if lock:
+        lines.append(f"Lock: {lock.get('owner_tool_id') or '-'} · job {lock.get('job_id') or '-'}")
+    else:
+        lines.append("Lock: свободен")
+    if last_success:
+        lines.append(f"Последний успешный workflow: {format_workflow_job_line(last_success)}")
+    return "\n".join(lines)
+
+
+def format_profile_workspace_history(profile: dict[str, Any], *, limit: int = 6, step_limit: int = 4) -> str:
+    profile_name = str(profile.get("profile_name") or "").strip() or "profile"
+    profile_dir = str(profile.get("profile_dir") or "").strip()
+    groups = profile_history_groups(
+        profile_name=profile_name,
+        profile_dir=profile_dir,
+        limit=limit,
+        step_limit=step_limit,
+    )
+    lines = ["История профиля"]
+    if not groups:
+        lines.append("Для этого профиля пока нет unified workflow history.")
+        return "\n".join(lines)
+    for group in groups:
+        job = group.get("job") if isinstance(group.get("job"), dict) else {}
+        steps = group.get("steps") if isinstance(group.get("steps"), list) else []
+        lines.extend(["", format_workflow_job_line(job)])
+        if not steps:
+            lines.append("  Child steps пока не зафиксированы.")
+            continue
+        for step in steps:
+            started_at = str(step.get("started_at") or "").strip() or "-"
+            completed_at = str(step.get("completed_at") or "").strip() or "..."
+            lines.append(
+                "  "
+                + f"#{_safe_preview_int(step.get('step_index')) + 1} · "
+                + f"{step.get('step_code') or '-'} · "
+                + f"{step.get('step_kind') or '-'} · "
+                + f"{step.get('status') or '-'} · "
+                + f"{str(step.get('summary') or '').strip() or '-'} · "
+                + f"{started_at} -> {completed_at}"
+            )
+    return "\n".join(lines)
+
+
+def format_profile_workspace_artifacts_health(profile: dict[str, Any]) -> str:
+    profile_name = str(profile.get("profile_name") or "").strip() or "profile"
+    profile_dir = str(profile.get("profile_dir") or "").strip()
+    workspace = profile_workspace_snapshot(profile_name=profile_name, profile_dir=profile_dir)
+    health = workspace.get("health") if isinstance(workspace.get("health"), dict) else {}
+    artifacts = profile_artifact_index(profile_name=profile_name, profile_dir=profile_dir)
+    lines = [
+        "Артефакты и здоровье",
+        "",
+        "Здоровье профиля",
+        f"- Profile runtime: {'запущен' if health.get('profile_running') else 'остановлен'}",
+        f"- Window automation: {'доступно' if health.get('window_automation_available') else 'недоступно'}",
+        f"- Accessibility: {'доступно' if health.get('accessibility_available') else 'недоступно'}",
+        f"- Session runtime: {'доступен' if health.get('session_runtime_reachable') else 'недоступен'}",
+        f"- Panel/backend: {health.get('panel_backend_status') or '-'}",
+        "",
+        format_artifact_center(artifacts),
+    ]
     return "\n".join(lines)
 
 
@@ -1167,6 +1273,8 @@ if tk is not None:
 
             self.profile_combo: ttk.Combobox | None = None
             self.profile_details: tk.Text | None = None
+            self.profile_history: tk.Text | None = None
+            self.profile_artifacts: tk.Text | None = None
             self.profile_overview: tk.Text | None = None
             self.profile_manager_window: tk.Toplevel | None = None
             self.invite_output: tk.Text | None = None
@@ -1821,6 +1929,7 @@ if tk is not None:
                 self._refresh_session_dashboard()
             elif tool_id == "telegram_combined_flow":
                 self._refresh_combined_dashboard()
+            self._refresh_profile_workspace_dashboard()
 
         def _render_workflow_status(self, tool_id: str, job: dict[str, Any]) -> None:
             status = str(job.get("status") or "").strip().lower()
@@ -1973,6 +2082,7 @@ if tk is not None:
 
             if callable(refresh_callback):
                 refresh_callback()
+                self._refresh_profile_workspace_dashboard()
             else:
                 self._refresh_dashboard_for_tool(tool_id)
 
@@ -2071,6 +2181,7 @@ if tk is not None:
                     self._refresh_combined_dashboard()
                 elif tool_id == "telegram_session_runner":
                     self._refresh_session_dashboard()
+                self._refresh_profile_workspace_dashboard()
                 return
             if error_text:
                 if active_job_id:
@@ -2096,6 +2207,7 @@ if tk is not None:
                     self._refresh_combined_dashboard()
                 elif tool_id == "telegram_session_runner":
                     self._refresh_session_dashboard()
+                self._refresh_profile_workspace_dashboard()
                 messagebox.showerror("Панель Telegram", error_text)
                 return
             assert payload is not None
@@ -2117,6 +2229,7 @@ if tk is not None:
                 self._status_var_for_tool(tool_id).set("Завершено")
             self._log_event(tool_id, f"Завершено: {action_label}")
             on_success(payload)
+            self._refresh_profile_workspace_dashboard()
 
         def _stop_tool_process(self, tool_id: str) -> None:
             with self._process_lock:
@@ -2267,23 +2380,47 @@ if tk is not None:
         def _build_profile_status_section(self, parent: ttk.Frame) -> None:
             body = self._create_card(
                 parent,
-                "3. Состояние профиля",
-                "Этот блок вспомогательный: здесь детали выбранного профиля и сводка по всем найденным Telegram-пользователям.",
+                "3. Workspace профиля",
+                "Это главный dashboard по выбранному профилю: слева сводка и workflow, по центру unified history, справа артефакты и здоровье.",
             )
             body.columnconfigure(0, weight=1)
+            body.columnconfigure(1, weight=1)
+            body.columnconfigure(2, weight=1)
 
-            ttk.Label(body, text="Детали профиля", style="Field.TLabel").grid(
-                row=0, column=0, sticky="w"
+            summary_panel = self._create_inline_panel(
+                body,
+                "Профиль и workflow",
+                "Краткая сводка по выбранному пользователю, активному workflow, recoverable workflow и lock.",
             )
-            self.profile_details = self._create_readonly_text(body, height=5)
-            self.profile_details.grid(row=1, column=0, sticky="nsew", pady=(6, 0))
-            ttk.Label(body, text="Все найденные профили", style="Field.TLabel").grid(
-                row=2, column=0, sticky="w", pady=(14, 0)
+            summary_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+            summary_panel.columnconfigure(0, weight=1)
+            self.profile_details = self._create_readonly_text(summary_panel, height=14)
+            self.profile_details.grid(row=2, column=0, sticky="nsew")
+            self._bind_scroll_to_widget(self.profile_details)
+
+            history_panel = self._create_inline_panel(
+                body,
+                "История профиля",
+                "Unified timeline по профилю строится из последних jobs и их child steps.",
             )
-            self.profile_overview = self._create_readonly_text(body, height=4)
-            self.profile_overview.grid(row=3, column=0, sticky="nsew", pady=(6, 0))
-            actions = ttk.Frame(body, style="Card.TFrame")
-            actions.grid(row=4, column=0, sticky="w", pady=(12, 0))
+            history_panel.grid(row=0, column=1, sticky="nsew", padx=(0, 10))
+            history_panel.columnconfigure(0, weight=1)
+            self.profile_history = self._create_readonly_text(history_panel, height=14)
+            self.profile_history.grid(row=2, column=0, sticky="nsew")
+            self._bind_scroll_to_widget(self.profile_history)
+
+            artifacts_panel = self._create_inline_panel(
+                body,
+                "Артефакты и здоровье",
+                "Быстрый доступ к последним артефактам и краткая health-сводка по текущему профилю.",
+            )
+            artifacts_panel.grid(row=0, column=2, sticky="nsew")
+            artifacts_panel.columnconfigure(0, weight=1)
+            self.profile_artifacts = self._create_readonly_text(artifacts_panel, height=14)
+            self.profile_artifacts.grid(row=2, column=0, sticky="nsew")
+            self._bind_scroll_to_widget(self.profile_artifacts)
+            actions = ttk.Frame(artifacts_panel, style="Card.TFrame")
+            actions.grid(row=3, column=0, sticky="w", pady=(12, 0))
             ttk.Button(
                 actions,
                 text="Открыть лог панели",
@@ -2309,6 +2446,16 @@ if tk is not None:
                 text="Открыть screenshot",
                 command=lambda: self._open_workspace_artifact("screenshot"),
             ).pack(side=tk.LEFT, padx=(10, 0))
+            overview_panel = self._create_inline_panel(
+                body,
+                "Все найденные профили",
+                "Сводка по portable-профилям, которые сейчас видит control center.",
+            )
+            overview_panel.grid(row=1, column=0, columnspan=3, sticky="nsew", pady=(14, 0))
+            overview_panel.columnconfigure(0, weight=1)
+            self.profile_overview = self._create_readonly_text(overview_panel, height=4)
+            self.profile_overview.grid(row=2, column=0, sticky="nsew")
+            self._bind_scroll_to_widget(self.profile_overview)
 
         def _build_tool_selector(self, parent: ttk.Frame) -> None:
             body = self._create_card(
@@ -3154,6 +3301,11 @@ if tk is not None:
                     self.profile_details,
                     "Профили не найдены. Проверь корень профилей и импортируй нужный tdata.",
                 )
+                self._set_readonly_text(self.profile_history, "История профиля\nПрофили пока не найдены.")
+                self._set_readonly_text(
+                    self.profile_artifacts,
+                    "Артефакты и здоровье\nПрофили пока не найдены, поэтому workspace ещё пустой.",
+                )
                 self._set_readonly_text(self.profile_overview, "Профили пока не найдены.")
                 self._refresh_summary()
                 return
@@ -3167,7 +3319,8 @@ if tk is not None:
             if self.profile_combo is not None:
                 self.profile_combo.current(index)
             self._show_profile(self._profiles[index])
-            self._set_readonly_text(self.profile_overview, format_profiles_overview(self._profiles))
+            if self._active_tool_id:
+                self._refresh_dashboard_for_tool(self._active_tool_id)
             self._refresh_summary()
 
         def _selected_profile(self) -> dict[str, Any] | None:
@@ -3179,8 +3332,38 @@ if tk is not None:
             return self._profiles[index]
 
         def _show_profile(self, profile: dict[str, Any]) -> None:
-            details = format_profile_details(profile) + "\n" + format_profile_workspace_details(profile)
-            self._set_readonly_text(self.profile_details, details)
+            self._refresh_profile_workspace_dashboard(profile)
+
+        def _refresh_profile_workspace_dashboard(self, profile: dict[str, Any] | None = None) -> None:
+            current_profile = profile or self._selected_profile()
+            if current_profile is None:
+                self._set_readonly_text(
+                    self.profile_details,
+                    "Профиль и workflow\nСначала выбери Telegram-профиль сверху.",
+                )
+                self._set_readonly_text(
+                    self.profile_history,
+                    "История профиля\nПосле выбора профиля здесь появится unified timeline по jobs и child steps.",
+                )
+                self._set_readonly_text(
+                    self.profile_artifacts,
+                    "Артефакты и здоровье\nПосле выбора профиля здесь появятся последние артефакты и health summary.",
+                )
+                self._set_readonly_text(self.profile_overview, format_profiles_overview(self._profiles))
+                return
+            self._set_readonly_text(
+                self.profile_details,
+                format_profile_workspace_summary(current_profile),
+            )
+            self._set_readonly_text(
+                self.profile_history,
+                format_profile_workspace_history(current_profile),
+            )
+            self._set_readonly_text(
+                self.profile_artifacts,
+                format_profile_workspace_artifacts_health(current_profile),
+            )
+            self._set_readonly_text(self.profile_overview, format_profiles_overview(self._profiles))
 
         def _on_profile_select(self, _event: object) -> None:
             profile = self._selected_profile()
@@ -3190,8 +3373,8 @@ if tk is not None:
                     self._sync_contact_job_dir()
                 if self.combined_input_path_var.get().strip() and not self.combined_job_dir_var.get().strip():
                     self._sync_combined_job_dir()
-                if self._active_tool_id == "telegram_combined_flow":
-                    self._refresh_combined_dashboard()
+                if self._active_tool_id:
+                    self._refresh_dashboard_for_tool(self._active_tool_id)
                 self._refresh_summary()
 
         def _launch_selected_profile(self) -> None:
@@ -3224,6 +3407,8 @@ if tk is not None:
             if 0 <= index < len(self._profiles):
                 self._profiles[index] = fresh
             self._show_profile(fresh)
+            if self._active_tool_id:
+                self._refresh_dashboard_for_tool(self._active_tool_id)
             self._refresh_summary()
 
         def _sync_contact_job_dir(self, *_args: object) -> None:
@@ -3566,14 +3751,6 @@ if tk is not None:
                 self._load_session_targets(show_feedback=False)
 
         def _refresh_invite_dashboard(self) -> None:
-            try:
-                bucket = self._selected_profile_workflow_bucket("invite_batch")
-                workspace_block = format_workflow_workspace_block(
-                    title="Operator workspace режима `Добавить контакты из TXT`",
-                    bucket=bucket,
-                )
-            except Exception:
-                workspace_block = "Operator workspace режима `Добавить контакты из TXT`\nПрофиль пока не выбран."
             job_dir_text = self.invite_job_dir_var.get().strip()
             if not job_dir_text:
                 preview_path = self.invite_input_path_var.get().strip()
@@ -3583,7 +3760,7 @@ if tk is not None:
                     except Exception as exc:
                         self._set_readonly_text(
                             self.invite_summary_text,
-                            workspace_block + "\n\n" + f"Не удалось прочитать список username:\n{exc}",
+                            f"Не удалось прочитать список username:\n{exc}",
                         )
                         return
                     self.invite_preview_var.set(
@@ -3591,7 +3768,7 @@ if tk is not None:
                     )
                     self._set_readonly_text(
                         self.invite_summary_text,
-                        workspace_block + "\n\n" + format_invite_input_preview(preview),
+                        format_invite_input_preview(preview),
                     )
                     self._set_readonly_text(
                         self.invite_queue_text,
@@ -3607,12 +3784,17 @@ if tk is not None:
                         self.invite_history_text,
                         "История batch-запусков\nПока нет запусков.",
                     )
+                else:
+                    self._set_readonly_text(
+                        self.invite_summary_text,
+                        "Файл контактов ещё не выбран. Загрузи TXT / CSV / JSON и затем запускай batch-добавление.",
+                    )
                 return
 
             snapshot = contact_job_snapshot(job_dir_text)
             self._set_readonly_text(
                 self.invite_summary_text,
-                workspace_block + "\n\n" + format_contact_dashboard_snapshot(snapshot),
+                format_contact_dashboard_snapshot(snapshot),
             )
             self._set_readonly_text(
                 self.invite_queue_text,
@@ -3640,14 +3822,6 @@ if tk is not None:
             )
 
         def _refresh_session_dashboard(self) -> None:
-            try:
-                bucket = self._selected_profile_workflow_bucket("session_run")
-                workspace_block = format_workflow_workspace_block(
-                    title="Operator workspace режима `Сессия и сообщения`",
-                    bucket=bucket,
-                )
-            except Exception:
-                workspace_block = "Operator workspace режима `Сессия и сообщения`\nПрофиль пока не выбран."
             snapshot = session_history_snapshot(
                 state_file=DEFAULT_SESSION_STATE_FILE,
                 runs_dir=DEFAULT_SESSION_RUNS_DIR,
@@ -3655,7 +3829,7 @@ if tk is not None:
             preview_context = self._session_preview_context()
             self._set_readonly_text(
                 self.session_summary_text,
-                workspace_block + "\n\n" + format_session_operator_summary(snapshot, **preview_context),
+                format_session_operator_summary(snapshot, **preview_context),
             )
             self._set_readonly_text(
                 self.session_history_text,
@@ -3711,11 +3885,16 @@ if tk is not None:
             return bucket if isinstance(bucket, dict) else {}
 
         def _selected_profile_artifact_index(self) -> dict[str, str]:
-            workspace = self._selected_profile_workspace(limit=8, timeline_limit=8)
             merged: dict[str, str] = {}
-            artifact_index = workspace.get("artifact_index")
-            if isinstance(artifact_index, dict):
-                merged.update({str(key): str(value) for key, value in artifact_index.items() if str(key).strip() and str(value).strip()})
+            profile = self._selected_profile()
+            if profile is None:
+                return merged
+            artifact_index = profile_artifact_index(
+                profile_name=str(profile.get("profile_name") or ""),
+                profile_dir=str(profile.get("profile_dir") or ""),
+            )
+            merged.update({str(key): str(value) for key, value in artifact_index.items() if str(key).strip() and str(value).strip()})
+            workspace = self._selected_profile_workspace(limit=8, timeline_limit=8)
             workflow_kind = TOOL_WORKFLOW_KINDS.get(self._active_tool_id)
             buckets = workspace.get("workflow_buckets") if isinstance(workspace.get("workflow_buckets"), dict) else {}
             if workflow_kind and isinstance(buckets.get(workflow_kind), dict):
@@ -4076,13 +4255,8 @@ if tk is not None:
             self.combined_status_var.set(self._combined_status_from_state(state))
             try:
                 bucket = self._selected_profile_workflow_bucket("combined_pattern")
-                workspace_block = format_workflow_workspace_block(
-                    title="Operator workspace режима `Совместный режим`",
-                    bucket=bucket,
-                )
             except Exception:
                 bucket = {}
-                workspace_block = "Operator workspace режима `Совместный режим`\nПрофиль пока не выбран."
             active_job = bucket.get("active_job") if isinstance(bucket.get("active_job"), dict) else None
             last_job = bucket.get("last_job") if isinstance(bucket.get("last_job"), dict) else None
             sync_from_state = bool(active_job or last_job)
@@ -4118,9 +4292,7 @@ if tk is not None:
             profile_label = format_profile_label(profile)
             self._set_readonly_text(
                 self.combined_state_text,
-                workspace_block
-                + "\n\n"
-                + format_combined_flow_state(
+                format_combined_flow_state(
                     state,
                     profile_label=profile_label,
                     invite_snapshot=invite_snapshot,
