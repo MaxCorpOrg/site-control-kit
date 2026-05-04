@@ -1303,6 +1303,249 @@ class ToolPlatformCatalogTests(unittest.TestCase):
         self.assertTrue(invite_bucket["retry_failed_allowed"])
         self.assertEqual(invite_bucket["next_operator_action"], "Повторить ошибки invite batch.")
 
+    def test_profile_workspace_snapshot_prefers_fresh_completed_job_over_older_recoverable_for_top_hint(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            index_path = Path(tmp_dir) / "jobs" / "index.json"
+            old_job = start_job(
+                tool_id="telegram_session_runner",
+                workflow_kind="session_run",
+                profile_name="AK",
+                profile_dir="/home/max/TelegramPortableAK",
+                phase="stopped",
+                status="stopped",
+                summary="Old recoverable session",
+                recoverable=True,
+                index_path=index_path,
+            )
+            fresh_job = start_job(
+                tool_id="telegram_session_runner",
+                workflow_kind="session_run",
+                profile_name="AK",
+                profile_dir="/home/max/TelegramPortableAK",
+                phase="stopped",
+                status="completed",
+                summary="Fresh completed session",
+                index_path=index_path,
+            )
+            payload = json.loads(index_path.read_text(encoding="utf-8"))
+            for item in payload["jobs"]:
+                if item["job_id"] == old_job["job_id"]:
+                    item["started_at"] = "2026-05-04T09:00:00Z"
+                    item["updated_at"] = "2026-05-04T09:00:05Z"
+                    item["completed_at"] = "2026-05-04T09:00:05Z"
+                if item["job_id"] == fresh_job["job_id"]:
+                    item["started_at"] = "2026-05-04T09:10:00Z"
+                    item["updated_at"] = "2026-05-04T09:10:05Z"
+                    item["completed_at"] = "2026-05-04T09:10:05Z"
+            index_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+            workspace = profile_workspace_snapshot(
+                profile_name="AK",
+                profile_dir="/home/max/TelegramPortableAK",
+                index_path=index_path,
+            )
+
+        self.assertEqual(workspace["last_successful_job"]["job_id"], fresh_job["job_id"])
+        self.assertEqual(workspace["resume_hint"], "лучше перезапустить")
+        self.assertEqual(workspace["next_operator_action"], "Запустить новый workflow.")
+
+    def test_profile_workspace_snapshot_exposes_history_groups_timeline_and_artifact_shortcuts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            index_path = root / "jobs" / "index.json"
+            invite_batch_json = root / "invite-batch.json"
+            invite_batch_json.write_text("{}", encoding="utf-8")
+            execution_record = root / "execution_record.json"
+            execution_record.write_text("{}", encoding="utf-8")
+            run_dir = root / "session-run"
+            run_dir.mkdir()
+            run_json = run_dir / "run.json"
+            run_json.write_text("{}", encoding="utf-8")
+            screenshot = run_dir / "after.png"
+            screenshot.write_text("png", encoding="utf-8")
+
+            start_job(
+                tool_id="telegram_invite_manager",
+                workflow_kind="invite_batch",
+                profile_name="AK",
+                profile_dir="/home/max/TelegramPortableAK",
+                phase="stopped",
+                status="completed",
+                summary="Invite done",
+                artifact_paths={"batch_json": str(invite_batch_json)},
+                index_path=index_path,
+            )
+            start_job(
+                tool_id="telegram_combined_flow",
+                workflow_kind="combined_pattern",
+                profile_name="AK",
+                profile_dir="/home/max/TelegramPortableAK",
+                phase="stopped",
+                status="completed",
+                summary="Combined done",
+                steps=[
+                    {
+                        "step_id": "combined-1",
+                        "step_index": 0,
+                        "step_code": "1",
+                        "step_kind": "invite_batch",
+                        "status": "completed",
+                        "summary": "Contact add done",
+                        "started_at": "2026-05-04T09:20:00Z",
+                        "completed_at": "2026-05-04T09:20:05Z",
+                        "artifact_paths": {"execution_record": str(execution_record)},
+                    }
+                ],
+                index_path=index_path,
+            )
+            session_job = start_job(
+                tool_id="telegram_session_runner",
+                workflow_kind="session_run",
+                profile_name="AK",
+                profile_dir="/home/max/TelegramPortableAK",
+                phase="session_running",
+                status="running",
+                summary="Session running",
+                artifact_paths={"run_dir": str(run_dir), "screenshot_path": str(screenshot)},
+                steps=[
+                    {
+                        "step_id": "session-1",
+                        "step_index": 0,
+                        "step_code": "2",
+                        "step_kind": "session_run",
+                        "status": "running",
+                        "summary": "Session cycle",
+                        "started_at": "2026-05-04T09:25:00Z",
+                        "completed_at": "",
+                        "artifact_paths": {"run_dir": str(run_dir)},
+                    }
+                ],
+                index_path=index_path,
+            )
+            payload = json.loads(index_path.read_text(encoding="utf-8"))
+            ordered_timestamps = {
+                str(session_job["job_id"]): ("2026-05-04T09:25:00Z", "2026-05-04T09:25:05Z"),
+            }
+            for item in payload["jobs"]:
+                started_at, updated_at = ordered_timestamps.get(
+                    str(item.get("job_id") or ""),
+                    ("2026-05-04T09:10:00Z", "2026-05-04T09:10:05Z"),
+                )
+                item["started_at"] = started_at
+                item["updated_at"] = updated_at
+                if str(item.get("status") or "") in {"completed", "running"}:
+                    item["completed_at"] = "" if str(item.get("status") or "") == "running" else updated_at
+            index_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+            workspace = profile_workspace_snapshot(
+                profile_name="AK",
+                profile_dir="/home/max/TelegramPortableAK",
+                index_path=index_path,
+            )
+
+        self.assertEqual(workspace["history_groups"][0]["job"]["job_id"], session_job["job_id"])
+        self.assertEqual(workspace["profile_timeline"][0]["entry_kind"], "job")
+        self.assertEqual(workspace["profile_timeline"][1]["entry_kind"], "step")
+        self.assertEqual(workspace["artifact_shortcuts"]["session_run"], str(run_json))
+        self.assertEqual(workspace["artifact_shortcuts"]["batch_json"], str(invite_batch_json))
+        self.assertEqual(workspace["artifact_shortcuts"]["execution_record"], str(execution_record))
+        self.assertEqual(workspace["artifact_shortcuts"]["screenshot"], str(screenshot))
+        self.assertTrue(any(item["artifact_kind"] == "session_run" and item["available"] for item in workspace["artifact_center"]))
+
+    def test_profile_workspace_snapshot_prefers_session_bucket_for_session_run_shortcut(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            index_path = root / "jobs" / "index.json"
+            old_combined_run_dir = root / "combined-run"
+            old_combined_run_dir.mkdir()
+            (old_combined_run_dir / "run.json").write_text("{}", encoding="utf-8")
+            fresh_session_run_dir = root / "session-run"
+            fresh_session_run_dir.mkdir()
+            fresh_run_json = fresh_session_run_dir / "run.json"
+            fresh_run_json.write_text("{}", encoding="utf-8")
+
+            combined_job = start_job(
+                tool_id="telegram_combined_flow",
+                workflow_kind="combined_pattern",
+                profile_name="AK",
+                profile_dir="/home/max/TelegramPortableAK",
+                phase="stopped",
+                status="completed",
+                summary="Combined done",
+                artifact_paths={"run_dir": str(old_combined_run_dir)},
+                index_path=index_path,
+            )
+            session_job = start_job(
+                tool_id="telegram_session_runner",
+                workflow_kind="session_run",
+                profile_name="AK",
+                profile_dir="/home/max/TelegramPortableAK",
+                phase="stopped",
+                status="completed",
+                summary="Session done",
+                artifact_paths={"run_dir": str(fresh_session_run_dir)},
+                index_path=index_path,
+            )
+            payload = json.loads(index_path.read_text(encoding="utf-8"))
+            for item in payload["jobs"]:
+                if item["job_id"] == combined_job["job_id"]:
+                    item["started_at"] = "2026-05-04T09:10:00Z"
+                    item["updated_at"] = "2026-05-04T09:10:05Z"
+                    item["completed_at"] = "2026-05-04T09:10:05Z"
+                if item["job_id"] == session_job["job_id"]:
+                    item["started_at"] = "2026-05-04T09:20:00Z"
+                    item["updated_at"] = "2026-05-04T09:20:05Z"
+                    item["completed_at"] = "2026-05-04T09:20:05Z"
+            index_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+            workspace = profile_workspace_snapshot(
+                profile_name="AK",
+                profile_dir="/home/max/TelegramPortableAK",
+                index_path=index_path,
+            )
+
+        self.assertEqual(workspace["last_successful_job"]["job_id"], session_job["job_id"])
+        self.assertEqual(workspace["artifact_shortcuts"]["session_run"], str(fresh_run_json))
+
+    def test_profile_workspace_snapshot_falls_back_to_session_history_for_session_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            index_path = root / "jobs" / "index.json"
+            run_dir = root / "session-run"
+            run_dir.mkdir()
+            run_json = run_dir / "run.json"
+            run_json.write_text("{}", encoding="utf-8")
+            screenshot = run_dir / "after.png"
+            screenshot.write_text("png", encoding="utf-8")
+
+            start_job(
+                tool_id="telegram_session_runner",
+                workflow_kind="session_run",
+                profile_name="AK",
+                profile_dir="/home/max/TelegramPortableAK",
+                phase="stopped",
+                status="completed",
+                summary="Session done without artifact_paths",
+                index_path=index_path,
+            )
+            with mock.patch(
+                "tool_platform.telegram_gui_helpers.session_history_snapshot",
+                return_value={
+                    "last_run": {
+                        "run_dir": str(run_dir),
+                        "path": str(run_json),
+                    }
+                },
+            ):
+                workspace = profile_workspace_snapshot(
+                    profile_name="AK",
+                    profile_dir="/home/max/TelegramPortableAK",
+                    index_path=index_path,
+                )
+
+        self.assertEqual(workspace["artifact_shortcuts"]["session_run"], str(run_json))
+        self.assertEqual(workspace["artifact_shortcuts"]["screenshot"], str(screenshot))
+
     def test_profile_history_groups_preserve_unified_step_order(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             index_path = Path(tmp_dir) / "jobs" / "index.json"

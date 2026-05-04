@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
-  "current_priority": "Усилить profile history/timeline center и artifact center поверх уже работающего Telegram profile workspace dashboard.",
+  "current_priority": "Поднять richer profile artifact history и sent/draft-level session timeline поверх уже работающего Telegram profile workspace dashboard.",
   "active_risks": [
-    "gui.py всё ещё содержит часть readback/UI-связывания и нуждается в дальнейшем истончении поверх workflows.py.",
-    "Resume/Retry слой уже работает, но top action hint всё ещё может предпочитать старый recoverable workflow свежему completed run и путать оператора.",
+    "gui.py всё ещё содержит часть readback/UI-связывания и нуждается в дальнейшем истончении поверх jobs.py/workflows.py.",
+    "Unified session_run jobs пока не пишут собственные artifact_paths, поэтому session artifact center частично держится на session_history_snapshot() fallback.",
     "Artifact center пока open-first и ещё не даёт более сильный history/preview слой по профилю.",
     "Linux live-path сильнее остальных ОС; Windows/macOS пока требуют adapter-first layering."
   ],
@@ -18,9 +18,9 @@
     "project_status": "/home/max/site-control-kit/docs/PROJECT_STATUS_RU.md",
     "supertool_roadmap": "/home/max/site-control-kit/docs/TELEGRAM_SUPERTOOL_ROADMAP_RU.md",
     "next_chat_prompt": "/home/max/site-control-kit/tools/telegram/NEXT_CHAT_AGENT_PROMPT_RU.md",
-    "resume_retry_live": "/tmp/telegram-resume-retry-live/20260504T111030Z/result.json",
-    "combined_resume_live": "/tmp/telegram-resume-retry-live-postfix/20260504T111649Z/result.json",
-    "session_send_confirm": "/tmp/telegram-resume-retry-send-confirm.json"
+    "safe_readback_live": "/tmp/telegram-architecture-audit-safe-readback/result.json",
+    "session_send_confirm": "/tmp/telegram-architecture-audit-send-confirm-final/result.json",
+    "session_send_run": "/home/max/telegram-portable-session-tool/runs/20260504T140725Z-0c50fab7/run.json"
   },
-  "next_recommended_step": "Делать richer profile history/timeline center и artifact center поверх уже готового workspace dashboard; затем пересмотреть баланс active/recoverable/last_successful в верхнем action hint и дальше истончать gui.py."
+  "next_recommended_step": "Поднять richer profile artifact history и sent/draft-level session timeline; затем вынести ещё больше formatting/fallback логики из gui.py и по возможности писать artifact_paths прямо в unified session_run jobs."
 }

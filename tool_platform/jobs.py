@@ -10,6 +10,7 @@ from typing import Any
 
 DEFAULT_TELEGRAM_STATE_ROOT = Path.home() / ".site-control-kit" / "telegram"
 DEFAULT_JOB_INDEX_PATH = DEFAULT_TELEGRAM_STATE_ROOT / "jobs" / "index.json"
+DEFAULT_PANEL_LOG_PATH = Path("/tmp/telegram-control-center-panel.log")
 DEFAULT_TIMELINE_LIMIT = 20
 WORKSPACE_WORKFLOW_KINDS = ("invite_batch", "session_run", "combined_pattern")
 JOB_STATUSES = {
@@ -38,6 +39,14 @@ STEP_STATUSES = {
     "error",
 }
 RESUMABLE_JOB_STATUSES = {"planned", "stopped", "completed_with_errors", "error"}
+SUCCESSFUL_JOB_STATUSES = {"completed", "dry_run"}
+ARTIFACT_CENTER_LABELS = {
+    "panel_log": "Лог панели",
+    "batch_json": "Последний batch json",
+    "session_run": "Последний session run",
+    "execution_record": "Последний execution record",
+    "screenshot": "Последний screenshot",
+}
 
 
 def now_utc() -> str:
@@ -92,6 +101,36 @@ def _normalize_artifact_paths(payload: Any) -> dict[str, str]:
         for key, value in payload.items()
         if str(key).strip() and str(value).strip()
     }
+
+
+def _job_status(job: dict[str, Any] | None) -> str:
+    if not isinstance(job, dict):
+        return ""
+    return str(job.get("status") or "").strip().lower()
+
+
+def _job_timestamp(job: dict[str, Any] | None) -> str:
+    if not isinstance(job, dict):
+        return ""
+    return str(
+        job.get("updated_at")
+        or job.get("completed_at")
+        or job.get("started_at")
+        or ""
+    ).strip()
+
+
+def _job_is_resumable(job: dict[str, Any] | None) -> bool:
+    status = _job_status(job)
+    if status == "planned":
+        return True
+    if status in {"stopped", "completed_with_errors", "error"}:
+        return bool((job or {}).get("recoverable", True))
+    return False
+
+
+def _job_is_success_like(job: dict[str, Any] | None) -> bool:
+    return _job_status(job) in SUCCESSFUL_JOB_STATUSES
 
 
 def _normalize_step_record(step: dict[str, Any], *, position: int) -> dict[str, Any]:
@@ -585,12 +624,8 @@ def _job_timeline(job: dict[str, Any], *, limit: int = DEFAULT_TIMELINE_LIMIT) -
 
 
 def _recoverable_job(jobs: list[dict[str, Any]]) -> dict[str, Any] | None:
-    for status in ("planned", "stopped", "completed_with_errors", "error"):
-        for item in jobs:
-            if str(item.get("status") or "") != status:
-                continue
-            if status in {"stopped", "completed_with_errors", "error"} and not bool(item.get("recoverable", True)):
-                continue
+    for item in jobs:
+        if _job_is_resumable(item):
             return item
     return None
 
@@ -615,6 +650,22 @@ def _workflow_resume_decision(
             "allowed": False,
             "hint": "workflow уже выполняется",
             "action_text": "Жди завершения текущего workflow или останови его вручную.",
+        }
+    if _job_is_resumable(last_job):
+        return {
+            "kind": "resume",
+            "job": last_job,
+            "allowed": True,
+            "hint": "можно продолжить",
+            "action_text": "Последний workflow можно продолжить из сохранённого состояния.",
+        }
+    if _job_is_success_like(last_job):
+        return {
+            "kind": "restart",
+            "job": last_job,
+            "allowed": False,
+            "hint": "лучше перезапустить",
+            "action_text": "Последний workflow уже успешно завершён; для нового прогона лучше запустить его заново.",
         }
     if isinstance(recoverable_job, dict):
         return {
@@ -679,7 +730,7 @@ def _invite_queue_decisions(
     recoverable_job: dict[str, Any] | None,
     last_job: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    source_job = recoverable_job or active_job or last_job
+    source_job = active_job or last_job or recoverable_job
     base_context = _invite_context_from_job(source_job)
     snapshot = _invite_snapshot_from_context(base_context)
     pending_total = int(snapshot.get("pending_total") or 0)
@@ -798,6 +849,193 @@ def _workflow_bucket_snapshot(
     return payload
 
 
+def _profile_history_groups_from_jobs(
+    jobs: list[dict[str, Any]],
+    *,
+    limit: int,
+    step_limit: int,
+) -> list[dict[str, Any]]:
+    groups: list[dict[str, Any]] = []
+    for item in jobs[: max(limit, 1)]:
+        groups.append(
+            {
+                "job": item,
+                "steps": _job_timeline(item, limit=step_limit),
+            }
+        )
+    return groups
+
+
+def _profile_timeline_from_groups(groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    timeline: list[dict[str, Any]] = []
+    for group in groups:
+        job = group.get("job") if isinstance(group.get("job"), dict) else None
+        if isinstance(job, dict):
+            timeline.append(
+                {
+                    "entry_kind": "job",
+                    "job_id": str(job.get("job_id") or "").strip(),
+                    "workflow_kind": str(job.get("workflow_kind") or job.get("tool_id") or "").strip(),
+                    "status": _job_status(job),
+                    "phase": str(job.get("phase") or "").strip(),
+                    "summary": str(job.get("summary") or "").strip(),
+                    "started_at": str(job.get("started_at") or "").strip(),
+                    "completed_at": str(job.get("completed_at") or "").strip(),
+                }
+            )
+        for step in group.get("steps") or []:
+            if not isinstance(step, dict):
+                continue
+            timeline.append(
+                {
+                    "entry_kind": "step",
+                    "job_id": str(step.get("workflow_job_id") or job.get("job_id") if isinstance(job, dict) else "").strip(),
+                    "workflow_kind": str(job.get("workflow_kind") or job.get("tool_id") or "").strip()
+                    if isinstance(job, dict)
+                    else "",
+                    "step_index": int(step.get("step_index") or 0),
+                    "step_code": str(step.get("step_code") or "").strip(),
+                    "step_kind": str(step.get("step_kind") or "").strip(),
+                    "status": str(step.get("status") or "").strip(),
+                    "summary": str(step.get("summary") or "").strip(),
+                    "started_at": str(step.get("started_at") or "").strip(),
+                    "completed_at": str(step.get("completed_at") or "").strip(),
+                }
+            )
+    return timeline
+
+
+def _artifact_candidates_from_index(artifact_index: dict[str, str], artifact_kind: str) -> list[Path]:
+    candidates: list[Path] = []
+
+    def _append_candidate(raw_value: Any) -> None:
+        value = str(raw_value or "").strip()
+        if not value:
+            return
+        path = Path(value).expanduser().resolve()
+        if path.exists() and path not in candidates:
+            candidates.append(path)
+
+    def _append_from_glob(root_value: Any, pattern: str) -> None:
+        value = str(root_value or "").strip()
+        if not value:
+            return
+        root = Path(value).expanduser().resolve()
+        if not root.exists():
+            return
+        matches = sorted(
+            root.glob(pattern),
+            key=lambda item: item.stat().st_mtime if item.exists() else 0,
+            reverse=True,
+        )
+        for item in matches:
+            if item.exists() and item not in candidates:
+                candidates.append(item)
+
+    if artifact_kind == "panel_log":
+        _append_candidate(DEFAULT_PANEL_LOG_PATH)
+    elif artifact_kind == "batch_json":
+        _append_candidate(artifact_index.get("batch_json"))
+        run_dir = artifact_index.get("run_dir")
+        if str(run_dir or "").strip():
+            _append_candidate(Path(str(run_dir)) / "batch_contact_add.json")
+        _append_from_glob(artifact_index.get("job_dir"), "executions/*/batch_contact_add.json")
+    elif artifact_kind == "session_run":
+        _append_candidate(artifact_index.get("session_run"))
+        _append_candidate(artifact_index.get("path"))
+        run_dir = artifact_index.get("run_dir")
+        if str(run_dir or "").strip():
+            _append_candidate(Path(str(run_dir)) / "run.json")
+        _append_candidate(run_dir)
+    elif artifact_kind == "execution_record":
+        _append_candidate(artifact_index.get("execution_record"))
+        run_dir = artifact_index.get("run_dir")
+        if str(run_dir or "").strip():
+            _append_candidate(Path(str(run_dir)) / "execution_record.json")
+        _append_from_glob(artifact_index.get("job_dir"), "executions/*/execution_record.json")
+    elif artifact_kind == "screenshot":
+        _append_candidate(artifact_index.get("screenshot_path"))
+        _append_candidate(artifact_index.get("window_screenshot"))
+        run_dir = artifact_index.get("run_dir")
+        if str(run_dir or "").strip():
+            _append_from_glob(run_dir, "*.png")
+    return candidates
+
+
+def _session_history_artifacts() -> dict[str, str]:
+    from .telegram_gui_helpers import session_history_snapshot
+
+    try:
+        snapshot = session_history_snapshot()
+    except Exception:
+        return {}
+    last_run = snapshot.get("last_run") if isinstance(snapshot.get("last_run"), dict) else {}
+    if not last_run:
+        return {}
+    payload: dict[str, str] = {}
+    for key in ("run_dir", "path"):
+        value = str(last_run.get(key) or "").strip()
+        if value:
+            payload[key] = value
+    if payload.get("path"):
+        payload["session_run"] = payload["path"]
+    return payload
+
+
+def _resolved_artifact_shortcuts(
+    artifact_index: dict[str, str],
+    *,
+    workflow_buckets: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, str]:
+    shortcuts: dict[str, str] = {}
+
+    def _bucket_artifacts(workflow_kind: str) -> dict[str, str]:
+        bucket = workflow_buckets.get(workflow_kind) if isinstance(workflow_buckets, dict) else None
+        payload = bucket.get("artifact_index") if isinstance(bucket, dict) else None
+        if not isinstance(payload, dict):
+            return {}
+        return {str(key): str(value) for key, value in payload.items() if str(key).strip() and str(value).strip()}
+
+    artifact_sources = {
+        "panel_log": [artifact_index],
+        "batch_json": [_bucket_artifacts("invite_batch"), artifact_index],
+        "session_run": [_bucket_artifacts("session_run"), _session_history_artifacts(), artifact_index],
+        "execution_record": [
+            _bucket_artifacts("combined_pattern"),
+            _bucket_artifacts("invite_batch"),
+            artifact_index,
+        ],
+        "screenshot": [
+            _bucket_artifacts("session_run"),
+            _bucket_artifacts("combined_pattern"),
+            _session_history_artifacts(),
+            artifact_index,
+        ],
+    }
+    for artifact_kind in ARTIFACT_CENTER_LABELS:
+        candidates: list[Path] = []
+        for source in artifact_sources.get(artifact_kind, [artifact_index]):
+            candidates.extend(_artifact_candidates_from_index(source, artifact_kind))
+        if candidates:
+            shortcuts[artifact_kind] = str(candidates[0])
+    return shortcuts
+
+
+def _artifact_center_rows(shortcuts: dict[str, str]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for artifact_kind, label in ARTIFACT_CENTER_LABELS.items():
+        path = str(shortcuts.get(artifact_kind) or "").strip()
+        rows.append(
+            {
+                "artifact_kind": artifact_kind,
+                "label": label,
+                "path": path,
+                "available": bool(path),
+            }
+        )
+    return rows
+
+
 def _profile_artifact_index_from_jobs(
     jobs: list[dict[str, Any]],
     *,
@@ -874,13 +1112,11 @@ def profile_history_groups(
 ) -> list[dict[str, Any]]:
     profile_id = profile_id_for(profile_name, profile_dir)
     jobs = list_jobs(profile_id=profile_id, limit=max(limit, 1), index_path=index_path)
-    return [
-        {
-            "job": item,
-            "steps": _job_timeline(item, limit=step_limit),
-        }
-        for item in jobs[: max(limit, 1)]
-    ]
+    return _profile_history_groups_from_jobs(
+        jobs,
+        limit=limit,
+        step_limit=step_limit,
+    )
 
 
 def profile_artifact_index(
@@ -934,6 +1170,12 @@ def profile_workspace_snapshot(
         )
         for workflow_kind in WORKSPACE_WORKFLOW_KINDS
     }
+    history_groups = _profile_history_groups_from_jobs(
+        jobs,
+        limit=limit,
+        step_limit=timeline_limit,
+    )
+    profile_timeline = _profile_timeline_from_groups(history_groups)
     resume_decision = _workflow_resume_decision(
         active_job=active_workflow,
         recoverable_job=recoverable_workflow,
@@ -944,6 +1186,10 @@ def profile_workspace_snapshot(
         jobs,
         workflow_buckets=workflow_buckets,
         index_path=index_path,
+    )
+    artifact_shortcuts = _resolved_artifact_shortcuts(
+        artifact_index,
+        workflow_buckets=workflow_buckets,
     )
     current_lock = get_profile_lock(profile_name=profile_name, profile_dir=profile_dir)
     try:
@@ -984,6 +1230,10 @@ def profile_workspace_snapshot(
         "current_lock": current_lock,
         "health": health,
         "last_successful_job": last_success,
+        "history_groups": history_groups,
+        "profile_timeline": profile_timeline,
         "artifact_index": artifact_index,
+        "artifact_shortcuts": artifact_shortcuts,
+        "artifact_center": _artifact_center_rows(artifact_shortcuts),
         "workflow_buckets": workflow_buckets,
     }

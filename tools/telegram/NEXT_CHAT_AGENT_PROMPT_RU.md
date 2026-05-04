@@ -185,6 +185,29 @@
     - session `Стоп -> Продолжить workflow`;
     - combined `Стоп -> Продолжить workflow`;
     - отдельный real auto-send confirm с `sent_count = 1` и `sent: true`.
+  - tranche `Architecture Audit + Next Tranche` теперь тоже закрыт:
+    - top action hint перебалансирован:
+      - свежий `completed` / `dry_run` workflow теперь выигрывает у старого recoverable в верхнем workspace summary;
+      - recoverable workflow при этом остаётся доступным в bucket-level hints и Resume UX;
+    - grouped profile history и compact timeline теперь собираются на стороне `tool_platform/jobs.py`, а не в локальном GUI readback;
+    - profile artifact center теперь строится в snapshot-модели:
+      - `artifact_shortcuts`
+      - `artifact_center`
+      - session fallback через `session_history_snapshot()`, если unified `session_run` jobs ещё не принесли `artifact_paths`;
+    - закрыт живой readback-баг:
+      - после свежего session send shortcut `Открыть session run` больше не ведёт в старый combined `run_dir`;
+      - теперь он стабильно указывает на свежий standalone `run.json` до и после restart панели;
+    - новые live-артефакты:
+      - safe no-send readback smoke:
+        - `/tmp/telegram-architecture-audit-safe-readback/result.json`
+      - final real auto-send confirm:
+        - `/tmp/telegram-architecture-audit-send-confirm-final/result.json`
+        - `/home/max/telegram-portable-session-tool/runs/20260504T140725Z-0c50fab7/run.json`
+      - в final confirm подтверждено:
+        - `sent_count = 1`
+        - `message_count = 1`
+        - `text = Хорошего дня!`
+        - `artifact_shortcuts.session_run = /home/max/telegram-portable-session-tool/runs/20260504T140725Z-0c50fab7/run.json`
 
 Что сейчас важно не потерять:
 - session-runner не копировать вручную в site-control-kit без отдельного решения;
@@ -229,10 +252,12 @@
 - не возвращаться к старому расследованию `не чередует`: этот live-баг уже закрыт;
 - не возвращаться и к старой постановке `сделать timeline/history поверх unified jobs`: базовый operator workspace уже реализован;
 - не возвращаться и к tranche `Resume / Retry / Continue queue`: он уже реализован и подтверждён живыми panel-smoke;
+- не возвращаться и к rebalance `top action hint` / `artifact_shortcuts.session_run`: этот tranche уже закрыт и подтверждён safe/read-send live acceptance;
 - двигаться дальше по следующему tranche:
-  - делать richer history/timeline center по профилю и чуть более сильный artifact center;
-  - пересмотреть баланс `active / recoverable / last_successful` в верхнем action hint, чтобы старый recoverable workflow не путал оператора после только что завершённого run;
-  - ещё сильнее утончать `gui.py`, чтобы он оставался thin client над `tool_platform/workflows.py`;
+  - делать richer profile artifact history поверх уже рабочего artifact center;
+  - поднимать sent/draft-level session timeline для profile workspace и session summary;
+  - ещё сильнее утончать `gui.py` и `telegram_gui_helpers.py`, чтобы они оставались thin client/readback wrapper над `tool_platform/jobs.py` и `tool_platform/workflows.py`;
+  - по возможности уменьшать зависимость artifact center от `session_history_snapshot()` fallback и писать `artifact_paths` прямо в unified `session_run` jobs;
 - параллельно продолжать следующий tranche cross-platform adapters из `docs/TELEGRAM_SUPERTOOL_ROADMAP_RU.md`, не пытаясь сразу вытянуть full Telegram Desktop parity на Windows/macOS.
 
 Как работать:

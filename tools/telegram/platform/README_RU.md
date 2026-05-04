@@ -186,12 +186,20 @@ cd /home/max/site-control-kit/tools/telegram/platform
   - active workflow artifacts;
   - last successful / recent fallback;
   - bucket-level missing artifacts;
+- top action hint теперь перебалансирован:
+  - свежий `completed` / `dry_run` workflow выигрывает у старого recoverable в верхнем profile workspace summary;
+  - recoverable workflow при этом не теряется и остаётся доступным через Resume/Retry hints;
 - в profile dashboard есть быстрые operator actions:
   - `Открыть лог панели`
   - `Открыть batch json`
   - `Открыть session run`
   - `Открыть execution record`
   - `Открыть screenshot`
+- profile history и grouped timeline теперь собираются на стороне `tool_platform/jobs.py`, а не локальным GUI readback;
+- artifact center теперь тоже формируется на стороне snapshot-модели:
+  - `artifact_shortcuts`
+  - `artifact_center`
+  - `session_run` при пустых unified `artifact_paths` честно берётся из `session_history_snapshot()` standalone runtime;
 - экраны `Добавить контакты`, `Сессия` и `Совместный режим` теперь не дублируют верхний dashboard длинными readback-блоками:
   - сверху остаётся единый profile workspace;
   - ниже в режиме показываются только mode-specific детали;
@@ -210,6 +218,18 @@ cd /home/max/site-control-kit/tools/telegram/platform
   - `last_job`
 - `Продолжить очередь` и `Повторить ошибки` в invite-режиме теперь сначала используют latest recoverable unified invite job context, а уже потом падают обратно на UI `job_dir`;
 - для combined readback timeline anchor теперь идёт от `active -> last -> recoverable`, поэтому старый recoverable run не должен перетирать верхний timeline нового parent workflow;
+- отдельный live architecture-audit smoke подтвердил новый readback слой:
+  - safe no-send readback smoke:
+    - `/tmp/telegram-architecture-audit-safe-readback/result.json`
+    - после restart панели `history_groups`, `timeline_size` и `artifact_shortcuts` остались стабильными;
+  - final real auto-send confirm:
+    - `/tmp/telegram-architecture-audit-send-confirm-final/result.json`
+    - `/home/max/telegram-portable-session-tool/runs/20260504T140725Z-0c50fab7/run.json`
+    - подтверждено:
+      - `sent_count = 1`
+      - `message_count = 1`
+      - текст `Хорошего дня!`
+      - shortcut `Открыть session run` уже указывает на свежий standalone `run.json`, а не на старый combined `run_dir`;
 - после завершения workflow верхний profile workspace теперь тоже перерисовывается сразу;
   - закрыт live-bug, когда нижний mode-screen уже обновился, а верхний dashboard оставался stale до ручного переключения профиля;
 - длинный экран теперь можно прокручивать мышью вниз;

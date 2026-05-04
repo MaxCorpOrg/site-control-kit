@@ -62,8 +62,6 @@ from .jobs import (
     finish_job,
     get_job,
     list_jobs,
-    profile_artifact_index,
-    profile_history_groups,
     profile_id_for,
     profile_workspace_snapshot,
     start_job,
@@ -214,6 +212,14 @@ def format_profile_workspace_details(profile: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _workspace_for_profile(profile: dict[str, Any], workspace: dict[str, Any] | None = None) -> dict[str, Any]:
+    if isinstance(workspace, dict):
+        return workspace
+    profile_name = str(profile.get("profile_name") or "").strip() or "profile"
+    profile_dir = str(profile.get("profile_dir") or "").strip()
+    return profile_workspace_snapshot(profile_name=profile_name, profile_dir=profile_dir)
+
+
 def format_workflow_resume_hint(job: dict[str, Any] | None) -> str:
     if not isinstance(job, dict) or not job:
         return "нет подходящего workflow"
@@ -227,13 +233,13 @@ def format_workflow_resume_hint(job: dict[str, Any] | None) -> str:
     return "лучше перезапустить"
 
 
-def format_profile_workspace_summary(profile: dict[str, Any]) -> str:
-    profile_name = str(profile.get("profile_name") or "").strip() or "profile"
-    profile_dir = str(profile.get("profile_dir") or "").strip()
+def format_profile_workspace_summary(profile: dict[str, Any], workspace: dict[str, Any] | None = None) -> str:
     account = profile.get("account") if isinstance(profile.get("account"), dict) else {}
     windows = profile.get("windows") if isinstance(profile.get("windows"), list) else []
     first_window = windows[0] if windows else {}
-    workspace = profile_workspace_snapshot(profile_name=profile_name, profile_dir=profile_dir)
+    workspace = _workspace_for_profile(profile, workspace)
+    profile_name = str(profile.get("profile_name") or "").strip() or "profile"
+    profile_dir = str(profile.get("profile_dir") or "").strip()
     active_job = workspace.get("active_workflow") if isinstance(workspace.get("active_workflow"), dict) else None
     recoverable_job = workspace.get("recoverable_workflow") if isinstance(workspace.get("recoverable_workflow"), dict) else None
     lock = workspace.get("current_lock") if isinstance(workspace.get("current_lock"), dict) else None
@@ -263,27 +269,29 @@ def format_profile_workspace_summary(profile: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def format_profile_workspace_history(profile: dict[str, Any], *, limit: int = 6, step_limit: int = 4) -> str:
-    profile_name = str(profile.get("profile_name") or "").strip() or "profile"
-    profile_dir = str(profile.get("profile_dir") or "").strip()
-    groups = profile_history_groups(
-        profile_name=profile_name,
-        profile_dir=profile_dir,
-        limit=limit,
-        step_limit=step_limit,
-    )
+def format_profile_workspace_history(
+    profile: dict[str, Any],
+    workspace: dict[str, Any] | None = None,
+    *,
+    limit: int = 6,
+    step_limit: int = 4,
+) -> str:
+    current_workspace = _workspace_for_profile(profile, workspace)
+    groups = current_workspace.get("history_groups") if isinstance(current_workspace.get("history_groups"), list) else []
+    if not groups:
+        groups = []
     lines = ["История профиля"]
     if not groups:
         lines.append("Для этого профиля пока нет unified workflow history.")
         return "\n".join(lines)
-    for group in groups:
+    for group in groups[: max(limit, 1)]:
         job = group.get("job") if isinstance(group.get("job"), dict) else {}
         steps = group.get("steps") if isinstance(group.get("steps"), list) else []
         lines.extend(["", format_workflow_job_line(job)])
         if not steps:
             lines.append("  Child steps пока не зафиксированы.")
             continue
-        for step in steps:
+        for step in steps[: max(step_limit, 1)]:
             started_at = str(step.get("started_at") or "").strip() or "-"
             completed_at = str(step.get("completed_at") or "").strip() or "..."
             lines.append(
@@ -298,12 +306,10 @@ def format_profile_workspace_history(profile: dict[str, Any], *, limit: int = 6,
     return "\n".join(lines)
 
 
-def format_profile_workspace_artifacts_health(profile: dict[str, Any]) -> str:
-    profile_name = str(profile.get("profile_name") or "").strip() or "profile"
-    profile_dir = str(profile.get("profile_dir") or "").strip()
-    workspace = profile_workspace_snapshot(profile_name=profile_name, profile_dir=profile_dir)
+def format_profile_workspace_artifacts_health(profile: dict[str, Any], workspace: dict[str, Any] | None = None) -> str:
+    workspace = _workspace_for_profile(profile, workspace)
     health = workspace.get("health") if isinstance(workspace.get("health"), dict) else {}
-    artifacts = profile_artifact_index(profile_name=profile_name, profile_dir=profile_dir)
+    artifacts = workspace.get("artifact_center") if isinstance(workspace.get("artifact_center"), list) else workspace.get("artifact_shortcuts")
     lines = [
         "Артефакты и здоровье",
         "",
@@ -408,7 +414,16 @@ def format_workflow_jobs_block(
     return "\n".join(lines)
 
 
-def format_artifact_center(artifact_index: dict[str, Any] | None) -> str:
+def format_artifact_center(artifact_index: dict[str, Any] | list[dict[str, Any]] | None) -> str:
+    lines = ["Artifact center"]
+    if isinstance(artifact_index, list):
+        for item in artifact_index:
+            if not isinstance(item, dict):
+                continue
+            label = str(item.get("label") or item.get("artifact_kind") or "Артефакт").strip()
+            value = str(item.get("path") or "").strip()
+            lines.append(f"- {label}: {value or 'пока нет'}")
+        return "\n".join(lines)
     artifacts = artifact_index if isinstance(artifact_index, dict) else {}
     previews = [
         ("Последний batch json", artifacts.get("batch_json") or artifacts.get("job_dir") or ""),
@@ -417,7 +432,6 @@ def format_artifact_center(artifact_index: dict[str, Any] | None) -> str:
         ("Последний screenshot", artifacts.get("screenshot_path") or artifacts.get("run_dir") or ""),
         ("Лог панели", str(PANEL_LOG_PATH)),
     ]
-    lines = ["Artifact center"]
     for label, value in previews:
         lines.append(f"- {label}: {value or 'пока нет'}")
     return "\n".join(lines)
@@ -3404,17 +3418,18 @@ if tk is not None:
                 )
                 self._set_readonly_text(self.profile_overview, format_profiles_overview(self._profiles))
                 return
+            workspace = self._selected_profile_workspace(limit=8, timeline_limit=8)
             self._set_readonly_text(
                 self.profile_details,
-                format_profile_workspace_summary(current_profile),
+                format_profile_workspace_summary(current_profile, workspace),
             )
             self._set_readonly_text(
                 self.profile_history,
-                format_profile_workspace_history(current_profile),
+                format_profile_workspace_history(current_profile, workspace),
             )
             self._set_readonly_text(
                 self.profile_artifacts,
-                format_profile_workspace_artifacts_health(current_profile),
+                format_profile_workspace_artifacts_health(current_profile, workspace),
             )
             self._set_readonly_text(self.profile_overview, format_profiles_overview(self._profiles))
 
@@ -3980,24 +3995,16 @@ if tk is not None:
                 "action_text": "Для этого режима пока нет workflow, который можно продолжить.",
             }
 
-        def _selected_profile_artifact_index(self) -> dict[str, str]:
-            merged: dict[str, str] = {}
-            profile = self._selected_profile()
-            if profile is None:
-                return merged
-            artifact_index = profile_artifact_index(
-                profile_name=str(profile.get("profile_name") or ""),
-                profile_dir=str(profile.get("profile_dir") or ""),
-            )
-            merged.update({str(key): str(value) for key, value in artifact_index.items() if str(key).strip() and str(value).strip()})
+        def _selected_profile_artifact_shortcuts(self) -> dict[str, str]:
             workspace = self._selected_profile_workspace(limit=8, timeline_limit=8)
-            workflow_kind = TOOL_WORKFLOW_KINDS.get(self._active_tool_id)
-            buckets = workspace.get("workflow_buckets") if isinstance(workspace.get("workflow_buckets"), dict) else {}
-            if workflow_kind and isinstance(buckets.get(workflow_kind), dict):
-                bucket_artifacts = buckets[workflow_kind].get("artifact_index")
-                if isinstance(bucket_artifacts, dict):
-                    merged.update({str(key): str(value) for key, value in bucket_artifacts.items() if str(key).strip() and str(value).strip()})
-            return merged
+            shortcuts = workspace.get("artifact_shortcuts")
+            if isinstance(shortcuts, dict):
+                return {
+                    str(key): str(value)
+                    for key, value in shortcuts.items()
+                    if str(key).strip() and str(value).strip()
+                }
+            return {}
 
         def _invite_bucket_action_context(self, action: str) -> dict[str, Any] | None:
             bucket = self._selected_profile_workflow_bucket("invite_batch")
@@ -4018,57 +4025,14 @@ if tk is not None:
             return payload
 
         def _resolve_workspace_artifact(self, artifact_kind: str) -> Path:
-            artifact_index = self._selected_profile_artifact_index()
-            candidates: list[Path] = []
-
-            def _append_candidate(raw_value: Any) -> None:
-                value = str(raw_value or "").strip()
-                if not value:
-                    return
-                path = Path(value).expanduser().resolve()
-                if path.exists():
-                    candidates.append(path)
-
-            def _append_from_glob(root_value: Any, pattern: str) -> None:
-                value = str(root_value or "").strip()
-                if not value:
-                    return
-                root = Path(value).expanduser().resolve()
-                if not root.exists():
-                    return
-                matches = sorted(
-                    root.glob(pattern),
-                    key=lambda item: item.stat().st_mtime if item.exists() else 0,
-                    reverse=True,
-                )
-                candidates.extend(item for item in matches if item.exists())
-
-            if artifact_kind == "panel_log":
-                _append_candidate(PANEL_LOG_PATH)
-            elif artifact_kind == "batch_json":
-                _append_candidate(artifact_index.get("batch_json"))
-                run_dir = artifact_index.get("run_dir")
-                if str(run_dir or "").strip():
-                    _append_candidate(Path(str(run_dir)) / "batch_contact_add.json")
-                _append_from_glob(artifact_index.get("job_dir"), "executions/*/batch_contact_add.json")
-            elif artifact_kind == "session_run":
-                run_dir = artifact_index.get("run_dir")
-                _append_candidate(Path(str(run_dir)) / "run.json" if str(run_dir or "").strip() else "")
-                _append_candidate(run_dir)
-            elif artifact_kind == "execution_record":
-                _append_candidate(artifact_index.get("execution_record"))
-                run_dir = artifact_index.get("run_dir")
-                if str(run_dir or "").strip():
-                    _append_candidate(Path(str(run_dir)) / "execution_record.json")
-                _append_from_glob(artifact_index.get("job_dir"), "executions/*/execution_record.json")
-            elif artifact_kind == "screenshot":
-                _append_candidate(artifact_index.get("screenshot_path"))
-                run_dir = artifact_index.get("run_dir")
-                if str(run_dir or "").strip():
-                    _append_from_glob(run_dir, "*.png")
-            if not candidates:
+            artifact_shortcuts = self._selected_profile_artifact_shortcuts()
+            value = str(artifact_shortcuts.get(artifact_kind) or "").strip()
+            if not value:
                 raise FileNotFoundError(f"Для `{artifact_kind}` пока нет сохранённого артефакта.")
-            return candidates[0]
+            path = Path(value).expanduser().resolve()
+            if not path.exists():
+                raise FileNotFoundError(f"Для `{artifact_kind}` пока нет живого файла артефакта.")
+            return path
 
         def _open_workspace_artifact(self, artifact_kind: str) -> None:
             try:

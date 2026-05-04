@@ -1428,24 +1428,66 @@
     - `./tools/telegram/platform/bin/tool-platform validate-registry`
     - `./tools/telegram/platform/bin/tool-platform doctor`
     - `./tools/telegram/platform/bin/tool-platform capabilities`
+- Tranche `Architecture Audit + Next Tranche` завершён:
+  - profile workspace теперь сильнее опирается на unified jobs как на единственный source of truth для profile history;
+  - верхний timeline профиля и grouped history больше не собираются локально в GUI:
+    - grouping и timeline идут из `tool_platform/jobs.py`;
+    - combined child steps сохраняют порядок `step_index` и рендерятся как единый profile timeline;
+  - top action hint перебалансирован:
+    - свежий `completed` / `dry_run` workflow теперь имеет приоритет над старым recoverable run в верхнем workspace summary;
+    - recoverable workflow при этом не теряется и остаётся доступным в bucket-level hints / Resume UX;
+  - profile artifact center усилен на уровне snapshot-модели:
+    - `artifact_shortcuts` и `artifact_center` теперь формируются в `jobs.py`, а не через локальные fallback-ветки `gui.py`;
+    - `session_run` теперь берётся из session bucket, а если unified session jobs ещё не записали `artifact_paths`, идёт честный fallback в `session_history_snapshot()` standalone runtime;
+    - это закрывает живой баг, где после свежего session send `Открыть session run` продолжал вести в старый combined `run_dir`;
+  - `tool_platform/gui.py` ещё сильнее истончён по responsibility:
+    - profile workspace summary/history/artifacts теперь получают один precomputed workspace snapshot;
+    - open-logic для workspace artifacts больше не делает локальный glob/selection policy, а использует `artifact_shortcuts` из snapshot;
+  - добавлены regression-тесты на новую архитектурную политику:
+    - свежий `completed` workflow побеждает старый recoverable в верхнем action hint;
+    - `profile_workspace_snapshot()` отдаёт `history_groups`, `profile_timeline`, `artifact_shortcuts`, `artifact_center`;
+    - `session_run` shortcut предпочитает session bucket;
+    - при пустых `artifact_paths` у unified session jobs включается fallback на `session_history_snapshot()`;
+  - проверки после tranche:
+    - `python3 -m py_compile tool_platform/*.py tool_platform/platform_adapters/*.py tests/test_tool_platform.py`
+    - `PYTHONPATH="$PWD" python3 -m unittest tests.test_tool_platform` → `70 OK`
+    - `PYTHONPATH="$PWD" python3 -m unittest discover -s tests -p 'test_*.py'` → `252 OK`
+    - `bash -n tools/telegram/platform/bin/tool-platform tools/telegram/platform/bin/tool-platform-panel tools/telegram/session_runner/bin/telegram-session-runner tools/telegram/invite_manager/bin/telegram-invite-manager tools/telegram/invite_manager/bin/telegram-invite-executor`
+    - `./tools/telegram/platform/bin/tool-platform validate-registry`
+    - `./tools/telegram/platform/bin/tool-platform doctor`
+    - `./tools/telegram/platform/bin/tool-platform capabilities`
+  - live acceptance этого tranche:
+    - safe no-send panel readback smoke:
+      - `/tmp/telegram-architecture-audit-safe-readback/result.json`
+      - подтверждено:
+        - dashboard, unified history и artifact center читаются из workspace snapshot;
+        - `session_run` shortcut уже указывает на свежий standalone `run.json`;
+        - после restart панели `history_groups`, `timeline_size` и `artifact_shortcuts` остаются стабильными;
+    - final real auto-send confirm:
+      - `/tmp/telegram-architecture-audit-send-confirm-final/result.json`
+      - `/home/max/telegram-portable-session-tool/runs/20260504T140725Z-0c50fab7/run.json`
+      - подтверждено:
+        - `sent_count = 1`
+        - `message_count = 1`
+        - `messages_sent_total: 8 -> 9`
+        - текст: `Хорошего дня!`
+        - `artifact_shortcuts.session_run` указывает на свежий `run.json` и до, и после restart панели;
 
 ## Следующий Приоритет
-1. Для operator workspace:
-   - поднять richer profile history/timeline center поверх уже работающего dashboard;
-   - сделать более сильный artifact center с понятными quick-open и preview-подсказками;
-   - усилить profile workspace block по осям `active / recoverable / last_successful`.
-2. Дочистить selection policy над unified jobs:
-   - проверить, не слишком ли агрессивно старый recoverable workflow перетягивает верхний action hint после свежего completed run;
-   - для session summary отдельно продумать баланс между `recoverable` и `latest successful run`, чтобы dashboard не путал оператора после только что завершённого send-cycle.
-3. Дочистить thin-client роль `gui.py`:
-   - ещё сильнее сократить прямой доступ к cached panel-state;
-   - использовать unified bucket snapshot как primary readback почти везде;
-   - оставить cached panel-state только как compatibility fallback для combined flow.
-4. Для Session/Combined:
-   - добавить более явный human-readable hint в UI, что `Непрерывно до Стопа` останавливает дальнейшее pattern advancement и удерживает workflow в длинной сессии;
-   - отдельно усилить session timeline на sent/draft level для operator readback.
-5. Для Invite/Desktop:
-   - поднять чуть более богатый operator readback по `execution_record / batch json / screenshot`, не меняя простую one-screen модель панели.
+1. Поднять richer profile artifact history поверх уже рабочего artifact center:
+   - кроме `artifact_shortcuts`, добавить profile-level recent artifact trail;
+   - показать более понятные operator-friendly empty states и source hints для каждого quick-open.
+2. Усилить session timeline до sent/draft уровня:
+   - подтягивать в workspace summary не только `visit_count / sent_count`, но и явный `sent_messages / unsent_messages` readback;
+   - сделать profile history менее “job-centric” и чуть более “operator-story-centric”.
+3. Продолжить истончение `gui.py` и `telegram_gui_helpers.py`:
+   - вынести ещё больше formatting / fallback / artifact selection из GUI в helper/model слой;
+   - уменьшить зависимость dashboard от runtime-specific helper readback.
+4. Снизить технический долг вокруг session artifacts:
+   - по возможности научить unified `session_run` jobs сохранять собственные `artifact_paths`, чтобы artifact center меньше зависел от `session_history_snapshot()` fallback.
+5. Для Session/Combined:
+   - добавить ещё более явный human-readable hint в UI, что `Непрерывно до Стопа` блокирует дальнейшее pattern advancement;
+   - усилить readback по текущему next cycle / next target / next template.
 6. Для cross-platform core: продолжать adapter-first расширение Windows/macOS через `doctor/capabilities/launch/open-uri/focus/screenshot`, не пытаясь сразу вытащить full Telegram Desktop parity.
 
 ## Как Продолжать Следующему Агенту
