@@ -33,6 +33,7 @@ DEFAULT_WORKFLOW_STATE_ROOT = DEFAULT_TELEGRAM_STATE_ROOT / "panel_state"
 LEGACY_PANEL_STATE_ROOT = Path("/tmp/telegram-control-center")
 WORKFLOW_KINDS = {"invite_batch", "session_run", "combined_pattern"}
 COMBINED_PHASES = {"contact_add", "review", "session_ready", "session_running", "stopped"}
+RESUMABLE_WORKFLOW_STATUSES = {"planned", "stopped", "completed_with_errors", "error"}
 
 
 @dataclass(frozen=True)
@@ -239,6 +240,14 @@ def _normalized_message_settings(context: dict[str, Any]) -> dict[str, Any]:
         "view_max_seconds": int(payload.get("view_max_seconds") or 6),
         "base_config_path": str(payload.get("base_config_path") or "").strip(),
     }
+
+
+def _stop_hint_for_workflow(workflow_kind: str) -> str:
+    if workflow_kind == "invite_batch":
+        return "Workflow остановлен. Можно продолжить очередь, повторить ошибки или запустить новый batch."
+    if workflow_kind == "session_run":
+        return "Workflow остановлен. Можно продолжить session workflow из сохранённого контекста."
+    return "Workflow остановлен. Можно продолжить его через `Продолжить workflow` или перезапустить заново."
 
 
 def plan_workflow(
@@ -659,8 +668,13 @@ def run_workflow(job_id: str, *, index_path: str | Path = DEFAULT_JOB_INDEX_PATH
     running_step = find_running_step(job)
     if running_step is not None:
         return {"status": "already_running", "job": job, "command": None, "step": dict(running_step)}
-    if str(job.get("status") or "") in {"completed", "completed_with_errors", "dry_run", "stopped", "error"} and str(job.get("workflow_kind") or "") != "combined_pattern":
+    current_status = str(job.get("status") or "").strip().lower()
+    current_kind = str(job.get("workflow_kind") or "").strip()
+    if current_status in {"completed", "dry_run"} and current_kind != "combined_pattern":
         return {"status": "terminal", "job": job, "command": None}
+    if current_status in {"completed_with_errors", "stopped", "error"} and current_kind != "combined_pattern":
+        if not bool(job.get("recoverable", True)):
+            return {"status": "terminal", "job": job, "command": None}
 
     step_code, step_kind, command, metadata = _build_command_for_job(job)
     step = append_job_step(
@@ -738,6 +752,12 @@ def complete_workflow_step(
             job_id,
             summary="Остановлено оператором",
             phase="stopped",
+            index_path=index_path,
+        )
+        job = update_job(
+            job_id,
+            next_hint=_stop_hint_for_workflow(workflow_kind),
+            recoverable=True,
             index_path=index_path,
         )
         release_profile_lock(
@@ -850,7 +870,7 @@ def complete_workflow_step(
             phase="stopped" if str(normalized["status"]) in {"completed", "completed_with_errors", "dry_run"} else str(normalized["phase"]),
             summary=str(normalized["summary"]),
             artifact_paths=step_artifacts,
-            next_hint=str(normalized["next_hint"]),
+            next_hint=str(normalized["next_hint"] or ("Повтори ошибки или продолжи очередь через control center." if str(normalized["status"]) == "completed_with_errors" else "")),
             recoverable=bool(normalized["recoverable"]),
             completed=True,
             context_patch=base_context_patch,
@@ -871,7 +891,7 @@ def complete_workflow_step(
             phase="stopped",
             summary=str(normalized["summary"]),
             artifact_paths=step_artifacts,
-            next_hint=str(normalized["next_hint"]),
+            next_hint=str(normalized["next_hint"] or (_stop_hint_for_workflow("session_run") if str(normalized["status"]) in {"stopped", "completed_with_errors", "error"} else "")),
             recoverable=bool(normalized["recoverable"]),
             completed=True,
             context_patch={

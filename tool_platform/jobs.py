@@ -37,6 +37,7 @@ STEP_STATUSES = {
     "stopped",
     "error",
 }
+RESUMABLE_JOB_STATUSES = {"planned", "stopped", "completed_with_errors", "error"}
 
 
 def now_utc() -> str:
@@ -594,6 +595,160 @@ def _recoverable_job(jobs: list[dict[str, Any]]) -> dict[str, Any] | None:
     return None
 
 
+def _job_context(job: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(job, dict):
+        return {}
+    payload = job.get("context")
+    return dict(payload) if isinstance(payload, dict) else {}
+
+
+def _workflow_resume_decision(
+    *,
+    active_job: dict[str, Any] | None,
+    recoverable_job: dict[str, Any] | None,
+    last_job: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if isinstance(active_job, dict):
+        return {
+            "kind": "running",
+            "job": active_job,
+            "allowed": False,
+            "hint": "workflow уже выполняется",
+            "action_text": "Жди завершения текущего workflow или останови его вручную.",
+        }
+    if isinstance(recoverable_job, dict):
+        return {
+            "kind": "resume",
+            "job": recoverable_job,
+            "allowed": True,
+            "hint": "можно продолжить",
+            "action_text": "Последний recoverable workflow можно продолжить без нового запуска.",
+        }
+    if isinstance(last_job, dict):
+        last_status = str(last_job.get("status") or "").strip().lower()
+        if last_status in RESUMABLE_JOB_STATUSES:
+            return {
+                "kind": "resume",
+                "job": last_job,
+                "allowed": True,
+                "hint": "можно продолжить",
+                "action_text": "Последний workflow можно продолжить из сохранённого состояния.",
+            }
+        return {
+            "kind": "restart",
+            "job": last_job,
+            "allowed": False,
+            "hint": "лучше перезапустить",
+            "action_text": "Последний workflow уже завершён; для нового прогона лучше запустить его заново.",
+        }
+    return {
+        "kind": "missing",
+        "job": None,
+        "allowed": False,
+        "hint": "нет подходящего workflow",
+        "action_text": "Для этого режима ещё нет workflow, который можно продолжить.",
+    }
+
+
+def _invite_context_from_job(job: dict[str, Any] | None) -> dict[str, Any]:
+    context = _job_context(job)
+    return {
+        "input_path": str(context.get("input_path") or "").strip(),
+        "invite_job_dir": str(context.get("invite_job_dir") or "").strip(),
+        "invite_batch_limit": int(context.get("invite_batch_limit") or 0),
+        "statuses": [str(item).strip() for item in context.get("statuses") or [] if str(item).strip()],
+    }
+
+
+def _invite_snapshot_from_context(context: dict[str, Any]) -> dict[str, Any]:
+    invite_job_dir = str(context.get("invite_job_dir") or "").strip()
+    if not invite_job_dir:
+        return {}
+    from .telegram_gui_helpers import contact_job_snapshot
+
+    try:
+        snapshot = contact_job_snapshot(invite_job_dir)
+    except Exception:
+        return {}
+    return snapshot if isinstance(snapshot, dict) else {}
+
+
+def _invite_queue_decisions(
+    *,
+    active_job: dict[str, Any] | None,
+    recoverable_job: dict[str, Any] | None,
+    last_job: dict[str, Any] | None,
+) -> dict[str, Any]:
+    source_job = recoverable_job or active_job or last_job
+    base_context = _invite_context_from_job(source_job)
+    snapshot = _invite_snapshot_from_context(base_context)
+    pending_total = int(snapshot.get("pending_total") or 0)
+    failed_total = int(snapshot.get("failed_total") or 0)
+    added_total = int(snapshot.get("added_total") or 0)
+
+    if isinstance(active_job, dict):
+        continue_hint = "workflow уже выполняется"
+        continue_allowed = False
+        retry_hint = "workflow уже выполняется"
+        retry_allowed = False
+        next_action = "Ждать завершения текущего invite workflow."
+    else:
+        continue_allowed = pending_total > 0 and bool(base_context.get("invite_job_dir"))
+        retry_allowed = failed_total > 0 and bool(base_context.get("invite_job_dir"))
+        if continue_allowed:
+            continue_hint = f"можно продолжить: осталось {pending_total}"
+        elif snapshot:
+            continue_hint = "очередь исчерпана"
+        else:
+            continue_hint = "нет сохранённой очереди"
+        if retry_allowed:
+            retry_hint = f"ошибки можно повторить: {failed_total}"
+        elif snapshot:
+            retry_hint = "ошибок для повтора нет"
+        else:
+            retry_hint = "нет сохранённой истории ошибок"
+        if retry_allowed:
+            next_action = "Повторить ошибки invite batch."
+        elif continue_allowed:
+            next_action = "Продолжить очередь invite batch."
+        elif added_total > 0:
+            next_action = "Очередь закончилась; можно запускать новый batch."
+        else:
+            next_action = "Запусти новый invite batch."
+
+    return {
+        "continue_queue_hint": continue_hint,
+        "retry_failed_hint": retry_hint,
+        "continue_queue_allowed": continue_allowed,
+        "retry_failed_allowed": retry_allowed,
+        "continue_queue_context": {
+            **base_context,
+            "statuses": ["new", "checked"],
+        },
+        "retry_failed_context": {
+            **base_context,
+            "statuses": ["failed"],
+        },
+        "invite_snapshot": snapshot,
+        "next_operator_action": next_action,
+    }
+
+
+def _workflow_next_operator_action(
+    *,
+    workflow_kind: str,
+    resume_decision: dict[str, Any],
+) -> str:
+    decision_kind = str(resume_decision.get("kind") or "")
+    if decision_kind == "running":
+        return f"Ждать завершения {workflow_kind} workflow."
+    if decision_kind == "resume":
+        return f"Продолжить {workflow_kind} workflow."
+    if decision_kind == "restart":
+        return f"Запустить новый {workflow_kind} workflow."
+    return f"Подготовить и запустить {workflow_kind} workflow."
+
+
 def _workflow_bucket_snapshot(
     jobs: list[dict[str, Any]],
     *,
@@ -606,13 +761,18 @@ def _workflow_bucket_snapshot(
     active_job = next((item for item in workflow_jobs if str(item.get("status") or "") == "running"), None)
     last_job = workflow_jobs[0] if workflow_jobs else None
     recoverable_job = _recoverable_job(workflow_jobs)
+    resume_decision = _workflow_resume_decision(
+        active_job=active_job,
+        recoverable_job=recoverable_job,
+        last_job=last_job,
+    )
     anchor_job = active_job or last_job or recoverable_job
     artifact_index = (
         workflow_artifact_index(str(anchor_job.get("job_id") or ""), index_path=index_path)
         if isinstance(anchor_job, dict)
         else {}
     )
-    return {
+    payload = {
         "workflow_kind": workflow_kind,
         "active_job": active_job,
         "last_job": last_job,
@@ -620,7 +780,22 @@ def _workflow_bucket_snapshot(
         "timeline": _job_timeline(anchor_job or {}, limit=timeline_limit),
         "artifact_index": artifact_index,
         "recoverable_job": recoverable_job,
+        "resume_decision": resume_decision,
+        "resume_hint": str(resume_decision.get("hint") or ""),
+        "next_operator_action": _workflow_next_operator_action(
+            workflow_kind=workflow_kind,
+            resume_decision=resume_decision,
+        ),
     }
+    if workflow_kind == "invite_batch":
+        payload.update(
+            _invite_queue_decisions(
+                active_job=active_job,
+                recoverable_job=recoverable_job,
+                last_job=last_job,
+            )
+        )
+    return payload
 
 
 def _profile_artifact_index_from_jobs(
@@ -739,6 +914,8 @@ def profile_workspace_snapshot(
     jobs = list_jobs(profile_id=profile_id, limit=max(limit * 8, 24), index_path=index_path)
     active_jobs = [item for item in jobs if str(item.get("status") or "") == "running"][:limit]
     recent_jobs = jobs[:limit]
+    active_workflow = active_jobs[0] if active_jobs else None
+    recoverable_workflow = _recoverable_job(jobs)
     last_success = next(
         (
             item
@@ -757,6 +934,12 @@ def profile_workspace_snapshot(
         )
         for workflow_kind in WORKSPACE_WORKFLOW_KINDS
     }
+    resume_decision = _workflow_resume_decision(
+        active_job=active_workflow,
+        recoverable_job=recoverable_workflow,
+        last_job=recent_jobs[0] if recent_jobs else None,
+    )
+    invite_bucket = workflow_buckets.get("invite_batch") if isinstance(workflow_buckets.get("invite_batch"), dict) else {}
     artifact_index = _profile_artifact_index_from_jobs(
         jobs,
         workflow_buckets=workflow_buckets,
@@ -776,10 +959,28 @@ def profile_workspace_snapshot(
         "session_runtime_reachable": (Path("/home/max/telegram-portable-session-tool") / "bin" / "telegram-portable-session-tool").exists(),
         "panel_backend_status": "ready",
     }
+    if str(resume_decision.get("kind") or "") == "running":
+        next_operator_action = "Ждать завершения активного workflow."
+    elif bool(invite_bucket.get("retry_failed_allowed")):
+        next_operator_action = "Повторить ошибки invite batch."
+    elif bool(invite_bucket.get("continue_queue_allowed")):
+        next_operator_action = "Продолжить очередь invite batch."
+    elif str(resume_decision.get("kind") or "") == "resume":
+        next_operator_action = "Продолжить recoverable workflow."
+    elif recent_jobs:
+        next_operator_action = "Запустить новый workflow."
+    else:
+        next_operator_action = "Выбери режим и запусти первый workflow."
     return {
         "profile_id": profile_id,
         "active_jobs": active_jobs,
         "recent_jobs": recent_jobs,
+        "active_workflow": active_workflow,
+        "recoverable_workflow": recoverable_workflow,
+        "resume_hint": str(resume_decision.get("hint") or ""),
+        "continue_queue_hint": str(invite_bucket.get("continue_queue_hint") or ""),
+        "retry_failed_hint": str(invite_bucket.get("retry_failed_hint") or ""),
+        "next_operator_action": next_operator_action,
         "current_lock": current_lock,
         "health": health,
         "last_successful_job": last_success,

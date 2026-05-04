@@ -58,7 +58,6 @@ from .agent_state import ensure_agent_state, load_agent_state
 from .catalog import tool_platform_support
 from .jobs import (
     DEFAULT_TELEGRAM_STATE_ROOT,
-    active_workflow_job,
     fail_job,
     finish_job,
     get_job,
@@ -67,7 +66,6 @@ from .jobs import (
     profile_history_groups,
     profile_id_for,
     profile_workspace_snapshot,
-    recoverable_workflow_job,
     start_job,
     stop_job,
 )
@@ -236,8 +234,8 @@ def format_profile_workspace_summary(profile: dict[str, Any]) -> str:
     windows = profile.get("windows") if isinstance(profile.get("windows"), list) else []
     first_window = windows[0] if windows else {}
     workspace = profile_workspace_snapshot(profile_name=profile_name, profile_dir=profile_dir)
-    active_job = active_workflow_job(profile_name=profile_name, profile_dir=profile_dir)
-    recoverable_job = recoverable_workflow_job(profile_name=profile_name, profile_dir=profile_dir)
+    active_job = workspace.get("active_workflow") if isinstance(workspace.get("active_workflow"), dict) else None
+    recoverable_job = workspace.get("recoverable_workflow") if isinstance(workspace.get("recoverable_workflow"), dict) else None
     lock = workspace.get("current_lock") if isinstance(workspace.get("current_lock"), dict) else None
     last_success = workspace.get("last_successful_job") if isinstance(workspace.get("last_successful_job"), dict) else None
     lines = [
@@ -251,7 +249,10 @@ def format_profile_workspace_summary(profile: dict[str, Any]) -> str:
         "",
         f"Активный workflow: {format_workflow_job_line(active_job) if active_job else 'нет'}",
         f"Recoverable workflow: {format_workflow_job_line(recoverable_job) if recoverable_job else 'нет'}",
-        f"Подсказка resume: {format_workflow_resume_hint(recoverable_job or active_job)}",
+        f"Подсказка resume: {str(workspace.get('resume_hint') or format_workflow_resume_hint(recoverable_job or active_job))}",
+        f"Очередь invite: {str(workspace.get('continue_queue_hint') or 'нет данных')}",
+        f"Ошибки invite: {str(workspace.get('retry_failed_hint') or 'нет данных')}",
+        f"Следующее действие: {str(workspace.get('next_operator_action') or 'не определено')}",
     ]
     if lock:
         lines.append(f"Lock: {lock.get('owner_tool_id') or '-'} · job {lock.get('job_id') or '-'}")
@@ -316,6 +317,58 @@ def format_profile_workspace_artifacts_health(profile: dict[str, Any]) -> str:
         format_artifact_center(artifacts),
     ]
     return "\n".join(lines)
+
+
+def format_invite_operator_action(bucket: dict[str, Any] | None) -> str:
+    payload = bucket if isinstance(bucket, dict) else {}
+    continue_hint = str(payload.get("continue_queue_hint") or "нет данных").strip()
+    retry_hint = str(payload.get("retry_failed_hint") or "нет данных").strip()
+    next_action = str(payload.get("next_operator_action") or "не определено").strip()
+    context = payload.get("continue_queue_context") if isinstance(payload.get("continue_queue_context"), dict) else {}
+    source_file = str(context.get("input_path") or "").strip() or "не сохранён"
+    invite_job_dir = str(context.get("invite_job_dir") or "").strip() or "не сохранена"
+    return "\n".join(
+        [
+            "Operator action",
+            f"Продолжить очередь: {continue_hint}",
+            f"Повторить ошибки: {retry_hint}",
+            f"Следующее действие: {next_action}",
+            f"Источник context: {source_file}",
+            f"Папка задачи: {invite_job_dir}",
+        ]
+    )
+
+
+def format_session_operator_action(bucket: dict[str, Any] | None) -> str:
+    payload = bucket if isinstance(bucket, dict) else {}
+    resume_hint = str(payload.get("resume_hint") or "нет данных").strip()
+    next_action = str(payload.get("next_operator_action") or "не определено").strip()
+    decision = payload.get("resume_decision") if isinstance(payload.get("resume_decision"), dict) else {}
+    job = decision.get("job") if isinstance(decision.get("job"), dict) else {}
+    return "\n".join(
+        [
+            "Operator action",
+            f"Подсказка resume: {resume_hint}",
+            f"Следующее действие: {next_action}",
+            f"Workflow: {format_workflow_job_line(job) if job else 'нет подходящего workflow'}",
+        ]
+    )
+
+
+def format_combined_operator_action(bucket: dict[str, Any] | None) -> str:
+    payload = bucket if isinstance(bucket, dict) else {}
+    resume_hint = str(payload.get("resume_hint") or "нет данных").strip()
+    next_action = str(payload.get("next_operator_action") or "не определено").strip()
+    decision = payload.get("resume_decision") if isinstance(payload.get("resume_decision"), dict) else {}
+    job = decision.get("job") if isinstance(decision.get("job"), dict) else {}
+    return "\n".join(
+        [
+            "Operator action",
+            f"Подсказка resume: {resume_hint}",
+            f"Следующее действие: {next_action}",
+            f"Parent workflow: {format_workflow_job_line(job) if job else 'нет подходящего workflow'}",
+        ]
+    )
 
 
 def format_workflow_job_line(job: dict[str, Any]) -> str:
@@ -3751,6 +3804,8 @@ if tk is not None:
                 self._load_session_targets(show_feedback=False)
 
         def _refresh_invite_dashboard(self) -> None:
+            bucket = self._selected_profile_workflow_bucket("invite_batch")
+            action_block = format_invite_operator_action(bucket)
             job_dir_text = self.invite_job_dir_var.get().strip()
             if not job_dir_text:
                 preview_path = self.invite_input_path_var.get().strip()
@@ -3760,7 +3815,7 @@ if tk is not None:
                     except Exception as exc:
                         self._set_readonly_text(
                             self.invite_summary_text,
-                            f"Не удалось прочитать список username:\n{exc}",
+                            action_block + "\n\n" + f"Не удалось прочитать список username:\n{exc}",
                         )
                         return
                     self.invite_preview_var.set(
@@ -3768,7 +3823,7 @@ if tk is not None:
                     )
                     self._set_readonly_text(
                         self.invite_summary_text,
-                        format_invite_input_preview(preview),
+                        action_block + "\n\n" + format_invite_input_preview(preview),
                     )
                     self._set_readonly_text(
                         self.invite_queue_text,
@@ -3787,14 +3842,14 @@ if tk is not None:
                 else:
                     self._set_readonly_text(
                         self.invite_summary_text,
-                        "Файл контактов ещё не выбран. Загрузи TXT / CSV / JSON и затем запускай batch-добавление.",
+                        action_block + "\n\n" + "Файл контактов ещё не выбран. Загрузи TXT / CSV / JSON и затем запускай batch-добавление.",
                     )
                 return
 
             snapshot = contact_job_snapshot(job_dir_text)
             self._set_readonly_text(
                 self.invite_summary_text,
-                format_contact_dashboard_snapshot(snapshot),
+                action_block + "\n\n" + format_contact_dashboard_snapshot(snapshot),
             )
             self._set_readonly_text(
                 self.invite_queue_text,
@@ -3822,6 +3877,7 @@ if tk is not None:
             )
 
         def _refresh_session_dashboard(self) -> None:
+            bucket = self._selected_profile_workflow_bucket("session_run")
             snapshot = session_history_snapshot(
                 state_file=DEFAULT_SESSION_STATE_FILE,
                 runs_dir=DEFAULT_SESSION_RUNS_DIR,
@@ -3829,7 +3885,7 @@ if tk is not None:
             preview_context = self._session_preview_context()
             self._set_readonly_text(
                 self.session_summary_text,
-                format_session_operator_summary(snapshot, **preview_context),
+                format_session_operator_action(bucket) + "\n\n" + format_session_operator_summary(snapshot, **preview_context),
             )
             self._set_readonly_text(
                 self.session_history_text,
@@ -3884,6 +3940,46 @@ if tk is not None:
             bucket = buckets.get(workflow_kind)
             return bucket if isinstance(bucket, dict) else {}
 
+        def _selected_profile_resume_decision(self, workflow_kind: str, *, limit: int = 12) -> dict[str, Any]:
+            bucket = self._selected_profile_workflow_bucket(workflow_kind, limit=limit)
+            decision = bucket.get("resume_decision") if isinstance(bucket.get("resume_decision"), dict) else {}
+            if decision:
+                return dict(decision)
+            active_job = bucket.get("active_job") if isinstance(bucket.get("active_job"), dict) else None
+            recoverable_job = bucket.get("recoverable_job") if isinstance(bucket.get("recoverable_job"), dict) else None
+            last_job = bucket.get("last_job") if isinstance(bucket.get("last_job"), dict) else None
+            if active_job is not None:
+                return {
+                    "kind": "running",
+                    "job": active_job,
+                    "allowed": False,
+                    "hint": "workflow уже выполняется",
+                    "action_text": "Жди завершения текущего workflow или останови его вручную.",
+                }
+            if recoverable_job is not None:
+                return {
+                    "kind": "resume",
+                    "job": recoverable_job,
+                    "allowed": True,
+                    "hint": "можно продолжить",
+                    "action_text": "Последний recoverable workflow можно продолжить без нового запуска.",
+                }
+            if last_job is not None:
+                return {
+                    "kind": "restart",
+                    "job": last_job,
+                    "allowed": False,
+                    "hint": "лучше перезапустить",
+                    "action_text": "Последний workflow уже завершён; для нового прогона лучше запустить его заново.",
+                }
+            return {
+                "kind": "missing",
+                "job": None,
+                "allowed": False,
+                "hint": "нет подходящего workflow",
+                "action_text": "Для этого режима пока нет workflow, который можно продолжить.",
+            }
+
         def _selected_profile_artifact_index(self) -> dict[str, str]:
             merged: dict[str, str] = {}
             profile = self._selected_profile()
@@ -3902,6 +3998,24 @@ if tk is not None:
                 if isinstance(bucket_artifacts, dict):
                     merged.update({str(key): str(value) for key, value in bucket_artifacts.items() if str(key).strip() and str(value).strip()})
             return merged
+
+        def _invite_bucket_action_context(self, action: str) -> dict[str, Any] | None:
+            bucket = self._selected_profile_workflow_bucket("invite_batch")
+            key = "retry_failed_context" if action == "retry_failed" else "continue_queue_context"
+            context = bucket.get(key) if isinstance(bucket.get(key), dict) else None
+            if context is None:
+                candidate = bucket.get("recoverable_job") if isinstance(bucket.get("recoverable_job"), dict) else None
+                context = dict(candidate.get("context") or {}) if isinstance(candidate, dict) else None
+            if context is None:
+                return None
+            payload = dict(context)
+            input_path = str(payload.get("input_path") or "").strip()
+            invite_job_dir = str(payload.get("invite_job_dir") or "").strip()
+            if input_path:
+                self.invite_input_path_var.set(input_path)
+            if invite_job_dir:
+                self.invite_job_dir_var.set(invite_job_dir)
+            return payload
 
         def _resolve_workspace_artifact(self, artifact_kind: str) -> Path:
             artifact_index = self._selected_profile_artifact_index()
@@ -4076,15 +4190,9 @@ if tk is not None:
             )
 
         def _resume_candidate_workflow_job(self, workflow_kind: str, *, limit: int = 12) -> dict[str, Any] | None:
-            bucket = self._selected_profile_workflow_bucket(workflow_kind, limit=limit)
-            active_job = bucket.get("active_job") if isinstance(bucket.get("active_job"), dict) else None
-            if active_job is not None:
-                return active_job
-            recoverable_job = bucket.get("recoverable_job") if isinstance(bucket.get("recoverable_job"), dict) else None
-            if recoverable_job is not None:
-                return recoverable_job
-            last_job = bucket.get("last_job") if isinstance(bucket.get("last_job"), dict) else None
-            return last_job
+            decision = self._selected_profile_resume_decision(workflow_kind, limit=limit)
+            job = decision.get("job")
+            return dict(job) if isinstance(job, dict) else None
 
         def _resume_workflow_for_tool(
             self,
@@ -4094,12 +4202,20 @@ if tk is not None:
             refresh_callback: Callable[[], None],
         ) -> None:
             try:
-                candidate = self._resume_candidate_workflow_job(workflow_kind)
+                decision = self._selected_profile_resume_decision(workflow_kind)
             except Exception as exc:
                 messagebox.showerror("Панель Telegram", f"Не удалось найти workflow для продолжения:\n{exc}")
                 return
+            candidate = decision.get("job") if isinstance(decision.get("job"), dict) else None
             if candidate is None:
                 messagebox.showinfo("Панель Telegram", "Для этого профиля сейчас нет подходящего workflow для продолжения.")
+                return
+            if not bool(decision.get("allowed")):
+                messagebox.showinfo(
+                    "Панель Telegram",
+                    str(decision.get("action_text") or decision.get("hint") or "Этот workflow сейчас нельзя продолжить."),
+                )
+                refresh_callback()
                 return
             job_id = str(candidate.get("job_id") or "")
             try:
@@ -4257,9 +4373,12 @@ if tk is not None:
                 bucket = self._selected_profile_workflow_bucket("combined_pattern")
             except Exception:
                 bucket = {}
+            action_block = format_combined_operator_action(bucket)
             active_job = bucket.get("active_job") if isinstance(bucket.get("active_job"), dict) else None
             last_job = bucket.get("last_job") if isinstance(bucket.get("last_job"), dict) else None
-            sync_from_state = bool(active_job or last_job)
+            # Keep operator-entered fields stable when combined state is only historical or recoverable.
+            # Only an actively running combined workflow is allowed to drive the form automatically.
+            sync_from_state = bool(active_job)
             if (sync_from_state or not self.combined_input_path_var.get().strip()) and state.get("input_path"):
                 self.combined_input_path_var.set(str(state.get("input_path") or ""))
             if (sync_from_state or not self.combined_job_dir_var.get().strip()) and state.get("invite_job_dir"):
@@ -4292,7 +4411,7 @@ if tk is not None:
             profile_label = format_profile_label(profile)
             self._set_readonly_text(
                 self.combined_state_text,
-                format_combined_flow_state(
+                action_block + "\n\n" + format_combined_flow_state(
                     state,
                     profile_label=profile_label,
                     invite_snapshot=invite_snapshot,
@@ -4363,18 +4482,7 @@ if tk is not None:
             )
 
         def _invite_recoverable_context(self) -> dict[str, Any] | None:
-            bucket = self._selected_profile_workflow_bucket("invite_batch")
-            candidate = bucket.get("recoverable_job") if isinstance(bucket.get("recoverable_job"), dict) else None
-            if candidate is None:
-                return None
-            context = dict(candidate.get("context") or {})
-            input_path = str(context.get("input_path") or "").strip()
-            invite_job_dir = str(context.get("invite_job_dir") or "").strip()
-            if input_path:
-                self.invite_input_path_var.set(input_path)
-            if invite_job_dir:
-                self.invite_job_dir_var.set(invite_job_dir)
-            return context
+            return self._invite_bucket_action_context("continue_queue")
 
         def _combined_resolved_job_dir(self) -> Path:
             job_dir = self.combined_job_dir_var.get().strip()
@@ -4466,7 +4574,22 @@ if tk is not None:
             )
 
         def _invite_continue_queue(self) -> None:
-            context = self._invite_recoverable_context()
+            bucket = self._selected_profile_workflow_bucket("invite_batch")
+            context = self._invite_bucket_action_context("continue_queue")
+            if isinstance(bucket.get("active_job"), dict):
+                messagebox.showinfo(
+                    "Панель Telegram",
+                    str(bucket.get("next_operator_action") or "Invite workflow уже выполняется."),
+                )
+                self._refresh_invite_dashboard()
+                return
+            if context is not None and not bool(bucket.get("continue_queue_allowed")):
+                messagebox.showinfo(
+                    "Панель Telegram",
+                    str(bucket.get("continue_queue_hint") or "Очередь сейчас нельзя продолжить."),
+                )
+                self._refresh_invite_dashboard()
+                return
             if context is None:
                 try:
                     self._invite_resolved_job_dir()
@@ -4481,7 +4604,22 @@ if tk is not None:
             )
 
         def _invite_retry_failed(self) -> None:
-            context = self._invite_recoverable_context()
+            bucket = self._selected_profile_workflow_bucket("invite_batch")
+            context = self._invite_bucket_action_context("retry_failed")
+            if isinstance(bucket.get("active_job"), dict):
+                messagebox.showinfo(
+                    "Панель Telegram",
+                    str(bucket.get("next_operator_action") or "Invite workflow уже выполняется."),
+                )
+                self._refresh_invite_dashboard()
+                return
+            if context is not None and not bool(bucket.get("retry_failed_allowed")):
+                messagebox.showinfo(
+                    "Панель Telegram",
+                    str(bucket.get("retry_failed_hint") or "Для повтора сейчас нет ошибок."),
+                )
+                self._refresh_invite_dashboard()
+                return
             if context is None:
                 try:
                     self._invite_resolved_job_dir()

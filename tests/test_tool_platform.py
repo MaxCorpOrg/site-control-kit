@@ -1252,6 +1252,57 @@ class ToolPlatformCatalogTests(unittest.TestCase):
         self.assertEqual(artifacts["batch_json"], "/tmp/invite-batch.json")
         self.assertEqual(artifacts["execution_record"], "/tmp/combined-record.json")
 
+    def test_profile_workspace_snapshot_includes_operator_hints(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            index_path = Path(tmp_dir) / "jobs" / "index.json"
+            invite_job_dir = Path(tmp_dir) / "invite-job"
+            invite_job_dir.mkdir(parents=True, exist_ok=True)
+            (invite_job_dir / "invite_state.json").write_text(
+                json.dumps(
+                    {
+                        "users": [
+                            {"username": "@one", "status": "new"},
+                            {"username": "@two", "status": "failed"},
+                            {"username": "@three", "status": "contact_added"},
+                        ]
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            start_job(
+                tool_id="telegram_invite_manager",
+                workflow_kind="invite_batch",
+                profile_name="AK",
+                profile_dir="/home/max/TelegramPortableAK",
+                phase="stopped",
+                status="completed_with_errors",
+                summary="Invite partial",
+                recoverable=True,
+                context={
+                    "input_path": "/tmp/users.txt",
+                    "invite_job_dir": str(invite_job_dir),
+                    "statuses": ["new", "checked"],
+                },
+                index_path=index_path,
+            )
+
+            workspace = profile_workspace_snapshot(
+                profile_name="AK",
+                profile_dir="/home/max/TelegramPortableAK",
+                index_path=index_path,
+            )
+            invite_bucket = workspace["workflow_buckets"]["invite_batch"]
+
+        self.assertEqual(workspace["resume_hint"], "можно продолжить")
+        self.assertIn("осталось 1", workspace["continue_queue_hint"])
+        self.assertIn("ошибки можно повторить: 1", workspace["retry_failed_hint"])
+        self.assertEqual(invite_bucket["resume_hint"], "можно продолжить")
+        self.assertTrue(invite_bucket["continue_queue_allowed"])
+        self.assertTrue(invite_bucket["retry_failed_allowed"])
+        self.assertEqual(invite_bucket["next_operator_action"], "Повторить ошибки invite batch.")
+
     def test_profile_history_groups_preserve_unified_step_order(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             index_path = Path(tmp_dir) / "jobs" / "index.json"
@@ -1659,6 +1710,31 @@ class ToolPlatformCatalogTests(unittest.TestCase):
         self.assertEqual(running["status"], "already_running")
         self.assertEqual(resumed["status"], "terminal")
 
+    def test_resume_workflow_restarts_recoverable_session_job_after_stop(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            index_path = Path(tmp_dir) / "jobs" / "index.json"
+            with mock.patch("tool_platform.workflows._build_session_run_command") as builder:
+                builder.return_value = (
+                    WorkflowCommandSpec(argv=["python3", "session.py"], cwd=Path(tmp_dir)),
+                    Path(tmp_dir) / "runtime.json",
+                )
+                planned = plan_workflow(
+                    workflow_kind="session_run",
+                    tool_id="telegram_session_runner",
+                    profile_name="AK",
+                    profile_dir="/home/max/TelegramPortableAK",
+                    context={"continuous_session": False, "message_settings": {"base_config_path": "/tmp/config.json"}},
+                    summary="Session planned",
+                    index_path=index_path,
+                )
+                run_workflow(planned["job_id"], index_path=index_path)
+                stop_workflow_job(planned["job_id"], summary="Остановлено оператором", index_path=index_path)
+                resumed = resume_workflow(planned["job_id"], index_path=index_path)
+
+        self.assertEqual(resumed["status"], "ready")
+        self.assertIsNotNone(resumed["command"])
+        self.assertEqual(str((resumed["job"] or {}).get("status") or ""), "running")
+
     def test_gui_resume_candidate_prefers_active_then_recoverable_job(self) -> None:
         panel = object.__new__(ToolPlatformPanel)
         panel._selected_profile_workflow_bucket = lambda workflow_kind, limit=12: {
@@ -1702,6 +1778,123 @@ class ToolPlatformCatalogTests(unittest.TestCase):
         self.assertEqual(context["input_path"], "/tmp/users.txt")
         self.assertEqual(panel.invite_input_path_var.get(), "/tmp/users.txt")
         self.assertEqual(panel.invite_job_dir_var.get(), "/tmp/invite-job")
+
+    def test_refresh_combined_dashboard_keeps_manual_inputs_when_only_last_job_exists(self) -> None:
+        class DummyVar:
+            def __init__(self, value: str = "") -> None:
+                self.value = value
+
+            def set(self, value: str) -> None:
+                self.value = value
+
+            def get(self) -> str:
+                return self.value
+
+        panel = object.__new__(ToolPlatformPanel)
+        panel.combined_input_path_var = DummyVar("/home/max/контакты/1.txt")
+        panel.combined_job_dir_var = DummyVar("/home/max/telegram_invite_jobs/contact_add__AK__1")
+        panel.session_config_path_var = DummyVar("/home/max/telegram-portable-session-tool/examples/session.example.json")
+        panel.combined_step_pattern_var = DummyVar("12")
+        panel.combined_phase_var = DummyVar()
+        panel.combined_status_var = DummyVar()
+        panel.combined_preview_var = DummyVar()
+        panel.combined_state_text = object()
+        panel.combined_contact_text = object()
+        panel.combined_session_text = object()
+        panel.combined_targets_text = object()
+        panel._set_readonly_text = mock.Mock()
+        panel._session_preview_context = lambda: {}
+        panel._combined_targets_summary = lambda: "targets"
+        panel._selected_profile = lambda: {
+            "profile_name": "AK",
+            "profile_dir": "/home/max/TelegramPortableAK",
+        }
+        panel._selected_profile_workflow_bucket = lambda workflow_kind: {
+            "active_job": None,
+            "last_job": {
+                "job_id": "combined-last",
+                "status": "completed",
+                "context": {
+                    "input_path": "/tmp/stale-users.txt",
+                    "invite_job_dir": "/tmp/stale-job",
+                    "session_config_path": "/tmp/stale-session.json",
+                    "step_pattern": "21",
+                },
+            },
+            "recoverable_job": {
+                "job_id": "combined-recoverable",
+                "status": "stopped",
+                "recoverable": True,
+                "context": {
+                    "input_path": "/tmp/recoverable-users.txt",
+                    "invite_job_dir": "/tmp/recoverable-job",
+                    "session_config_path": "/tmp/recoverable-session.json",
+                    "step_pattern": "22",
+                },
+            },
+        }
+        state = {
+            "phase": "stopped",
+            "input_path": "/tmp/stale-users.txt",
+            "invite_job_dir": "/tmp/stale-job",
+            "session_config_path": "/tmp/stale-session.json",
+            "step_pattern": "21",
+            "last_status": "completed",
+            "last_action": "combined_contact_add_finished",
+        }
+
+        with mock.patch("tool_platform.gui.combined_state_from_jobs", return_value=state), mock.patch(
+            "tool_platform.gui.session_history_snapshot", return_value={}
+        ), mock.patch("tool_platform.gui.preview_invite_input_file", return_value={"unique_usernames": 1, "duplicates": 0, "invalid_count": 0}), mock.patch(
+            "tool_platform.gui.contact_job_snapshot", return_value={"pending_total": 0, "failed_total": 0, "added_total": 1}
+        ), mock.patch(
+            "tool_platform.gui.format_combined_operator_action", return_value="operator"
+        ), mock.patch(
+            "tool_platform.gui.format_combined_flow_state", return_value="state"
+        ), mock.patch(
+            "tool_platform.gui.format_contact_dashboard_snapshot", return_value="contact"
+        ), mock.patch(
+            "tool_platform.gui.format_contact_errors", return_value="errors"
+        ), mock.patch(
+            "tool_platform.gui.format_session_dashboard_snapshot", return_value="session"
+        ), mock.patch(
+            "tool_platform.gui.format_profile_label", return_value="AK"
+        ):
+            ToolPlatformPanel._refresh_combined_dashboard(panel)
+
+        self.assertEqual(panel.combined_input_path_var.get(), "/home/max/контакты/1.txt")
+        self.assertEqual(panel.combined_job_dir_var.get(), "/home/max/telegram_invite_jobs/contact_add__AK__1")
+        self.assertEqual(
+            panel.session_config_path_var.get(),
+            "/home/max/telegram-portable-session-tool/examples/session.example.json",
+        )
+        self.assertEqual(panel.combined_step_pattern_var.get(), "12")
+
+    def test_gui_resume_workflow_for_tool_does_not_restart_running_job(self) -> None:
+        panel = object.__new__(ToolPlatformPanel)
+        panel._selected_profile_resume_decision = lambda workflow_kind: {
+            "kind": "running",
+            "job": {"job_id": "running-job", "status": "running"},
+            "allowed": False,
+            "hint": "workflow уже выполняется",
+            "action_text": "Жди завершения текущего workflow или останови его вручную.",
+        }
+        refresh_callback = mock.Mock()
+        info_messages: list[str] = []
+
+        with mock.patch("tool_platform.gui.messagebox.showinfo", side_effect=lambda title, text: info_messages.append(str(text))):
+            with mock.patch("tool_platform.gui.resume_workflow") as resume_workflow_mock:
+                ToolPlatformPanel._resume_workflow_for_tool(
+                    panel,
+                    tool_id="telegram_session_runner",
+                    workflow_kind="session_run",
+                    refresh_callback=refresh_callback,
+                )
+
+        resume_workflow_mock.assert_not_called()
+        refresh_callback.assert_called_once()
+        self.assertTrue(info_messages)
+        self.assertIn("Жди завершения", info_messages[0])
 
     def test_complete_workflow_event_refreshes_profile_dashboard_after_mode_callback(self) -> None:
         panel = object.__new__(ToolPlatformPanel)

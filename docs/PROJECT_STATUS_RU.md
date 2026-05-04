@@ -1369,32 +1369,83 @@
     - новый верхний workspace реально виден в панели;
     - `Последний успешный workflow` и верхний timeline обновляются по только что завершённому job;
     - stale подмена старым recoverable workflow после completion больше не воспроизводится.
+- Tranche `Resume / Retry UX` поверх profile workspace dashboard завершён:
+  - `profile_workspace_snapshot()` теперь отдаёт operator decision layer:
+    - `active_workflow`
+    - `recoverable_workflow`
+    - `resume_hint`
+    - `continue_queue_hint`
+    - `retry_failed_hint`
+    - `next_operator_action`
+  - `workflow_buckets` для `invite_batch`, `session_run`, `combined_pattern` теперь содержат не только timeline/artifacts, но и decision payload:
+    - `resume_decision`
+    - `resume_hint`
+    - `continue_queue_allowed`
+    - `retry_failed_allowed`
+    - `continue_queue_context`
+    - `retry_failed_context`
+    - `next_operator_action`
+  - invite-режим теперь использует latest recoverable unified job context для:
+    - `Продолжить очередь`
+    - `Повторить ошибки`
+    - и честно блокирует повторный запуск, если invite workflow уже `running`;
+  - session-режим теперь реально продолжает именно recoverable `session_run` job:
+    - `stop -> resume` больше не делает silent restart “как нового запуска”;
+    - `run_workflow()` теперь допускает повторный старт recoverable `stopped/completed_with_errors/error` session job;
+    - stop-path пишет recoverable `next_hint` для session workflow;
+  - combined-режим теперь продолжает только parent `combined_pattern` job и в summary явно показывает:
+    - какой parent workflow будет продолжен;
+    - какой следующий `step_code / step_kind` ожидается;
+    - почему workflow сейчас `stopped`;
+  - найден и закрыт отдельный live UI-bug combined mode:
+    - форма `Совместного режима` перетирала ручные `input_path / invite_job_dir / step_pattern` данными старого recoverable/completed combined workflow;
+    - после фикса автосинхронизация формы теперь разрешена только для реально `active` combined workflow;
+    - history/recoverable состояние остаётся в dashboard/hints, но больше не ломает операторский ввод;
+  - добавлен regression на этот сценарий:
+    - `test_refresh_combined_dashboard_keeps_manual_inputs_when_only_last_job_exists`;
+  - live Linux panel-smoke этого tranche:
+    - invite `Старт -> Стоп -> Продолжить очередь`:
+      - `/tmp/telegram-resume-retry-live/20260504T111030Z/result.json`
+      - подтверждено, что continuation создаётся из recoverable unified invite context и продолжает `statuses = new/checked`;
+    - invite `Повторить ошибки`:
+      - тот же артефакт;
+      - подтверждено, что retry стартует с `statuses = failed`;
+    - session `Стоп -> Продолжить workflow`:
+      - тот же артефакт;
+      - подтверждено, что один и тот же `session_run` job возвращается в `running`, а затем снова корректно останавливается;
+    - combined `Стоп -> Продолжить workflow`:
+      - `/tmp/telegram-resume-retry-live-postfix/20260504T111649Z/result.json`
+      - подтверждено, что parent combined job `20260504T111659Z-c97dfd4a` продолжился как тот же workflow, а старт пошёл уже из правильного `invite_job_dir = /home/max/telegram_invite_jobs/contact_add__AK__1`;
+    - финальный real auto-send confirm:
+      - `/tmp/telegram-resume-retry-send-confirm.json`
+      - `/home/max/telegram-portable-session-tool/runs/20260504T111811Z-a0435a6f/run.json`
+      - подтверждено `sent_count = 1`, `message_count = 1`, адресат `@M_a_x_i_m_M_i_k_h_a_i_l_o_v`, текст `Позвоню?`;
+  - проверки после tranche:
+    - `python3 -m py_compile tool_platform/*.py tool_platform/platform_adapters/*.py tests/test_tool_platform.py`
+    - `PYTHONPATH="$PWD" python3 -m unittest tests.test_tool_platform` → `66 OK`
+    - `PYTHONPATH="$PWD" python3 -m unittest discover -s tests -p 'test_*.py'` → `248 OK`
+    - `bash -n tools/telegram/platform/bin/tool-platform tools/telegram/platform/bin/tool-platform-panel tools/telegram/session_runner/bin/telegram-session-runner tools/telegram/invite_manager/bin/telegram-invite-manager tools/telegram/invite_manager/bin/telegram-invite-executor`
+    - `./tools/telegram/platform/bin/tool-platform validate-registry`
+    - `./tools/telegram/platform/bin/tool-platform doctor`
+    - `./tools/telegram/platform/bin/tool-platform capabilities`
 
 ## Следующий Приоритет
 1. Для operator workspace:
-   - сделать richer `Resume / Retry / Continue queue` UX поверх уже готового dashboard;
-   - показать human-readable operator hints:
-     - `workflow уже выполняется`;
-     - `можно продолжить`;
-     - `лучше перезапустить`;
-   - усилить invite/session/combined action rows так, чтобы оператору было понятно, что именно продолжится и откуда возьмётся context.
-2. Дочистить thin-client роль `gui.py`:
+   - поднять richer profile history/timeline center поверх уже работающего dashboard;
+   - сделать более сильный artifact center с понятными quick-open и preview-подсказками;
+   - усилить profile workspace block по осям `active / recoverable / last_successful`.
+2. Дочистить selection policy над unified jobs:
+   - проверить, не слишком ли агрессивно старый recoverable workflow перетягивает верхний action hint после свежего completed run;
+   - для session summary отдельно продумать баланс между `recoverable` и `latest successful run`, чтобы dashboard не путал оператора после только что завершённого send-cycle.
+3. Дочистить thin-client роль `gui.py`:
    - ещё сильнее сократить прямой доступ к cached panel-state;
    - использовать unified bucket snapshot как primary readback почти везде;
    - оставить cached panel-state только как compatibility fallback для combined flow.
-3. Для history/artifact center:
-   - поднять более сильный profile timeline center по профилю;
-   - сделать richer artifact center с более явными quick-open и preview-подсказками;
-   - добавить profile workspace block с ещё более явным `active / recoverable / last_successful`.
-4. Для Invite/Desktop: прогнать end-to-end операторский сценарий в панели:
-   - `Старт добавления`;
-   - `Продолжить очередь`;
-   - `Повторить ошибки`;
-   - `Открыть batch json` / `execution record`;
-   чтобы подтвердить уже не только backend batch, но и новый workspace UX.
-5. Для Session/Combined:
+4. Для Session/Combined:
    - добавить более явный human-readable hint в UI, что `Непрерывно до Стопа` останавливает дальнейшее pattern advancement и удерживает workflow в длинной сессии;
    - отдельно усилить session timeline на sent/draft level для operator readback.
+5. Для Invite/Desktop:
+   - поднять чуть более богатый operator readback по `execution_record / batch json / screenshot`, не меняя простую one-screen модель панели.
 6. Для cross-platform core: продолжать adapter-first расширение Windows/macOS через `doctor/capabilities/launch/open-uri/focus/screenshot`, не пытаясь сразу вытащить full Telegram Desktop parity.
 
 ## Как Продолжать Следующему Агенту

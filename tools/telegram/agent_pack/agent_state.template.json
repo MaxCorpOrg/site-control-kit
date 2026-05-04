@@ -1,9 +1,10 @@
 {
   "schema_version": 1,
-  "current_priority": "Воспроизвести и закрыть live баг Совместного режима в Telegram control center.",
+  "current_priority": "Усилить profile history/timeline center и artifact center поверх уже работающего Telegram profile workspace dashboard.",
   "active_risks": [
-    "GUI Combined Mode ещё может расходиться с panel-harness.",
-    "Orchestration add/session/combined всё ещё слишком привязана к gui.py.",
+    "gui.py всё ещё содержит часть readback/UI-связывания и нуждается в дальнейшем истончении поверх workflows.py.",
+    "Resume/Retry слой уже работает, но top action hint всё ещё может предпочитать старый recoverable workflow свежему completed run и путать оператора.",
+    "Artifact center пока open-first и ещё не даёт более сильный history/preview слой по профилю.",
     "Linux live-path сильнее остальных ОС; Windows/macOS пока требуют adapter-first layering."
   ],
   "default_decisions": {
@@ -16,7 +17,10 @@
   "last_verified_artifacts": {
     "project_status": "/home/max/site-control-kit/docs/PROJECT_STATUS_RU.md",
     "supertool_roadmap": "/home/max/site-control-kit/docs/TELEGRAM_SUPERTOOL_ROADMAP_RU.md",
-    "next_chat_prompt": "/home/max/site-control-kit/tools/telegram/NEXT_CHAT_AGENT_PROMPT_RU.md"
+    "next_chat_prompt": "/home/max/site-control-kit/tools/telegram/NEXT_CHAT_AGENT_PROMPT_RU.md",
+    "resume_retry_live": "/tmp/telegram-resume-retry-live/20260504T111030Z/result.json",
+    "combined_resume_live": "/tmp/telegram-resume-retry-live-postfix/20260504T111649Z/result.json",
+    "session_send_confirm": "/tmp/telegram-resume-retry-send-confirm.json"
   },
-  "next_recommended_step": "Снять live лог Combined Mode в реальной панели, затем выносить workflow/job engine из gui.py."
+  "next_recommended_step": "Делать richer profile history/timeline center и artifact center поверх уже готового workspace dashboard; затем пересмотреть баланс active/recoverable/last_successful в верхнем action hint и дальше истончать gui.py."
 }

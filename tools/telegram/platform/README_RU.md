@@ -136,6 +136,18 @@ cd /home/max/site-control-kit/tools/telegram/platform
 - `Совместный режим` не запускает два живых действия на одном Telegram-окне одновременно: сначала завершается contact-add, потом уже стартует сессия;
 - если workflow успел спланироваться, но не дошёл до реального child-step старта, stale `planned` job и stale profile lock теперь автоматически чистятся перед следующим запуском;
 - у `Сессии` и `Совместного режима` есть кнопка `Продолжить workflow`, которая использует unified `resume_workflow()`, а не локальный ручной restart;
+- верхний dashboard и mode screens теперь показывают operator hints поверх unified jobs:
+  - `workflow уже выполняется`
+  - `можно продолжить`
+  - `очередь исчерпана`
+  - `ошибки можно повторить`
+  - `лучше перезапустить`
+- `Продолжить очередь` и `Повторить ошибки` в invite-режиме теперь берут context из latest recoverable unified invite job, а не только из текущего поля `Папка задачи`;
+- `Продолжить workflow` в session-режиме теперь реально продолжает recoverable `session_run` job, а не запускает новый workflow "как будто с нуля";
+- `Продолжить workflow` в combined-режиме продолжает только parent `combined_pattern` job;
+- `Совместный режим` больше не перетирает ручные `Файл контактов / Папка задачи / Шаблон шагов` значениями старого recoverable/completed workflow:
+  - history остаётся в dashboard и hints;
+  - form-state автоматически синхронизируется только от реально активного combined workflow;
 - панель пишет операторский лог действий в `/tmp/telegram-control-center-panel.log`;
 - persistent state для control plane теперь уходит в `~/.site-control-kit/telegram/`:
   - `agent/agent_state.json`
@@ -183,6 +195,15 @@ cd /home/max/site-control-kit/tools/telegram/platform
 - экраны `Добавить контакты`, `Сессия` и `Совместный режим` теперь не дублируют верхний dashboard длинными readback-блоками:
   - сверху остаётся единый profile workspace;
   - ниже в режиме показываются только mode-specific детали;
+- живой Linux smoke последнего tranche подтвердил прямо через `ToolPlatformPanel`:
+  - invite `Старт -> Стоп -> Продолжить очередь`;
+  - invite `Повторить ошибки`;
+  - session `Стоп -> Продолжить workflow`;
+  - combined `Стоп -> Продолжить workflow`;
+  - отдельный real auto-send confirm:
+    - `/home/max/telegram-portable-session-tool/runs/20260504T111811Z-a0435a6f/run.json`
+    - `sent_count = 1`
+    - `text = Позвоню?`
 - `Продолжить workflow` теперь выбирает workflow по unified bucket policy:
   - `active_job`
   - `recoverable_job`

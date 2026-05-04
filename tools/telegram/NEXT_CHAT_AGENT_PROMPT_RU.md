@@ -145,6 +145,16 @@
     - `recoverable_job`
     - `last_job`
   - `Продолжить очередь` / `Повторить ошибки` теперь используют latest recoverable unified invite job context, а не только текущий UI `job_dir`;
+  - следующий tranche `Resume / Retry UX` уже тоже закрыт:
+    - `profile_workspace_snapshot()` теперь отдаёт operator hints:
+      - `resume_hint`
+      - `continue_queue_hint`
+      - `retry_failed_hint`
+      - `next_operator_action`
+    - invite `Продолжить очередь` и `Повторить ошибки` используют latest recoverable unified invite context;
+    - session `Продолжить workflow` реально продолжает recoverable `session_run` job;
+    - combined `Продолжить workflow` продолжает только parent `combined_pattern` job;
+    - stale form override в `Совместном режиме` закрыт: completed/recoverable history больше не перетирает ручные `input_path / invite_job_dir / step_pattern`;
   - timeline anchor для combined readback уже поправлен на `active -> last -> recoverable`, чтобы старый recoverable run не перетирал верхний timeline.
   - верхний блок `3. Workspace профиля` теперь реально перестроен в dashboard:
     - `Профиль и workflow`
@@ -164,6 +174,17 @@
     - `Последний успешный workflow` обновился до только что завершённого job;
     - верхний timeline сразу показал новый parent workflow и его child step;
     - stale подмена старым recoverable workflow больше не воспроизводится.
+  - новые live-артефакты tranche `Resume / Retry UX`:
+    - `/tmp/telegram-resume-retry-live/20260504T111030Z/result.json`
+    - `/tmp/telegram-resume-retry-live-postfix/20260504T111649Z/result.json`
+    - `/tmp/telegram-resume-retry-send-confirm.json`
+    - `/home/max/telegram-portable-session-tool/runs/20260504T111811Z-a0435a6f/run.json`
+  - по реальному panel-smoke подтверждено:
+    - invite `Старт -> Стоп -> Продолжить очередь`;
+    - invite `Повторить ошибки`;
+    - session `Стоп -> Продолжить workflow`;
+    - combined `Стоп -> Продолжить workflow`;
+    - отдельный real auto-send confirm с `sent_count = 1` и `sent: true`.
 
 Что сейчас важно не потерять:
 - session-runner не копировать вручную в site-control-kit без отдельного решения;
@@ -207,13 +228,10 @@
 Текущий логичный следующий шаг:
 - не возвращаться к старому расследованию `не чередует`: этот live-баг уже закрыт;
 - не возвращаться и к старой постановке `сделать timeline/history поверх unified jobs`: базовый operator workspace уже реализован;
+- не возвращаться и к tranche `Resume / Retry / Continue queue`: он уже реализован и подтверждён живыми panel-smoke;
 - двигаться дальше по следующему tranche:
-  - усиливать `Resume / Retry / Continue queue` UX поверх уже готового profile workspace dashboard;
-  - показывать оператору явные hints:
-    - `workflow уже выполняется`
-    - `можно продолжить`
-    - `лучше перезапустить`
   - делать richer history/timeline center по профилю и чуть более сильный artifact center;
+  - пересмотреть баланс `active / recoverable / last_successful` в верхнем action hint, чтобы старый recoverable workflow не путал оператора после только что завершённого run;
   - ещё сильнее утончать `gui.py`, чтобы он оставался thin client над `tool_platform/workflows.py`;
 - параллельно продолжать следующий tranche cross-platform adapters из `docs/TELEGRAM_SUPERTOOL_ROADMAP_RU.md`, не пытаясь сразу вытянуть full Telegram Desktop parity на Windows/macOS.
 
