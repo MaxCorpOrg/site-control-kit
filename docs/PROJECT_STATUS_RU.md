@@ -1190,32 +1190,89 @@
     - `env PYTHONPATH="$PWD" python3 -m tool_platform.gui`
     - окно `Центр управления Telegram` подтверждено через `wmctrl` и `xwininfo`
     - geometry окна: `1460x980`
+- Закрыт реальный live-баг `Совместного режима`, который раньше подхватывал stale combined-state вместо текущих значений из панели:
+  - найдено и исправлено три корневых дефекта:
+    - новый `Старт совместного режима` тащил старый `step_cursor` и мог начинать сразу с шага `2`, если в cached-state уже лежала старая фаза;
+    - cached combined-state мог перетирать текущие operator-вводы (`input_path`, `session_config_path`, `step_pattern`) из UI;
+    - если workflow успевал спланироваться, но падал до реального child-step старта, оставались stale `planned` job и profile lock;
+  - для этого добавлены:
+    - `build_combined_start_context()` в `tool_platform/gui.py`, который всегда начинает новый combined run с текущих UI-значений и `step_cursor=0`;
+    - `cleanup_failed_workflow_start()` в `tool_platform/workflows.py`, который переводит неудачный запуск в recoverable `error` и снимает lock;
+    - stale-lock cleanup внутри `plan_workflow()`, чтобы новый live start автоматически отбрасывал уже завершённый или потерянный lock;
+    - guarded readback в combined dashboard, который больше не перетирает непустые operator-поля stale cached-state, если живого active job нет.
+- Реальный safe no-send live-pass на настоящем `ToolPlatformPanel` теперь подтверждён:
+  - профиль: `AK` / `/home/max/TelegramPortableAK`;
+  - режим: `Совместный режим`;
+  - шаблон: `11,2,1111,22`;
+  - `invite_batch_limit=1`;
+  - `continuous_session=false`;
+  - `auto_send=false`;
+  - фактическая последовательность child steps:
+    - `1` add-contact;
+    - `1` add-contact;
+    - `2` one session cycle;
+    - `1` следующий add-contact;
+  - то есть live GUI реально дал `1 -> 1 -> 2 -> 1`, а не застрял в одном режиме;
+  - после operator stop workflow и lock были корректно возвращены в `stopped` / `locks: {}` без нового stale leak;
+  - артефакты:
+    - `/tmp/telegram-panel-live-safe-combined/result.json`
+    - `/tmp/telegram-control-center-panel.log`
+- Реальный live confirm с автоотправкой внутри combined workflow тоже подтверждён:
+  - шаблон: `121`;
+  - `messages_per_cycle=1`;
+  - `total_message_limit=0` (без лимита, чтобы не упереться в уже накопленный `session_state.json`);
+  - combined workflow реально прошёл:
+    - `1` add-contact;
+    - `2` session run с `auto_send=true`;
+    - `1` следующий add-contact стартовал автоматически;
+  - в свежем session run:
+    - `/home/max/telegram-portable-session-tool/runs/20260504T073345Z-96508eda/run.json`
+    - `sent_count: 1`;
+    - текст: `Хорошего дня!`;
+    - адресат: `@M_a_x_i_m_M_i_k_h_a_i_l_o_v`;
+  - полный panel-level артефакт:
+    - `/tmp/telegram-panel-live-send-combined-final/result.json`
+- Stop-flow в панели усилен:
+  - после operator stop combined/session workflow больше не всплывает ложный modal `showerror` с `command failed with code -15`;
+  - `stop_workflow_job()` теперь обновляет `recent_step` как `stopped`, пишет recoverable `next_hint` и сохраняет человекочитаемый `last_action` (`combined_contact_add_stopped` / `combined_session_stopped`);
+  - combined stop-state теперь годится для честного `Продолжить workflow`, а не выглядит как потерянный running-step.
+- Regression для этого блока расширен:
+  - добавлены tests на:
+    - fresh combined start context без stale cursor;
+    - cleanup неудачного workflow-start с release lock;
+    - auto-release stale terminal lock перед новым `plan_workflow()`;
+    - stop-flow с `recent_step=stopped` и recoverable `next_hint`;
+  - `tests/test_tool_platform.py` теперь изолирует `DEFAULT_WORKFLOW_STATE_ROOT` в temp-root, чтобы combined workflow tests не пачкали реальный `~/.site-control-kit/telegram/panel_state/*` во время regression.
+- Проверки после закрытия live combined bug:
+  - `python3 -m py_compile tool_platform/*.py tool_platform/platform_adapters/*.py tests/test_tool_platform.py`
+  - `PYTHONPATH="$PWD" python3 -m unittest tests.test_tool_platform` → `53 OK`
+  - `PYTHONPATH="$PWD" python3 -m unittest discover -s tests -p 'test_*.py'` → `235 OK`
+  - `bash -n tools/telegram/platform/bin/tool-platform tools/telegram/platform/bin/tool-platform-panel tools/telegram/session_runner/bin/telegram-session-runner tools/telegram/invite_manager/bin/telegram-invite-manager tools/telegram/invite_manager/bin/telegram-invite-executor`
+  - `./tools/telegram/platform/bin/tool-platform validate-registry`
+  - `./tools/telegram/platform/bin/tool-platform doctor`
+  - `./tools/telegram/platform/bin/tool-platform capabilities`
 
 ## Следующий Приоритет
-1. Для Telegram control center: сесть именно в живую GUI-панель и воспроизвести остаточный баг пользователя `не чередует`, но уже на новом workflow/job engine:
-   - `~/.site-control-kit/telegram/panel_state/combined_flows/*`
-   - `~/.site-control-kit/telegram/jobs/index.json`
-   - `~/.site-control-kit/telegram/locks/profiles.json`
-   - `/tmp/telegram-control-center-panel.log`
-2. Если баг подтвердится только в живом окне, искать расхождение уже не в parser-е, а в live lifecycle:
-   - parent combined job;
-   - child step start;
-   - child step complete;
-   - cursor advance;
-   - auto-start next step;
-   - lock acquire/release.
-3. После фикса live combined bug добить вынос остатков operator decision logic из `gui.py`:
-   - status/readback paths для invite/session/combined;
-   - resume/retry UX поверх `resume_workflow()`.
-4. Для operator workspace: поднять отдельный timeline/history center и нормальный artifact center уже поверх unified jobs, а не поверх разрозненных run-state файлов.
-5. Для cross-platform core: продолжать adapter-first расширение Windows/macOS через `doctor/capabilities/launch/open-uri/focus/screenshot`, не пытаясь сразу вытащить full Telegram Desktop parity.
-6. Для Invite/Desktop: прогнать end-to-end операторский сценарий в панели:
+1. Для operator workspace: поднять более явный timeline/history center и отдельный artifact center уже поверх unified jobs, а не поверх разрозненных run-state файлов:
+   - current job summary;
+   - child step timeline;
+   - unified artifact shortcuts;
+   - last successful runs per profile.
+2. Дочистить thin-client роль `gui.py`:
+   - ещё сильнее сократить локальные readback-решения;
+   - переводить invite/session/combined summary на единый job-driven формат;
+   - оставить cached panel-state только как compatibility/readback cache, а не как второй источник truth.
+3. Для resume/retry UX:
+   - сделать более явный `Продолжить workflow` / `Retry failed` / `Continue queue` flow поверх unified job context;
+   - добавить отдельные operator hints, когда workflow можно безопасно resume-ить, а когда лучше стартовать заново.
+4. Для Invite/Desktop: прогнать end-to-end операторский сценарий в панели:
    - `Старт добавления`;
    - `Продолжить очередь`;
    - `Повторить ошибки`;
    - `Открыть batch json` / `execution record`;
    чтобы подтвердить уже не только backend batch, но и новый workspace UX.
-7. Для Session/Combined: добавить более явный human-readable hint в UI, что `Непрерывно до Стопа` останавливает дальнейшее pattern advancement и удерживает workflow в длинной сессии.
+5. Для Session/Combined: добавить более явный human-readable hint в UI, что `Непрерывно до Стопа` останавливает дальнейшее pattern advancement и удерживает workflow в длинной сессии.
+6. Для cross-platform core: продолжать adapter-first расширение Windows/macOS через `doctor/capabilities/launch/open-uri/focus/screenshot`, не пытаясь сразу вытащить full Telegram Desktop parity.
 
 ## Как Продолжать Следующему Агенту
 1. Прочитать `AGENTS.md`.

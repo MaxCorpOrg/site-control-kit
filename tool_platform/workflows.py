@@ -278,6 +278,25 @@ def plan_workflow(
         index_path=index_path,
     )
     if acquire_lock:
+        existing_lock = get_profile_lock(
+            profile_name=profile_name,
+            profile_dir=profile_dir,
+        )
+        if isinstance(existing_lock, dict):
+            existing_job = get_job(str(existing_lock.get("job_id") or ""), index_path=index_path)
+            if existing_job is None or str(existing_job.get("status") or "") in {
+                "completed",
+                "completed_with_errors",
+                "dry_run",
+                "stopped",
+                "error",
+            }:
+                release_profile_lock(
+                    profile_name=profile_name,
+                    profile_dir=profile_dir,
+                    owner_tool_id=str(existing_lock.get("owner_tool_id") or ""),
+                    job_id=str(existing_lock.get("job_id") or ""),
+                )
         lock_result = acquire_profile_lock(
             profile_name=profile_name,
             profile_dir=profile_dir,
@@ -306,6 +325,42 @@ def plan_workflow(
     if normalized_kind == "combined_pattern":
         sync_combined_flow_state_from_job(record)
     return record
+
+
+def cleanup_failed_workflow_start(
+    job_id: str,
+    *,
+    error_text: str,
+    index_path: str | Path = DEFAULT_JOB_INDEX_PATH,
+) -> dict[str, Any]:
+    job = get_job(job_id, index_path=index_path)
+    if job is None:
+        raise KeyError(f"unknown job_id: {job_id}")
+    phase = "review" if str(job.get("workflow_kind") or "") == "combined_pattern" else str(job.get("phase") or "planned")
+    job = update_job(
+        job_id,
+        status="error",
+        phase=phase,
+        summary=str(error_text or "Не удалось запустить workflow"),
+        last_error=str(error_text or "").strip(),
+        recoverable=True,
+        completed=True,
+        context_patch={
+            "phase": phase,
+            "last_status": "error",
+            "last_summary": str(error_text or "Не удалось запустить workflow"),
+        },
+        index_path=index_path,
+    )
+    release_profile_lock(
+        profile_name=str(job.get("profile_name") or ""),
+        profile_dir=str(job.get("profile_dir") or ""),
+        owner_tool_id=str(job.get("tool_id") or ""),
+        job_id=job_id,
+    )
+    if str(job.get("workflow_kind") or "") == "combined_pattern":
+        sync_combined_flow_state_from_job(job)
+    return job
 
 
 def status_workflow(job_id: str, *, index_path: str | Path = DEFAULT_JOB_INDEX_PATH) -> dict[str, Any]:
@@ -910,7 +965,25 @@ def stop_workflow_job(job_id: str, *, summary: str = "Остановлено", i
     if job is None:
         raise KeyError(f"unknown job_id: {job_id}")
     running_step = find_running_step(job)
+    recent_step_patch: dict[str, Any] | None = None
+    last_action = "workflow_stopped"
     if running_step is not None:
+        step_code = str(running_step.get("step_code") or "")
+        recent_step_patch = {
+            "workflow_job_id": job_id,
+            "step_id": str(running_step.get("step_id") or ""),
+            "step_index": int(running_step.get("step_index") or 0),
+            "step_code": step_code,
+            "step_kind": str(running_step.get("step_kind") or ""),
+            "step_status": "stopped",
+            "started_at": str(running_step.get("started_at") or ""),
+            "completed_at": now_utc(),
+            "artifact_paths": dict(running_step.get("artifact_paths") or {}),
+        }
+        if step_code == "1":
+            last_action = "combined_contact_add_stopped"
+        elif step_code == "2":
+            last_action = "combined_session_stopped"
         update_job_step(
             job_id,
             step_id=str(running_step.get("step_id") or ""),
@@ -929,10 +1002,14 @@ def stop_workflow_job(job_id: str, *, summary: str = "Остановлено", i
     if str(job.get("workflow_kind") or "") == "combined_pattern":
         job = update_job(
             job_id,
+            next_hint="Workflow остановлен. Можно продолжить его через `Продолжить workflow` или перезапустить заново.",
+            recoverable=True,
             context_patch={
                 "phase": "stopped",
+                "last_action": last_action,
                 "last_status": "stopped",
                 "last_summary": summary,
+                "recent_step": recent_step_patch or {},
             },
             index_path=index_path,
         )

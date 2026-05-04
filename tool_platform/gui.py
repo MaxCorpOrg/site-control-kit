@@ -79,6 +79,7 @@ from .telegram_profiles import (
     list_portable_profiles,
 )
 from .workflows import (
+    cleanup_failed_workflow_start,
     default_combined_workflow_context,
     complete_workflow_step,
     plan_workflow,
@@ -213,6 +214,29 @@ def format_workflow_jobs_block(
     return "\n".join(lines)
 
 
+def format_workflow_timeline(job: dict[str, Any] | None, *, limit: int = 8) -> str:
+    if not isinstance(job, dict) or not job:
+        return "Workflow timeline\nПока нет шагов."
+    lines = [
+        "Workflow timeline",
+        f"Job: {job.get('job_id') or '-'}",
+        f"Статус: {job.get('status') or '-'} · фаза: {job.get('phase') or '-'}",
+    ]
+    steps = [item for item in job.get("steps") or [] if isinstance(item, dict)]
+    if not steps:
+        lines.append("Child steps пока не зафиксированы.")
+        return "\n".join(lines)
+    lines.append("")
+    for step in steps[-limit:]:
+        lines.append(
+            f"- #{_safe_preview_int(step.get('step_index')) + 1} · "
+            f"код {step.get('step_code') or '-'} · "
+            f"{step.get('step_kind') or '-'} · "
+            f"{step.get('status') or '-'}"
+        )
+    return "\n".join(lines)
+
+
 def format_recent_step_trace(step: dict[str, Any]) -> list[str]:
     if not isinstance(step, dict) or not step:
         return ["Последний шаг engine: пока не зафиксирован."]
@@ -233,6 +257,51 @@ def format_recent_step_trace(step: dict[str, Any]) -> list[str]:
         for key, value in sorted(artifact_paths.items()):
             lines.append(f"  {key}: {value}")
     return lines
+
+
+def build_combined_start_context(
+    *,
+    profile_name: str,
+    profile_dir: str | Path,
+    input_path: str,
+    invite_job_dir: str,
+    session_config_path: str,
+    step_pattern: str,
+    continuous_session: bool,
+    invite_batch_limit: int,
+    account_username: str = "",
+    account_label: str = "",
+    message_settings: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    tokens = parse_combined_step_pattern(step_pattern)
+    if not tokens:
+        raise ValueError("Шаблон совместного режима должен содержать хотя бы один шаг: `1` или `2`.")
+    context = default_combined_workflow_context(profile_name, profile_dir)
+    context.update(
+        {
+            "phase": "contact_add",
+            "step_pattern": str(step_pattern).strip(),
+            "step_cursor": 0,
+            "step_label": combined_step_label(tokens[0]),
+            "input_path": str(input_path).strip(),
+            "invite_job_dir": str(invite_job_dir).strip(),
+            "session_config_path": str(session_config_path).strip(),
+            "last_runtime_config_path": "",
+            "last_action": "combined_manual_start",
+            "last_status": "planned",
+            "last_summary": "",
+            "last_invite_status": "",
+            "last_session_status": "",
+            "last_session_run_dir": "",
+            "continuous_session": bool(continuous_session),
+            "invite_batch_limit": max(0, _safe_preview_int(invite_batch_limit)),
+            "account_username": str(account_username or "").strip(),
+            "account_label": str(account_label or "").strip(),
+            "message_settings": dict(message_settings or {}),
+            "recent_step": {},
+        }
+    )
+    return context
 
 
 def format_workflow_details(tool: ToolManifest) -> str:
@@ -1804,13 +1873,13 @@ if tk is not None:
             if job:
                 self._render_workflow_status(tool_id, job)
                 summary = str(job.get("summary") or "")
-                if error_text:
+                if stopped:
+                    self._log_event(tool_id, f"Остановлено: {action_label}")
+                elif error_text:
                     self._log_event(tool_id, f"Ошибка: {action_label}")
                     self._log_event(tool_id, error_text)
                     if summary:
                         self._log_event(tool_id, summary)
-                elif stopped:
-                    self._log_event(tool_id, f"Остановлено: {action_label}")
                 else:
                     self._log_event(tool_id, f"Завершено: {action_label}")
                     if summary:
@@ -1830,7 +1899,7 @@ if tk is not None:
                 self._active_job_ids.pop(tool_id, None)
                 self._active_job_contexts.pop(tool_id, None)
 
-            if error_text and terminal:
+            if error_text and terminal and not stopped:
                 messagebox.showerror("Панель Telegram", error_text)
                 return
 
@@ -2413,6 +2482,17 @@ if tk is not None:
             )
             session_plan_button.pack(side=tk.LEFT, padx=(10, 0))
             self._register_busy_widget("telegram_session_runner", session_plan_button)
+            session_resume_button = ttk.Button(
+                top_buttons,
+                text="Продолжить workflow",
+                command=lambda: self._resume_workflow_for_tool(
+                    tool_id="telegram_session_runner",
+                    workflow_kind="session_run",
+                    refresh_callback=self._refresh_session_dashboard,
+                ),
+            )
+            session_resume_button.pack(side=tk.LEFT, padx=(10, 0))
+            self._register_busy_widget("telegram_session_runner", session_resume_button)
             session_refresh_button = ttk.Button(
                 top_buttons,
                 text="Обновить экран",
@@ -2698,6 +2778,17 @@ if tk is not None:
             )
             combined_start_button.pack(side=tk.LEFT)
             self._register_busy_widget("telegram_combined_flow", combined_start_button)
+            combined_resume_button = ttk.Button(
+                top_buttons,
+                text="Продолжить workflow",
+                command=lambda: self._resume_workflow_for_tool(
+                    tool_id="telegram_combined_flow",
+                    workflow_kind="combined_pattern",
+                    refresh_callback=self._refresh_combined_dashboard,
+                ),
+            )
+            combined_resume_button.pack(side=tk.LEFT, padx=(10, 0))
+            self._register_busy_widget("telegram_combined_flow", combined_resume_button)
             combined_refresh_button = ttk.Button(
                 top_buttons,
                 text="Обновить экран",
@@ -3396,8 +3487,10 @@ if tk is not None:
                     active_jobs=active_jobs,
                     recent_jobs=recent_jobs,
                 )
+                timeline_block = format_workflow_timeline(recent_jobs[0] if recent_jobs else None)
             except Exception:
                 jobs_block = "Unified jobs режима `Добавить контакты из TXT`\nПрофиль пока не выбран."
+                timeline_block = "Workflow timeline\nПрофиль пока не выбран."
             job_dir_text = self.invite_job_dir_var.get().strip()
             if not job_dir_text:
                 preview_path = self.invite_input_path_var.get().strip()
@@ -3429,7 +3522,7 @@ if tk is not None:
                     self._set_readonly_text(self.invite_failed_text, "Последние ошибки\nОшибок пока нет.")
                     self._set_readonly_text(
                         self.invite_history_text,
-                        jobs_block + "\n\nИстория batch-запусков\nПока нет запусков.",
+                        jobs_block + "\n\n" + timeline_block + "\n\nИстория batch-запусков\nПока нет запусков.",
                     )
                 return
 
@@ -3457,7 +3550,7 @@ if tk is not None:
             self._set_readonly_text(self.invite_failed_text, format_contact_errors(snapshot))
             self._set_readonly_text(
                 self.invite_history_text,
-                jobs_block + "\n\n" + format_contact_history(snapshot),
+                jobs_block + "\n\n" + timeline_block + "\n\n" + format_contact_history(snapshot),
             )
             self.invite_preview_var.set(
                 f"Осталось: {snapshot.get('pending_total') or 0} · добавлено: {snapshot.get('added_total') or 0} · ошибок: {snapshot.get('failed_total') or 0}"
@@ -3471,8 +3564,10 @@ if tk is not None:
                     active_jobs=active_jobs,
                     recent_jobs=recent_jobs,
                 )
+                timeline_block = format_workflow_timeline(recent_jobs[0] if recent_jobs else None)
             except Exception:
                 jobs_block = "Unified jobs режима `Сессия и сообщения`\nПрофиль пока не выбран."
+                timeline_block = "Workflow timeline\nПрофиль пока не выбран."
             snapshot = session_history_snapshot(
                 state_file=DEFAULT_SESSION_STATE_FILE,
                 runs_dir=DEFAULT_SESSION_RUNS_DIR,
@@ -3484,7 +3579,7 @@ if tk is not None:
             )
             self._set_readonly_text(
                 self.session_history_text,
-                jobs_block + "\n\n" + format_session_history(snapshot),
+                jobs_block + "\n\n" + timeline_block + "\n\n" + format_session_history(snapshot),
             )
 
         def _sync_combined_job_dir(self, *_args: object) -> None:
@@ -3660,6 +3755,7 @@ if tk is not None:
                 return
             profile_name = str(profile.get("profile_name") or "")
             profile_dir = str(profile.get("profile_dir") or "")
+            planned: dict[str, Any] | None = None
             try:
                 planned = plan_workflow(
                     workflow_kind=workflow_kind,
@@ -3672,6 +3768,11 @@ if tk is not None:
                 )
                 execution = run_workflow(str(planned.get("job_id") or ""))
             except Exception as exc:
+                if planned is not None:
+                    try:
+                        cleanup_failed_workflow_start(str(planned.get("job_id") or ""), error_text=str(exc))
+                    except Exception:
+                        pass
                 messagebox.showerror("Панель Telegram", f"Не удалось запустить workflow:\n{exc}")
                 return
             command = execution.get("command")
@@ -3692,6 +3793,67 @@ if tk is not None:
                     tool_id,
                     str(((execution.get("step") or {}) if isinstance(execution.get("step"), dict) else {}).get("step_kind") or ""),
                 ),
+            )
+
+        def _resume_candidate_workflow_job(self, workflow_kind: str, *, limit: int = 12) -> dict[str, Any] | None:
+            profile_name, profile_dir = self._selected_profile_identity()
+            jobs = list_jobs(
+                profile_id=profile_id_for(profile_name, profile_dir),
+                workflow_kind=workflow_kind,
+                limit=limit,
+            )
+            for status in ("planned", "stopped", "completed_with_errors", "error"):
+                for item in jobs:
+                    if str(item.get("status") or "") != status:
+                        continue
+                    if status in {"stopped", "completed_with_errors", "error"} and not bool(item.get("recoverable", True)):
+                        continue
+                    return item
+            return None
+
+        def _resume_workflow_for_tool(
+            self,
+            *,
+            tool_id: str,
+            workflow_kind: str,
+            refresh_callback: Callable[[], None],
+        ) -> None:
+            try:
+                candidate = self._resume_candidate_workflow_job(workflow_kind)
+            except Exception as exc:
+                messagebox.showerror("Панель Telegram", f"Не удалось найти workflow для продолжения:\n{exc}")
+                return
+            if candidate is None:
+                messagebox.showinfo("Панель Telegram", "Для этого профиля сейчас нет подходящего workflow для продолжения.")
+                return
+            job_id = str(candidate.get("job_id") or "")
+            try:
+                execution = resume_workflow(job_id)
+            except Exception as exc:
+                messagebox.showerror("Панель Telegram", f"Не удалось продолжить workflow:\n{exc}")
+                return
+            if str(execution.get("status") or "") == "already_running":
+                messagebox.showinfo(
+                    "Панель Telegram",
+                    "Workflow уже помечен как running. Если живой процесс потерян, сначала нажми `Стоп`, потом `Продолжить workflow`.",
+                )
+                refresh_callback()
+                return
+            if str(execution.get("status") or "") == "terminal" or execution.get("command") is None:
+                messagebox.showinfo("Панель Telegram", "Этот workflow уже находится в terminal-состоянии и не требует продолжения.")
+                refresh_callback()
+                return
+            job = dict(execution.get("job") or {}) if isinstance(execution.get("job"), dict) else {}
+            step = dict(execution.get("step") or {}) if isinstance(execution.get("step"), dict) else {}
+            self._start_workflow_process(
+                tool_id=tool_id,
+                workflow_job_id=job_id,
+                command=execution.get("command"),
+                action_label=str(execution.get("action_label") or "продолжение workflow"),
+                profile_dir=str(job.get("profile_dir") or ""),
+                step_kind=str(step.get("step_kind") or ""),
+                refresh_callback=refresh_callback,
+                on_payload_success=self._default_payload_success_handler(tool_id, str(step.get("step_kind") or "")),
             )
 
         def _combined_pattern_tokens(self) -> list[str]:
@@ -3722,43 +3884,29 @@ if tk is not None:
                 messagebox.showinfo("Панель Telegram", "Сначала выбери Telegram-профиль сверху.")
                 return
             try:
-                state = self._load_combined_state()
-                tokens, cursor, step_code = self._combined_current_step(state)
                 job_dir = self._combined_resolved_job_dir()
+                pattern_text = self._combined_pattern_text()
+                tokens = self._combined_pattern_tokens()
+                step_code = tokens[0]
             except Exception as exc:
                 messagebox.showerror("Панель Telegram", f"Не удалось подготовить совместный режим:\n{exc}")
                 return
-            context = default_combined_workflow_context(
-                str(selected_profile.get("profile_name") or ""),
-                str(selected_profile.get("profile_dir") or ""),
-            )
-            context.update(
-                {
-                    "phase": str(state.get("phase") or "contact_add"),
-                    "step_pattern": self._combined_pattern_text(),
-                    "step_cursor": cursor,
-                    "step_label": combined_step_label(step_code),
-                    "input_path": self.combined_input_path_var.get().strip(),
-                    "invite_job_dir": str(job_dir),
-                    "session_config_path": self.session_config_path_var.get().strip(),
-                    "last_runtime_config_path": str(state.get("last_runtime_config_path") or ""),
-                    "last_action": str(state.get("last_action") or ""),
-                    "last_status": str(state.get("last_status") or "idle"),
-                    "last_summary": str(state.get("last_summary") or ""),
-                    "last_invite_status": str(state.get("last_invite_status") or ""),
-                    "last_session_status": str(state.get("last_session_status") or ""),
-                    "last_session_run_dir": str(state.get("last_session_run_dir") or ""),
-                    "continuous_session": bool(self.session_continuous_var.get()),
-                    "invite_batch_limit": _safe_preview_int(self.invite_limit_var.get()),
-                    "account_username": str((selected_profile.get("account") or {}).get("username") or ""),
-                    "account_label": str((selected_profile.get("account") or {}).get("label") or ""),
-                    "message_settings": self._session_message_settings_context(),
-                    "recent_step": dict(state.get("recent_step") or {}) if isinstance(state.get("recent_step"), dict) else {},
-                }
+            context = build_combined_start_context(
+                profile_name=str(selected_profile.get("profile_name") or ""),
+                profile_dir=str(selected_profile.get("profile_dir") or ""),
+                input_path=self.combined_input_path_var.get().strip(),
+                invite_job_dir=str(job_dir),
+                session_config_path=self.session_config_path_var.get().strip(),
+                step_pattern=pattern_text,
+                continuous_session=bool(self.session_continuous_var.get()),
+                invite_batch_limit=_safe_preview_int(self.invite_limit_var.get()),
+                account_username=str((selected_profile.get("account") or {}).get("username") or ""),
+                account_label=str((selected_profile.get("account") or {}).get("label") or ""),
+                message_settings=self._session_message_settings_context(),
             )
             self._log_event(
                 "telegram_combined_flow",
-                f"Старт общего режима: шаг {cursor + 1}/{len(tokens)} по шаблону -> {combined_step_label(step_code)}",
+                f"Старт общего режима: шаг 1/{len(tokens)} по шаблону -> {combined_step_label(step_code)}",
             )
             self._plan_and_start_workflow(
                 tool_id="telegram_combined_flow",
@@ -3827,13 +3975,24 @@ if tk is not None:
             state = self._load_combined_state()
             self.combined_phase_var.set(combined_phase_label(str(state.get("phase") or "contact_add")))
             self.combined_status_var.set(self._combined_status_from_state(state))
-            if state.get("input_path"):
+            try:
+                active_jobs, recent_jobs = self._selected_profile_workflow_jobs("combined_pattern")
+                jobs_block = format_workflow_jobs_block(
+                    title="Unified jobs режима `Совместный режим`",
+                    active_jobs=active_jobs,
+                    recent_jobs=recent_jobs,
+                )
+            except Exception:
+                active_jobs, recent_jobs = ([], [])
+                jobs_block = "Unified jobs режима `Совместный режим`\nПрофиль пока не выбран."
+            sync_from_state = bool(active_jobs)
+            if (sync_from_state or not self.combined_input_path_var.get().strip()) and state.get("input_path"):
                 self.combined_input_path_var.set(str(state.get("input_path") or ""))
-            if state.get("invite_job_dir"):
+            if (sync_from_state or not self.combined_job_dir_var.get().strip()) and state.get("invite_job_dir"):
                 self.combined_job_dir_var.set(str(state.get("invite_job_dir") or ""))
-            if state.get("session_config_path"):
+            if (sync_from_state or not self.session_config_path_var.get().strip()) and state.get("session_config_path"):
                 self.session_config_path_var.set(str(state.get("session_config_path") or ""))
-            if state.get("step_pattern"):
+            if (sync_from_state or not self.combined_step_pattern_var.get().strip()) and state.get("step_pattern"):
                 self.combined_step_pattern_var.set(str(state.get("step_pattern") or ""))
             input_path = self.combined_input_path_var.get().strip()
             invite_snapshot: dict[str, Any] | None = None
@@ -3856,15 +4015,6 @@ if tk is not None:
                 runs_dir=DEFAULT_SESSION_RUNS_DIR,
             )
             preview_context = self._session_preview_context()
-            try:
-                active_jobs, recent_jobs = self._selected_profile_workflow_jobs("combined_pattern")
-                jobs_block = format_workflow_jobs_block(
-                    title="Unified jobs режима `Совместный режим`",
-                    active_jobs=active_jobs,
-                    recent_jobs=recent_jobs,
-                )
-            except Exception:
-                jobs_block = "Unified jobs режима `Совместный режим`\nПрофиль пока не выбран."
             profile_label = format_profile_label(profile)
             self._set_readonly_text(
                 self.combined_state_text,

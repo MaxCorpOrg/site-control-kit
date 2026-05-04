@@ -10,6 +10,7 @@ from tool_platform.agent_state import default_agent_state, ensure_agent_state, l
 from tool_platform.catalog import find_action, find_tool, load_catalog
 from tool_platform.cli import execute_action
 from tool_platform.gui import (
+    build_combined_start_context,
     format_combined_flow_state,
     format_profile_details,
     format_session_operator_summary,
@@ -69,6 +70,7 @@ from tool_platform.telegram_profiles import (
 )
 from tool_platform.workflows import (
     CommandSpec as WorkflowCommandSpec,
+    cleanup_failed_workflow_start,
     combined_state_from_jobs,
     complete_workflow_step,
     default_combined_workflow_context,
@@ -76,10 +78,25 @@ from tool_platform.workflows import (
     plan_workflow,
     resume_workflow,
     run_workflow,
+    stop_workflow_job,
 )
 
 
 class ToolPlatformCatalogTests(unittest.TestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self._workflow_state_tmp = tempfile.TemporaryDirectory()
+        self._workflow_state_patcher = mock.patch(
+            "tool_platform.workflows.DEFAULT_WORKFLOW_STATE_ROOT",
+            Path(self._workflow_state_tmp.name) / "panel_state",
+        )
+        self._workflow_state_patcher.start()
+
+    def tearDown(self) -> None:
+        self._workflow_state_patcher.stop()
+        self._workflow_state_tmp.cleanup()
+        super().tearDown()
+
     def _write_json(self, path: Path, payload: dict) -> None:
         path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -466,11 +483,12 @@ class ToolPlatformCatalogTests(unittest.TestCase):
                     "last_status": "completed",
                 },
             )
-            state = load_combined_flow_state(
-                profile_name="AK",
-                profile_dir="/home/max/TelegramPortableAK",
-                state_root=tmp_dir,
-            )
+            with mock.patch("tool_platform.telegram_gui_helpers.combined_state_from_jobs", return_value=None):
+                state = load_combined_flow_state(
+                    profile_name="AK",
+                    profile_dir="/home/max/TelegramPortableAK",
+                    state_root=tmp_dir,
+                )
             exists_before_cleanup = state_path.exists()
 
         self.assertTrue(exists_before_cleanup)
@@ -1363,6 +1381,40 @@ class ToolPlatformCatalogTests(unittest.TestCase):
         self.assertEqual(running["status"], "already_running")
         self.assertEqual(resumed["status"], "terminal")
 
+    def test_stop_workflow_job_updates_recent_step_and_recoverable_hint(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            index_path = Path(tmp_dir) / "jobs" / "index.json"
+            combined_context = default_combined_workflow_context("AK", "/home/max/TelegramPortableAK")
+            combined_context.update(
+                {
+                    "input_path": "/tmp/users.txt",
+                    "invite_job_dir": "/tmp/job",
+                    "step_pattern": "12",
+                }
+            )
+            with mock.patch("tool_platform.workflows._build_invite_batch_command") as invite_builder:
+                invite_builder.return_value = WorkflowCommandSpec(argv=["python3", "invite.py"], cwd=Path(tmp_dir))
+                planned = plan_workflow(
+                    workflow_kind="combined_pattern",
+                    tool_id="telegram_combined_flow",
+                    profile_name="AK",
+                    profile_dir="/home/max/TelegramPortableAK",
+                    context=combined_context,
+                    summary="Combined planned",
+                    acquire_lock=True,
+                    index_path=index_path,
+                )
+                run_workflow(planned["job_id"], index_path=index_path)
+                stopped = stop_workflow_job(planned["job_id"], summary="Остановлено оператором", index_path=index_path)
+
+        self.assertEqual(stopped["status"], "stopped")
+        self.assertTrue(stopped["recoverable"])
+        self.assertIn("Продолжить workflow", stopped["next_hint"])
+        self.assertEqual(stopped["context"]["last_status"], "stopped")
+        self.assertEqual(stopped["context"]["last_action"], "combined_contact_add_stopped")
+        self.assertEqual(stopped["context"]["recent_step"]["step_status"], "stopped")
+        self.assertTrue(stopped["context"]["recent_step"]["completed_at"])
+
     def test_combined_state_from_jobs_prefers_job_context_over_legacy_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             index_path = Path(tmp_dir) / "jobs" / "index.json"
@@ -1388,6 +1440,138 @@ class ToolPlatformCatalogTests(unittest.TestCase):
         self.assertEqual(state["phase"], "session_ready")
         self.assertEqual(state["step_pattern"], "11,2")
         self.assertEqual(state["step_cursor"], 2)
+
+    def test_build_combined_start_context_resets_cursor_and_uses_current_ui_values(self) -> None:
+        context = build_combined_start_context(
+            profile_name="AK",
+            profile_dir="/home/max/TelegramPortableAK",
+            input_path="/home/max/контакты/1.txt",
+            invite_job_dir="/home/max/telegram_invite_jobs/contact_add__AK__1",
+            session_config_path="/home/max/telegram-portable-session-tool/examples/session.example.json",
+            step_pattern="11,2,1111,22",
+            continuous_session=False,
+            invite_batch_limit=1,
+            account_username="@M_a_g_g_i_e",
+            account_label="@M_a_g_g_i_e",
+            message_settings={
+                "auto_send": False,
+                "messages_per_cycle": 0,
+                "message_targets": [{"kind": "contact", "username": "@M_a_x_i_m_M_i_k_h_a_i_l_o_v"}],
+            },
+        )
+
+        self.assertEqual(context["phase"], "contact_add")
+        self.assertEqual(context["step_pattern"], "11,2,1111,22")
+        self.assertEqual(context["step_cursor"], 0)
+        self.assertEqual(context["step_label"], "добавление контактов")
+        self.assertEqual(context["input_path"], "/home/max/контакты/1.txt")
+        self.assertEqual(context["invite_job_dir"], "/home/max/telegram_invite_jobs/contact_add__AK__1")
+        self.assertEqual(
+            context["session_config_path"],
+            "/home/max/telegram-portable-session-tool/examples/session.example.json",
+        )
+        self.assertEqual(context["last_action"], "combined_manual_start")
+        self.assertEqual(context["last_status"], "planned")
+        self.assertEqual(context["recent_step"], {})
+        self.assertFalse(context["continuous_session"])
+
+    def test_cleanup_failed_workflow_start_marks_job_error_and_releases_lock(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            index_path = Path(tmp_dir) / "jobs" / "index.json"
+            locks_path = Path(tmp_dir) / "locks" / "profiles.json"
+            planned = plan_workflow(
+                workflow_kind="combined_pattern",
+                tool_id="telegram_combined_flow",
+                profile_name="AK",
+                profile_dir="/home/max/TelegramPortableAK",
+                context=default_combined_workflow_context("AK", "/home/max/TelegramPortableAK"),
+                summary="Combined planned",
+                acquire_lock=False,
+                index_path=index_path,
+            )
+            acquire_profile_lock(
+                profile_name="AK",
+                profile_dir="/home/max/TelegramPortableAK",
+                owner_tool_id="telegram_combined_flow",
+                job_id=planned["job_id"],
+                locks_path=locks_path,
+            )
+            with mock.patch("tool_platform.workflows.DEFAULT_JOB_INDEX_PATH", index_path), mock.patch(
+                "tool_platform.workflows.DEFAULT_WORKFLOW_STATE_ROOT",
+                Path(tmp_dir) / "panel_state",
+            ), mock.patch("tool_platform.workflows.release_profile_lock") as release_mock:
+                release_mock.side_effect = lambda **kwargs: release_profile_lock(
+                    locks_path=locks_path,
+                    **kwargs,
+                )
+                cleaned = cleanup_failed_workflow_start(
+                    planned["job_id"],
+                    error_text="boom",
+                    index_path=index_path,
+                )
+
+            lock = get_profile_lock(
+                profile_name="AK",
+                profile_dir="/home/max/TelegramPortableAK",
+                locks_path=locks_path,
+            )
+
+        self.assertEqual(cleaned["status"], "error")
+        self.assertEqual(cleaned["phase"], "review")
+        self.assertEqual(cleaned["last_error"], "boom")
+        self.assertTrue(cleaned["recoverable"])
+        self.assertIsNotNone(cleaned["completed_at"])
+        self.assertIsNone(lock)
+        self.assertEqual(cleaned["context"]["last_status"], "error")
+        self.assertEqual(cleaned["context"]["last_summary"], "boom")
+
+    def test_plan_workflow_releases_stale_terminal_lock_before_acquiring_new_one(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            index_path = Path(tmp_dir) / "jobs" / "index.json"
+            locks_path = Path(tmp_dir) / "locks" / "profiles.json"
+            finished = start_job(
+                tool_id="telegram_combined_flow",
+                workflow_kind="combined_pattern",
+                profile_name="AK",
+                profile_dir="/home/max/TelegramPortableAK",
+                phase="stopped",
+                status="completed",
+                summary="Finished workflow",
+                index_path=index_path,
+            )
+            acquire_profile_lock(
+                profile_name="AK",
+                profile_dir="/home/max/TelegramPortableAK",
+                owner_tool_id="telegram_combined_flow",
+                job_id=finished["job_id"],
+                locks_path=locks_path,
+            )
+            with mock.patch("tool_platform.workflows.get_profile_lock") as get_lock_mock, mock.patch(
+                "tool_platform.workflows.release_profile_lock"
+            ) as release_mock, mock.patch("tool_platform.workflows.acquire_profile_lock") as acquire_mock:
+                get_lock_mock.side_effect = lambda **kwargs: get_profile_lock(locks_path=locks_path, **kwargs)
+                release_mock.side_effect = lambda **kwargs: release_profile_lock(locks_path=locks_path, **kwargs)
+                acquire_mock.side_effect = lambda **kwargs: acquire_profile_lock(locks_path=locks_path, **kwargs)
+                planned = plan_workflow(
+                    workflow_kind="combined_pattern",
+                    tool_id="telegram_combined_flow",
+                    profile_name="AK",
+                    profile_dir="/home/max/TelegramPortableAK",
+                    context=default_combined_workflow_context("AK", "/home/max/TelegramPortableAK"),
+                    summary="Combined planned",
+                    acquire_lock=True,
+                    index_path=index_path,
+                )
+
+            current_lock = get_profile_lock(
+                profile_name="AK",
+                profile_dir="/home/max/TelegramPortableAK",
+                locks_path=locks_path,
+            )
+
+        self.assertEqual(current_lock["job_id"], planned["job_id"])
+        self.assertEqual(current_lock["owner_tool_id"], "telegram_combined_flow")
+        self.assertNotEqual(current_lock["job_id"], finished["job_id"])
 
     def test_profile_locks_detect_conflict_and_force_release(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -1450,11 +1634,12 @@ class ToolPlatformCatalogTests(unittest.TestCase):
                 new_state_root=new_root,
                 legacy_state_root=legacy_root,
             )
-            loaded = load_combined_flow_state(
-                profile_name="AK",
-                profile_dir="/home/max/TelegramPortableAK",
-                state_root=new_root,
-            )
+            with mock.patch("tool_platform.telegram_gui_helpers.combined_state_from_jobs", return_value=None):
+                loaded = load_combined_flow_state(
+                    profile_name="AK",
+                    profile_dir="/home/max/TelegramPortableAK",
+                    state_root=new_root,
+                )
 
         self.assertEqual(migrated["phase"], "session_ready")
         self.assertEqual(loaded["phase"], "session_ready")

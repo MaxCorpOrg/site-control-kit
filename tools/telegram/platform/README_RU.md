@@ -52,6 +52,11 @@ cd /home/max/site-control-kit/tools/telegram/platform
 ./bin/tool-platform capabilities
 ./bin/tool-platform show-agent-state
 ./bin/tool-platform list-jobs
+./bin/tool-platform show-job --job-id <job_id>
+./bin/tool-platform show-artifacts --job-id <job_id>
+./bin/tool-platform stop-job --job-id <job_id>
+./bin/tool-platform resume-job --job-id <job_id>
+./bin/tool-platform profile-health --profile-name AK --profile-dir /home/max/TelegramPortableAK
 ./bin/tool-platform list-locks
 ./bin/tool-platform-panel
 ```
@@ -123,8 +128,13 @@ cd /home/max/site-control-kit/tools/telegram/platform
 - если в `Совместном режиме` выключен флаг непрерывной сессии, панель теперь сама чередует шаги без ручного клика:
   - `добавление контактов -> один session-cycle -> следующий batch контактов -> следующий session-cycle`;
   - цикл продолжается, пока в очереди есть `new/checked` username или пока оператор не нажмёт `Стоп`;
+- это уже подтверждено живыми прогонами на настоящем `ToolPlatformPanel`:
+  - safe no-send сценарий реально дал `1 -> 1 -> 2 -> 1` для шаблона `11,2,1111,22`;
+  - live auto-send сценарий реально дал `1 -> 2 -> 1` для шаблона `121` и не сломал pattern advancement после реальной отправки сообщения;
 - если в `Совместном режиме` включён непрерывный режим сессии, автоматическое чередование дальше не идёт: после шага добавления запускается одна длинная сессия до `Стоп`;
 - `Совместный режим` не запускает два живых действия на одном Telegram-окне одновременно: сначала завершается contact-add, потом уже стартует сессия;
+- если workflow успел спланироваться, но не дошёл до реального child-step старта, stale `planned` job и stale profile lock теперь автоматически чистятся перед следующим запуском;
+- у `Сессии` и `Совместного режима` есть кнопка `Продолжить workflow`, которая использует unified `resume_workflow()`, а не локальный ручной restart;
 - панель пишет операторский лог действий в `/tmp/telegram-control-center-panel.log`;
 - persistent state для control plane теперь уходит в `~/.site-control-kit/telegram/`:
   - `agent/agent_state.json`

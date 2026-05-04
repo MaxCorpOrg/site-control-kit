@@ -44,7 +44,7 @@
   - последние checkpoint commits:
     - `188f2bd` — шаблонный совместный режим Telegram панели
     - `2be8229` — сохранение `step_pattern/step_cursor` в combined-state
-  - смысл текущей точки: Telegram control center уже умеет единый `Совместный режим` с шаблоном шагов `1/2`, но живой GUI-баг пользователя ещё не закрыт
+  - смысл текущей точки: live combined bug уже закрыт на новом workflow/job engine, и текущий приоритет смещён в operator workspace / timeline / artifact center
 - standalone session tool:
   - репозиторий: /home/max/telegram-portable-session-tool
   - ветка: main
@@ -74,8 +74,11 @@
   - `2` = сессия и сообщения;
   - поддерживается шаблон вроде `11,2,1111,22,1,222,1111`;
 - parser шаблона и сохранение `step_pattern/step_cursor` уже починены;
-- panel-harness на самом `ToolPlatformPanel` уже подтвердил, что шаблон с запятыми может давать правильную последовательность шагов;
-- но пользователь всё ещё сообщает, что в реальном GUI это “не чередует”, поэтому считать баг закрытым нельзя.
+- panel-harness на самом `ToolPlatformPanel` уже подтверждал корректную последовательность шагов;
+- теперь и реальная живая панель это подтверждает:
+  - safe no-send live-pass на `ToolPlatformPanel` дал `1 -> 1 -> 2 -> 1` для шаблона `11,2,1111,22`;
+  - live auto-send confirm дал `1 -> 2 -> 1` для шаблона `121` и реально отправил `1` сообщение;
+  - stale `planned` combined job, stale profile lock и ложный modal `showerror(-15)` после stop тоже закрыты.
 - foundation-слой уже начал выноситься из GUI:
 - foundation-слой уже не только начат, но и частично включён в реальный control-plane:
   - versioned agent-pack defaults:
@@ -147,28 +150,13 @@
   - /home/max/telegram-portable-session-tool/*
 
 Текущий логичный следующий шаг:
-- первым делом не добавлять новые фичи, а воспроизвести живой GUI-баг пользователя в `Совместном режиме` уже на новом workflow/job engine;
-- проверить именно реальную панель, а не только panel-harness:
-  - какой шаблон введён;
-  - что лежит в `~/.site-control-kit/telegram/panel_state/combined_flows/AK__TelegramPortableAK.json`;
-  - что попало в `~/.site-control-kit/telegram/jobs/index.json`;
-  - что попало в `~/.site-control-kit/telegram/locks/profiles.json`;
-  - что пишет `/tmp/telegram-control-center-panel.log`;
-  - какая фактическая последовательность:
-    - child step start;
-    - child step complete;
-    - cursor advance;
-    - auto-start next step;
-    - lock acquire/release;
-- если баг подтверждается только в реальном окне, искать расхождение между:
-  - live Tk event flow;
-  - unified job record;
-  - cached combined flow state;
-  - live subprocess lifecycle;
-- только после этого продолжать:
-  - resume/retry UX поверх `resume_workflow()`;
-  - отдельный artifact center / history center;
-  - следующий tranche cross-platform adapters из `docs/TELEGRAM_SUPERTOOL_ROADMAP_RU.md`.
+- не возвращаться к старому расследованию `не чередует`: этот live-баг уже закрыт;
+- двигаться дальше по unified operator workspace:
+  - поднимать отдельный timeline/history center поверх unified jobs;
+  - делать отдельный artifact center по профилю;
+  - усиливать `Resume / Retry / Continue queue` UX поверх `resume_workflow()` и unified context;
+  - ещё сильнее утончать `gui.py`, чтобы он оставался thin client над `tool_platform/workflows.py`;
+- параллельно продолжать следующий tranche cross-platform adapters из `docs/TELEGRAM_SUPERTOOL_ROADMAP_RU.md`, не пытаясь сразу вытянуть full Telegram Desktop parity на Windows/macOS.
 
 Как работать:
 - сначала восстанови контекст по этим файлам, потом меняй код;
