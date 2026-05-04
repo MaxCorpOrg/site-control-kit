@@ -30,6 +30,7 @@ Low-level helper и export остаются в registry и CLI, но не зас
 - `AGENT_GUIDE_RU.md` — как агенту развивать platform layer;
 - `docs/ARCHITECTURE_RU.md` — архитектура registry/panel;
 - `docs/INTEGRATION_GUIDE_RU.md` — как подключать новый инструмент;
+- `/home/max/site-control-kit/docs/TELEGRAM_SUPERTOOL_ROADMAP_RU.md` — стратегический roadmap следующего этапа развития;
 - `bin/tool-platform` — CLI доступа к catalog;
 - `bin/tool-platform-panel` — Tkinter GUI-панель.
 

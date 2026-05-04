@@ -88,6 +88,7 @@
 - /home/max/site-control-kit/tools/telegram/README_RU.md
 - /home/max/site-control-kit/tools/telegram/platform/README_RU.md
 - /home/max/site-control-kit/docs/PROJECT_STATUS_RU.md
+- /home/max/site-control-kit/docs/TELEGRAM_SUPERTOOL_ROADMAP_RU.md
 
 Если задача про panel/control center, куда лезть:
 - /home/max/site-control-kit/tool_platform/gui.py
@@ -118,7 +119,7 @@
   - live Tk event flow;
   - сохранённым combined-state;
   - `_start_json_command` / `_complete_json_command`;
-- только после этого продолжать UX-полировку.
+- только после этого продолжать UX-полировку и стратегические шаги из `docs/TELEGRAM_SUPERTOOL_ROADMAP_RU.md`.
 
 Как работать:
 - сначала восстанови контекст по этим файлам, потом меняй код;

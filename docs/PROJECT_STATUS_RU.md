@@ -242,6 +242,15 @@
   - общая панель читает manifests и orchestration metadata;
   - session-runner виден из Telegram-хаба как отдельная единица, даже если runtime остаётся в standalone repo.
   - для нового агента теперь есть отдельная точка входа `tools/telegram/NEXT_CHAT_AGENT_PROMPT_RU.md`, зафиксированная именно на текущем checkpoint.
+- Для следующего стратегического слоя добавлен отдельный roadmap:
+  - `docs/TELEGRAM_SUPERTOOL_ROADMAP_RU.md`
+  - он фиксирует целевую архитектуру супер-инструмента без потери текущего practical focus;
+  - ключевые направления там такие:
+    - вынести orchestration-логику из `tool_platform/gui.py`;
+    - ввести unified job index;
+    - собрать profile-centric workspace;
+    - поднять observability до timeline / artifact index / health center;
+    - готовить основу под scheduler / scenario builder / headless API / tool SDK.
 
 ### Безопасность данных Telegram
 - Введены `identity_history.json`, `review.txt`, `conflicts.json` и quarantine-логика.
@@ -1085,6 +1094,7 @@
 11. Разделить browser capability/runtime compatibility и Telegram export concerns в отдельные модули/слои.
 12. Отделить понятие `best-known latest` от `most-recent run` в UI и документации, если пользователю важно видеть именно последний прогон как основной артефакт.
 13. Декомпозировать `export_telegram_members_non_pii.py` на модули.
+14. После стабилизации live `Совместного режима` переходить к шагам из `docs/TELEGRAM_SUPERTOOL_ROADMAP_RU.md`, начиная с вынесения orchestration-логики из `tool_platform/gui.py`.
 
 ## Как Продолжать Следующему Агенту
 1. Прочитать `AGENTS.md`.
