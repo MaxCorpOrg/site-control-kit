@@ -4,6 +4,7 @@
 
 Здесь собраны:
 - `platform/` — Telegram control center и registry-driven panel;
+- `agent_pack/` — агентский runbook, defaults и machine-readable entry layer;
 - `invite_manager/` — consent-based invite и add-contact flow;
 - `portable_helper/` — low-level Telegram Desktop portable helper;
 - `export/` — Telegram export pipeline и batch/chain entrypoints;
@@ -19,6 +20,7 @@ cd /home/max/site-control-kit/tools/telegram
 
 Потом:
 - `NEXT_CHAT_AGENT_PROMPT_RU.md`
+- `agent_pack/README_RU.md`
 - `platform/README_RU.md`
 - `invite_manager/README.md`
 - `portable_helper/README_RU.md`
@@ -29,6 +31,8 @@ cd /home/max/site-control-kit/tools/telegram
 
 ### `platform/`
 - единый Telegram catalog;
+- platform-aware manifests и capability matrix;
+- unified jobs / profile locks / doctor / capabilities CLI foundation;
 - manifests;
 - GUI control panel;
 - выбор portable-пользователей из выпадающего списка;
@@ -69,5 +73,9 @@ Backend-код по-прежнему может жить в `scripts/`, `tool_pl
 Если нужно продолжить работу ровно с текущего checkpoint, начинать нужно с:
 
 - `tools/telegram/NEXT_CHAT_AGENT_PROMPT_RU.md`
+- `tools/telegram/agent_pack/README_RU.md`
+- `tools/telegram/agent_pack/VERIFICATION_MATRIX_RU.md`
+- `tools/telegram/agent_pack/agent_state.template.json`
+- `~/.site-control-kit/telegram/agent/agent_state.json`
 
 Это не общая справка по проекту, а зафиксированная точка продолжения именно с текущего состояния Telegram control center.

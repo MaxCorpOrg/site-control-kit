@@ -51,6 +51,16 @@
     "safe_snapshots",
     "chain_runner"
   ],
+  "supported_platforms": [
+    "linux",
+    "windows",
+    "macos"
+  ],
+  "required_capabilities": [],
+  "degraded_modes": {
+    "windows": "Browser bridge и export pipeline допускаются, но Linux-specific X11 fallback отсутствует.",
+    "macos": "Browser bridge и export pipeline допускаются, но Linux-specific X11 fallback отсутствует."
+  },
   "tags": [
     "telegram",
     "export",

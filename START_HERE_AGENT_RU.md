@@ -49,6 +49,7 @@
 13. если задача про Linux Telegram Desktop profile из `tdata.zip`: `docs/TELEGRAM_PORTABLE_RU.md`
 14. если задача про Telegram control center или подключение новых инструментов: `tools/telegram/platform/README_RU.md` и `tools/telegram/platform/AGENT_GUIDE_RU.md`
 15. если задача вообще про Telegram operator layer: `tools/telegram/NEXT_CHAT_AGENT_PROMPT_RU.md`, потом `tools/telegram/README_RU.md` и `tools/telegram/AGENT_GUIDE_RU.md`
+16. если задача про текущий Telegram control plane: `tools/telegram/agent_pack/README_RU.md`, `tools/telegram/agent_pack/VERIFICATION_MATRIX_RU.md`, `tools/telegram/agent_pack/agent_state.template.json`, затем `~/.site-control-kit/telegram/agent/agent_state.json`
 
 ## Что Нужно Понять До Любых Правок
 До правок ты обязан ответить себе на четыре вопроса:

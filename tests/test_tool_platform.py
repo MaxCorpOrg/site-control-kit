@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from tool_platform.agent_state import default_agent_state, ensure_agent_state, load_agent_state, save_agent_state
 from tool_platform.catalog import find_action, find_tool, load_catalog
 from tool_platform.cli import execute_action
 from tool_platform.gui import (
@@ -14,7 +15,23 @@ from tool_platform.gui import (
     format_session_operator_summary,
     format_workflow_details,
 )
+from tool_platform.jobs import (
+    finish_job,
+    get_job,
+    list_jobs,
+    profile_id_for,
+    profile_workspace_snapshot,
+    start_job,
+)
+from tool_platform.locks import (
+    acquire_profile_lock,
+    force_release_profile_lock,
+    get_profile_lock,
+    release_profile_lock,
+)
+from tool_platform.platform_adapters import current_platform_id, platform_doctor_report
 from tool_platform.telegram_gui_helpers import (
+    DEFAULT_PANEL_STATE_ROOT,
     active_profile_conflict,
     build_session_runtime_config,
     combined_contact_add_transition,
@@ -46,6 +63,7 @@ from tool_platform.telegram_profiles import (
     import_tdata_profile,
     list_portable_profiles,
 )
+from tool_platform.workflows import migrate_legacy_combined_state
 
 
 class ToolPlatformCatalogTests(unittest.TestCase):
@@ -210,6 +228,43 @@ class ToolPlatformCatalogTests(unittest.TestCase):
             self.assertEqual(result["status"], "dry_run")
             self.assertIn("echo hello", result["command"])
 
+    def test_catalog_loads_platform_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            manifest_dir = root / "tool"
+            registry_dir = root / "registry"
+            manifest_dir.mkdir()
+            registry_dir.mkdir()
+            manifest_path = manifest_dir / "tool_manifest.json"
+            registry_path = registry_dir / "tools.json"
+
+            self._write_json(
+                manifest_path,
+                {
+                    "schema_version": 1,
+                    "tool_id": "platform_tool",
+                    "display_name": "Platform Tool",
+                    "root_dir": ".",
+                    "supported_platforms": ["linux"],
+                    "required_capabilities": ["window_automation"],
+                    "degraded_modes": {"windows": "read-only"},
+                    "actions": [],
+                },
+            )
+            self._write_json(
+                registry_path,
+                {
+                    "schema_version": 1,
+                    "tools": [{"manifest_path": str(manifest_path), "enabled": True}],
+                },
+            )
+
+            tool = find_tool(load_catalog(registry_path), "platform_tool")
+
+        self.assertEqual(tool.supported_platforms, ("linux",))
+        self.assertEqual(tool.required_capabilities, ("window_automation",))
+        self.assertEqual(tool.degraded_modes, {"windows": "read-only"})
+
     def test_format_profile_label_prefers_account_label_and_running_state(self) -> None:
         self.assertEqual(
             format_profile_label(
@@ -337,6 +392,9 @@ class ToolPlatformCatalogTests(unittest.TestCase):
                         }
                     ],
                     "capabilities": ["alpha", "beta"],
+                    "supported_platforms": ["linux"],
+                    "required_capabilities": ["window_automation"],
+                    "degraded_modes": {"windows": "docs only"},
                     "tags": ["telegram", "demo"],
                     "artifacts": {"runs_dir": "runs"},
                 },
@@ -357,6 +415,7 @@ class ToolPlatformCatalogTests(unittest.TestCase):
         self.assertIn("Readable workflow summary", details)
         self.assertIn("- README:", details)
         self.assertIn("- runs_dir: runs", details)
+        self.assertIn("Поддерживаемые ОС: linux", details)
 
     def test_default_invite_job_dir_uses_chat_fragment_slug(self) -> None:
         result = default_invite_job_dir(
@@ -947,6 +1006,126 @@ class ToolPlatformCatalogTests(unittest.TestCase):
         self.assertIn("--launch-if-needed", spec.argv)
         self.assertIn("--auto-send", spec.argv)
         self.assertIn("--continuous", spec.argv)
+
+    def test_agent_state_roundtrip_uses_persistent_defaults(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            state_path = Path(tmp_dir) / "agent_state.json"
+            ensure_agent_state(state_path)
+            payload = load_agent_state(state_path)
+            payload["next_recommended_step"] = "Run doctor first"
+            save_agent_state(payload, state_path)
+            updated = load_agent_state(state_path)
+
+        self.assertEqual(updated["next_recommended_step"], "Run doctor first")
+        self.assertEqual(updated["default_decisions"]["platform_support"], "tiered")
+
+    def test_job_index_start_finish_and_workspace_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            index_path = Path(tmp_dir) / "jobs" / "index.json"
+            started = start_job(
+                tool_id="telegram_session_runner",
+                profile_name="AK",
+                profile_dir="/home/max/TelegramPortableAK",
+                phase="session_running",
+                summary="Running session",
+                index_path=index_path,
+            )
+            finish_job(
+                started["job_id"],
+                payload={"status": "completed", "run_dir": "/tmp/run-1", "summary": "Done"},
+                fallback_phase="session_running",
+                index_path=index_path,
+            )
+            record = get_job(started["job_id"], index_path)
+            workspace = profile_workspace_snapshot(
+                profile_name="AK",
+                profile_dir="/home/max/TelegramPortableAK",
+                index_path=index_path,
+            )
+
+        self.assertIsNotNone(record)
+        assert record is not None
+        self.assertEqual(record["status"], "completed")
+        self.assertEqual(record["artifact_paths"]["run_dir"], "/tmp/run-1")
+        self.assertEqual(workspace["profile_id"], profile_id_for("AK", "/home/max/TelegramPortableAK"))
+        self.assertEqual(workspace["last_successful_job"]["job_id"], started["job_id"])
+
+    def test_profile_locks_detect_conflict_and_force_release(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            locks_path = Path(tmp_dir) / "locks.json"
+            first = acquire_profile_lock(
+                profile_name="AK",
+                profile_dir="/home/max/TelegramPortableAK",
+                owner_tool_id="telegram_invite_manager",
+                job_id="job-1",
+                locks_path=locks_path,
+            )
+            second = acquire_profile_lock(
+                profile_name="AK",
+                profile_dir="/home/max/TelegramPortableAK",
+                owner_tool_id="telegram_session_runner",
+                job_id="job-2",
+                locks_path=locks_path,
+            )
+            current = get_profile_lock(
+                profile_name="AK",
+                profile_dir="/home/max/TelegramPortableAK",
+                locks_path=locks_path,
+            )
+            released = release_profile_lock(
+                profile_name="AK",
+                profile_dir="/home/max/TelegramPortableAK",
+                owner_tool_id="telegram_invite_manager",
+                job_id="job-1",
+                locks_path=locks_path,
+            )
+            force_release_profile_lock(
+                profile_name="AK",
+                profile_dir="/home/max/TelegramPortableAK",
+                locks_path=locks_path,
+            )
+
+        self.assertTrue(first["acquired"])
+        self.assertFalse(second["acquired"])
+        self.assertEqual(current["owner_tool_id"], "telegram_invite_manager")
+        self.assertTrue(released)
+
+    def test_migrate_legacy_combined_state_copies_tmp_state_into_persistent_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            legacy_root = Path(tmp_dir) / "legacy"
+            new_root = Path(tmp_dir) / "new"
+            legacy_path = combined_flow_state_path(
+                profile_name="AK",
+                profile_dir="/home/max/TelegramPortableAK",
+                state_root=legacy_root,
+            )
+            legacy_path.parent.mkdir(parents=True, exist_ok=True)
+            legacy_path.write_text(
+                json.dumps({"phase": "session_ready", "step_pattern": "12"}, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+
+            migrated = migrate_legacy_combined_state(
+                profile_name="AK",
+                profile_dir="/home/max/TelegramPortableAK",
+                new_state_root=new_root,
+                legacy_state_root=legacy_root,
+            )
+            loaded = load_combined_flow_state(
+                profile_name="AK",
+                profile_dir="/home/max/TelegramPortableAK",
+                state_root=new_root,
+            )
+
+        self.assertEqual(migrated["phase"], "session_ready")
+        self.assertEqual(loaded["phase"], "session_ready")
+        self.assertEqual(loaded["step_pattern"], "12")
+
+    def test_platform_doctor_report_contains_current_platform_and_capabilities(self) -> None:
+        report = platform_doctor_report()
+        self.assertEqual(report["current_platform_id"], current_platform_id())
+        self.assertIn("capabilities", report)
+        self.assertIn("gui", report["capabilities"])
 
 
 if __name__ == "__main__":

@@ -259,6 +259,7 @@ DOM-команды:
 13. Для задач про Linux Telegram Desktop portable-профили и `tdata.zip` дополнительно: `docs/TELEGRAM_PORTABLE_RU.md`.
 14. Для задач про unified tool platform дополнительно: `tools/telegram/platform/README_RU.md` и `tools/telegram/platform/AGENT_GUIDE_RU.md`.
 15. Для Telegram-operator структуры в целом дополнительно: `tools/telegram/README_RU.md` и `tools/telegram/AGENT_GUIDE_RU.md`.
+16. Для текущего Telegram control plane дополнительно: `tools/telegram/agent_pack/README_RU.md`, `tools/telegram/agent_pack/VERIFICATION_MATRIX_RU.md`, `tools/telegram/agent_pack/agent_state.template.json` и runtime state `~/.site-control-kit/telegram/agent/agent_state.json`.
 
 Запрещено начинать изменения в коде, не просмотрев `docs/PROJECT_STATUS_RU.md`. Этот файл нужен, чтобы новый чат или новый агент не дублировал уже закрытые задачи и видел текущие дыры.
 

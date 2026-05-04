@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "current_priority": "Воспроизвести и закрыть live баг Совместного режима в Telegram control center.",
+  "active_risks": [
+    "GUI Combined Mode ещё может расходиться с panel-harness.",
+    "Orchestration add/session/combined всё ещё слишком привязана к gui.py.",
+    "Linux live-path сильнее остальных ОС; Windows/macOS пока требуют adapter-first layering."
+  ],
+  "default_decisions": {
+    "agent_model": "runbook_plus_orchestration",
+    "platform_support": "tiered",
+    "first_major_stage_after_bugfix": "workflow_engine_and_job_store",
+    "session_runner_runtime": "standalone_repo_contract",
+    "persistent_state_root": "~/.site-control-kit/telegram"
+  },
+  "last_verified_artifacts": {
+    "project_status": "/home/max/site-control-kit/docs/PROJECT_STATUS_RU.md",
+    "supertool_roadmap": "/home/max/site-control-kit/docs/TELEGRAM_SUPERTOOL_ROADMAP_RU.md",
+    "next_chat_prompt": "/home/max/site-control-kit/tools/telegram/NEXT_CHAT_AGENT_PROMPT_RU.md"
+  },
+  "next_recommended_step": "Снять live лог Combined Mode в реальной панели, затем выносить workflow/job engine из gui.py."
+}

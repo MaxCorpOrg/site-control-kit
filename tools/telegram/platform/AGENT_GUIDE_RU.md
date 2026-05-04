@@ -24,6 +24,10 @@
 4. `tool_platform/cli.py`
 5. `tool_platform/gui.py`
 6. `tool_platform/telegram_profiles.py`
+7. `tool_platform/jobs.py`
+8. `tool_platform/locks.py`
+9. `tool_platform/workflows.py`
+10. `tool_platform/platform_adapters/*`
 
 ## Как Добавлять Новый Инструмент
 
@@ -35,6 +39,9 @@
    - `root_dir`
    - docs paths
    - operator actions
+   - `supported_platforms`
+   - `required_capabilities`
+   - `degraded_modes`
 4. Добавить путь к manifest в `registry/tools.json`.
 5. Обновить `README_RU.md`, если инструмент значимый для оператора.
 6. Если инструмент использует Telegram Desktop portable actor, подумать, нужен ли ему выбор профиля из общей панели, а не отдельная форма.
@@ -83,9 +90,17 @@
 Его текущий контракт:
 - работает только на одном выбранном portable-профиле;
 - не пытается крутить два живых действия на одном Telegram-окне одновременно;
-- сначала запускает batch-добавление контактов;
-- затем, после полного успеха или явного разрешения оператора, запускает session runner;
+- использует один общий `Старт совместного режима`, а не две ручные кнопки;
+- берёт шаги из шаблона:
+  - `1` = batch-добавление контактов;
+  - `2` = session runner;
+- по умолчанию крутит pattern-цепочку автоматически, пока есть очередь или пока оператор не нажмёт `Стоп`;
 - хранит своё panel-only состояние отдельно и восстанавливает summary после перезапуска панели.
+- parallel foundation уже начала выноситься в persistent control-plane:
+  - unified jobs;
+  - profile locks;
+  - platform adapters;
+  - persistent combined state под `~/.site-control-kit/telegram/`.
 
 Если агент меняет этот режим, он обязан сохранить:
 - жёсткий guard от одновременного запуска двух live-процессов на один профиль;
@@ -96,6 +111,7 @@
 
 - Нельзя ломать standalone-режим инструмента ради unified panel.
 - Нельзя превращать platform layer в место, где живёт Telegram-specific runtime logic.
+- Нельзя снова размазывать orchestration по `gui.py`, если её можно вынести в jobs/workflows.
 - Нельзя плодить отдельные сложные экраны там, где хватает простого profile-first управления и двух понятных режимов.
 
 ## Следующий Масштабируемый Шаг

@@ -1,6 +1,6 @@
 # Project Status RU
 
-Последнее обновление: 2026-05-03
+Последнее обновление: 2026-05-04
 
 Этот файл нужен как точка входа для любого нового чата и любого нового агента.
 Перед новой задачей его нужно прочитать целиком.
@@ -251,6 +251,48 @@
     - собрать profile-centric workspace;
     - поднять observability до timeline / artifact index / health center;
     - готовить основу под scheduler / scenario builder / headless API / tool SDK.
+- Начато реальное внедрение foundation-слоя из этого roadmap:
+  - agent-layer:
+    - `tool_platform/agent_state.py`
+    - `tools/telegram/agent_pack/README_RU.md`
+    - `tools/telegram/agent_pack/PLAYBOOK_RU.md`
+    - `tools/telegram/agent_pack/VERIFICATION_MATRIX_RU.md`
+    - `tools/telegram/agent_pack/agent_state.template.json`
+    - persistent state: `~/.site-control-kit/telegram/agent/agent_state.json`
+  - unified jobs:
+    - `tool_platform/jobs.py`
+    - persistent index: `~/.site-control-kit/telegram/jobs/index.json`
+  - profile locks:
+    - `tool_platform/locks.py`
+    - persistent locks: `~/.site-control-kit/telegram/locks/profiles.json`
+  - workflow-state foundation:
+    - `tool_platform/workflows.py`
+    - persistent combined-state: `~/.site-control-kit/telegram/panel_state/combined_flows/*`
+    - есть односторонняя миграция legacy combined-state из `/tmp/telegram-control-center/*`
+  - platform adapters:
+    - `tool_platform/platform_adapters/*`
+    - Linux / Windows / macOS capability reports
+  - `tool_platform/cli.py` теперь умеет:
+    - `doctor`
+    - `capabilities`
+    - `show-agent-state`
+    - `list-jobs`
+    - `show-job`
+    - `list-locks`
+  - `tool_manifest.json` инструментов теперь знает:
+    - `supported_platforms`
+    - `required_capabilities`
+    - `degraded_modes`
+  - GUI уже частично подключён к новому control-plane foundation:
+    - создаёт persistent jobs для panel actions;
+    - ставит и снимает persistent profile locks;
+    - показывает workspace summary по профилю;
+    - пишет persistent combined state не в legacy `/tmp`, а под user state root;
+    - session runtime configs теперь тоже идут под persistent state root.
+  - Linux capability model для Telegram Desktop live-lane теперь выровнена с реальным runtime:
+    - `window_automation` считается по `DISPLAY + wmctrl + python3-xlib`;
+    - `xdotool` больше не является ложным hard requirement для Telegram panel gating;
+    - `tool-platform doctor` и `tool-platform capabilities` теперь честно показывают поддержку Linux live-path без ложного disable основных режимов.
 
 ### Безопасность данных Telegram
 - Введены `identity_history.json`, `review.txt`, `conflicts.json` и quarantine-логика.
@@ -317,6 +359,20 @@
   - при открытии такой страницы расширение вызывает `chrome.runtime.reload()` само.
 
 ## Проверено
+- После foundation-слоя Telegram supertool дополнительно подтверждены:
+  - `python3 -m py_compile tool_platform/*.py tool_platform/platform_adapters/*.py scripts/telegram_portable.py scripts/telegram_invite_executor.py`
+  - `PYTHONPATH="$PWD" python3 -m unittest tests.test_tool_platform` → `42 OK`
+  - `PYTHONPATH="$PWD" python3 -m unittest discover -s tests -p 'test_*.py'` → `224 OK`
+  - `bash -n tools/telegram/platform/bin/tool-platform tools/telegram/platform/bin/tool-platform-panel tools/telegram/session_runner/bin/telegram-session-runner tools/telegram/invite_manager/bin/telegram-invite-manager tools/telegram/invite_manager/bin/telegram-invite-executor`
+  - `./tools/telegram/platform/bin/tool-platform validate-registry`
+  - `./tools/telegram/platform/bin/tool-platform doctor`
+  - `./tools/telegram/platform/bin/tool-platform capabilities`
+  - `./tools/telegram/platform/bin/tool-platform show-agent-state`
+  - GUI smoke после перевода на persistent control-plane:
+    - `env PYTHONPATH="$PWD" python3 -m tool_platform.gui`
+    - окно `Центр управления Telegram` подтвердилось через `wmctrl -lx` и `xwininfo`
+    - geometry: `1488x1046`
+    - после smoke окно было корректно закрыто, без оставшегося процесса.
 - После перевода Telegram control center в русский двухрежимный UX подтверждены:
   - `python3 -m py_compile tool_platform/*.py scripts/telegram_portable.py scripts/telegram_invite_executor.py scripts/telegram_invite_manager.py`
   - `PYTHONPATH="$PWD" python3 -m unittest discover -s tests -p 'test_*.py'` → `199 OK`
@@ -1074,27 +1130,30 @@
   - это значит, что mention/deep снова приносит новые реальные username, а не только восстанавливает старые знания из истории, и делает это батчем, а не по одному peer.
 
 ## Следующий Приоритет
-1. Для Invite/Desktop: держать основным рабочим путём `site-control-kit` / Telegram Web flow (`open-chat -> inspect-chat -> add-contact`) и не подменять его Desktop-guessing path.
-2. Для Invite/Desktop: прогнать новый operator flow `Старт добавления -> Продолжить очередь -> Повторить ошибки` уже на панели, чтобы подтвердить не только backend batch, но и новый summary/retry UX end-to-end.
-3. Для Telegram control center: сесть именно в живую GUI-панель и воспроизвести баг пользователя `не чередует`, даже если panel-harness уже показывает правильный шаблон.
-4. Для Telegram control center: при воспроизведении сохранить:
-   - `/tmp/telegram-control-center-panel.log`;
-   - текущий `/tmp/telegram-control-center/combined_flows/AK__TelegramPortableAK.json`;
-   - последовательность реальных start/stop шагов;
-   - конкретный шаблон, который был введён оператором.
-5. Для Telegram control center: если баг подтвердится только в живом UI, искать расхождение между:
+1. Для Telegram control center: сесть именно в живую GUI-панель и воспроизвести баг пользователя `не чередует`, но уже на новом persistent control-plane:
+   - `~/.site-control-kit/telegram/panel_state/combined_flows/*`
+   - `~/.site-control-kit/telegram/jobs/index.json`
+   - `~/.site-control-kit/telegram/locks/profiles.json`
+   - `/tmp/telegram-control-center-panel.log`
+2. Для Telegram control center: если баг подтвердится только в живом UI, искать расхождение между:
    - panel-harness;
    - сохранённым combined-state;
+   - unified jobs/profile locks;
    - фактическим live subprocess lifecycle в `_start_json_command` / `_complete_json_command`.
-6. Для Telegram control center: добавить быстрые кнопки `Открыть последний batch json`, `Открыть последний session run`, `Открыть последний screenshot`, если оператору станет тесно в текущем summary-режиме.
-7. Для Telegram control center: вывести в отдельный маленький блок явное предупреждение, что `Непрерывно до Стопа` отключает дальнейшее автоматическое чередование и удерживает панель в одном session-run.
-8. Для Telegram control center: проверить глазами на реальном операторском сценарии, хватает ли нового summary-блока без прокрутки, или нужно ещё сильнее укрупнить шрифт и сократить технические поля.
-9. Снизить runtime-затраты discovery относительно deep, чтобы multi-peer deep чаще успевал проходить следующий слой visible peer.
-10. Поднять приоритеты deep-target'ов: раньше брать тех peer, у кого вероятность успешного `Mention` выше.
-11. Разделить browser capability/runtime compatibility и Telegram export concerns в отдельные модули/слои.
-12. Отделить понятие `best-known latest` от `most-recent run` в UI и документации, если пользователю важно видеть именно последний прогон как основной артефакт.
-13. Декомпозировать `export_telegram_members_non_pii.py` на модули.
-14. После стабилизации live `Совместного режима` переходить к шагам из `docs/TELEGRAM_SUPERTOOL_ROADMAP_RU.md`, начиная с вынесения orchestration-логики из `tool_platform/gui.py`.
+3. Следующий конкретный архитектурный шаг после этого foundation-коммита: перенести сами combined/session/add transitions из `tool_platform/gui.py` в `tool_platform/workflows.py`, чтобы GUI стал thin client над unified jobs и locks.
+4. После выноса transitions добавить через CLI и GUI ровный workflow/job интерфейс:
+   - `plan`
+   - `run`
+   - `stop`
+   - `status`
+   - `resume`
+   - `artifacts`
+5. Для cross-platform core: начать adapter-first расширение Windows/macOS не с live Telegram parity, а с честного `doctor/capabilities/launch/open-uri/focus/screenshot` слоя и capability matrix.
+6. Для profile workspace: поднять timeline/history center, artifact index и health center поверх уже созданных persistent jobs.
+7. Для Invite/Desktop: держать основным рабочим путём `site-control-kit` / Telegram Web flow (`open-chat -> inspect-chat -> add-contact`) и не подменять его Desktop-guessing path.
+8. Для Invite/Desktop: прогнать новый operator flow `Старт добавления -> Продолжить очередь -> Повторить ошибки` уже на панели, чтобы подтвердить не только backend batch, но и новый summary/retry UX end-to-end.
+9. Для Telegram control center: добавить быстрые кнопки `Открыть последний batch json`, `Открыть последний session run`, `Открыть последний screenshot`, если оператору станет тесно в текущем summary-режиме.
+10. Для Telegram control center: вывести в отдельный маленький блок явное предупреждение, что `Непрерывно до Стопа` отключает дальнейшее автоматическое чередование и удерживает панель в одном session-run.
 
 ## Как Продолжать Следующему Агенту
 1. Прочитать `AGENTS.md`.

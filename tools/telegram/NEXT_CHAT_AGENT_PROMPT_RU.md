@@ -23,6 +23,10 @@
    - /home/max/site-control-kit/AGENTS.md
    - /home/max/site-control-kit/START_HERE_AGENT_RU.md
    - /home/max/site-control-kit/docs/PROJECT_STATUS_RU.md
+   - /home/max/site-control-kit/tools/telegram/agent_pack/README_RU.md
+   - /home/max/site-control-kit/tools/telegram/agent_pack/VERIFICATION_MATRIX_RU.md
+   - /home/max/site-control-kit/tools/telegram/agent_pack/agent_state.template.json
+   - ~/.site-control-kit/telegram/agent/agent_state.json
    - /home/max/site-control-kit/tools/telegram/README_RU.md
    - /home/max/site-control-kit/tools/telegram/AGENT_GUIDE_RU.md
    - /home/max/site-control-kit/tools/telegram/platform/README_RU.md
@@ -72,6 +76,16 @@
 - parser шаблона и сохранение `step_pattern/step_cursor` уже починены;
 - panel-harness на самом `ToolPlatformPanel` уже подтвердил, что шаблон с запятыми может давать правильную последовательность шагов;
 - но пользователь всё ещё сообщает, что в реальном GUI это “не чередует”, поэтому считать баг закрытым нельзя.
+- foundation-слой уже начал выноситься из GUI:
+  - versioned agent-pack defaults:
+    - `/home/max/site-control-kit/tools/telegram/agent_pack/agent_state.template.json`
+    - `/home/max/site-control-kit/tools/telegram/agent_pack/VERIFICATION_MATRIX_RU.md`
+  - persistent agent state: `~/.site-control-kit/telegram/agent/agent_state.json`;
+  - unified jobs: `~/.site-control-kit/telegram/jobs/index.json`;
+  - profile locks: `~/.site-control-kit/telegram/locks/profiles.json`;
+  - persistent combined state: `~/.site-control-kit/telegram/panel_state/combined_flows/*`;
+  - tool manifests уже знают `supported_platforms`, `required_capabilities`, `degraded_modes`;
+  - `tool-platform` уже умеет `doctor`, `capabilities`, `show-agent-state`, `list-jobs`, `list-locks`.
 
 Что сейчас важно не потерять:
 - session-runner не копировать вручную в site-control-kit без отдельного решения;
@@ -85,10 +99,14 @@
 
 Какие файлы являются основной точкой входа именно для этой текущей стадии:
 - /home/max/site-control-kit/tools/telegram/NEXT_CHAT_AGENT_PROMPT_RU.md
+- /home/max/site-control-kit/tools/telegram/agent_pack/README_RU.md
+- /home/max/site-control-kit/tools/telegram/agent_pack/VERIFICATION_MATRIX_RU.md
+- /home/max/site-control-kit/tools/telegram/agent_pack/agent_state.template.json
 - /home/max/site-control-kit/tools/telegram/README_RU.md
 - /home/max/site-control-kit/tools/telegram/platform/README_RU.md
 - /home/max/site-control-kit/docs/PROJECT_STATUS_RU.md
 - /home/max/site-control-kit/docs/TELEGRAM_SUPERTOOL_ROADMAP_RU.md
+- ~/.site-control-kit/telegram/agent/agent_state.json
 
 Если задача про panel/control center, куда лезть:
 - /home/max/site-control-kit/tool_platform/gui.py
@@ -112,7 +130,9 @@
 - первым делом не добавлять новые фичи, а воспроизвести живой GUI-баг пользователя в `Совместном режиме`;
 - проверить именно реальную панель, а не только panel-harness:
   - какой шаблон введён;
-  - что лежит в `/tmp/telegram-control-center/combined_flows/AK__TelegramPortableAK.json`;
+  - что лежит в `~/.site-control-kit/telegram/panel_state/combined_flows/AK__TelegramPortableAK.json`;
+  - что попало в `~/.site-control-kit/telegram/jobs/index.json`;
+  - что попало в `~/.site-control-kit/telegram/locks/profiles.json`;
   - что пишет `/tmp/telegram-control-center-panel.log`;
   - какая фактическая последовательность start/complete у add/session шагов;
 - если баг подтверждается только в реальном окне, искать расхождение между:

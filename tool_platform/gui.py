@@ -33,6 +33,7 @@ from .telegram_gui_helpers import (
     CommandSpec,
     DEFAULT_INVITE_OUTPUT_ROOT,
     DEFAULT_PANEL_STATE_ROOT,
+    DEFAULT_RUNTIME_CONFIG_ROOT,
     DEFAULT_SESSION_CONFIG,
     DEFAULT_SESSION_RUNS_DIR,
     DEFAULT_SESSION_STATE_FILE,
@@ -58,6 +59,18 @@ from .telegram_gui_helpers import (
     session_plan_command,
     session_run_command,
 )
+from .agent_state import ensure_agent_state, load_agent_state
+from .catalog import tool_platform_support
+from .jobs import (
+    DEFAULT_TELEGRAM_STATE_ROOT,
+    fail_job,
+    finish_job,
+    profile_workspace_snapshot,
+    start_job,
+    stop_job,
+)
+from .locks import acquire_profile_lock, get_profile_lock, release_profile_lock
+from .platform_adapters import current_platform_id, platform_doctor_report
 from .telegram_profiles import (
     DEFAULT_OUTPUT_ROOT,
     adopt_existing_profile,
@@ -107,7 +120,41 @@ def format_profile_details(profile: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def format_profile_workspace_details(profile: dict[str, Any]) -> str:
+    profile_name = str(profile.get("profile_name") or "").strip() or "profile"
+    profile_dir = str(profile.get("profile_dir") or "").strip()
+    workspace = profile_workspace_snapshot(profile_name=profile_name, profile_dir=profile_dir)
+    lock = get_profile_lock(profile_name=profile_name, profile_dir=profile_dir)
+    doctor = platform_doctor_report()
+    lines = [
+        "",
+        "Workspace",
+        f"Профиль ID: {workspace.get('profile_id') or '-'}",
+        f"Активных jobs: {len(workspace.get('active_jobs') or [])}",
+        f"Последних jobs: {len(workspace.get('recent_jobs') or [])}",
+        f"Текущая ОС: {doctor.get('current_platform_id') or '-'}",
+    ]
+    if lock:
+        lines.append(
+            f"Lock: {lock.get('owner_tool_id') or '-'} · job {lock.get('job_id') or '-'}"
+        )
+    else:
+        lines.append("Lock: свободен")
+    last_success = workspace.get("last_successful_job") if isinstance(workspace.get("last_successful_job"), dict) else {}
+    if last_success:
+        lines.append(
+            f"Последний успешный job: {last_success.get('tool_id') or '-'} · {last_success.get('status') or '-'}"
+        )
+    artifact_index = workspace.get("artifact_index") if isinstance(workspace.get("artifact_index"), dict) else {}
+    if artifact_index:
+        lines.extend(["", "Последние артефакты"])
+        for key, value in sorted(artifact_index.items()):
+            lines.append(f"- {key}: {value}")
+    return "\n".join(lines)
+
+
 def format_workflow_details(tool: ToolManifest) -> str:
+    support = tool_platform_support(tool)
     lines = [
         "Инструмент Telegram",
         f"Название: {tool.display_name}",
@@ -117,7 +164,17 @@ def format_workflow_details(tool: ToolManifest) -> str:
         f"Standalone: {'да' if tool.standalone else 'нет'}",
         f"Рабочая папка: {tool.root_dir}",
         f"Manifest: {tool.manifest_path}",
+        f"Платформа сейчас: {support['platform_id']}",
+        f"Поддержка на этой платформе: {'да' if support['supported'] else 'нет'}",
     ]
+    if tool.supported_platforms:
+        lines.append(f"Поддерживаемые ОС: {', '.join(tool.supported_platforms)}")
+    if tool.required_capabilities:
+        lines.append(f"Требуемые capability: {', '.join(tool.required_capabilities)}")
+    if support["missing_capabilities"]:
+        lines.append(f"Недостающие capability: {', '.join(support['missing_capabilities'])}")
+    if support["degraded_mode"]:
+        lines.append(f"Degraded mode: {support['degraded_mode']}")
     if tool.description:
         lines.extend(["", "Описание", tool.description])
     if tool.capabilities:
@@ -755,6 +812,13 @@ if tk is not None:
             self.registry_path = registry_path
             self.catalog = load_catalog(registry_path)
             self.tools_by_id = {tool.tool_id: tool for tool in self.catalog.tools}
+            self._current_platform_id = current_platform_id()
+            self._tool_support = {
+                tool.tool_id: tool_platform_support(tool, self._current_platform_id)
+                for tool in self.catalog.tools
+            }
+            self.agent_state_path = ensure_agent_state()
+            self.agent_state = load_agent_state(self.agent_state_path)
             for required_tool_id in ("telegram_invite_manager", "telegram_session_runner"):
                 if required_tool_id not in self.tools_by_id:
                     raise RuntimeError(
@@ -823,6 +887,8 @@ if tk is not None:
             self._active_tool_id = "telegram_invite_manager"
             self._active_processes: dict[str, subprocess.Popen[str]] = {}
             self._active_process_profiles: dict[str, str] = {}
+            self._active_job_ids: dict[str, str] = {}
+            self._active_job_contexts: dict[str, dict[str, str]] = {}
             self._busy_controls: dict[str, list[Any]] = {
                 "telegram_invite_manager": [],
                 "telegram_session_runner": [],
@@ -1123,6 +1189,72 @@ if tk is not None:
                 "telegram_combined_flow": "Совместный режим",
             }.get(tool_id, tool_id)
 
+        def _tool_support_for_id(self, tool_id: str) -> dict[str, Any]:
+            if tool_id == "telegram_combined_flow":
+                invite_support = dict(self._tool_support.get("telegram_invite_manager") or {})
+                session_support = dict(self._tool_support.get("telegram_session_runner") or {})
+                supported = bool(invite_support.get("supported")) and bool(session_support.get("supported"))
+                missing = list(invite_support.get("missing_capabilities") or []) + list(
+                    session_support.get("missing_capabilities") or []
+                )
+                degraded_parts = [
+                    part
+                    for part in (
+                        str(invite_support.get("degraded_mode") or "").strip(),
+                        str(session_support.get("degraded_mode") or "").strip(),
+                    )
+                    if part
+                ]
+                return {
+                    "platform_id": self._current_platform_id,
+                    "supported": supported,
+                    "missing_capabilities": sorted(set(missing)),
+                    "degraded_mode": " | ".join(degraded_parts),
+                }
+            return dict(
+                self._tool_support.get(tool_id)
+                or {
+                    "platform_id": self._current_platform_id,
+                    "supported": True,
+                    "missing_capabilities": [],
+                    "degraded_mode": "",
+                }
+            )
+
+        def _ensure_tool_supported(self, tool_id: str) -> bool:
+            support = self._tool_support_for_id(tool_id)
+            if support.get("supported"):
+                return True
+            message = [
+                f"Этот режим сейчас не поддержан на платформе `{support.get('platform_id')}`.",
+            ]
+            missing = list(support.get("missing_capabilities") or [])
+            if missing:
+                message.append(f"Не хватает capability: {', '.join(missing)}")
+            degraded = str(support.get("degraded_mode") or "").strip()
+            if degraded:
+                message.append(degraded)
+            messagebox.showinfo("Панель Telegram", "\n".join(message))
+            return False
+
+        def _job_phase_for_tool(self, tool_id: str, action_label: str) -> str:
+            if tool_id == "telegram_combined_flow":
+                try:
+                    return str(self._load_combined_state().get("phase") or "contact_add")
+                except Exception:
+                    return "contact_add"
+            if tool_id == "telegram_session_runner":
+                if "plan" in action_label:
+                    return "plan"
+                return "session_running"
+            if tool_id == "telegram_invite_manager":
+                if "ошиб" in action_label:
+                    return "retry_failed"
+                if "статус" in action_label or "оставших" in action_label:
+                    return "inspect"
+                return "contact_add"
+            return action_label
+
         def _log_event(self, tool_id: str, message: str) -> None:
             line = f"[{datetime.now().strftime('%H:%M:%S')}] {message}"
             LOGGER.info("%s | %s", tool_id, message)
@@ -1283,6 +1415,7 @@ if tk is not None:
             on_success: Callable[[dict[str, Any]], None],
             monitor_active_state: bool = False,
             profile_dir: str = "",
+            profile_name: str = "",
         ) -> None:
             with self._process_lock:
                 existing = self._active_processes.get(tool_id)
@@ -1307,6 +1440,44 @@ if tk is not None:
                     return
 
             command_text = shlex.join(command.argv)
+            active_job_id = ""
+            if str(profile_name).strip() and str(profile_dir).strip():
+                job = start_job(
+                    tool_id=tool_id,
+                    profile_name=profile_name,
+                    profile_dir=profile_dir,
+                    phase=self._job_phase_for_tool(tool_id, action_label),
+                    summary=f"Выполняется: {action_label}",
+                    next_hint="Дождись завершения subprocess или нажми `Стоп`.",
+                )
+                active_job_id = str(job.get("job_id") or "")
+                self._active_job_ids[tool_id] = active_job_id
+                self._active_job_contexts[tool_id] = {
+                    "job_id": active_job_id,
+                    "profile_name": str(profile_name),
+                    "profile_dir": str(Path(profile_dir).expanduser().resolve()),
+                }
+                if monitor_active_state:
+                    lock_result = acquire_profile_lock(
+                        profile_name=profile_name,
+                        profile_dir=profile_dir,
+                        owner_tool_id=tool_id,
+                        job_id=active_job_id,
+                        conflict_reason="active_job",
+                    )
+                    if not lock_result.get("acquired"):
+                        conflict_text = (
+                            "Этот Telegram-профиль уже удерживается другим живым workflow.\n\n"
+                            f"Owner: {str((lock_result.get('lock') or {}).get('owner_tool_id') or '-')}\n"
+                            f"Job: {str((lock_result.get('lock') or {}).get('job_id') or '-')}"
+                        )
+                        fail_job(active_job_id, error_text=conflict_text, phase=self._job_phase_for_tool(tool_id, action_label))
+                        self._active_job_ids.pop(tool_id, None)
+                        self._active_job_contexts.pop(tool_id, None)
+                        self._status_var_for_tool(tool_id).set("Профиль занят")
+                        self._log_event(tool_id, conflict_text)
+                        messagebox.showinfo("Панель Telegram", conflict_text)
+                        return
             if tool_id == "telegram_session_runner" and action_label == "запуск session runner":
                 self._start_session_timer()
             if monitor_active_state:
@@ -1416,9 +1587,24 @@ if tk is not None:
         ) -> None:
             self._set_tool_busy(tool_id, False)
             self._cancel_tool_monitor(tool_id)
+            job_context = self._active_job_contexts.pop(tool_id, {})
+            active_job_id = str(self._active_job_ids.pop(tool_id, "") or "")
+            if job_context:
+                release_profile_lock(
+                    profile_name=str(job_context.get("profile_name") or ""),
+                    profile_dir=str(job_context.get("profile_dir") or ""),
+                    owner_tool_id=tool_id,
+                    job_id=active_job_id or None,
+                )
             if tool_id == "telegram_session_runner" and action_label == "запуск session runner":
                 self._stop_session_timer()
             if stopped:
+                if active_job_id:
+                    stop_job(
+                        active_job_id,
+                        summary="Остановлено оператором",
+                        phase=self._job_phase_for_tool(tool_id, action_label),
+                    )
                 self._status_var_for_tool(tool_id).set("Остановлено")
                 self._log_event(tool_id, f"Остановлено: {action_label}")
                 if tool_id == "telegram_invite_manager":
@@ -1437,6 +1623,12 @@ if tk is not None:
                     self._refresh_session_dashboard()
                 return
             if error_text:
+                if active_job_id:
+                    fail_job(
+                        active_job_id,
+                        error_text=error_text,
+                        phase=self._job_phase_for_tool(tool_id, action_label),
+                    )
                 self._status_var_for_tool(tool_id).set("Ошибка")
                 self._log_event(tool_id, f"Ошибка: {action_label}")
                 self._log_event(tool_id, error_text)
@@ -1457,6 +1649,13 @@ if tk is not None:
                 messagebox.showerror("Панель Telegram", error_text)
                 return
             assert payload is not None
+            if active_job_id:
+                finish_job(
+                    active_job_id,
+                    payload=payload,
+                    fallback_status="completed",
+                    fallback_phase=self._job_phase_for_tool(tool_id, action_label),
+                )
             payload_status = str(payload.get("status") or "").strip().lower()
             if payload_status == "stopped":
                 self._status_var_for_tool(tool_id).set("Остановлено")
@@ -1637,6 +1836,7 @@ if tk is not None:
                 ("telegram_combined_flow", "Совместный режим: Добавить → Сессия"),
             ]
             for tool_id, label in tools:
+                support = self._tool_support_for_id(tool_id)
                 button = tk.Button(
                     selector,
                     text=label,
@@ -1646,6 +1846,7 @@ if tk is not None:
                     pady=16,
                     relief="flat",
                     command=lambda current=tool_id: self._switch_tool(current),
+                    state="normal" if support.get("supported") else "disabled",
                 )
                 button.pack(side=tk.LEFT, padx=(0, 10))
                 self._tool_buttons[tool_id] = button
@@ -2467,7 +2668,8 @@ if tk is not None:
             return self._profiles[index]
 
         def _show_profile(self, profile: dict[str, Any]) -> None:
-            self._set_readonly_text(self.profile_details, format_profile_details(profile))
+            details = format_profile_details(profile) + "\n" + format_profile_workspace_details(profile)
+            self._set_readonly_text(self.profile_details, details)
 
         def _on_profile_select(self, _event: object) -> None:
             profile = self._selected_profile()
@@ -2530,6 +2732,8 @@ if tk is not None:
             )
 
         def _switch_tool(self, tool_id: str) -> None:
+            if not self._ensure_tool_supported(tool_id):
+                return
             self._active_tool_id = tool_id
             for current_tool_id, frame in self._tool_frames.items():
                 if current_tool_id == tool_id:
@@ -2582,8 +2786,8 @@ if tk is not None:
                         [
                             "Совместный режим `Добавить → Сессия`",
                             "1. Сверху выбери Telegram-профиль.",
-                            "2. Загрузи файл контактов и нажми `1. Старт добавления`.",
-                            "3. После шага добавления перейди к сессии и нажми `2. Старт сессии`.",
+                            "2. Загрузи файл контактов, настрой шаблон шагов и нажми `Старт совместного режима`.",
+                            "3. Дальше система сама ведёт шаги add/session по шаблону, пока ты не нажмёшь `Стоп` или не закончится очередь.",
                         ]
                     ),
                 )
@@ -3189,6 +3393,7 @@ if tk is not None:
                 command=command,
                 on_success=self._on_invite_init_success,
                 monitor_active_state=True,
+                profile_name=str(selected_profile.get("profile_name") or ""),
                 profile_dir=str(selected_profile.get("profile_dir") or ""),
             )
 
@@ -3258,6 +3463,7 @@ if tk is not None:
                 command=command,
                 on_success=self._on_combined_contact_add_success,
                 monitor_active_state=True,
+                profile_name=str(selected_profile.get("profile_name") or ""),
                 profile_dir=str(selected_profile.get("profile_dir") or ""),
             )
 
@@ -3313,6 +3519,7 @@ if tk is not None:
                     runtime_config,
                 ),
                 monitor_active_state=True,
+                profile_name=str(selected_profile.get("profile_name") or ""),
                 profile_dir=str(selected_profile.get("profile_dir") or ""),
             )
 
@@ -3546,7 +3753,7 @@ if tk is not None:
             self._refresh_combined_dashboard()
 
         def _session_runtime_config_path(self) -> Path:
-            temp_dir = Path("/tmp/telegram-control-center")
+            temp_dir = DEFAULT_RUNTIME_CONFIG_ROOT
             temp_dir.mkdir(parents=True, exist_ok=True)
             return Path(
                 tempfile.mkstemp(
@@ -3611,6 +3818,8 @@ if tk is not None:
                     payload,
                     runtime_config,
                 ),
+                profile_name=str((self._selected_profile() or {}).get("profile_name") or ""),
+                profile_dir=str((self._selected_profile() or {}).get("profile_dir") or ""),
             )
 
         def _session_run(self) -> None:
@@ -3633,6 +3842,7 @@ if tk is not None:
                     runtime_config,
                 ),
                 monitor_active_state=True,
+                profile_name=str((self._selected_profile() or {}).get("profile_name") or ""),
                 profile_dir=str((self._selected_profile() or {}).get("profile_dir") or ""),
             )
 

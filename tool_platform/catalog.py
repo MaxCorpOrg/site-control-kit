@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .platform_adapters import current_platform_id, get_platform_adapter
+
 
 DEFAULT_REGISTRY_PATH = (
     Path(__file__).resolve().parent.parent
@@ -47,6 +49,9 @@ class ToolManifest:
     capabilities: tuple[str, ...]
     tags: tuple[str, ...]
     artifacts: dict[str, str]
+    supported_platforms: tuple[str, ...]
+    required_capabilities: tuple[str, ...]
+    degraded_modes: dict[str, str]
     source_label: str
 
 
@@ -138,6 +143,9 @@ def load_tool_manifest(manifest_path: str | Path, source_label: str = "registry"
         capabilities=tuple(str(item) for item in payload.get("capabilities", [])),
         tags=tuple(str(item) for item in payload.get("tags", [])),
         artifacts={str(key): str(value) for key, value in payload.get("artifacts", {}).items()},
+        supported_platforms=tuple(str(item) for item in payload.get("supported_platforms", [])),
+        required_capabilities=tuple(str(item) for item in payload.get("required_capabilities", [])),
+        degraded_modes={str(key): str(value) for key, value in payload.get("degraded_modes", {}).items()},
         source_label=source_label,
     )
 
@@ -168,10 +176,17 @@ def load_catalog(registry_path: str | Path = DEFAULT_REGISTRY_PATH) -> ToolCatal
 
 def validate_catalog(catalog: ToolCatalog) -> None:
     seen_ids: set[str] = set()
+    known_platforms = {"linux", "windows", "macos"}
     for tool in catalog.tools:
         if tool.tool_id in seen_ids:
             raise ValueError(f"duplicate tool_id in catalog: {tool.tool_id}")
         seen_ids.add(tool.tool_id)
+        for platform_id in tool.supported_platforms:
+            if platform_id not in known_platforms:
+                raise ValueError(f"unknown platform in tool {tool.tool_id}: {platform_id}")
+        for platform_id in tool.degraded_modes:
+            if platform_id not in known_platforms:
+                raise ValueError(f"unknown degraded_modes platform in tool {tool.tool_id}: {platform_id}")
         action_ids: set[str] = set()
         for action in tool.actions:
             if action.action_id in action_ids:
@@ -212,6 +227,9 @@ def catalog_to_dict(catalog: ToolCatalog) -> dict[str, Any]:
                 "capabilities": list(tool.capabilities),
                 "tags": list(tool.tags),
                 "artifacts": dict(tool.artifacts),
+                "supported_platforms": list(tool.supported_platforms),
+                "required_capabilities": list(tool.required_capabilities),
+                "degraded_modes": dict(tool.degraded_modes),
                 "docs": [
                     {
                         "doc_id": doc.doc_id,
@@ -234,4 +252,24 @@ def catalog_to_dict(catalog: ToolCatalog) -> dict[str, Any]:
             }
             for tool in catalog.tools
         ],
+    }
+
+
+def tool_platform_support(tool: ToolManifest, platform_id: str | None = None) -> dict[str, Any]:
+    current_id = platform_id or current_platform_id()
+    adapter = get_platform_adapter(current_id)
+    capability_map = adapter.capabilities()
+    required = list(tool.required_capabilities)
+    missing = [
+        capability
+        for capability in required
+        if not bool((capability_map.get(capability) or {}).get("available"))
+    ]
+    platform_supported = not tool.supported_platforms or current_id in tool.supported_platforms
+    return {
+        "platform_id": current_id,
+        "platform_supported": platform_supported,
+        "missing_capabilities": missing,
+        "supported": platform_supported and not missing,
+        "degraded_mode": tool.degraded_modes.get(current_id, ""),
     }

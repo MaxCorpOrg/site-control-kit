@@ -61,6 +61,18 @@
     "consent_based_invite",
     "add_contact_by_username"
   ],
+  "supported_platforms": [
+    "linux"
+  ],
+  "required_capabilities": [
+    "window_automation",
+    "accessibility",
+    "uri_open"
+  ],
+  "degraded_modes": {
+    "windows": "Catalog/docs доступны, но текущий live add-contact portable flow не поддержан.",
+    "macos": "Catalog/docs доступны, но текущий live add-contact portable flow не поддержан."
+  },
   "tags": [
     "telegram",
     "invite",

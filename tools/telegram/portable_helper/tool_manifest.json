@@ -40,6 +40,20 @@
     "x11_primitives",
     "accessibility_primitives"
   ],
+  "supported_platforms": [
+    "linux"
+  ],
+  "required_capabilities": [
+    "display_session",
+    "window_automation",
+    "accessibility",
+    "window_screenshot",
+    "uri_open"
+  ],
+  "degraded_modes": {
+    "windows": "Portable helper пока Linux-only: нет X11/AT-SPI live lane.",
+    "macos": "Portable helper пока Linux-only: нет X11/AT-SPI live lane."
+  },
   "tags": [
     "telegram",
     "portable",

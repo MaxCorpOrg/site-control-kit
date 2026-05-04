@@ -10,6 +10,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .jobs import DEFAULT_TELEGRAM_STATE_ROOT
+from .workflows import (
+    DEFAULT_WORKFLOW_STATE_ROOT,
+    combined_flow_state_path as persistent_combined_flow_state_path,
+    migrate_legacy_combined_state,
+)
+
 
 DEFAULT_INVITE_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "telegram_invite_manager.py"
 DEFAULT_INVITE_EXECUTOR_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "telegram_invite_executor.py"
@@ -18,7 +25,8 @@ DEFAULT_SESSION_REPO = Path("/home/max/telegram-portable-session-tool")
 DEFAULT_SESSION_CONFIG = DEFAULT_SESSION_REPO / "examples" / "session.example.json"
 DEFAULT_SESSION_STATE_FILE = DEFAULT_SESSION_REPO / ".state" / "session_state.json"
 DEFAULT_SESSION_RUNS_DIR = DEFAULT_SESSION_REPO / "runs"
-DEFAULT_PANEL_STATE_ROOT = Path("/tmp/telegram-control-center")
+DEFAULT_PANEL_STATE_ROOT = DEFAULT_WORKFLOW_STATE_ROOT
+DEFAULT_RUNTIME_CONFIG_ROOT = DEFAULT_TELEGRAM_STATE_ROOT / "runtime_configs"
 USERNAME_RE = re.compile(r"^@?[A-Za-z0-9_]{5,32}$")
 CONTACT_PENDING_STATUSES = {"new", "checked"}
 CONTACT_SUCCESS_STATUSES = {"contact_added"}
@@ -114,9 +122,11 @@ def combined_flow_state_path(
     profile_dir: str | Path,
     state_root: str | Path = DEFAULT_PANEL_STATE_ROOT,
 ) -> Path:
-    profile_slug = _safe_slug(profile_name, "profile")
-    dir_slug = _safe_slug(Path(profile_dir).expanduser().resolve().name if str(profile_dir or "").strip() else "portable", "portable")
-    return Path(state_root).expanduser().resolve() / "combined_flows" / f"{profile_slug}__{dir_slug}.json"
+    return persistent_combined_flow_state_path(
+        profile_name=profile_name,
+        profile_dir=profile_dir,
+        state_root=state_root,
+    )
 
 
 def default_combined_flow_state(profile_name: str, profile_dir: str | Path) -> dict[str, Any]:
@@ -152,6 +162,12 @@ def load_combined_flow_state(
         profile_dir=profile_dir,
         state_root=state_root,
     )
+    if not path.exists():
+        migrate_legacy_combined_state(
+            profile_name=profile_name,
+            profile_dir=profile_dir,
+            new_state_root=state_root,
+        )
     if not path.exists():
         return default_combined_flow_state(profile_name, profile_dir)
     payload = _load_json_file(path)

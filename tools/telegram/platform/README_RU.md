@@ -31,6 +31,9 @@ Low-level helper и export остаются в registry и CLI, но не зас
 - `docs/ARCHITECTURE_RU.md` — архитектура registry/panel;
 - `docs/INTEGRATION_GUIDE_RU.md` — как подключать новый инструмент;
 - `/home/max/site-control-kit/docs/TELEGRAM_SUPERTOOL_ROADMAP_RU.md` — стратегический roadmap следующего этапа развития;
+- `/home/max/site-control-kit/tools/telegram/agent_pack/README_RU.md` — agent-layer и machine-readable checkpoint;
+- `/home/max/site-control-kit/tools/telegram/agent_pack/VERIFICATION_MATRIX_RU.md` — матрица проверок по слоям;
+- `/home/max/site-control-kit/tools/telegram/agent_pack/agent_state.template.json` — versioned template machine-readable state;
 - `bin/tool-platform` — CLI доступа к catalog;
 - `bin/tool-platform-panel` — Tkinter GUI-панель.
 
@@ -45,6 +48,11 @@ cd /home/max/site-control-kit/tools/telegram/platform
 ./bin/tool-platform show-tool --tool-id telegram_portable_helper
 ./bin/tool-platform show-tool --tool-id telegram_export
 ./bin/tool-platform show-tool --tool-id telegram_session_runner
+./bin/tool-platform doctor
+./bin/tool-platform capabilities
+./bin/tool-platform show-agent-state
+./bin/tool-platform list-jobs
+./bin/tool-platform list-locks
 ./bin/tool-platform-panel
 ```
 
@@ -118,6 +126,11 @@ cd /home/max/site-control-kit/tools/telegram/platform
 - если в `Совместном режиме` включён непрерывный режим сессии, автоматическое чередование дальше не идёт: после шага добавления запускается одна длинная сессия до `Стоп`;
 - `Совместный режим` не запускает два живых действия на одном Telegram-окне одновременно: сначала завершается contact-add, потом уже стартует сессия;
 - панель пишет операторский лог действий в `/tmp/telegram-control-center-panel.log`;
+- persistent state для control plane теперь уходит в `~/.site-control-kit/telegram/`:
+  - `agent/agent_state.json`
+  - `jobs/index.json`
+  - `locks/profiles.json`
+  - `panel_state/combined_flows/*`
 - длинный экран теперь можно прокручивать мышью вниз;
 - рендерит детали профиля и результаты в читаемых текстовых блоках, а не в тесных таблицах.
 
@@ -129,6 +142,9 @@ cd /home/max/site-control-kit/tools/telegram/platform
 - документация;
 - базовые operator actions;
 - артефакты и capability tags.
+- поддерживаемые платформы;
+- required capabilities;
+- degraded modes.
 
 Чтобы добавить новый инструмент в платформу, не нужно ломать текущую панель.
 Достаточно:

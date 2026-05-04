@@ -53,6 +53,19 @@
     "controlled_auto_send",
     "visible_wrapper"
   ],
+  "supported_platforms": [
+    "linux"
+  ],
+  "required_capabilities": [
+    "display_session",
+    "window_automation",
+    "accessibility",
+    "uri_open"
+  ],
+  "degraded_modes": {
+    "windows": "Wrapper виден, но текущий standalone runtime и Telegram Desktop live lane пока Linux-first.",
+    "macos": "Wrapper виден, но текущий standalone runtime и Telegram Desktop live lane пока Linux-first."
+  },
   "tags": [
     "telegram",
     "session",
