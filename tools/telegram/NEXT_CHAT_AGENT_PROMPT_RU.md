@@ -46,7 +46,7 @@
     - `241a903` — усилен timeline и artifact center Telegram панели
     - `188f2bd` — шаблонный совместный режим Telegram панели
     - `2be8229` — сохранение `step_pattern/step_cursor` в combined-state
-  - смысл текущей точки: live combined bug уже закрыт на новом workflow/job engine, и текущий приоритет смещён в operator workspace / timeline / artifact center
+  - смысл текущей точки: live combined bug уже закрыт на новом workflow/job engine, а сверху в рабочем дереве уже доведён следующий tranche `snapshot-first session readback + repair-session-artifacts`; не начинать его заново и не откатывать к старой постановке про “legacy session artifacts ещё не решены”
 - standalone session tool:
   - репозиторий: /home/max/telegram-portable-session-tool
   - ветка: main
@@ -210,6 +210,220 @@
         - `message_count = 1`
         - `text = Хорошего дня!`
         - `artifact_shortcuts.session_run = /home/max/telegram-portable-session-tool/runs/20260504T140725Z-0c50fab7/run.json`
+  - tranche `Profile Artifact History + Session Timeline` теперь тоже закрыт:
+    - unified `session_run` jobs теперь сами пишут `artifact_paths` для:
+      - `run_dir`
+      - `session_run`
+      - `plan_json`
+      - `state_path`
+      - `runtime_config`
+      - best-effort `screenshot_path`
+    - это работает и для standalone `session_run`, и для session-step внутри `combined_pattern`;
+    - `profile_workspace_snapshot()` теперь возвращает richer history layer:
+      - `artifact_history`
+      - session summaries в `history_groups`
+      - session summaries в `profile_timeline`
+    - session summary теперь подтягивает из `run.json`:
+      - `visit_count`
+      - `message_count`
+      - `sent_count`
+      - `draft_count`
+      - `message_target_username`
+      - preview sent/draft сообщений
+    - `gui.py` уже использует этот snapshot:
+      - `История профиля` показывает sent/draft-level session details;
+      - `Артефакты и здоровье` показывает recent artifact history поверх старого artifact center;
+      - `История запусков сессии` показывает `черновиков`, target и короткий sent/draft preview;
+    - versioned agent defaults синхронизированы:
+      - `/home/max/site-control-kit/tool_platform/agent_state.py`
+      - `/home/max/site-control-kit/tools/telegram/agent_pack/agent_state.template.json`
+    - проверки этого tranche:
+      - `python3 -m py_compile tool_platform/jobs.py tool_platform/workflows.py tool_platform/gui.py tool_platform/telegram_gui_helpers.py tool_platform/agent_state.py`
+      - `git diff --check`
+      - `PYTHONPATH="$PWD" python3 -m unittest tests.test_tool_platform` → `71 OK`
+      - `PYTHONPATH="$PWD" python3 -m unittest discover -s tests -p 'test_*.py'` → `253 OK`
+      - `./tools/telegram/platform/bin/tool-platform validate-registry`
+      - `./tools/telegram/platform/bin/tool-platform doctor`
+      - `./tools/telegram/platform/bin/tool-platform capabilities`
+      - GUI smoke:
+        - `./tools/telegram/platform/bin/tool-platform-panel`
+        - `wmctrl -lx` подтвердил окно `tk.Tk ... Центр управления Telegram`
+  - tranche `Snapshot-first Session Readback + Historical Session Artifact Repair` теперь тоже закрыт:
+    - `tool_platform/jobs.py` умеет on-the-fly резолвить legacy session artifacts для standalone `session_run` jobs и session-step внутри `combined_pattern`:
+      - existing `artifact_paths`
+      - payload `run_id/run_dir`
+      - exact `started_at`
+      - exact `completed_at`
+      - exact timestamp из `job_id`
+      - near-match в пределах `2s`
+    - `workflow_artifact_index()` и session history summary используют resolved legacy artifacts ещё до явного backfill в index;
+    - `profile_workspace_snapshot()` теперь отдаёт top-level `session_snapshot`:
+      - `status`
+      - `messages_sent_total`
+      - `message_cursor`
+      - `message_target_cursor`
+      - `latest_runs`
+      - `last_run`
+      - `history_source`
+    - `tool_platform/gui.py` больше не зовёт `session_history_snapshot()` напрямую из session/combined dashboard refresh;
+    - `tool_platform/cli.py` получил явный repair entrypoint:
+      - `tool-platform repair-session-artifacts`
+      - filters:
+        - `--job-id`
+        - `--profile-name`
+        - `--profile-dir`
+      - preview by default
+      - `--apply` пишет backfilled `artifact_paths` в unified index
+    - persistent repair semantics:
+      - standalone `session_run` parent получает parent-level session artifacts и `context.last_session_run_dir`;
+      - `combined_pattern` parent сохраняет invite `job_dir`, а session artifacts получает только session-step;
+    - live smoke подтвердил:
+      - `show-artifacts --job-id 20260504T140725Z-c97f5529` возвращает resolved `run.json`, `plan.json`, `runtime_config`;
+      - `show-artifacts --job-id 20260504T135955Z-d70b1f2e` сохраняет combined invite `job_dir`, но даёт resolved session `run.json`;
+      - preview `repair-session-artifacts --profile-name AK --profile-dir /home/max/TelegramPortableAK` дал:
+        - `matched_jobs = 14`
+        - `matched_steps = 15`
+        - `unresolved = 0`
+      - safe apply-smoke на временной копии real index дал:
+        - `changed = true`
+        - `repaired_jobs = 7`
+        - `repaired_steps = 15`
+        - `unresolved = 0`
+    - проверки этого tranche:
+      - `python3 -m py_compile tool_platform/jobs.py tool_platform/cli.py tool_platform/gui.py tests/test_tool_platform.py`
+      - `git diff --check`
+      - `PYTHONPATH="$PWD" python3 -m unittest tests.test_tool_platform` → `77 OK`
+      - `PYTHONPATH="$PWD" python3 -m unittest discover -s tests -p 'test_*.py'` → `259 OK`
+      - `./tools/telegram/platform/bin/tool-platform list-jobs --profile-name AK --workflow-kind session_run --limit 5`
+      - `./tools/telegram/platform/bin/tool-platform list-jobs --profile-name AK --workflow-kind combined_pattern --limit 5`
+      - `./tools/telegram/platform/bin/tool-platform show-artifacts --job-id 20260504T140725Z-c97f5529`
+      - `./tools/telegram/platform/bin/tool-platform show-artifacts --job-id 20260504T135955Z-d70b1f2e`
+      - `./tools/telegram/platform/bin/tool-platform profile-health --profile-name AK --profile-dir /home/max/TelegramPortableAK`
+      - `./tools/telegram/platform/bin/tool-platform repair-session-artifacts --profile-name AK --profile-dir /home/max/TelegramPortableAK`
+      - `./tools/telegram/platform/bin/tool-platform validate-registry`
+      - `./tools/telegram/platform/bin/tool-platform doctor`
+      - `./tools/telegram/platform/bin/tool-platform capabilities`
+  - tranche `Attach Gating + Account Manager UX + Safe AK2 Live Block` теперь тоже закрыт:
+    - `scripts/telegram_portable.py` больше не делает fallback на “первое доступное окно Telegram”, если у выбранного portable-профиля нет собственного safe attach;
+    - portable status теперь отдаёт:
+      - `attach_status`
+      - `attach_message`
+      - `attach_candidates`
+    - safe attach-ready statuses:
+      - `exact_window`
+      - `title_match`
+    - `tool_platform/telegram_profiles.py` получил lifecycle helpers:
+      - `hide_portable_profile(...)`
+      - `unhide_portable_profile(...)`
+      - `remove_portable_profile(...)`
+      - hidden profiles state под `~/.site-control-kit/telegram/profiles/hidden_profiles.json`
+    - `tool_platform/gui.py` теперь:
+      - показывает attach/window status прямо в profile workspace summary и profiles overview;
+      - использует единый attach preflight перед start/resume для `invite_batch`, `session_run`, `combined_pattern`;
+      - блокирует workflow ещё до `plan_workflow(...)`, если profile live-path unsafe;
+      - открывает account manager через `Аккаунты...`, а внутри даёт:
+        - импорт `tdata.zip`
+        - подключение portable-папки
+        - `Скрыть из панели`
+        - `Вернуть в панель`
+        - `Удалить папку профиля`
+    - живой panel-driven smoke для `AK2` на `2026-05-07` подтвердил правильное поведение:
+      - профиль:
+        - `AK2`
+        - `/home/max/TelegramPortable-AK2`
+      - список:
+        - `/home/max/Документы/Пользователи для телеграмм/tg_contact4_cosmochatrussia_full_history_20260507T074001Z_usernames.txt`
+      - limit:
+        - `19`
+      - attach diagnostics перед запуском:
+        - `running = true`
+        - `windows = []`
+        - `attach_status = running_without_window`
+      - реальный batch корректно заблокирован и не создал новый workflow/job:
+        - `jobs_before == jobs_after == ["20260507T085110Z-9a70b574"]`
+      - артефакты smoke:
+        - `/tmp/telegram-ak2-attach-smoke-kq_f_upy/result.json`
+        - `/tmp/telegram-ak2-attach-smoke-kq_f_upy/panel-ak2-before.png`
+        - `/tmp/telegram-ak2-attach-smoke-kq_f_upy/panel-ak2-manager.png`
+        - `/tmp/telegram-ak2-attach-smoke-kq_f_upy/panel-log-delta.log`
+    - проверки этого tranche:
+      - `python3 -m py_compile tool_platform/gui.py tool_platform/jobs.py tool_platform/telegram_profiles.py scripts/telegram_portable.py tests/test_tool_platform.py tests/test_telegram_portable.py`
+      - `PYTHONPATH="$PWD" python3 -m unittest tests.test_telegram_portable tests.test_tool_platform` → `118 OK`
+      - `PYTHONPATH="$PWD" python3 -m unittest discover -s tests -p 'test_*.py'` → `270 OK`
+      - `git diff --check`
+      - `./tools/telegram/platform/bin/tool-platform validate-registry`
+      - `./tools/telegram/platform/bin/tool-platform doctor`
+      - `./tools/telegram/platform/bin/tool-platform capabilities`
+      - `./tools/telegram/platform/bin/tool-platform profile-health --profile-name AK2 --profile-dir /home/max/TelegramPortable-AK2`
+      - `python3 scripts/telegram_portable.py status --profile-dir /home/max/TelegramPortable-AK2`
+  - live tranche `AK3 Invite Bootstrap 19/19` тоже уже закрыт и теперь является основным operator checkpoint:
+    - рабочий профиль:
+      - `AK3`
+      - `/home/max/TelegramPortable-AK3`
+    - source archive:
+      - `/home/max/site-control-kit/telegram_ak/3/tdata-003.zip`
+    - preflight перед живым запуском подтвердил:
+      - `running = true`
+      - `attach_status = exact_window`
+      - `active profile lock` отсутствует
+      - старых unified `invite_batch` jobs у `AK3` не было
+    - реальный run выполнен через сам `ToolPlatformPanel`, не через ручной CLI-скрипт:
+      - режим: `Добавить контакты из TXT`
+      - input:
+        - `/home/max/Документы/Пользователи для телеграмм/tg_contact4_cosmochatrussia_full_history_20260507T074001Z_usernames.txt`
+      - limit:
+        - `19`
+      - unified job:
+        - `20260507T115430Z-a5c3125a`
+      - execution root:
+        - `/home/max/telegram_invite_jobs/contact_add__AK3__tg_contact4_cosmochatrussia_full_history_20260507T074001Z_usernames/executions/20260507T115431Z`
+    - итог:
+      - `19 / 19` успешно добавлены
+      - `failed = 0`
+      - `already_present = 0`
+      - remaining queue:
+        - `1467`
+      - final workflow status:
+        - `completed`
+      - attach drift не происходил:
+        - `attach_status = exact_window` от старта до конца
+      - messagebox errors/info в панели не появлялись
+    - measured throughput:
+      - start:
+        - `2026-05-07T11:54:30Z`
+      - completed:
+        - `2026-05-07T12:06:24Z`
+      - wall time:
+        - `714s`
+      - средний темп:
+        - примерно `37.6s/contact`
+    - ключевые артефакты:
+      - bundle:
+        - `/tmp/telegram-ak3-live-invite-_ehrz8y4`
+      - summary:
+        - `/tmp/telegram-ak3-live-invite-_ehrz8y4/result.json`
+      - final job:
+        - `/tmp/telegram-ak3-live-invite-_ehrz8y4/job-final.json`
+      - invite snapshot:
+        - `/tmp/telegram-ak3-live-invite-_ehrz8y4/invite-snapshot-final.json`
+      - batch json:
+        - `/tmp/telegram-ak3-live-invite-_ehrz8y4/batch_contact_add.json`
+      - execution record:
+        - `/tmp/telegram-ak3-live-invite-_ehrz8y4/execution_record.json`
+      - panel before/after:
+        - `/tmp/telegram-ak3-live-invite-_ehrz8y4/panel-before.png`
+        - `/tmp/telegram-ak3-live-invite-_ehrz8y4/panel-after.png`
+      - Telegram before/after:
+        - `/tmp/telegram-ak3-live-invite-_ehrz8y4/telegram-before.png`
+        - `/tmp/telegram-ak3-live-invite-_ehrz8y4/telegram-after.png`
+      - panel log delta:
+        - `/tmp/telegram-ak3-live-invite-_ehrz8y4/panel-log-delta.log`
+    - что уже доказано по результату:
+      - correctness-path у `AK3` рабочий: все 19 результатов имеют `outcome = contact_added_verified`
+      - unified workflow/job engine корректно создал новый `invite_batch` job и привязал его к `AK3`
+      - panel workspace после завершения правильно показывает последний successful workflow и invite summary для `AK3`
+      - главный текущий operational risk уже не attach, а throughput и observability long-running invite loop
+      - noisy `telegram-log.txt` нельзя трактовать как итог batch сам по себе без correlation с `execution_record.json`
 
 Что сейчас важно не потерять:
 - session-runner не копировать вручную в site-control-kit без отдельного решения;
@@ -230,8 +444,11 @@
 - /home/max/site-control-kit/tools/telegram/platform/README_RU.md
 - /home/max/site-control-kit/docs/PROJECT_STATUS_RU.md
 - /home/max/site-control-kit/docs/TELEGRAM_SUPERTOOL_ROADMAP_RU.md
-- ~/.site-control-kit/telegram/agent/agent_state.json
-- ~/.site-control-kit/telegram/agent/workspace_checkpoint.json
+- /home/max/site-control-kit/runtime/telegram/state/agent/agent_state.json
+- /home/max/site-control-kit/runtime/telegram/state/agent/workspace_checkpoint.json
+- legacy compatibility copies:
+  - ~/.site-control-kit/telegram/agent/agent_state.json
+  - ~/.site-control-kit/telegram/agent/workspace_checkpoint.json
 
 Если задача про panel/control center, куда лезть:
 - /home/max/site-control-kit/tool_platform/gui.py
@@ -256,11 +473,197 @@
 - не возвращаться и к старой постановке `сделать timeline/history поверх unified jobs`: базовый operator workspace уже реализован;
 - не возвращаться и к tranche `Resume / Retry / Continue queue`: он уже реализован и подтверждён живыми panel-smoke;
 - не возвращаться и к rebalance `top action hint` / `artifact_shortcuts.session_run`: этот tranche уже закрыт и подтверждён safe/read-send live acceptance;
+- не возвращаться и к tranche `Profile Artifact History + Session Timeline`: enriched workspace snapshot и direct session artifact_paths для новых jobs уже реализованы;
+- не возвращаться и к tranche `Snapshot-first Session Readback + Historical Session Artifact Repair`: session/combined dashboards уже читают `session_snapshot`, legacy session artifacts уже резолвятся на лету, а explicit CLI repair уже есть;
+- не возвращаться и к старому багу `AK2 запускает другой аккаунт` как будто это combobox wiring issue:
+  - корень оказался в attach-layer portable helper;
+  - unsafe fallback уже убран;
+  - теперь проблема `AK2` сформулирована честно как `running_without_window`, а live path блокируется до старта;
+- текущий operator lane по умолчанию теперь не `AK2`, а `AK3`:
+  - использовать:
+    - `/home/max/site-control-kit/runtime/telegram/profiles/TelegramPortable-AK3`
+  - source archive:
+    - `/home/max/site-control-kit/telegram_ak/3/tdata-003.zip`
+  - последний успешный live invite workflow:
+    - `20260508T090724Z-df7c7d53`
+  - последний успешный execution root:
+    - `/home/max/site-control-kit/runtime/telegram/invite_jobs/contact_add__AK3__tg_contact4_cosmochatrussia_full_history_20260507T074001Z_usernames/executions/20260508T090724Z`
+  - последний diagnostic failure уже разобран и закрыт:
+    - failed batch:
+      - `20260507T125128Z-cf38fc85`
+    - проблемный username:
+      - `@alenushkatu`
+    - targeted fix:
+      - `/home/max/site-control-kit/scripts/telegram_invite_executor.py`
+    - regression test:
+      - `/home/max/site-control-kit/tests/test_telegram_invite_executor.py`
+  - invite observability tranche уже закрыт:
+    - runtime теперь пишет `batch_progress.json`
+    - unified invite workflow заранее знает `progress_json` / `batch_json`
+    - panel summary/history/output уже показывают `elapsed`, `processed`, `rate`, `ETA`
+  - live smoke по observability:
+    - first diagnostic:
+      - `/tmp/telegram-ak3-progress-smoke-6rOhZ3`
+      - показал правильный live snapshot, но выявил bug auto-refresh preview в панели
+    - immediate fix:
+      - `/home/max/site-control-kit/tool_platform/gui.py`
+      - `_poll_tool_snapshot()` теперь не теряет reschedule между `active_job_id` и поздней регистрацией subprocess
+    - verification smoke after fix:
+      - `/tmp/telegram-ak3-progress-smoke-2-p2jVKN`
+      - preview во время running уже показывал:
+        - `Обработано: 1/2 · rate: 1.82/мин · ETA: 00:00:33 · очередь: 1445`
+      - summary во время running уже показывал:
+        - `history_source = progress_json`
+        - `processed_count = 1`
+        - `remaining_in_run = 1`
+        - `current_username = @aliya1988ab`
+        - `last_outcome = contact_added_verified`
+  - текущее состояние очереди:
+    - historical checkpoint до runtime migration:
+      - `contact_added = 42`
+      - `failed = 0`
+      - `new = 1444`
+    - текущий project-local checkpoint:
+      - `contact_added = 54`
+      - `failed = 0`
+      - `new = 1432`
+      - latest successful workflow:
+        - `20260508T090724Z-df7c7d53`
+  - tranche `project-local runtime root` уже закрыт:
+    - канонический runtime root теперь:
+      - `/home/max/site-control-kit/runtime/telegram`
+    - текущий profile root:
+      - `/home/max/site-control-kit/runtime/telegram/profiles`
+    - текущий invite root:
+      - `/home/max/site-control-kit/runtime/telegram/invite_jobs`
+    - mutable runtime data теперь лежат внутри проекта:
+      - `profiles/`
+      - `invite_jobs/`
+      - `session/configs/`
+      - `session/state/`
+      - `session/runs/`
+      - `state/jobs/`
+      - `state/locks/`
+      - `state/agent/`
+      - `state/panel/`
+      - `logs/panel/`
+      - `cache/telegram-desktop/`
+    - baseline legacy-layout acceptance перед migration:
+      - bundle:
+        - `/tmp/telegram-ak3-baseline10-wbwEXn`
+      - unified job:
+        - `20260508T084531Z-fee0870b`
+      - итог:
+        - `10 / 10 added`
+        - `failed = 0`
+        - `remaining = 1434`
+    - migration evidence:
+      - `/tmp/telegram-runtime-migration-NTanxX/result.json`
+      - `/tmp/telegram-runtime-migration-NTanxX/profile-migration-result.json`
+      - `/tmp/telegram-runtime-migration-NTanxX/project-profile-status.json`
+    - project-local live smoke после copy-then-switch:
+      - bundle:
+        - `/tmp/telegram-ak3-project-root-smoke-1w09yy`
+      - unified job:
+        - `20260508T090724Z-df7c7d53`
+      - результат:
+        - `2 / 2 added`
+        - `failed = 0`
+        - `remaining = 1432`
+      - ключевой факт:
+        - `job_dir` и `run_dir` уже живут внутри `runtime/telegram/invite_jobs/...`
+    - что ещё не считать полностью закрытым:
+      - старые unified job records и historical artifact paths всё ещё частично указывают на legacy absolute paths
+      - live readback уже умеет canonical redirect, но persistent rewrite старых entries отдельно не делался
 - двигаться дальше по следующему tranche:
-  - делать richer profile artifact history поверх уже рабочего artifact center;
-  - поднимать sent/draft-level session timeline для profile workspace и session summary;
-  - ещё сильнее утончать `gui.py` и `telegram_gui_helpers.py`, чтобы они оставались thin client/readback wrapper над `tool_platform/jobs.py` и `tool_platform/workflows.py`;
-  - по возможности уменьшать зависимость artifact center от `session_history_snapshot()` fallback и писать `artifact_paths` прямо в unified `session_run` jobs;
+  - не начинать заново tranche `ETA/throughput/observability` как будто он ещё не сделан;
+  - не начинать заново tranche `project-local runtime root` как будто он ещё не сделан;
+  - учитывать, что после migration tranche уже закрыт ещё один живой project-local checkpoint:
+    - controlled10 bundle:
+      - `/tmp/telegram-ak3-controlled10-rrH2bx`
+    - unified job:
+      - `20260508T114956Z-14df3e7a`
+    - итог:
+      - `10 / 10 added`
+      - `remaining = 1422`
+  - учитывать, что в этом controlled10 tranche всплыл реальный баг legacy `invite_job_dir` / `last_invite_run_dir` в `continue_queue` context:
+    - fix уже внесён в:
+      - `/home/max/site-control-kit/tool_platform/jobs.py`
+      - `/home/max/site-control-kit/tool_platform/workflows.py`
+    - regression уже есть в:
+      - `/home/max/site-control-kit/tests/test_tool_platform.py`
+    - live validation fix уже подтверждена:
+      - path-fix smoke bundle:
+        - `/tmp/telegram-ak3-pathfix-smoke-te3fk5ga`
+      - unified job:
+        - `20260508T115849Z-7a9d50bb`
+      - новый context и artifacts уже canonical в `runtime/telegram/invite_jobs/...`
+  - учитывать, что targeted thinning тоже уже не pending, а частично закрыт:
+    - `/home/max/site-control-kit/tool_platform/telegram_gui_helpers.py`
+      - получил helper-слой для profile workspace summary/details, session dashboard text assembly и combined preview/contact preparation
+    - `/home/max/site-control-kit/tool_platform/gui.py`
+      - `format_profile_workspace_summary()` и `format_profile_workspace_details()` стали thin wrappers
+      - `_refresh_session_dashboard()` и `_refresh_combined_dashboard()` стали тоньше и опираются на helper-built blocks
+    - post-refactor live smoke уже подтверждён:
+      - bundle:
+        - `/tmp/telegram-ak3-post-refactor-smoke-vqh2kbgb`
+      - unified job:
+        - `20260508T120414Z-c4e7e795`
+      - итог:
+        - `2 / 2 added`
+        - `remaining = 1418`
+  - учитывать, что historical invite continuity теперь уже не только readback-resolved, но и live-canonicalized explicit repair-ом:
+    - новый maintainer CLI:
+      - `tool-platform repair-invite-artifacts`
+    - live apply на `AK3` уже выполнен:
+      - `./tools/telegram/platform/bin/tool-platform repair-invite-artifacts --profile-name AK3 --profile-dir /home/max/site-control-kit/runtime/telegram/profiles/TelegramPortable-AK3 --apply`
+    - repaired historical jobs:
+      - `20260508T090724Z-df7c7d53`
+      - `20260508T114956Z-14df3e7a`
+      - `20260508T115849Z-7a9d50bb`
+      - `20260508T120414Z-c4e7e795`
+    - `unresolved = 0`
+  - учитывать, что product-grade smoke после этого уже подтверждён через сам Python/Tk слой панели:
+    - bundle:
+      - `/tmp/telegram-ak3-product-grade-smoke-1o3xssvd`
+    - unified job:
+      - `20260508T130734Z-ce7451e9`
+    - итог:
+      - `2 / 2 added`
+      - `failed = 0`
+      - `remaining = 1416`
+      - `elapsed = 60s`
+      - `rate = 2.00/min`
+      - attach по всему smoke оставался `exact_window`
+    - полезные артефакты:
+      - `/tmp/telegram-ak3-product-grade-smoke-1o3xssvd/result.json`
+      - `/tmp/telegram-ak3-product-grade-smoke-1o3xssvd/panel-before.json`
+      - `/tmp/telegram-ak3-product-grade-smoke-1o3xssvd/panel-mid.json`
+      - `/tmp/telegram-ak3-product-grade-smoke-1o3xssvd/panel-after.json`
+      - `/tmp/telegram-ak3-product-grade-smoke-1o3xssvd/panel-log-delta.log`
+      - `/tmp/telegram-ak3-product-grade-smoke-1o3xssvd/telegram-after.png`
+  - current operator entry docs теперь уже есть:
+    - `/home/max/site-control-kit/docs/TELEGRAM_CONTROL_CENTER_OPERATOR_RU.md`
+    - `/home/max/site-control-kit/docs/TELEGRAM_CONTROL_CENTER_RUNBOOK_RU.md`
+  - текущий queue checkpoint теперь уже такой:
+    - `contact_added = 70`
+    - `failed = 0`
+    - `new = 1416`
+    - latest successful workflow:
+      - `20260508T130734Z-ce7451e9`
+  - следующим шагом идти уже не в ещё один blind invite-only tranche, а в session/combined parity:
+    - live progress summary для `session_run`;
+    - parent/child progress summary для `combined_pattern`;
+    - current target / template / phase / next step;
+    - bounded ETA только там, где она реально вычислима;
+  - параллельно продолжать deeper thinning `gui.py` и `telegram_gui_helpers.py`, чтобы они оставались thin render/form-state layer над `tool_platform/jobs.py` и `tool_platform/workflows.py`;
+  - убирать из GUI оставшиеся formatting/open-policy ветки там, где уже хватает workspace snapshot;
+  - после этого уже отдельно доводить remaining historical backfill и doc normalization вокруг нового `runtime/telegram`, а не возвращаться к legacy spread layout;
+  - помнить про operator-side recovery: если project-local `AK3` снова придёт как `running_without_window`, правильный recovery path уже подтверждён как relaunch профиля, а не ослабление attach gating;
+  - отдельно, если понадобится настоящий live add-contact именно на `AK2`, расследовать operator-side причину, почему `/home/max/TelegramPortable-AK2` на `2026-05-07` остаётся `running_without_window`, а не ослаблять attach gating;
+  - при желании сделать осознанный one-shot `tool-platform repair-session-artifacts --apply` на живом index, но не смешивать это с кодовым tranche без нужды;
+  - усилить quick-open/source hints для `plan.json`, `runtime_config` и `state_path`, а не только для `run.json`;
+  - при желании показывать provenance для legacy artifacts: stored path или resolved-on-readback path;
 - параллельно продолжать следующий tranche cross-platform adapters из `docs/TELEGRAM_SUPERTOOL_ROADMAP_RU.md`, не пытаясь сразу вытянуть full Telegram Desktop parity на Windows/macOS.
 
 Как работать:

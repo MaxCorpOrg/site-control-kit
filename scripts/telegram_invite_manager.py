@@ -8,10 +8,17 @@ import re
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
+import sys
 from typing import Any
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from tool_platform.telegram_runtime import invite_jobs_root
+
 STATE_VERSION = 1
-DEFAULT_OUTPUT_ROOT = Path.home() / "telegram_invite_jobs"
+DEFAULT_OUTPUT_ROOT = invite_jobs_root()
 DEFAULT_SELECTABLE_STATUSES = ("new",)
 ALLOWED_STATUSES = (
     "new",

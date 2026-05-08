@@ -2,6 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 PYTHON_SCRIPT="${SCRIPT_DIR}/telegram_portable.py"
 TITLE="Telegram Portable Import"
 
@@ -45,7 +46,7 @@ profile_name="$(
   zenity \
     --entry \
     --title="${TITLE}" \
-    --text="Имя профиля. Папка будет создана как ~/TelegramPortable-<имя>." \
+    --text="Имя профиля. Папка будет создана как ${PROJECT_ROOT}/runtime/telegram/profiles/TelegramPortable-<имя>." \
     --entry-text="${default_name}"
 )" || exit 0
 

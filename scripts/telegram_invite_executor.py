@@ -301,16 +301,14 @@ def _plan_row_for_user(row: dict[str, Any], *, execution: dict[str, Any], chat_u
 
 
 def _write_execution_artifacts(job_dir: Path, execution_id: str, payload: dict[str, Any], log_lines: list[str]) -> Path:
-    run_dir = _execution_runs_dir(job_dir) / execution_id
-    run_dir.mkdir(parents=True, exist_ok=True)
+    run_dir = _execution_run_dir(job_dir, execution_id)
     atomic_write_json(run_dir / "execution_plan.json", payload)
     (run_dir / "execution.log").write_text("\n".join(log_lines) + ("\n" if log_lines else ""), encoding="utf-8")
     return run_dir
 
 
 def _write_execution_record(job_dir: Path, execution_id: str, payload: dict[str, Any], log_lines: list[str]) -> Path:
-    run_dir = _execution_runs_dir(job_dir) / execution_id
-    run_dir.mkdir(parents=True, exist_ok=True)
+    run_dir = _execution_run_dir(job_dir, execution_id)
     atomic_write_json(run_dir / "execution_record.json", payload)
     (run_dir / "execution_record.log").write_text("\n".join(log_lines) + ("\n" if log_lines else ""), encoding="utf-8")
     return run_dir
@@ -318,6 +316,12 @@ def _write_execution_record(job_dir: Path, execution_id: str, payload: dict[str,
 
 def _execution_id_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
+def _execution_run_dir(job_dir: Path, execution_id: str) -> Path:
+    run_dir = _execution_runs_dir(job_dir) / execution_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    return run_dir
 
 
 def _invoke_json_command(func: Any, namespace: argparse.Namespace) -> tuple[int, dict[str, Any]]:
@@ -358,19 +362,22 @@ def _init_job_state_from_input(
 
 
 def _write_contact_batch_artifacts(
-    job_dir: Path,
-    execution_id: str,
+    run_dir: Path,
     payload: dict[str, Any],
     log_lines: list[str],
 ) -> Path:
-    run_dir = _execution_runs_dir(job_dir) / execution_id
-    run_dir.mkdir(parents=True, exist_ok=True)
     atomic_write_json(run_dir / "batch_contact_add.json", payload)
     (run_dir / "batch_contact_add.log").write_text(
         "\n".join(log_lines) + ("\n" if log_lines else ""),
         encoding="utf-8",
     )
     return run_dir
+
+
+def _write_contact_batch_progress(run_dir: Path, payload: dict[str, Any]) -> Path:
+    path = run_dir / "batch_progress.json"
+    atomic_write_json(path, payload)
+    return path
 
 
 def _portable_visible_match_count(result: dict[str, Any]) -> int:
@@ -1952,6 +1959,166 @@ def command_desktop_add_contact_profile(args: argparse.Namespace) -> int:
         f"INFO: done_click_ratio=({float(args.done_click_x_ratio):.4f},{float(args.done_click_y_ratio):.4f}) repeat={int(args.done_click_repeat)}",
     ]
 
+    def perform_add_contact_submission(
+        window_geometry: dict[str, Any],
+        *,
+        label_prefix: str = "",
+        initial_add_button_match: dict[str, Any] | None = None,
+    ) -> None:
+        add_button_match = initial_add_button_match or find_add_contact_button()
+        if add_button_match is None:
+            raise RuntimeError("Add to contacts button is not visible in the opened profile")
+        steps.append(
+            {
+                "label": f"{label_prefix}probe_add_contact_button",
+                "term": add_button_match["term"],
+                "match": add_button_match["match"],
+            }
+        )
+        add_click_ratio = (
+            _portable_match_origin_ratio(add_button_match["match"])
+            or _portable_derive_accessible_click_ratio(add_button_match["match"], window_geometry)
+            or {"x_ratio": float(args.add_click_x_ratio), "y_ratio": float(args.add_click_y_ratio)}
+        )
+        steps.append(
+            {
+                "label": f"{label_prefix}resolved_add_contact_click",
+                "x_ratio": add_click_ratio["x_ratio"],
+                "y_ratio": add_click_ratio["y_ratio"],
+            }
+        )
+        click_window_ratio(
+            f"{label_prefix}click_add_to_contacts",
+            x_ratio=float(add_click_ratio["x_ratio"]),
+            y_ratio=float(add_click_ratio["y_ratio"]),
+            required=False,
+        )
+        time.sleep(max(float(args.after_add_wait), 0.0))
+
+        post_add_first_name = find_accessible_match(
+            terms=DESKTOP_FIRST_NAME_TERMS,
+            role="text",
+            visible_only=True,
+            label_prefix=f"{label_prefix}find_first_name" or "find_first_name",
+        )
+        post_add_done_button = find_accessible_match(
+            terms=DESKTOP_DONE_BUTTON_TERMS,
+            role="push button",
+            visible_only=True,
+            label_prefix=f"{label_prefix}find_done_button" or "find_done_button",
+        )
+        post_add_button = find_add_contact_button()
+        dialog_detected = bool(post_add_first_name or post_add_done_button)
+        steps.append(
+            {
+                "label": f"{label_prefix}post_add_dialog_state",
+                "dialog_detected": dialog_detected,
+                "add_button_still_visible": bool(post_add_button),
+                "first_name_visible": bool(post_add_first_name),
+                "done_button_visible": bool(post_add_done_button),
+            }
+        )
+        if not dialog_detected and post_add_button is not None:
+            retry_click_ratio = (
+                _portable_match_origin_ratio(post_add_button["match"])
+                or _portable_derive_accessible_click_ratio(post_add_button["match"], window_geometry)
+            )
+            if retry_click_ratio:
+                steps.append(
+                    {
+                        "label": f"{label_prefix}retry_add_contact_click",
+                        "x_ratio": retry_click_ratio["x_ratio"],
+                        "y_ratio": retry_click_ratio["y_ratio"],
+                    }
+                )
+                click_window_ratio(
+                    f"{label_prefix}retry_add_to_contacts",
+                    x_ratio=float(retry_click_ratio["x_ratio"]),
+                    y_ratio=float(retry_click_ratio["y_ratio"]),
+                    required=False,
+                )
+                time.sleep(max(float(args.after_add_wait), 0.0))
+                post_add_first_name = find_accessible_match(
+                    terms=DESKTOP_FIRST_NAME_TERMS,
+                    role="text",
+                    visible_only=True,
+                    label_prefix=f"{label_prefix}retry_find_first_name" or "retry_find_first_name",
+                )
+                post_add_done_button = find_accessible_match(
+                    terms=DESKTOP_DONE_BUTTON_TERMS,
+                    role="push button",
+                    visible_only=True,
+                    label_prefix=f"{label_prefix}retry_find_done_button" or "retry_find_done_button",
+                )
+                dialog_detected = bool(post_add_first_name or post_add_done_button)
+        if not dialog_detected:
+            raise RuntimeError("Add contact dialog did not appear after clicking Add to contacts")
+
+        last_name_text = _nonempty(args.last_name_text)
+        last_name_result: dict[str, Any] | None = None
+        if last_name_text:
+            last_name_result = try_accessible_type(
+                f"{label_prefix}type_last_name_accessible" or "type_last_name_accessible",
+                DESKTOP_LAST_NAME_TERMS,
+                last_name_text,
+            )
+            if last_name_result is None:
+                type_command = _portable_action_command(repo_root, actor, "type-text", "--text", last_name_text)
+                if bool(args.press_enter_after_last_name):
+                    type_command.append("--press-enter")
+                run_portable_step(f"{label_prefix}type_last_name_fallback", type_command, required=False)
+            time.sleep(0.15)
+
+        dialog_submit_ratio = (
+            _portable_derive_dialog_submit_ratio(last_name_result, window_geometry)
+            or _portable_derive_dialog_submit_ratio(post_add_done_button, window_geometry)
+            or _portable_derive_dialog_submit_ratio(post_add_first_name, window_geometry)
+        )
+        if dialog_submit_ratio:
+            steps.append(
+                {
+                    "label": f"{label_prefix}dialog_submit_click",
+                    "x_ratio": dialog_submit_ratio["x_ratio"],
+                    "y_ratio": dialog_submit_ratio["y_ratio"],
+                }
+            )
+            click_window_ratio(
+                f"{label_prefix}click_done_dialog_submit",
+                x_ratio=float(dialog_submit_ratio["x_ratio"]),
+                y_ratio=float(dialog_submit_ratio["y_ratio"]),
+                required=False,
+            )
+        elif post_add_done_button is not None:
+            done_click_ratio = (
+                _portable_match_origin_ratio(post_add_done_button["match"])
+                or _portable_derive_accessible_click_ratio(post_add_done_button["match"], window_geometry)
+                or {"x_ratio": float(args.done_click_x_ratio), "y_ratio": float(args.done_click_y_ratio)}
+            )
+            steps.append(
+                {
+                    "label": f"{label_prefix}resolved_done_contact_click",
+                    "x_ratio": done_click_ratio["x_ratio"],
+                    "y_ratio": done_click_ratio["y_ratio"],
+                }
+            )
+            click_window_ratio(
+                f"{label_prefix}click_done_button",
+                x_ratio=float(done_click_ratio["x_ratio"]),
+                y_ratio=float(done_click_ratio["y_ratio"]),
+                required=False,
+            )
+        else:
+            done_repeat = max(int(args.done_click_repeat), 1)
+            for index in range(done_repeat):
+                click_window_ratio(
+                    f"{label_prefix}click_done_{index + 1}",
+                    x_ratio=float(args.done_click_x_ratio),
+                    y_ratio=float(args.done_click_y_ratio),
+                    required=False,
+                )
+                time.sleep(0.12)
+        time.sleep(max(float(args.after_done_wait), 0.0))
+
     try:
         preflight_command = _portable_action_command(repo_root, actor, "log-diagnose")
         run_portable_step("preflight_log", preflight_command, required=False)
@@ -1992,14 +2159,6 @@ def command_desktop_add_contact_profile(args: argparse.Namespace) -> int:
                 window_geometry = portable["windows"][0] if portable.get("windows") else {}
                 add_button_match = find_add_contact_button()
                 username_match = find_exact_username_label(username)
-                if add_button_match:
-                    steps.append(
-                        {
-                            "label": "probe_add_contact_button",
-                            "term": add_button_match["term"],
-                            "match": add_button_match["match"],
-                        }
-                    )
                 if username_match:
                     steps.append(
                         {
@@ -2032,146 +2191,14 @@ def command_desktop_add_contact_profile(args: argparse.Namespace) -> int:
                     raise RuntimeError(f"Exact username label is not visible for {username}")
 
                 if not preexisting_contact_detected:
-                    add_click_ratio = (
-                        _portable_match_origin_ratio(add_button_match["match"])
-                        or _portable_derive_accessible_click_ratio(add_button_match["match"], window_geometry)
-                        or {"x_ratio": float(args.add_click_x_ratio), "y_ratio": float(args.add_click_y_ratio)}
-                    )
-                    steps.append(
-                        {
-                            "label": "resolved_add_contact_click",
-                            "x_ratio": add_click_ratio["x_ratio"],
-                            "y_ratio": add_click_ratio["y_ratio"],
-                        }
-                    )
-                    click_window_ratio(
-                        "click_add_to_contacts",
-                        x_ratio=float(add_click_ratio["x_ratio"]),
-                        y_ratio=float(add_click_ratio["y_ratio"]),
-                        required=False,
-                    )
-                    time.sleep(max(float(args.after_add_wait), 0.0))
-
-                    post_add_first_name = find_accessible_match(
-                        terms=DESKTOP_FIRST_NAME_TERMS,
-                        role="text",
-                        visible_only=True,
-                        label_prefix="find_first_name",
-                    )
-                    post_add_done_button = find_accessible_match(
-                        terms=DESKTOP_DONE_BUTTON_TERMS,
-                        role="push button",
-                        visible_only=True,
-                        label_prefix="find_done_button",
-                    )
-                    post_add_button = find_add_contact_button()
-                    dialog_detected = bool(post_add_first_name or post_add_done_button)
-                    steps.append(
-                        {
-                            "label": "post_add_dialog_state",
-                            "dialog_detected": dialog_detected,
-                            "add_button_still_visible": bool(post_add_button),
-                            "first_name_visible": bool(post_add_first_name),
-                            "done_button_visible": bool(post_add_done_button),
-                        }
-                    )
-                    if not dialog_detected and post_add_button is not None:
-                        retry_click_ratio = (
-                            _portable_match_origin_ratio(post_add_button["match"])
-                            or _portable_derive_accessible_click_ratio(post_add_button["match"], window_geometry)
+                    try:
+                        perform_add_contact_submission(
+                            window_geometry,
+                            initial_add_button_match=add_button_match,
                         )
-                        if retry_click_ratio:
-                            steps.append(
-                                {
-                                    "label": "retry_add_contact_click",
-                                    "x_ratio": retry_click_ratio["x_ratio"],
-                                    "y_ratio": retry_click_ratio["y_ratio"],
-                                }
-                            )
-                            click_window_ratio(
-                                "retry_add_to_contacts",
-                                x_ratio=float(retry_click_ratio["x_ratio"]),
-                                y_ratio=float(retry_click_ratio["y_ratio"]),
-                                required=False,
-                            )
-                            time.sleep(max(float(args.after_add_wait), 0.0))
-                            post_add_first_name = find_accessible_match(
-                                terms=DESKTOP_FIRST_NAME_TERMS,
-                                role="text",
-                                visible_only=True,
-                                label_prefix="retry_find_first_name",
-                            )
-                            post_add_done_button = find_accessible_match(
-                                terms=DESKTOP_DONE_BUTTON_TERMS,
-                                role="push button",
-                                visible_only=True,
-                                label_prefix="retry_find_done_button",
-                            )
-                            dialog_detected = bool(post_add_first_name or post_add_done_button)
-                    if not dialog_detected:
+                    except RuntimeError as exc:
                         outcome = "ui_add_dialog_not_detected"
-                        raise RuntimeError("Add contact dialog did not appear after clicking Add to contacts")
-
-                    last_name_text = _nonempty(args.last_name_text)
-                    last_name_result: dict[str, Any] | None = None
-                    if last_name_text:
-                        last_name_result = try_accessible_type("type_last_name_accessible", DESKTOP_LAST_NAME_TERMS, last_name_text)
-                        if last_name_result is None:
-                            type_command = _portable_action_command(repo_root, actor, "type-text", "--text", last_name_text)
-                            if bool(args.press_enter_after_last_name):
-                                type_command.append("--press-enter")
-                            run_portable_step("type_last_name_fallback", type_command, required=False)
-                        time.sleep(0.15)
-
-                    dialog_submit_ratio = (
-                        _portable_derive_dialog_submit_ratio(last_name_result, window_geometry)
-                        or _portable_derive_dialog_submit_ratio(post_add_done_button, window_geometry)
-                        or _portable_derive_dialog_submit_ratio(post_add_first_name, window_geometry)
-                    )
-                    if dialog_submit_ratio:
-                        steps.append(
-                            {
-                                "label": "dialog_submit_click",
-                                "x_ratio": dialog_submit_ratio["x_ratio"],
-                                "y_ratio": dialog_submit_ratio["y_ratio"],
-                            }
-                        )
-                        click_window_ratio(
-                            "click_done_dialog_submit",
-                            x_ratio=float(dialog_submit_ratio["x_ratio"]),
-                            y_ratio=float(dialog_submit_ratio["y_ratio"]),
-                            required=False,
-                        )
-                    elif post_add_done_button is not None:
-                        done_click_ratio = (
-                            _portable_match_origin_ratio(post_add_done_button["match"])
-                            or _portable_derive_accessible_click_ratio(post_add_done_button["match"], window_geometry)
-                            or {"x_ratio": float(args.done_click_x_ratio), "y_ratio": float(args.done_click_y_ratio)}
-                        )
-                        steps.append(
-                            {
-                                "label": "resolved_done_contact_click",
-                                "x_ratio": done_click_ratio["x_ratio"],
-                                "y_ratio": done_click_ratio["y_ratio"],
-                            }
-                        )
-                        click_window_ratio(
-                            "click_done_button",
-                            x_ratio=float(done_click_ratio["x_ratio"]),
-                            y_ratio=float(done_click_ratio["y_ratio"]),
-                            required=False,
-                        )
-                    else:
-                        done_repeat = max(int(args.done_click_repeat), 1)
-                        for index in range(done_repeat):
-                            click_window_ratio(
-                                f"click_done_{index + 1}",
-                                x_ratio=float(args.done_click_x_ratio),
-                                y_ratio=float(args.done_click_y_ratio),
-                                required=False,
-                            )
-                            time.sleep(0.12)
-                    time.sleep(max(float(args.after_done_wait), 0.0))
+                        raise RuntimeError(str(exc)) from exc
 
         capture_screenshot("profile_after_actions", "desktop_add_contact_profile_after_actions.png")
 
@@ -2192,6 +2219,38 @@ def command_desktop_add_contact_profile(args: argparse.Namespace) -> int:
                     f"success_visible={int(bool(verification['success_visible']))} "
                     f"term_counts={json.dumps(verification['term_counts'], ensure_ascii=False)}"
                 )
+                if (
+                    not preexisting_contact_detected
+                    and bool(verification.get("add_visible"))
+                    and not bool(verification.get("success_visible"))
+                ):
+                    log_lines.append("INFO: verify kept add button visible; retrying add-contact flow once")
+                    steps.append(
+                        {
+                            "label": "verify_reopen_retry_requested",
+                            "verification": dict(verification),
+                        }
+                    )
+                    perform_add_contact_submission(window_geometry, label_prefix="recovery_")
+                    capture_screenshot("profile_after_retry_actions", "desktop_add_contact_profile_after_retry_actions.png")
+                    retry_open_command = _portable_action_command(repo_root, actor, "open-uri", "--uri", uri)
+                    run_portable_step("reopen_profile_for_verify_retry", retry_open_command)
+                    time.sleep(max(float(args.verify_wait), 0.0))
+                    capture_screenshot("profile_verify_retry", "desktop_add_contact_profile_verify_retry.png")
+                    verification = probe_contact_verification("verify_retry_term")
+                    verification["stage"] = "verify_reopen_retry"
+                    steps.append(
+                        {
+                            "label": "verify_reopen_retry_result",
+                            "verification": dict(verification),
+                        }
+                    )
+                    log_lines.append(
+                        "INFO: verify retry outcome="
+                        f"{verification['outcome']} add_visible={int(bool(verification['add_visible']))} "
+                        f"success_visible={int(bool(verification['success_visible']))} "
+                        f"term_counts={json.dumps(verification['term_counts'], ensure_ascii=False)}"
+                    )
 
         if args.dry_run:
             outcome = "dry_run"
@@ -2308,6 +2367,12 @@ def command_desktop_add_contact_batch(args: argparse.Namespace) -> int:
     selection_limit = limit if limit > 0 else 10_000
     candidates = select_candidates(payload, selection_limit, statuses)
     execution_id = args.execution_id or _execution_id_now()
+    run_dir = _execution_run_dir(job_dir, execution_id)
+    progress_path = run_dir / "batch_progress.json"
+    batch_json_path = run_dir / "batch_contact_add.json"
+    batch_log_path = run_dir / "batch_contact_add.log"
+    started_at = now_utc()
+    started_monotonic = time.monotonic()
     log_lines = [
         f"INFO: desktop-add-contact-batch started execution_id={execution_id}",
         f"INFO: job_dir={job_dir}",
@@ -2319,11 +2384,79 @@ def command_desktop_add_contact_batch(args: argparse.Namespace) -> int:
     added_count = 0
     already_present_count = 0
     failed_count = 0
+    last_outcome = ""
+
+    def _elapsed_seconds() -> int:
+        return max(int(time.monotonic() - started_monotonic), 0)
+
+    def _rate_per_minute(processed_count: int, elapsed_seconds: int) -> float | None:
+        if processed_count <= 0 or elapsed_seconds <= 0:
+            return None
+        return round((float(processed_count) * 60.0) / float(elapsed_seconds), 2)
+
+    def _queue_remaining_total(processed_count: int, state_payload: dict[str, Any] | None) -> int:
+        if args.dry_run:
+            return max(len(candidates) - processed_count, 0)
+        current_state = state_payload if isinstance(state_payload, dict) else load_state(job_dir)
+        return len(select_candidates(current_state, 10_000, statuses))
+
+    def _progress_payload(
+        *,
+        status: str,
+        processed_count: int,
+        current_username: str = "",
+        last_outcome_value: str = "",
+        state_payload: dict[str, Any] | None = None,
+        completed_at: str = "",
+    ) -> dict[str, Any]:
+        elapsed_seconds = _elapsed_seconds()
+        return {
+            "status": status,
+            "job_dir": str(job_dir),
+            "run_dir": str(run_dir),
+            "execution_id": execution_id,
+            "progress_path": str(progress_path),
+            "batch_json": str(batch_json_path),
+            "started_at": started_at,
+            "updated_at": completed_at or now_utc(),
+            "completed_at": completed_at,
+            "selected_target": len(candidates),
+            "processed_count": processed_count,
+            "added_count": added_count,
+            "already_present_count": already_present_count,
+            "failed_count": failed_count,
+            "remaining_in_run": max(len(candidates) - processed_count, 0),
+            "queue_remaining_total": _queue_remaining_total(processed_count, state_payload),
+            "current_username": current_username,
+            "last_outcome": last_outcome_value,
+            "elapsed_seconds": elapsed_seconds,
+            "rate_per_minute": _rate_per_minute(processed_count, elapsed_seconds),
+        }
+
+    _write_contact_batch_progress(
+        run_dir,
+        _progress_payload(
+            status="running",
+            processed_count=0,
+            current_username="",
+            last_outcome_value="",
+            state_payload=payload,
+        ),
+    )
 
     for index, row in enumerate(candidates, start=1):
         username = str(row.get("username") or "")
         user_execution_id = f"{execution_id}-{index:03d}-{username.lstrip('@')}"
         log_lines.append(f"INFO: processing {username} execution_id={user_execution_id}")
+        _write_contact_batch_progress(
+            run_dir,
+            _progress_payload(
+                status="running",
+                processed_count=len(results),
+                current_username=username,
+                last_outcome_value=last_outcome,
+            ),
+        )
         namespace = argparse.Namespace(
             job_dir=str(job_dir),
             username=username,
@@ -2344,6 +2477,7 @@ def command_desktop_add_contact_batch(args: argparse.Namespace) -> int:
             confirm_add=bool(args.confirm_add),
             dry_run=bool(args.dry_run),
         )
+        progress_state: dict[str, Any] | None = None
         try:
             user_rc, user_payload = _invoke_json_command(command_desktop_add_contact_profile, namespace)
             result: dict[str, Any] = {
@@ -2373,6 +2507,7 @@ def command_desktop_add_contact_batch(args: argparse.Namespace) -> int:
                                 else "desktop_contact_batch_added"
                             ),
                         )
+                        progress_state = state_payload
                     added_count += 1
                     if str(user_payload.get("outcome") or "") == "contact_already_present":
                         already_present_count += 1
@@ -2404,8 +2539,20 @@ def command_desktop_add_contact_batch(args: argparse.Namespace) -> int:
                                 else "desktop_contact_batch_failed"
                             ),
                         )
+                        progress_state = state_payload
                 log_lines.append(f"WARN: failed {username} error={result.get('error')!r}")
             results.append(result)
+            last_outcome = str(result.get("outcome") or result.get("status") or "")
+            _write_contact_batch_progress(
+                run_dir,
+                _progress_payload(
+                    status="running",
+                    processed_count=len(results),
+                    current_username=username,
+                    last_outcome_value=last_outcome,
+                    state_payload=progress_state,
+                ),
+            )
         except Exception as exc:  # noqa: BLE001
             failed_count += 1
             result = {
@@ -2426,18 +2573,39 @@ def command_desktop_add_contact_batch(args: argparse.Namespace) -> int:
                         status="failed",
                         reason="desktop_contact_batch_failed",
                     )
+                    progress_state = state_payload
             results.append(result)
             log_lines.append(f"ERROR: {username} {exc}")
+            last_outcome = str(result.get("outcome") or result.get("status") or "failed")
+            _write_contact_batch_progress(
+                run_dir,
+                _progress_payload(
+                    status="running",
+                    processed_count=len(results),
+                    current_username=username,
+                    last_outcome_value=last_outcome,
+                    state_payload=progress_state,
+                ),
+            )
 
     final_state = load_state(job_dir)
     summary = summarize_state(final_state)
     remaining_candidates = select_candidates(final_state, 10_000, statuses)
+    completed_at = now_utc()
+    processed_count = len(results)
+    elapsed_seconds = _elapsed_seconds()
+    rate_per_minute = _rate_per_minute(processed_count, elapsed_seconds)
     response = {
         "status": "completed_with_errors" if failed_count else ("dry_run" if args.dry_run else "completed"),
         "job_dir": str(job_dir),
         "input_path": str(input_path) if input_path is not None else str(final_state.get("source_file") or ""),
         "initialized_from_input": bool(initialized_from_input),
         "execution_id": execution_id,
+        "started_at": started_at,
+        "completed_at": completed_at,
+        "elapsed_seconds": elapsed_seconds,
+        "processed_count": processed_count,
+        "rate_per_minute": rate_per_minute,
         "portable_actor": actor,
         "portable": portable,
         "selected_users": len(candidates),
@@ -2448,8 +2616,28 @@ def command_desktop_add_contact_batch(args: argparse.Namespace) -> int:
         "remaining_usernames": [str(item.get("username") or "") for item in remaining_candidates[:20]],
         "summary": summary,
         "results": results,
+        "progress_json": str(progress_path),
+        "batch_json": str(batch_json_path),
+        "artifact_paths": {
+            "job_dir": str(job_dir),
+            "run_dir": str(run_dir),
+            "progress_json": str(progress_path),
+            "batch_json": str(batch_json_path),
+            "log_path": str(batch_log_path),
+        },
     }
-    run_dir = _write_contact_batch_artifacts(job_dir, execution_id, response, log_lines)
+    _write_contact_batch_progress(
+        run_dir,
+        _progress_payload(
+            status=str(response.get("status") or "completed"),
+            processed_count=processed_count,
+            current_username="",
+            last_outcome_value=last_outcome,
+            state_payload=final_state,
+            completed_at=completed_at,
+        ),
+    )
+    run_dir = _write_contact_batch_artifacts(run_dir, response, log_lines)
     response["run_dir"] = str(run_dir)
     print(json.dumps(response, ensure_ascii=False, indent=2))
     return 0

@@ -42,7 +42,7 @@
         "./bin/telegram-session-runner",
         "sync-preview",
         "--config",
-        "/home/max/telegram-portable-session-tool/examples/session.example.json"
+        "/home/max/site-control-kit/runtime/telegram/session/configs/session.example.json"
       ],
       "workdir": "."
     }
@@ -74,6 +74,6 @@
   ],
   "artifacts": {
     "standalone_repo": "/home/max/telegram-portable-session-tool",
-    "default_runs_dir": "/home/max/telegram-portable-session-tool/runs"
+    "default_runs_dir": "/home/max/site-control-kit/runtime/telegram/session/runs"
   }
 }

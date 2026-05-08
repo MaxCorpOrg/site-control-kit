@@ -224,6 +224,38 @@ class TelegramPortableTests(unittest.TestCase):
             self.assertEqual(payload["profile_name"], "AK")
             self.assertFalse(payload["running"])
 
+    def test_status_reports_running_without_window_attach(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            profile_dir = Path(tmpdir) / "TelegramPortableAK"
+            profile_dir.mkdir(parents=True, exist_ok=True)
+            (profile_dir / "Telegram").write_text("#!/usr/bin/env bash\nsleep 60\n", encoding="utf-8")
+
+            with mock.patch.object(self.mod, "find_running_pids", return_value=[777]):
+                with mock.patch.object(self.mod, "_wmctrl_windows_by_pid", return_value={}):
+                    payload = self.mod.profile_status(profile_dir)
+
+        self.assertTrue(payload["running"])
+        self.assertEqual(payload["attach_status"], "running_without_window")
+        self.assertEqual(payload["attach_candidates"], [])
+        self.assertIn("собственное X11-окно", payload["attach_message"])
+
+    def test_status_reports_exact_window_attach(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            profile_dir = Path(tmpdir) / "TelegramPortableAK"
+            profile_dir.mkdir(parents=True, exist_ok=True)
+            (profile_dir / "Telegram").write_text("#!/usr/bin/env bash\nsleep 60\n", encoding="utf-8")
+
+            with mock.patch.object(self.mod, "find_running_pids", return_value=[777]):
+                with mock.patch.object(
+                    self.mod,
+                    "_wmctrl_windows_by_pid",
+                    return_value={777: [{"window_id": "0x11", "title": "Telegram", "width": 800, "height": 600}]},
+                ):
+                    payload = self.mod.profile_status(profile_dir)
+
+        self.assertEqual(payload["attach_status"], "exact_window")
+        self.assertEqual(payload["attach_candidates"][0]["window_id"], "0x11")
+
     def test_wmctrl_windows_by_pid_reads_geometry_and_title(self) -> None:
         output = "0x0460002e 0 10413 2746 506 1110 642 GIGA Жиротоп Shop\n"
 
@@ -476,6 +508,24 @@ class TelegramPortableTests(unittest.TestCase):
             self.assertEqual(payload["window_id"], "0x2")
             self.assertEqual((payload["x"], payload["y"]), (1000, 150))
             self.assertEqual(payload["coordinate_space"], "window_geometry")
+
+    def test_window_click_requires_safe_attach(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            profile_dir = Path(tmpdir) / "TelegramPortableAK"
+            profile_dir.mkdir(parents=True, exist_ok=True)
+            with mock.patch.object(
+                self.mod,
+                "profile_status",
+                return_value={
+                    "running": True,
+                    "windows": [],
+                    "attach_status": "running_without_window",
+                    "attach_message": "Процесс профиля запущен, но собственное окно Telegram не найдено.",
+                    "attach_candidates": [],
+                },
+            ):
+                with self.assertRaisesRegex(RuntimeError, "собственное окно Telegram не найдено"):
+                    self.mod.click_portable_window(profile_dir, x_ratio=0.5, y_ratio=0.5, dry_run=True)
 
     def test_window_click_dry_run_prefers_accessible_window_extents(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

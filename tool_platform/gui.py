@@ -36,8 +36,16 @@ from .telegram_gui_helpers import (
     DEFAULT_PANEL_STATE_ROOT,
     DEFAULT_RUNTIME_CONFIG_ROOT,
     DEFAULT_SESSION_CONFIG,
-    DEFAULT_SESSION_RUNS_DIR,
-    DEFAULT_SESSION_STATE_FILE,
+    build_artifact_center_text,
+    build_combined_dashboard_texts,
+    build_invite_dashboard_texts,
+    build_profile_workspace_artifacts_health,
+    build_profile_workspace_details,
+    build_profile_workspace_history,
+    build_profile_workspace_summary,
+    build_profile_manager_selected_text,
+    build_session_dashboard_text,
+    ensure_session_base_config,
     active_profile_conflict,
     build_session_runtime_config,
     combined_step_label,
@@ -49,9 +57,9 @@ from .telegram_gui_helpers import (
     parse_json_payload,
     parse_combined_step_pattern,
     preview_invite_input_file,
+    resolve_combined_contact_preview,
     save_combined_flow_state,
     session_config_defaults,
-    session_history_snapshot,
     session_plan_command,
 )
 from .agent_state import ensure_agent_state, load_agent_state
@@ -74,10 +82,18 @@ from .telegram_profiles import (
     adopt_existing_profile,
     format_profile_label,
     get_profile_status,
+    hide_portable_profile,
     import_tdata_profile,
+    list_external_portable_profiles,
+    list_hidden_profile_records,
     launch_profile,
     list_portable_profiles,
+    profile_attach_report,
+    profile_live_attach_error,
+    remove_portable_profile,
+    unhide_portable_profile,
 )
+from .telegram_runtime import display_path, panel_log_path, runtime_root
 from .workflows import (
     combined_state_from_jobs,
     cleanup_failed_workflow_start,
@@ -93,7 +109,7 @@ from .workflows import (
 
 
 USERNAME_RE = re.compile(r"^@?[A-Za-z0-9_]{5,32}$")
-PANEL_LOG_PATH = Path("/tmp/telegram-control-center-panel.log")
+PANEL_LOG_PATH = panel_log_path()
 LOGGER = logging.getLogger("telegram_control_center_panel")
 if not LOGGER.handlers:
     PANEL_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -109,30 +125,60 @@ TOOL_WORKFLOW_KINDS = {
     "telegram_combined_flow": "combined_pattern",
 }
 
+ATTACH_STATUS_LABELS = {
+    "exact_window": "окно найдено",
+    "title_match": "окно найдено по title",
+    "running_without_window": "окно не найдено",
+    "ambiguous_window": "attach неоднозначен",
+    "no_process": "профиль не запущен",
+    "unknown": "статус окна неизвестен",
+}
+
+
+def _format_attach_summary(profile: dict[str, Any]) -> tuple[str, str]:
+    report = profile_attach_report(profile)
+    attach_status = str(report.get("attach_status") or "").strip() or "unknown"
+    attach_message = str(report.get("attach_message") or "").strip()
+    candidates = report.get("attach_candidates") if isinstance(report.get("attach_candidates"), list) else []
+    first_candidate = candidates[0] if candidates else {}
+    title = str(first_candidate.get("title") or "").strip()
+    label = ATTACH_STATUS_LABELS.get(attach_status, attach_status or ATTACH_STATUS_LABELS["unknown"])
+    if attach_status == "ambiguous_window":
+        label = f"{label}: {len(candidates)} окна"
+    elif attach_status in {"exact_window", "title_match"} and title:
+        label = f"{label}: {title}"
+    return label, attach_message
+
 
 def format_profile_details(profile: dict[str, Any]) -> str:
     account = profile.get("account") if isinstance(profile.get("account"), dict) else {}
-    windows = profile.get("windows") if isinstance(profile.get("windows"), list) else []
+    windows = profile.get("attach_candidates") if isinstance(profile.get("attach_candidates"), list) else []
+    if not windows:
+        windows = profile.get("windows") if isinstance(profile.get("windows"), list) else []
     first_window = windows[0] if windows else {}
     running_text = "Запущен" if profile.get("running") else "Остановлен"
+    attach_summary, attach_message = _format_attach_summary(profile)
     lines = [
         "Профиль Telegram",
         f"Имя профиля: {profile.get('profile_name') or 'неизвестно'}",
         f"Username аккаунта: {account.get('username') or 'не задан'}",
         f"Метка аккаунта: {account.get('label') or 'не задана'}",
         f"Состояние: {running_text}",
+        f"Статус attach: {attach_summary}",
         f"Количество PID: {len(profile.get('pids') or [])}",
         "",
         "Пути",
-        f"Папка профиля: {profile.get('profile_dir') or '-'}",
-        f"Папка tdata: {profile.get('tdata_dir') or '-'}",
-        f"Metadata: {profile.get('metadata_path') or '-'}",
-        f"Telegram log: {profile.get('telegram_log_path') or '-'}",
+        f"Папка профиля: {display_path(profile.get('profile_dir') or '-') if profile.get('profile_dir') else '-'}",
+        f"Папка tdata: {display_path(profile.get('tdata_dir') or '-') if profile.get('tdata_dir') else '-'}",
+        f"Metadata: {display_path(profile.get('metadata_path') or '-') if profile.get('metadata_path') else '-'}",
+        f"Telegram log: {display_path(profile.get('telegram_log_path') or '-') if profile.get('telegram_log_path') else '-'}",
         "",
         "Окно",
         f"Заголовок окна: {first_window.get('title') or 'недоступно'}",
         f"ID окна: {first_window.get('window_id') or 'недоступно'}",
     ]
+    if attach_message:
+        lines.append(f"Подсказка attach: {attach_message}")
     return "\n".join(lines)
 
 
@@ -140,76 +186,14 @@ def format_profile_workspace_details(profile: dict[str, Any]) -> str:
     profile_name = str(profile.get("profile_name") or "").strip() or "profile"
     profile_dir = str(profile.get("profile_dir") or "").strip()
     workspace = profile_workspace_snapshot(profile_name=profile_name, profile_dir=profile_dir)
-    health = workspace.get("health") if isinstance(workspace.get("health"), dict) else {}
-    lock = workspace.get("current_lock") if isinstance(workspace.get("current_lock"), dict) else None
-    workflow_buckets = workspace.get("workflow_buckets") if isinstance(workspace.get("workflow_buckets"), dict) else {}
-    active_bucket = next(
-        (
-            bucket
-            for bucket in workflow_buckets.values()
-            if isinstance(bucket, dict) and isinstance(bucket.get("active_job"), dict)
-        ),
-        None,
+    attach_summary, attach_message = _format_attach_summary(profile)
+    return build_profile_workspace_details(
+        profile,
+        workspace,
+        attach_summary=attach_summary,
+        attach_message=attach_message,
+        workflow_line_formatter=format_workflow_job_line,
     )
-    recoverable_bucket = next(
-        (
-            bucket
-            for bucket in workflow_buckets.values()
-            if isinstance(bucket, dict) and isinstance(bucket.get("recoverable_job"), dict)
-        ),
-        None,
-    )
-    lines = [
-        "",
-        "Workspace",
-        f"Профиль ID: {workspace.get('profile_id') or '-'}",
-        f"Активных jobs: {len(workspace.get('active_jobs') or [])}",
-        f"Последних jobs: {len(workspace.get('recent_jobs') or [])}",
-        f"Текущая ОС: {health.get('platform_id') or '-'}",
-        f"Profile runtime: {'запущен' if health.get('profile_running') else 'остановлен'}",
-        f"Window automation: {'доступно' if health.get('window_automation_available') else 'недоступно'}",
-        f"Accessibility: {'доступно' if health.get('accessibility_available') else 'недоступно'}",
-        f"Session runtime: {'доступен' if health.get('session_runtime_reachable') else 'недоступен'}",
-    ]
-    if lock:
-        lines.append(
-            f"Lock: {lock.get('owner_tool_id') or '-'} · job {lock.get('job_id') or '-'}"
-        )
-    else:
-        lines.append("Lock: свободен")
-    if isinstance(active_bucket, dict) and isinstance(active_bucket.get("active_job"), dict):
-        lines.append(
-            f"Активный workflow: {format_workflow_job_line(active_bucket['active_job'])}"
-        )
-    else:
-        lines.append("Активный workflow: нет")
-    if isinstance(recoverable_bucket, dict) and isinstance(recoverable_bucket.get("recoverable_job"), dict):
-        lines.append(
-            f"Recoverable workflow: {format_workflow_job_line(recoverable_bucket['recoverable_job'])}"
-        )
-    else:
-        lines.append("Recoverable workflow: нет")
-    last_success = workspace.get("last_successful_job") if isinstance(workspace.get("last_successful_job"), dict) else {}
-    if last_success:
-        lines.append(
-            f"Последний успешный job: {last_success.get('tool_id') or '-'} · {last_success.get('status') or '-'}"
-        )
-    active_jobs = workspace.get("active_jobs") if isinstance(workspace.get("active_jobs"), list) else []
-    if active_jobs:
-        lines.extend(["", "Активные jobs"])
-        for item in active_jobs[:4]:
-            lines.append(format_workflow_job_line(item))
-    recent_jobs = workspace.get("recent_jobs") if isinstance(workspace.get("recent_jobs"), list) else []
-    if recent_jobs:
-        lines.extend(["", "Последние jobs"])
-        for item in recent_jobs[:4]:
-            lines.append(format_workflow_job_line(item))
-    artifact_index = workspace.get("artifact_index") if isinstance(workspace.get("artifact_index"), dict) else {}
-    if artifact_index:
-        lines.extend(["", "Последние артефакты"])
-        for key, value in sorted(artifact_index.items()):
-            lines.append(f"- {key}: {value}")
-    return "\n".join(lines)
 
 
 def _workspace_for_profile(profile: dict[str, Any], workspace: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -234,39 +218,18 @@ def format_workflow_resume_hint(job: dict[str, Any] | None) -> str:
 
 
 def format_profile_workspace_summary(profile: dict[str, Any], workspace: dict[str, Any] | None = None) -> str:
-    account = profile.get("account") if isinstance(profile.get("account"), dict) else {}
-    windows = profile.get("windows") if isinstance(profile.get("windows"), list) else []
-    first_window = windows[0] if windows else {}
+    attach_summary, attach_message = _format_attach_summary(profile)
     workspace = _workspace_for_profile(profile, workspace)
-    profile_name = str(profile.get("profile_name") or "").strip() or "profile"
-    profile_dir = str(profile.get("profile_dir") or "").strip()
     active_job = workspace.get("active_workflow") if isinstance(workspace.get("active_workflow"), dict) else None
     recoverable_job = workspace.get("recoverable_workflow") if isinstance(workspace.get("recoverable_workflow"), dict) else None
-    lock = workspace.get("current_lock") if isinstance(workspace.get("current_lock"), dict) else None
-    last_success = workspace.get("last_successful_job") if isinstance(workspace.get("last_successful_job"), dict) else None
-    lines = [
-        "Профиль и workflow",
-        f"Профиль: {profile_name}",
-        f"Аккаунт: {account.get('username') or 'не задан'}",
-        f"Метка: {account.get('label') or 'не задана'}",
-        f"Состояние: {'запущен' if profile.get('running') else 'остановлен'}",
-        f"Окно: {first_window.get('title') or 'недоступно'}",
-        f"Папка профиля: {profile_dir or '-'}",
-        "",
-        f"Активный workflow: {format_workflow_job_line(active_job) if active_job else 'нет'}",
-        f"Recoverable workflow: {format_workflow_job_line(recoverable_job) if recoverable_job else 'нет'}",
-        f"Подсказка resume: {str(workspace.get('resume_hint') or format_workflow_resume_hint(recoverable_job or active_job))}",
-        f"Очередь invite: {str(workspace.get('continue_queue_hint') or 'нет данных')}",
-        f"Ошибки invite: {str(workspace.get('retry_failed_hint') or 'нет данных')}",
-        f"Следующее действие: {str(workspace.get('next_operator_action') or 'не определено')}",
-    ]
-    if lock:
-        lines.append(f"Lock: {lock.get('owner_tool_id') or '-'} · job {lock.get('job_id') or '-'}")
-    else:
-        lines.append("Lock: свободен")
-    if last_success:
-        lines.append(f"Последний успешный workflow: {format_workflow_job_line(last_success)}")
-    return "\n".join(lines)
+    return build_profile_workspace_summary(
+        profile,
+        workspace,
+        attach_summary=attach_summary,
+        attach_message=attach_message,
+        workflow_line_formatter=format_workflow_job_line,
+        resume_hint=str(workspace.get("resume_hint") or format_workflow_resume_hint(recoverable_job or active_job)),
+    )
 
 
 def format_profile_workspace_history(
@@ -277,52 +240,31 @@ def format_profile_workspace_history(
     step_limit: int = 4,
 ) -> str:
     current_workspace = _workspace_for_profile(profile, workspace)
+    limited_workspace = dict(current_workspace)
     groups = current_workspace.get("history_groups") if isinstance(current_workspace.get("history_groups"), list) else []
-    if not groups:
-        groups = []
-    lines = ["История профиля"]
-    if not groups:
-        lines.append("Для этого профиля пока нет unified workflow history.")
-        return "\n".join(lines)
+    limited_groups: list[dict[str, Any]] = []
     for group in groups[: max(limit, 1)]:
-        job = group.get("job") if isinstance(group.get("job"), dict) else {}
-        steps = group.get("steps") if isinstance(group.get("steps"), list) else []
-        lines.extend(["", format_workflow_job_line(job)])
-        if not steps:
-            lines.append("  Child steps пока не зафиксированы.")
-            continue
-        for step in steps[: max(step_limit, 1)]:
-            started_at = str(step.get("started_at") or "").strip() or "-"
-            completed_at = str(step.get("completed_at") or "").strip() or "..."
-            lines.append(
-                "  "
-                + f"#{_safe_preview_int(step.get('step_index')) + 1} · "
-                + f"{step.get('step_code') or '-'} · "
-                + f"{step.get('step_kind') or '-'} · "
-                + f"{step.get('status') or '-'} · "
-                + f"{str(step.get('summary') or '').strip() or '-'} · "
-                + f"{started_at} -> {completed_at}"
-            )
-    return "\n".join(lines)
+        normalized_group = dict(group) if isinstance(group, dict) else {}
+        steps = normalized_group.get("steps") if isinstance(normalized_group.get("steps"), list) else []
+        normalized_group["steps"] = steps[: max(step_limit, 1)]
+        limited_groups.append(normalized_group)
+    limited_workspace["history_groups"] = limited_groups
+    return build_profile_workspace_history(
+        limited_workspace,
+        workflow_line_formatter=format_workflow_job_line,
+    )
 
 
 def format_profile_workspace_artifacts_health(profile: dict[str, Any], workspace: dict[str, Any] | None = None) -> str:
     workspace = _workspace_for_profile(profile, workspace)
-    health = workspace.get("health") if isinstance(workspace.get("health"), dict) else {}
-    artifacts = workspace.get("artifact_center") if isinstance(workspace.get("artifact_center"), list) else workspace.get("artifact_shortcuts")
-    lines = [
-        "Артефакты и здоровье",
-        "",
-        "Здоровье профиля",
-        f"- Profile runtime: {'запущен' if health.get('profile_running') else 'остановлен'}",
-        f"- Window automation: {'доступно' if health.get('window_automation_available') else 'недоступно'}",
-        f"- Accessibility: {'доступно' if health.get('accessibility_available') else 'недоступно'}",
-        f"- Session runtime: {'доступен' if health.get('session_runtime_reachable') else 'недоступен'}",
-        f"- Panel/backend: {health.get('panel_backend_status') or '-'}",
-        "",
-        format_artifact_center(artifacts),
-    ]
-    return "\n".join(lines)
+    attach_summary, attach_message = _format_attach_summary(profile)
+    return build_profile_workspace_artifacts_health(
+        profile,
+        workspace,
+        attach_summary=attach_summary,
+        attach_message=attach_message,
+        artifact_center_formatter=build_artifact_center_text,
+    )
 
 
 def format_invite_operator_action(bucket: dict[str, Any] | None) -> str:
@@ -415,26 +357,7 @@ def format_workflow_jobs_block(
 
 
 def format_artifact_center(artifact_index: dict[str, Any] | list[dict[str, Any]] | None) -> str:
-    lines = ["Artifact center"]
-    if isinstance(artifact_index, list):
-        for item in artifact_index:
-            if not isinstance(item, dict):
-                continue
-            label = str(item.get("label") or item.get("artifact_kind") or "Артефакт").strip()
-            value = str(item.get("path") or "").strip()
-            lines.append(f"- {label}: {value or 'пока нет'}")
-        return "\n".join(lines)
-    artifacts = artifact_index if isinstance(artifact_index, dict) else {}
-    previews = [
-        ("Последний batch json", artifacts.get("batch_json") or artifacts.get("job_dir") or ""),
-        ("Последний session run", artifacts.get("session_run") or artifacts.get("run_dir") or ""),
-        ("Последний execution record", artifacts.get("execution_record") or artifacts.get("job_dir") or ""),
-        ("Последний screenshot", artifacts.get("screenshot_path") or artifacts.get("run_dir") or ""),
-        ("Лог панели", str(PANEL_LOG_PATH)),
-    ]
-    for label, value in previews:
-        lines.append(f"- {label}: {value or 'пока нет'}")
-    return "\n".join(lines)
+    return build_artifact_center_text(artifact_index)
 
 
 def format_workflow_timeline(job: dict[str, Any] | None, *, limit: int = 8) -> str:
@@ -610,7 +533,8 @@ def format_profiles_overview(profiles: list[dict[str, Any]]) -> str:
         label = str(account.get("label") or "").strip() or username
         state = "запущен" if profile.get("running") else "остановлен"
         profile_name = str(profile.get("profile_name") or "profile")
-        lines.append(f"- {label} · {profile_name} · {state}")
+        attach_summary, _ = _format_attach_summary(profile)
+        lines.append(f"- {label} · {profile_name} · {state} · {attach_summary}")
     return "\n".join(lines)
 
 
@@ -622,6 +546,53 @@ def _format_username_block(title: str, usernames: list[str], *, empty_text: str)
     for item in usernames:
         lines.append(f"- {item}")
     return "\n".join(lines)
+
+
+def _format_elapsed_seconds_short(value: Any) -> str:
+    try:
+        total = max(int(value), 0)
+    except (TypeError, ValueError):
+        total = 0
+    hours, remainder = divmod(total, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+
+def _format_rate_per_minute(value: Any) -> str:
+    try:
+        rate = float(value)
+    except (TypeError, ValueError):
+        return "unknown"
+    if rate <= 0:
+        return "unknown"
+    return f"{rate:.2f}/мин"
+
+
+def _format_eta_seconds(value: Any) -> str:
+    try:
+        eta = int(value)
+    except (TypeError, ValueError):
+        return "unknown"
+    if eta < 0:
+        return "unknown"
+    return _format_elapsed_seconds_short(eta)
+
+
+def _format_invite_progress_preview(summary: dict[str, Any]) -> str:
+    if not isinstance(summary, dict) or not summary:
+        return ""
+    selected_target = int(summary.get("selected_target") or 0)
+    processed_count = int(summary.get("processed_count") or 0)
+    queue_remaining_total = int(summary.get("queue_remaining_total") or 0)
+    failed_count = int(summary.get("failed_count") or 0)
+    if selected_target <= 0 and processed_count <= 0 and queue_remaining_total <= 0 and failed_count <= 0:
+        return ""
+    return (
+        f"Обработано: {processed_count}/{selected_target or 0}"
+        f" · rate: {_format_rate_per_minute(summary.get('rate_per_minute'))}"
+        f" · ETA: {_format_eta_seconds(summary.get('eta_seconds'))}"
+        f" · очередь: {queue_remaining_total}"
+    )
 
 
 def format_contact_dashboard_snapshot(snapshot: dict[str, Any]) -> str:
@@ -643,6 +614,36 @@ def format_contact_dashboard_snapshot(snapshot: dict[str, Any]) -> str:
         f"Добавлено: {snapshot.get('added_total') or 0}",
         f"Ошибок: {snapshot.get('failed_total') or 0}",
     ]
+    progress_summary = snapshot.get("progress_summary") if isinstance(snapshot.get("progress_summary"), dict) else {}
+    if progress_summary:
+        lines.extend(
+            [
+                "",
+                "Прогресс invite batch",
+                f"- Источник: {progress_summary.get('history_source') or '-'}",
+                f"- Статус: {progress_summary.get('status') or '-'}",
+                (
+                    f"- Обработано: {progress_summary.get('processed_count') or 0}"
+                    f" / {progress_summary.get('selected_target') or 0}"
+                    f" · осталось в tranche: {progress_summary.get('remaining_in_run') or 0}"
+                ),
+                (
+                    f"- Добавлено: {progress_summary.get('added_count') or 0}"
+                    f" · уже было: {progress_summary.get('already_present_count') or 0}"
+                    f" · ошибок: {progress_summary.get('failed_count') or 0}"
+                ),
+                f"- Время: {_format_elapsed_seconds_short(progress_summary.get('elapsed_seconds'))}",
+                f"- Скорость: {_format_rate_per_minute(progress_summary.get('rate_per_minute'))}",
+                f"- ETA: {_format_eta_seconds(progress_summary.get('eta_seconds'))}",
+                f"- Осталось в общей очереди: {progress_summary.get('queue_remaining_total') or 0}",
+            ]
+        )
+        current_username = str(progress_summary.get("current_username") or "").strip()
+        if current_username:
+            lines.append(f"- Текущий username: {current_username}")
+        last_outcome = str(progress_summary.get("last_outcome") or "").strip()
+        if last_outcome:
+            lines.append(f"- Последний outcome: {last_outcome}")
     if counts:
         lines.append("")
         lines.append("Статусы")
@@ -660,6 +661,9 @@ def format_contact_dashboard_snapshot(snapshot: dict[str, Any]) -> str:
                     f" · добавлено: {last_run.get('added_count') or 0}"
                     f" · уже было: {last_run.get('already_present_count') or 0}"
                     f" · ошибок: {last_run.get('failed_count') or 0}"
+                    f" · processed: {last_run.get('processed_count') or 0}/{last_run.get('selected_users') or 0}"
+                    f" · время: {_format_elapsed_seconds_short(last_run.get('elapsed_seconds'))}"
+                    f" · rate: {_format_rate_per_minute(last_run.get('rate_per_minute'))}"
                 ),
             ]
         )
@@ -673,7 +677,7 @@ def format_contact_history(snapshot: dict[str, Any]) -> str:
     lines = ["История batch-запусков"]
     for item in history[-8:]:
         lines.append(
-            f"- {item.get('execution_id') or '-'} · {item.get('status') or '-'} · добавлено {item.get('added_count') or 0} · уже было {item.get('already_present_count') or 0} · ошибок {item.get('failed_count') or 0} · осталось {item.get('remaining_candidates') or 0}"
+            f"- {item.get('execution_id') or '-'} · {item.get('status') or '-'} · добавлено {item.get('added_count') or 0} · уже было {item.get('already_present_count') or 0} · ошибок {item.get('failed_count') or 0} · processed {item.get('processed_count') or 0}/{item.get('selected_users') or 0} · осталось {item.get('remaining_candidates') or 0} · время {_format_elapsed_seconds_short(item.get('elapsed_seconds'))} · rate {_format_rate_per_minute(item.get('rate_per_minute'))}"
         )
     return "\n".join(lines)
 
@@ -728,6 +732,25 @@ def format_session_dashboard_snapshot(snapshot: dict[str, Any]) -> str:
         f"Курсор шаблонов: {snapshot.get('message_cursor') or 0}",
         f"Курсор адресатов: {snapshot.get('message_target_cursor') or 0}",
     ]
+    progress_summary = snapshot.get("progress_summary") if isinstance(snapshot.get("progress_summary"), dict) else {}
+    if progress_summary:
+        eta_mode = str(progress_summary.get("eta_mode") or "").strip()
+        eta_text = "continuous" if eta_mode == "continuous" else _format_eta_seconds(progress_summary.get("eta_seconds"))
+        lines.extend(
+            [
+                "",
+                "Live progress",
+                f"- Фаза: {progress_summary.get('current_phase') or '-'}",
+                f"- Режим: {progress_summary.get('run_mode') or '-'}",
+                f"- Время: {_format_elapsed_seconds_short(progress_summary.get('elapsed_seconds'))}",
+                f"- Обработано: {progress_summary.get('processed_count') or 0} / {progress_summary.get('selected_target') or 0}",
+                f"- Осталось в цикле: {progress_summary.get('remaining_in_run') if progress_summary.get('remaining_in_run') is not None else 'n/a'}",
+                f"- Скорость: {_format_rate_per_minute(progress_summary.get('rate_per_minute'))}",
+                f"- ETA: {eta_text}",
+                f"- Следующий адресат: {progress_summary.get('current_target_label') or 'не выбран'}",
+                f"- Следующий текст: {progress_summary.get('current_template_preview') or 'не задан'}",
+            ]
+        )
     if last_run:
         lines.extend(
             [
@@ -755,8 +778,14 @@ def format_session_history(snapshot: dict[str, Any]) -> str:
     lines = ["История запусков сессии"]
     for item in latest_runs[-8:]:
         lines.append(
-            f"- {item.get('run_id') or '-'} · {item.get('status') or '-'} · визитов {item.get('visit_count') or 0} · сообщений {item.get('message_count') or 0} · отправлено {item.get('sent_count') or 0}"
+            f"- {item.get('run_id') or '-'} · {item.get('status') or '-'} · визитов {item.get('visit_count') or 0} · сообщений {item.get('message_count') or 0} · отправлено {item.get('sent_count') or 0} · черновиков {item.get('draft_count') or 0} · {item.get('message_target_username') or 'без адресата'}"
         )
+        sent_preview = item.get("sent_preview") if isinstance(item.get("sent_preview"), list) else []
+        draft_preview = item.get("draft_preview") if isinstance(item.get("draft_preview"), list) else []
+        if sent_preview:
+            lines.append(f"  sent: {' | '.join(str(text).strip() for text in sent_preview if str(text).strip())}")
+        if draft_preview:
+            lines.append(f"  draft: {' | '.join(str(text).strip() for text in draft_preview if str(text).strip())}")
     return "\n".join(lines)
 
 
@@ -973,6 +1002,7 @@ def format_combined_flow_state(
     session_snapshot: dict[str, Any] | None = None,
 ) -> str:
     phase = str(state.get("phase") or "contact_add")
+    progress_summary = state.get("progress_summary") if isinstance(state.get("progress_summary"), dict) else {}
     next_target = preview_next_session_target(
         session_targets,
         message_target_cursor=_safe_preview_int((session_snapshot or {}).get("message_target_cursor")),
@@ -1013,6 +1043,28 @@ def format_combined_flow_state(
         lines.append(f"Workflow summary: {workflow_summary}")
     if next_hint:
         lines.append(f"Подсказка engine: {next_hint}")
+    if progress_summary:
+        lines.extend(
+            [
+                f"Progress: {progress_summary.get('phase_label') or '-'}",
+                (
+                    f"Текущий шаг: {progress_summary.get('current_step_label') or '-'}"
+                    f" · следующий: {progress_summary.get('next_step_label') or '-'}"
+                ),
+                f"Elapsed: {_format_elapsed_seconds_short(progress_summary.get('elapsed_seconds'))}",
+                f"Причина ожидания: {progress_summary.get('waiting_reason') or 'не требуется'}",
+            ]
+        )
+        child_source = str(progress_summary.get("child_history_source") or "").strip()
+        if child_source:
+            lines.append(f"Источник дочернего прогресса: {child_source}")
+        if progress_summary.get("invite_pending_total") or progress_summary.get("invite_added_total") or progress_summary.get("invite_failed_total"):
+            lines.append(
+                "Invite summary: "
+                f"осталось {progress_summary.get('invite_pending_total') or 0}"
+                f" · добавлено {progress_summary.get('invite_added_total') or 0}"
+                f" · ошибок {progress_summary.get('invite_failed_total') or 0}"
+            )
     lines.extend(format_recent_step_trace(recent_step))
     lines.extend(
         [
@@ -1134,10 +1186,15 @@ def format_contact_batch_payload(payload: dict[str, Any]) -> str:
         f"Папка задачи: {payload.get('job_dir') or '-'}",
         f"Файл списка: {payload.get('input_path') or '-'}",
         f"Выбрано username: {payload.get('selected_users') or 0}",
+        f"Обработано username: {payload.get('processed_count') or len(results)}",
         f"Успешно добавлено: {payload.get('added_count') or 0}",
         f"Уже были в контактах: {payload.get('already_present_count') or 0}",
         f"Ошибок: {payload.get('failed_count') or 0}",
         f"Осталось в очереди: {payload.get('remaining_candidates') or 0}",
+        f"Старт: {payload.get('started_at') or '-'}",
+        f"Завершение: {payload.get('completed_at') or '-'}",
+        f"Время: {_format_elapsed_seconds_short(payload.get('elapsed_seconds'))}",
+        f"Скорость: {_format_rate_per_minute(payload.get('rate_per_minute'))}",
     ]
     if summary:
         counts = summary.get("counts") if isinstance(summary.get("counts"), dict) else {}
@@ -1160,6 +1217,9 @@ def format_contact_batch_payload(payload: dict[str, Any]) -> str:
     run_dir = str(payload.get("run_dir") or "").strip()
     if run_dir:
         lines.extend(["", f"Артефакты batch-запуска: {run_dir}"])
+    progress_json = str(payload.get("progress_json") or "").strip()
+    if progress_json:
+        lines.append(f"Progress json: {progress_json}")
     return "\n".join(lines)
 
 
@@ -1292,7 +1352,7 @@ if tk is not None:
             self.combined_preview_var = tk.StringVar(value="Список ещё не выбран")
             self.combined_step_pattern_var = tk.StringVar(value="12")
 
-            self.session_config_path_var = tk.StringVar(value=str(DEFAULT_SESSION_CONFIG))
+            self.session_config_path_var = tk.StringVar(value=str(ensure_session_base_config(DEFAULT_SESSION_CONFIG)))
             self.session_new_target_var = tk.StringVar()
             self.session_new_target_label_var = tk.StringVar()
             self.session_new_target_kind_var = tk.StringVar(value="Контакт")
@@ -1344,6 +1404,9 @@ if tk is not None:
             self.profile_artifacts: tk.Text | None = None
             self.profile_overview: tk.Text | None = None
             self.profile_manager_window: tk.Toplevel | None = None
+            self.profile_manager_selected_text: tk.Text | None = None
+            self.hidden_profiles_list: tk.Listbox | None = None
+            self.external_profiles_list: tk.Listbox | None = None
             self.invite_output: tk.Text | None = None
             self.invite_summary_text: tk.Text | None = None
             self.invite_queue_text: tk.Text | None = None
@@ -1364,6 +1427,8 @@ if tk is not None:
             self._session_template_widgets: list[tk.Text] = []
             self._tool_buttons: dict[str, tk.Button] = {}
             self._tool_frames: dict[str, ttk.Frame] = {}
+            self._hidden_profile_records: list[dict[str, Any]] = []
+            self._external_profile_records: list[dict[str, Any]] = []
 
             self.invite_input_path_var.trace_add("write", self._sync_contact_job_dir)
             self.combined_input_path_var.trace_add("write", self._sync_combined_job_dir)
@@ -1734,7 +1799,8 @@ if tk is not None:
                 self._log_event(tool_id, f"Не удалось обновить live-статус: {exc}")
             with self._process_lock:
                 proc = self._active_processes.get(tool_id)
-                running = proc is not None and proc.poll() is None
+                process_running = proc is not None and proc.poll() is None
+            running = process_running or bool(str(self._active_job_ids.get(tool_id) or ""))
             if running:
                 self._monitor_after_ids[tool_id] = self.after(
                     1800,
@@ -2440,7 +2506,7 @@ if tk is not None:
             ).pack(side=tk.LEFT, padx=(10, 0))
             ttk.Button(
                 action_row,
-                text="Добавить / подключить профили",
+                text="Аккаунты…",
                 command=self._open_profile_manager,
             ).pack(side=tk.LEFT, padx=(10, 0))
 
@@ -3351,7 +3417,10 @@ if tk is not None:
             preferred_profile_dir: str | None = None,
         ) -> None:
             try:
-                self._profiles = list_portable_profiles(self.output_root_var.get())
+                self._profiles = list_portable_profiles(
+                    self.output_root_var.get(),
+                    include_legacy_when_empty=True,
+                )
             except Exception as exc:  # pragma: no cover - GUI fallback
                 messagebox.showerror("Панель Telegram", f"Не удалось прочитать профили:\n{exc}")
                 if initial:
@@ -3374,6 +3443,7 @@ if tk is not None:
                     "Артефакты и здоровье\nПрофили пока не найдены, поэтому workspace ещё пустой.",
                 )
                 self._set_readonly_text(self.profile_overview, "Профили пока не найдены.")
+                self._refresh_profile_manager_state()
                 self._refresh_summary()
                 return
 
@@ -3388,18 +3458,188 @@ if tk is not None:
             self._show_profile(self._profiles[index])
             if self._active_tool_id:
                 self._refresh_dashboard_for_tool(self._active_tool_id)
+            self._refresh_profile_manager_state()
             self._refresh_summary()
 
+        def _selected_profile_index(self) -> int:
+            profile_combo = getattr(self, "profile_combo", None)
+            profiles = getattr(self, "_profiles", [])
+            if profile_combo is None:
+                return -1
+            index = profile_combo.current()
+            if index < 0 or index >= len(profiles):
+                return -1
+            return index
+
         def _selected_profile(self) -> dict[str, Any] | None:
-            if self.profile_combo is None:
+            index = self._selected_profile_index()
+            profiles = getattr(self, "_profiles", [])
+            if index < 0 or index >= len(profiles):
                 return None
-            index = self.profile_combo.current()
-            if index < 0 or index >= len(self._profiles):
+            return profiles[index]
+
+        def _sync_selected_profile_payload(
+            self,
+            fresh: dict[str, Any] | None,
+            *,
+            refresh_dashboard: bool = True,
+            refresh_tool: bool = True,
+        ) -> None:
+            if isinstance(fresh, dict):
+                index = self._selected_profile_index()
+                profiles = getattr(self, "_profiles", [])
+                if 0 <= index < len(profiles):
+                    self._profiles[index] = fresh
+            current = fresh if isinstance(fresh, dict) else self._selected_profile()
+            if refresh_dashboard:
+                self._refresh_profile_workspace_dashboard(current)
+            active_tool_id = str(getattr(self, "_active_tool_id", "") or "")
+            if refresh_tool and active_tool_id:
+                self._refresh_dashboard_for_tool(active_tool_id)
+            self._refresh_profile_manager_state()
+            self._refresh_summary()
+
+        def _refresh_selected_profile_runtime_state(self) -> dict[str, Any] | None:
+            profile = self._selected_profile()
+            if profile is None:
                 return None
-            return self._profiles[index]
+            fresh = get_profile_status(str(profile.get("profile_dir") or ""))
+            self._sync_selected_profile_payload(fresh)
+            return fresh
+
+        def _live_attach_preflight(self, *, tool_id: str, workflow_kind: str) -> dict[str, Any] | None:
+            profile = self._selected_profile()
+            if profile is None:
+                messagebox.showinfo("Панель Telegram", "Сначала выбери Telegram-профиль сверху.")
+                return None
+            try:
+                fresh = self._refresh_selected_profile_runtime_state()
+            except Exception as exc:
+                messagebox.showerror("Панель Telegram", f"Не удалось обновить attach-статус профиля:\n{exc}")
+                return None
+            if fresh is None:
+                return None
+            attach_error = profile_live_attach_error(fresh)
+            if not attach_error:
+                return fresh
+            attach_summary, _ = _format_attach_summary(fresh)
+            profile_name = str(fresh.get("profile_name") or "").strip() or "profile"
+            if callable(getattr(self, "_log_event", None)):
+                self._log_event(
+                    tool_id,
+                    (
+                        f"Live preflight заблокировал {workflow_kind} для {profile_name}: "
+                        f"{str(fresh.get('attach_status') or 'unknown')} · {attach_error}"
+                    ),
+                )
+            messagebox.showerror(
+                "Панель Telegram",
+                "\n".join(
+                    [
+                        f"Профиль `{profile_name}` пока не готов к безопасному live attach.",
+                        "",
+                        f"Статус окна: {attach_summary}",
+                        attach_error,
+                        "",
+                        "Сначала восстанови собственное окно этого аккаунта, затем повтори запуск.",
+                    ]
+                ),
+            )
+            return None
+
+        def _refresh_profile_manager_state(self) -> None:
+            profile_manager_window = getattr(self, "profile_manager_window", None)
+            if profile_manager_window is None or not profile_manager_window.winfo_exists():
+                return
+            profile = self._selected_profile()
+            if profile is None:
+                selected_text = (
+                    "Текущий выбранный аккаунт\n"
+                    "Сейчас в панели нет выбранного видимого профиля. Импортируй, забери в проект или верни скрытый аккаунт."
+                )
+            else:
+                try:
+                    workspace = self._selected_profile_workspace(limit=8, timeline_limit=8)
+                except Exception:
+                    workspace = {}
+                attach_summary, attach_message = _format_attach_summary(profile)
+                selected_text = build_profile_manager_selected_text(
+                    profile=profile,
+                    workspace=workspace,
+                    attach_summary=attach_summary,
+                    attach_message=attach_message,
+                )
+            self._set_readonly_text(self.profile_manager_selected_text, selected_text)
+            records = list_hidden_profile_records()
+            self._hidden_profile_records = records
+            if self.hidden_profiles_list is not None:
+                self.hidden_profiles_list.delete(0, tk.END)
+                if not records:
+                    self.hidden_profiles_list.insert(tk.END, "Скрытых аккаунтов нет.")
+                else:
+                    for item in records:
+                        profile_name = str(item.get("profile_name") or "").strip() or Path(
+                            str(item.get("profile_dir") or "")
+                        ).name
+                        account_label = str(item.get("account_label") or "").strip()
+                        account_username = str(item.get("account_username") or "").strip()
+                        label = account_label or account_username or profile_name
+                        suffix = "" if bool(item.get("exists")) else " · папка отсутствует"
+                        self.hidden_profiles_list.insert(
+                            tk.END,
+                            f"{label} · {profile_name}{suffix}",
+                        )
+            external_records = list_external_portable_profiles(primary_output_root=self.output_root_var.get())
+            self._external_profile_records = external_records
+            if self.external_profiles_list is not None:
+                self.external_profiles_list.delete(0, tk.END)
+                if not external_records:
+                    self.external_profiles_list.insert(tk.END, "Внешних аккаунтов для миграции нет.")
+                else:
+                    for item in external_records:
+                        self.external_profiles_list.insert(
+                            tk.END,
+                            f"{format_profile_label(item)} · {str(item.get('profile_dir') or '')}",
+                        )
+
+        def _selected_hidden_profile_record(self) -> dict[str, Any] | None:
+            if self.hidden_profiles_list is None:
+                return None
+            index = self.hidden_profiles_list.curselection()
+            if not index:
+                return None
+            selected_index = int(index[0])
+            if selected_index < 0 or selected_index >= len(self._hidden_profile_records):
+                return None
+            return self._hidden_profile_records[selected_index]
+
+        def _selected_external_profile_record(self) -> dict[str, Any] | None:
+            if self.external_profiles_list is None:
+                return None
+            index = self.external_profiles_list.curselection()
+            if not index:
+                return None
+            selected_index = int(index[0])
+            if selected_index < 0 or selected_index >= len(self._external_profile_records):
+                return None
+            return self._external_profile_records[selected_index]
+
+        def _use_selected_external_profile(self) -> None:
+            record = self._selected_external_profile_record()
+            if record is None:
+                messagebox.showinfo("Панель Telegram", "Сначала выбери внешний аккаунт, который нужно забрать в проект.")
+                return
+            self.adopt_profile_dir_var.set(str(record.get("profile_dir") or ""))
+            self.adopt_profile_name_var.set(str(record.get("profile_name") or ""))
+            account = record.get("account") if isinstance(record.get("account"), dict) else {}
+            self.adopt_account_username_var.set(str(account.get("username") or ""))
+            self.adopt_account_label_var.set(
+                str((account.get("label") or account.get("username") or record.get("profile_name") or "")).strip()
+            )
 
         def _show_profile(self, profile: dict[str, Any]) -> None:
             self._refresh_profile_workspace_dashboard(profile)
+            self._refresh_profile_manager_state()
 
         def _refresh_profile_workspace_dashboard(self, profile: dict[str, Any] | None = None) -> None:
             current_profile = profile or self._selected_profile()
@@ -3417,6 +3657,7 @@ if tk is not None:
                     "Артефакты и здоровье\nПосле выбора профиля здесь появятся последние артефакты и health summary.",
                 )
                 self._set_readonly_text(self.profile_overview, format_profiles_overview(self._profiles))
+                self._refresh_profile_manager_state()
                 return
             workspace = self._selected_profile_workspace(limit=8, timeline_limit=8)
             self._set_readonly_text(
@@ -3471,13 +3712,40 @@ if tk is not None:
             except Exception as exc:  # pragma: no cover - GUI fallback
                 messagebox.showerror("Панель Telegram", f"Не удалось обновить статус:\n{exc}")
                 return
-            index = self.profile_combo.current() if self.profile_combo is not None else -1
-            if 0 <= index < len(self._profiles):
-                self._profiles[index] = fresh
-            self._show_profile(fresh)
-            if self._active_tool_id:
-                self._refresh_dashboard_for_tool(self._active_tool_id)
-            self._refresh_summary()
+            self._sync_selected_profile_payload(fresh)
+
+        def _open_path_in_system(self, target: str | Path) -> None:
+            resolved = Path(target).expanduser().resolve()
+            if not resolved.exists():
+                messagebox.showinfo("Панель Telegram", f"Путь пока не найден:\n{resolved}")
+                return
+            if not webbrowser.open(resolved.as_uri()):
+                messagebox.showerror("Панель Telegram", f"Не удалось открыть путь:\n{resolved}")
+
+        def _open_selected_profile_dir(self) -> None:
+            profile = self._selected_profile()
+            if profile is None:
+                messagebox.showinfo("Панель Telegram", "Сначала выбери Telegram-профиль.")
+                return
+            profile_dir = str(profile.get("profile_dir") or "").strip()
+            if not profile_dir:
+                messagebox.showinfo("Панель Telegram", "У выбранного профиля пока нет portable-папки.")
+                return
+            self._open_path_in_system(profile_dir)
+
+        def _open_selected_profile_log(self) -> None:
+            profile = self._selected_profile()
+            if profile is None:
+                messagebox.showinfo("Панель Telegram", "Сначала выбери Telegram-профиль.")
+                return
+            log_path = str(profile.get("telegram_log_path") or "").strip()
+            if not log_path:
+                messagebox.showinfo("Панель Telegram", "У выбранного профиля пока не найден лог Telegram.")
+                return
+            self._open_path_in_system(log_path)
+
+        def _open_runtime_root(self) -> None:
+            self._open_path_in_system(runtime_root())
 
         def _sync_contact_job_dir(self, *_args: object) -> None:
             input_path = self.invite_input_path_var.get().strip()
@@ -3561,6 +3829,7 @@ if tk is not None:
         def _build_profile_manager_form(self, parent: ttk.Frame) -> None:
             parent.columnconfigure(0, weight=1)
             parent.columnconfigure(1, weight=1)
+            parent.rowconfigure(1, weight=1)
 
             import_panel = self._create_inline_panel(
                 parent,
@@ -3630,8 +3899,8 @@ if tk is not None:
 
             adopt_panel = self._create_inline_panel(
                 parent,
-                "Подключить готовую папку",
-                "Если профиль уже лежит на диске, просто добавь его в список без переимпорта.",
+                "Забрать профиль в проект",
+                "Внешний portable-профиль копируется в `runtime/telegram/profiles/`, после чего панель переключается на project-local путь.",
             )
             adopt_panel.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
             adopt_panel.columnconfigure(0, weight=1)
@@ -3689,20 +3958,126 @@ if tk is not None:
             )
             ttk.Button(
                 adopt_panel,
-                text="Подключить профиль",
+                text="Забрать в проект",
                 command=self._adopt_profile,
             ).grid(row=10, column=0, sticky="e")
 
+            tk.Label(
+                adopt_panel,
+                text="Внешние кандидаты для миграции",
+                bg=self._colors["field"],
+                fg=self._colors["muted"],
+                font=self._fonts["small"],
+                anchor="w",
+            ).grid(row=11, column=0, sticky="w")
+            self.external_profiles_list = self._create_listbox(adopt_panel, height=5)
+            self.external_profiles_list.grid(row=12, column=0, sticky="nsew", pady=(4, 8))
+            self._bind_scroll_to_widget(self.external_profiles_list)
+            external_actions = ttk.Frame(adopt_panel, style="Card.TFrame")
+            external_actions.grid(row=13, column=0, sticky="w")
+            ttk.Button(
+                external_actions,
+                text="Взять из списка",
+                command=self._use_selected_external_profile,
+            ).pack(side=tk.LEFT)
+            ttk.Button(
+                external_actions,
+                text="Обновить кандидаты",
+                command=self._refresh_profile_manager_state,
+            ).pack(side=tk.LEFT, padx=(10, 0))
+
+            selected_panel = self._create_inline_panel(
+                parent,
+                "Управление выбранным аккаунтом",
+                "Здесь собраны действия над профилем, который сейчас выбран в верхнем dropdown панели.",
+            )
+            selected_panel.grid(row=1, column=0, sticky="nsew", padx=(0, 8), pady=(16, 0))
+            selected_panel.columnconfigure(0, weight=1)
+            selected_panel.rowconfigure(2, weight=1)
+            self.profile_manager_selected_text = self._create_readonly_text(selected_panel, height=16)
+            self.profile_manager_selected_text.grid(row=2, column=0, sticky="nsew")
+            self._bind_scroll_to_widget(self.profile_manager_selected_text)
+            selected_actions = ttk.Frame(selected_panel, style="Card.TFrame")
+            selected_actions.grid(row=3, column=0, sticky="w", pady=(12, 0))
+            ttk.Button(
+                selected_actions,
+                text="Обновить статус",
+                command=self._refresh_selected_profile_status,
+            ).pack(side=tk.LEFT)
+            ttk.Button(
+                selected_actions,
+                text="Открыть папку",
+                command=self._open_selected_profile_dir,
+            ).pack(side=tk.LEFT, padx=(10, 0))
+            ttk.Button(
+                selected_actions,
+                text="Открыть лог",
+                command=self._open_selected_profile_log,
+            ).pack(side=tk.LEFT, padx=(10, 0))
+            ttk.Button(
+                selected_actions,
+                text="Открыть runtime",
+                command=self._open_runtime_root,
+            ).pack(side=tk.LEFT, padx=(10, 0))
+            ttk.Button(
+                selected_actions,
+                text="Скрыть из панели",
+                command=self._hide_selected_profile,
+            ).pack(side=tk.LEFT, padx=(10, 0))
+            ttk.Button(
+                selected_actions,
+                text="Удалить папку профиля",
+                command=self._delete_selected_profile,
+            ).pack(side=tk.LEFT, padx=(10, 0))
+
+            hidden_panel = self._create_inline_panel(
+                parent,
+                "Скрытые аккаунты",
+                "Скрытые профили не показываются в основном списке, но отсюда их можно вернуть обратно.",
+            )
+            hidden_panel.grid(row=1, column=1, sticky="nsew", padx=(8, 0), pady=(16, 0))
+            hidden_panel.columnconfigure(0, weight=1)
+            hidden_panel.rowconfigure(2, weight=1)
+            self.hidden_profiles_list = tk.Listbox(
+                hidden_panel,
+                bg=self._colors["field"],
+                fg=self._colors["text"],
+                selectbackground=self._colors["accent"],
+                selectforeground=self._colors["accent_text"],
+                activestyle="none",
+                relief="flat",
+                borderwidth=0,
+                highlightthickness=1,
+                highlightbackground=self._colors["border"],
+                highlightcolor=self._colors["accent"],
+                font=self._fonts["base"],
+            )
+            self.hidden_profiles_list.grid(row=2, column=0, sticky="nsew")
+            self._bind_scroll_to_widget(self.hidden_profiles_list)
+            hidden_actions = ttk.Frame(hidden_panel, style="Card.TFrame")
+            hidden_actions.grid(row=3, column=0, sticky="w", pady=(12, 0))
+            ttk.Button(
+                hidden_actions,
+                text="Вернуть в панель",
+                command=self._restore_hidden_profile,
+            ).pack(side=tk.LEFT)
+            ttk.Button(
+                hidden_actions,
+                text="Обновить список",
+                command=self._refresh_profile_manager_state,
+            ).pack(side=tk.LEFT, padx=(10, 0))
+
         def _open_profile_manager(self) -> None:
             if self.profile_manager_window is not None and self.profile_manager_window.winfo_exists():
+                self._refresh_profile_manager_state()
                 self.profile_manager_window.lift()
                 self.profile_manager_window.focus_force()
                 return
 
             window = tk.Toplevel(self)
-            window.title("Управление профилями Telegram")
-            window.geometry("1200x620")
-            window.minsize(1000, 540)
+            window.title("Аккаунты Telegram")
+            window.geometry("1240x760")
+            window.minsize(1060, 620)
             window.configure(bg=self._colors["bg"])
             window.transient(self)
             self.profile_manager_window = window
@@ -3717,18 +4092,19 @@ if tk is not None:
             outer.pack(fill=tk.BOTH, expand=True)
             ttk.Label(
                 outer,
-                text="Добавление и подключение Telegram-профилей",
+                text="Аккаунты Telegram",
                 style="HeroTitle.TLabel",
             ).pack(anchor="w")
             ttk.Label(
                 outer,
-                text="Здесь можно импортировать нового пользователя по tdata.zip или принять в управление уже готовую папку профиля.",
+                text="Здесь можно импортировать, забирать в проект, скрывать, возвращать и удалять portable-профили Telegram.",
                 style="HeroSub.TLabel",
             ).pack(anchor="w", pady=(6, 16))
 
             form = ttk.Frame(outer, style="App.TFrame")
             form.pack(fill=tk.BOTH, expand=True)
             self._build_profile_manager_form(form)
+            self._refresh_profile_manager_state()
 
         def _choose_import_zip(self) -> None:
             if filedialog is None:  # pragma: no cover - depends on tkinter extras
@@ -3745,7 +4121,7 @@ if tk is not None:
         def _choose_adopt_dir(self) -> None:
             if filedialog is None:  # pragma: no cover - depends on tkinter extras
                 return
-            selected = filedialog.askdirectory(title="Выбери существующую папку Telegram")
+            selected = filedialog.askdirectory(title="Выбери внешний portable-профиль Telegram")
             if selected:
                 self.adopt_profile_dir_var.set(selected)
                 if not self.adopt_profile_name_var.get().strip():
@@ -3822,90 +4198,70 @@ if tk is not None:
             bucket = self._selected_profile_workflow_bucket("invite_batch")
             action_block = format_invite_operator_action(bucket)
             job_dir_text = self.invite_job_dir_var.get().strip()
-            if not job_dir_text:
-                preview_path = self.invite_input_path_var.get().strip()
-                if preview_path:
-                    try:
-                        preview = preview_invite_input_file(preview_path)
-                    except Exception as exc:
-                        self._set_readonly_text(
-                            self.invite_summary_text,
-                            action_block + "\n\n" + f"Не удалось прочитать список username:\n{exc}",
-                        )
-                        return
-                    self.invite_preview_var.set(
-                        f"Уникальных username: {preview.get('unique_usernames') or 0} · дубликатов: {preview.get('duplicates') or 0} · ошибок: {preview.get('invalid_count') or 0}"
-                    )
-                    self._set_readonly_text(
-                        self.invite_summary_text,
-                        action_block + "\n\n" + format_invite_input_preview(preview),
-                    )
-                    self._set_readonly_text(
-                        self.invite_queue_text,
-                        _format_username_block(
-                            "Первые username из файла",
-                            list(preview.get("usernames") or []),
-                            empty_text="В файле пока нет корректных username.",
-                        ),
-                    )
-                    self._set_readonly_text(self.invite_added_text, "Уже добавлены\nЗадача ещё не запускалась.")
-                    self._set_readonly_text(self.invite_failed_text, "Последние ошибки\nОшибок пока нет.")
-                    self._set_readonly_text(
-                        self.invite_history_text,
-                        "История batch-запусков\nПока нет запусков.",
-                    )
-                else:
-                    self._set_readonly_text(
-                        self.invite_summary_text,
-                        action_block + "\n\n" + "Файл контактов ещё не выбран. Загрузи TXT / CSV / JSON и затем запускай batch-добавление.",
-                    )
+            preview_path = self.invite_input_path_var.get().strip()
+            bucket_snapshot = bucket.get("invite_snapshot") if isinstance(bucket.get("invite_snapshot"), dict) else {}
+            bucket_progress = bucket.get("progress_summary") if isinstance(bucket.get("progress_summary"), dict) else {}
+            try:
+                texts = build_invite_dashboard_texts(
+                    action_block=action_block,
+                    job_dir_text=job_dir_text,
+                    preview_path=preview_path,
+                    bucket_snapshot=bucket_snapshot,
+                    bucket_progress=bucket_progress,
+                    invite_input_preview_loader=preview_invite_input_file,
+                    contact_job_snapshot_loader=contact_job_snapshot,
+                    invite_preview_formatter=format_invite_input_preview,
+                    contact_snapshot_formatter=format_contact_dashboard_snapshot,
+                    contact_error_formatter=format_contact_errors,
+                    contact_history_formatter=format_contact_history,
+                    username_block_formatter=lambda title, usernames, empty_text: _format_username_block(
+                        title,
+                        usernames,
+                        empty_text=empty_text,
+                    ),
+                    progress_preview_formatter=_format_invite_progress_preview,
+                )
+            except Exception as exc:
+                self._set_readonly_text(
+                    self.invite_summary_text,
+                    action_block + "\n\n" + f"Не удалось прочитать список username:\n{exc}",
+                )
                 return
-
-            snapshot = contact_job_snapshot(job_dir_text)
-            self._set_readonly_text(
-                self.invite_summary_text,
-                action_block + "\n\n" + format_contact_dashboard_snapshot(snapshot),
-            )
+            self._set_readonly_text(self.invite_summary_text, texts["summary"])
             self._set_readonly_text(
                 self.invite_queue_text,
-                _format_username_block(
-                    "Осталось в очереди",
-                    list(snapshot.get("pending_usernames") or []),
-                    empty_text="Очередь сейчас пуста.",
-                ),
+                texts["queue"] or "Осталось в очереди\nФайл контактов ещё не выбран.",
             )
             self._set_readonly_text(
                 self.invite_added_text,
-                _format_username_block(
-                    "Уже добавлены",
-                    list(snapshot.get("added_usernames") or []),
-                    empty_text="Пока никто не добавлен.",
-                ),
+                texts["added"] or "Уже добавлены\nЗадача ещё не запускалась.",
             )
-            self._set_readonly_text(self.invite_failed_text, format_contact_errors(snapshot))
+            self._set_readonly_text(
+                self.invite_failed_text,
+                texts["failed"] or "Последние ошибки\nОшибок пока нет.",
+            )
             self._set_readonly_text(
                 self.invite_history_text,
-                format_contact_history(snapshot),
+                texts["history"] or "История batch-запусков\nПока нет запусков.",
             )
-            self.invite_preview_var.set(
-                f"Осталось: {snapshot.get('pending_total') or 0} · добавлено: {snapshot.get('added_total') or 0} · ошибок: {snapshot.get('failed_total') or 0}"
-            )
+            self.invite_preview_var.set(str(texts.get("preview") or ""))
 
         def _refresh_session_dashboard(self) -> None:
-            bucket = self._selected_profile_workflow_bucket("session_run")
-            snapshot = session_history_snapshot(
-                state_file=DEFAULT_SESSION_STATE_FILE,
-                runs_dir=DEFAULT_SESSION_RUNS_DIR,
-            )
+            workspace = self._selected_profile_workspace(limit=8, timeline_limit=8)
+            buckets = workspace.get("workflow_buckets") if isinstance(workspace.get("workflow_buckets"), dict) else {}
+            bucket = buckets.get("session_run") if isinstance(buckets.get("session_run"), dict) else {}
+            snapshot = workspace.get("session_snapshot") if isinstance(workspace.get("session_snapshot"), dict) else {"status": "missing"}
             preview_context = self._session_preview_context()
-            self._set_readonly_text(
-                self.session_summary_text,
-                format_session_operator_action(bucket) + "\n\n" + format_session_operator_summary(snapshot, **preview_context),
+            blocks = build_session_dashboard_text(
+                bucket,
+                snapshot,
+                preview_context=preview_context,
+                operator_action_formatter=format_session_operator_action,
+                operator_summary_formatter=format_session_operator_summary,
+                history_formatter=format_session_history,
             )
-            self._set_readonly_text(
-                self.session_history_text,
-                format_session_history(snapshot),
-            )
+            self._set_readonly_text(self.session_summary_text, blocks["summary"])
+            self._set_readonly_text(self.session_history_text, blocks["history"])
 
         def _sync_combined_job_dir(self, *_args: object) -> None:
             input_path = self.combined_input_path_var.get().strip()
@@ -4111,6 +4467,11 @@ if tk is not None:
             if profile is None:
                 messagebox.showinfo("Панель Telegram", "Сначала выбери Telegram-профиль сверху.")
                 return
+            fresh = self._live_attach_preflight(tool_id=tool_id, workflow_kind=workflow_kind)
+            if fresh is None:
+                refresh_callback()
+                return
+            profile = fresh
             profile_name = str(profile.get("profile_name") or "")
             profile_dir = str(profile.get("profile_dir") or "")
             planned: dict[str, Any] | None = None
@@ -4182,6 +4543,9 @@ if tk is not None:
                 refresh_callback()
                 return
             job_id = str(candidate.get("job_id") or "")
+            if self._live_attach_preflight(tool_id=tool_id, workflow_kind=workflow_kind) is None:
+                refresh_callback()
+                return
             try:
                 execution = resume_workflow(job_id)
             except Exception as exc:
@@ -4327,16 +4691,31 @@ if tk is not None:
                 self._set_readonly_text(self.combined_session_text, "Сессия\nПрофиль не выбран.")
                 self._set_readonly_text(self.combined_targets_text, "Адресаты\nПрофиль не выбран.")
                 return
-            state = combined_state_from_jobs(
-                profile_name=str(profile.get("profile_name") or ""),
-                profile_dir=str(profile.get("profile_dir") or ""),
-            ) or self._load_combined_state()
-            self.combined_phase_var.set(combined_phase_label(str(state.get("phase") or "contact_add")))
-            self.combined_status_var.set(self._combined_status_from_state(state))
             try:
-                bucket = self._selected_profile_workflow_bucket("combined_pattern")
+                workspace = self._selected_profile_workspace(limit=8, timeline_limit=8)
+            except Exception:
+                workspace = {}
+            buckets = workspace.get("workflow_buckets") if isinstance(workspace.get("workflow_buckets"), dict) else {}
+            try:
+                bucket = buckets.get("combined_pattern") if isinstance(buckets.get("combined_pattern"), dict) else {}
             except Exception:
                 bucket = {}
+            state = (
+                dict(bucket.get("combined_state") or {})
+                if isinstance(bucket.get("combined_state"), dict)
+                else workspace.get("combined_state")
+                if isinstance(workspace.get("combined_state"), dict)
+                else combined_state_from_jobs(
+                    profile_name=str(profile.get("profile_name") or ""),
+                    profile_dir=str(profile.get("profile_dir") or ""),
+                )
+                or self._load_combined_state()
+            )
+            if isinstance(bucket.get("progress_summary"), dict) and bucket.get("progress_summary"):
+                state = dict(state)
+                state["progress_summary"] = dict(bucket.get("progress_summary") or {})
+            self.combined_phase_var.set(combined_phase_label(str(state.get("phase") or "contact_add")))
+            self.combined_status_var.set(self._combined_status_from_state(state))
             action_block = format_combined_operator_action(bucket)
             active_job = bucket.get("active_job") if isinstance(bucket.get("active_job"), dict) else None
             last_job = bucket.get("last_job") if isinstance(bucket.get("last_job"), dict) else None
@@ -4352,55 +4731,38 @@ if tk is not None:
             if (sync_from_state or not self.combined_step_pattern_var.get().strip()) and state.get("step_pattern"):
                 self.combined_step_pattern_var.set(str(state.get("step_pattern") or ""))
             input_path = self.combined_input_path_var.get().strip()
-            invite_snapshot: dict[str, Any] | None = None
-            preview_text = "Список ещё не выбран"
-            if self.combined_job_dir_var.get().strip():
-                invite_snapshot = contact_job_snapshot(self.combined_job_dir_var.get().strip())
-            if input_path:
-                try:
-                    preview = preview_invite_input_file(input_path)
-                    preview_text = (
-                        f"Уникальных username: {preview.get('unique_usernames') or 0} · "
-                        f"дубликатов: {preview.get('duplicates') or 0} · "
-                        f"ошибок: {preview.get('invalid_count') or 0}"
-                    )
-                except Exception as exc:
-                    preview_text = f"Не удалось прочитать файл: {exc}"
-            self.combined_preview_var.set(preview_text)
-            session_snapshot = session_history_snapshot(
-                state_file=DEFAULT_SESSION_STATE_FILE,
-                runs_dir=DEFAULT_SESSION_RUNS_DIR,
+            preview = resolve_combined_contact_preview(
+                input_path=input_path,
+                invite_job_dir=self.combined_job_dir_var.get().strip(),
+                contact_job_snapshot_loader=contact_job_snapshot,
+                invite_input_preview_loader=preview_invite_input_file,
             )
+            invite_snapshot = preview.get("invite_snapshot") if isinstance(preview.get("invite_snapshot"), dict) else None
+            self.combined_preview_var.set(str(preview.get("preview_text") or "Список ещё не выбран"))
+            session_snapshot = workspace.get("session_snapshot") if isinstance(workspace.get("session_snapshot"), dict) else {"status": "missing"}
             preview_context = self._session_preview_context()
             profile_label = format_profile_label(profile)
-            self._set_readonly_text(
-                self.combined_state_text,
-                action_block + "\n\n" + format_combined_flow_state(
-                    state,
-                    profile_label=profile_label,
-                    invite_snapshot=invite_snapshot,
-                    session_snapshot=session_snapshot,
-                    **preview_context,
-                ),
+            texts = build_combined_dashboard_texts(
+                action_block=action_block,
+                state=state,
+                profile_label=profile_label,
+                invite_snapshot=invite_snapshot,
+                session_snapshot=session_snapshot,
+                preview_context=preview_context,
+                input_path=input_path,
+                preview_payload=preview.get("preview_payload") if isinstance(preview.get("preview_payload"), dict) else None,
+                preview_error=str(preview.get("preview_error") or ""),
+                combined_state_formatter=format_combined_flow_state,
+                contact_snapshot_formatter=format_contact_dashboard_snapshot,
+                contact_error_formatter=format_contact_errors,
+                invite_preview_formatter=format_invite_input_preview,
+                session_snapshot_formatter=format_session_dashboard_snapshot,
+                targets_summary_text=self._combined_targets_summary(),
             )
-            if invite_snapshot is None:
-                if input_path:
-                    try:
-                        preview = preview_invite_input_file(input_path)
-                        self._set_readonly_text(self.combined_contact_text, format_invite_input_preview(preview))
-                    except Exception as exc:
-                        self._set_readonly_text(self.combined_contact_text, f"Не удалось прочитать список username:\n{exc}")
-                else:
-                    self._set_readonly_text(
-                        self.combined_contact_text,
-                        "Контакты\nВыбери файл контактов и нажми `Старт совместного режима`.",
-                    )
-            else:
-                contact_text = format_contact_dashboard_snapshot(invite_snapshot)
-                contact_text += "\n\n" + format_contact_errors(invite_snapshot)
-                self._set_readonly_text(self.combined_contact_text, contact_text)
-            self._set_readonly_text(self.combined_session_text, format_session_dashboard_snapshot(session_snapshot))
-            self._set_readonly_text(self.combined_targets_text, self._combined_targets_summary())
+            self._set_readonly_text(self.combined_state_text, texts["state_text"])
+            self._set_readonly_text(self.combined_contact_text, texts["contact_text"])
+            self._set_readonly_text(self.combined_session_text, texts["session_text"])
+            self._set_readonly_text(self.combined_targets_text, texts["targets_text"])
 
         def _invite_batch_command(
             self,
@@ -4491,7 +4853,7 @@ if tk is not None:
         def _adopt_profile(self) -> None:
             profile_dir = self.adopt_profile_dir_var.get().strip()
             if not profile_dir:
-                messagebox.showinfo("Панель Telegram", "Сначала выбери существующую portable-папку.")
+                messagebox.showinfo("Панель Telegram", "Сначала выбери внешний portable-профиль, который нужно забрать в проект.")
                 return
             try:
                 result = adopt_existing_profile(
@@ -4499,14 +4861,93 @@ if tk is not None:
                     profile_name=self.adopt_profile_name_var.get(),
                     account_username=self.adopt_account_username_var.get(),
                     account_label=self.adopt_account_label_var.get(),
+                    output_root=self.output_root_var.get(),
                 )
             except Exception as exc:  # pragma: no cover - GUI fallback
-                messagebox.showerror("Панель Telegram", f"Подключение профиля не удалось:\n{exc}")
+                messagebox.showerror("Панель Telegram", f"Не удалось забрать профиль в проект:\n{exc}")
                 return
             self._reload_profiles(preferred_profile_dir=str(result.get("profile_dir") or ""))
+            self._refresh_profile_manager_state()
             messagebox.showinfo(
-                "Подключение профиля",
-                f"Папка профиля подключена и добавлена в список.\n\n{json.dumps(result, ensure_ascii=False, indent=2)}",
+                "Забрать профиль в проект",
+                f"Профиль скопирован в project-local storage и переключен на новый путь.\n\n{json.dumps(result, ensure_ascii=False, indent=2)}",
+            )
+
+        def _hide_selected_profile(self) -> None:
+            profile = self._selected_profile()
+            if profile is None:
+                messagebox.showinfo("Панель Telegram", "Сейчас нет выбранного видимого профиля, который можно скрыть.")
+                return
+            account = profile.get("account") if isinstance(profile.get("account"), dict) else {}
+            try:
+                result = hide_portable_profile(
+                    profile_dir=str(profile.get("profile_dir") or ""),
+                    profile_name=str(profile.get("profile_name") or ""),
+                    account_username=str(account.get("username") or ""),
+                    account_label=str(account.get("label") or ""),
+                )
+            except Exception as exc:
+                messagebox.showerror("Панель Telegram", f"Не удалось скрыть профиль:\n{exc}")
+                return
+            self._reload_profiles()
+            self._refresh_profile_manager_state()
+            messagebox.showinfo(
+                "Скрыть аккаунт",
+                f"Профиль скрыт из основного списка панели.\n\n{json.dumps(result, ensure_ascii=False, indent=2)}",
+            )
+
+        def _restore_hidden_profile(self) -> None:
+            record = self._selected_hidden_profile_record()
+            if record is None:
+                messagebox.showinfo("Панель Telegram", "Сначала выбери скрытый аккаунт, который нужно вернуть.")
+                return
+            try:
+                result = unhide_portable_profile(profile_dir=str(record.get("profile_dir") or ""))
+            except Exception as exc:
+                messagebox.showerror("Панель Telegram", f"Не удалось вернуть аккаунт в панель:\n{exc}")
+                return
+            self._reload_profiles(preferred_profile_dir=str(record.get("profile_dir") or ""))
+            self._refresh_profile_manager_state()
+            messagebox.showinfo(
+                "Вернуть аккаунт",
+                f"Профиль снова показан в основном списке.\n\n{json.dumps(result, ensure_ascii=False, indent=2)}",
+            )
+
+        def _delete_selected_profile(self) -> None:
+            profile = self._selected_profile()
+            if profile is None:
+                messagebox.showinfo("Панель Telegram", "Сейчас нет выбранного видимого профиля, который можно удалить.")
+                return
+            profile_dir = str(profile.get("profile_dir") or "").strip()
+            profile_name = str(profile.get("profile_name") or "").strip() or "profile"
+            if not profile_dir:
+                messagebox.showerror("Панель Telegram", "У выбранного профиля не определена portable-папка.")
+                return
+            confirmed = messagebox.askyesno(
+                "Удалить папку профиля",
+                "\n".join(
+                    [
+                        f"Удалить portable-папку профиля `{profile_name}`?",
+                        "",
+                        f"Путь: {profile_dir}",
+                        "",
+                        "История jobs и invite state останутся как audit trail.",
+                        "Действие необратимо.",
+                    ]
+                ),
+            )
+            if not confirmed:
+                return
+            try:
+                result = remove_portable_profile(profile_dir=profile_dir)
+            except Exception as exc:
+                messagebox.showerror("Панель Telegram", f"Не удалось удалить профиль:\n{exc}")
+                return
+            self._reload_profiles()
+            self._refresh_profile_manager_state()
+            messagebox.showinfo(
+                "Удаление профиля",
+                f"Portable-папка профиля удалена.\n\n{json.dumps(result, ensure_ascii=False, indent=2)}",
             )
 
         def _invite_resolved_job_dir(self) -> Path:

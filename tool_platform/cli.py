@@ -18,7 +18,7 @@ from .catalog import (
     load_catalog,
     tool_platform_support,
 )
-from .jobs import get_job, list_jobs
+from .jobs import get_job, list_jobs, repair_invite_artifacts, repair_session_artifacts
 from .locks import list_profile_locks
 from .platform_adapters import current_platform_id, platform_capabilities, platform_doctor_report
 from .workflows import artifacts_workflow, profile_health, resume_workflow, stop_workflow_job
@@ -58,6 +58,24 @@ def _build_parser() -> argparse.ArgumentParser:
 
     show_artifacts = subparsers.add_parser("show-artifacts", help="Show aggregated artifact index for one job.")
     show_artifacts.add_argument("--job-id", required=True)
+
+    repair_session = subparsers.add_parser(
+        "repair-session-artifacts",
+        help="Preview or backfill legacy session artifact_paths in the unified Telegram job index.",
+    )
+    repair_session.add_argument("--job-id")
+    repair_session.add_argument("--profile-name")
+    repair_session.add_argument("--profile-dir")
+    repair_session.add_argument("--apply", action="store_true")
+
+    repair_invite = subparsers.add_parser(
+        "repair-invite-artifacts",
+        help="Preview or backfill legacy invite/combined invite artifact_paths in the unified Telegram job index.",
+    )
+    repair_invite.add_argument("--job-id")
+    repair_invite.add_argument("--profile-name")
+    repair_invite.add_argument("--profile-dir")
+    repair_invite.add_argument("--apply", action="store_true")
 
     stop_job = subparsers.add_parser("stop-job", help="Mark one unified Telegram workflow job as stopped.")
     stop_job.add_argument("--job-id", required=True)
@@ -278,6 +296,40 @@ def _cmd_show_artifacts(job_id: str) -> int:
     return 0
 
 
+def _cmd_repair_session_artifacts(
+    *,
+    job_id: str | None,
+    profile_name: str | None,
+    profile_dir: str | None,
+    apply: bool,
+) -> int:
+    payload = repair_session_artifacts(
+        job_id=job_id,
+        profile_name=profile_name,
+        profile_dir=profile_dir,
+        apply=apply,
+    )
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return 0
+
+
+def _cmd_repair_invite_artifacts(
+    *,
+    job_id: str | None,
+    profile_name: str | None,
+    profile_dir: str | None,
+    apply: bool,
+) -> int:
+    payload = repair_invite_artifacts(
+        job_id=job_id,
+        profile_name=profile_name,
+        profile_dir=profile_dir,
+        apply=apply,
+    )
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return 0
+
+
 def _cmd_stop_job(job_id: str, summary: str) -> int:
     try:
         payload = stop_workflow_job(job_id, summary=summary)
@@ -377,6 +429,20 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_show_job(args.job_id)
     if args.command == "show-artifacts":
         return _cmd_show_artifacts(args.job_id)
+    if args.command == "repair-session-artifacts":
+        return _cmd_repair_session_artifacts(
+            job_id=args.job_id,
+            profile_name=args.profile_name,
+            profile_dir=args.profile_dir,
+            apply=bool(args.apply),
+        )
+    if args.command == "repair-invite-artifacts":
+        return _cmd_repair_invite_artifacts(
+            job_id=args.job_id,
+            profile_name=args.profile_name,
+            profile_dir=args.profile_dir,
+            apply=bool(args.apply),
+        )
     if args.command == "stop-job":
         return _cmd_stop_job(args.job_id, args.summary)
     if args.command == "resume-job":

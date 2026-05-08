@@ -30,6 +30,8 @@ Low-level helper и export остаются в registry и CLI, но не зас
 - `AGENT_GUIDE_RU.md` — как агенту развивать platform layer;
 - `docs/ARCHITECTURE_RU.md` — архитектура registry/panel;
 - `docs/INTEGRATION_GUIDE_RU.md` — как подключать новый инструмент;
+- `/home/max/site-control-kit/docs/TELEGRAM_CONTROL_CENTER_OPERATOR_RU.md` — канонический operator entry для панели;
+- `/home/max/site-control-kit/docs/TELEGRAM_CONTROL_CENTER_RUNBOOK_RU.md` — maintainer-runbook для repair/backfill и live recovery;
 - `/home/max/site-control-kit/docs/TELEGRAM_SUPERTOOL_ROADMAP_RU.md` — стратегический roadmap следующего этапа развития;
 - `/home/max/site-control-kit/tools/telegram/agent_pack/README_RU.md` — agent-layer и machine-readable checkpoint;
 - `/home/max/site-control-kit/tools/telegram/agent_pack/VERIFICATION_MATRIX_RU.md` — матрица проверок по слоям;
@@ -55,12 +57,24 @@ cd /home/max/site-control-kit/tools/telegram/platform
 ./bin/tool-platform list-jobs --profile-name AK --workflow-kind combined_pattern --limit 5
 ./bin/tool-platform show-job --job-id <job_id>
 ./bin/tool-platform show-artifacts --job-id <job_id>
+./bin/tool-platform repair-invite-artifacts --profile-name AK3 --profile-dir /home/max/site-control-kit/runtime/telegram/profiles/TelegramPortable-AK3
+./bin/tool-platform repair-session-artifacts --profile-name AK3 --profile-dir /home/max/site-control-kit/runtime/telegram/profiles/TelegramPortable-AK3
 ./bin/tool-platform stop-job --job-id <job_id>
 ./bin/tool-platform resume-job --job-id <job_id>
 ./bin/tool-platform profile-health --profile-name AK --profile-dir /home/max/TelegramPortableAK
 ./bin/tool-platform list-locks
 ./bin/tool-platform-panel
 ```
+
+Канонический runtime root для control center теперь один:
+
+`/home/max/site-control-kit/runtime/telegram`
+
+Для обычного оператора начинать лучше с:
+- `/home/max/site-control-kit/docs/TELEGRAM_CONTROL_CENTER_OPERATOR_RU.md`
+
+Для support / maintenance:
+- `/home/max/site-control-kit/docs/TELEGRAM_CONTROL_CENTER_RUNBOOK_RU.md`
 
 Что умеет панель сейчас:
 - показывает список уже существующих Telegram portable-пользователей;

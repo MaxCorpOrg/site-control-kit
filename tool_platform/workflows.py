@@ -8,7 +8,6 @@ from typing import Any
 
 from .jobs import (
     DEFAULT_JOB_INDEX_PATH,
-    DEFAULT_TELEGRAM_STATE_ROOT,
     append_job_step,
     find_running_step,
     get_job,
@@ -27,10 +26,14 @@ from .jobs import (
 from .locks import acquire_profile_lock, get_profile_lock, release_profile_lock
 from .platform_adapters import platform_capabilities, platform_doctor_report
 from .telegram_profiles import get_profile_status
+from .telegram_runtime import (
+    LEGACY_PANEL_STATE_ROOT,
+    runtime_config_root,
+    state_panel_root,
+)
 
 
-DEFAULT_WORKFLOW_STATE_ROOT = DEFAULT_TELEGRAM_STATE_ROOT / "panel_state"
-LEGACY_PANEL_STATE_ROOT = Path("/tmp/telegram-control-center")
+DEFAULT_WORKFLOW_STATE_ROOT = state_panel_root()
 WORKFLOW_KINDS = {"invite_batch", "session_run", "combined_pattern"}
 COMBINED_PHASES = {"contact_add", "review", "session_ready", "session_running", "stopped"}
 RESUMABLE_WORKFLOW_STATUSES = {"planned", "stopped", "completed_with_errors", "error"}
@@ -46,6 +49,48 @@ def _safe_slug(value: str, fallback: str) -> str:
     slug = "".join(char if char.isalnum() or char in "._-" else "_" for char in str(value or "").strip())
     slug = slug.strip("._-")
     return slug or fallback
+
+
+def _invite_execution_id_now() -> str:
+    return now_utc().replace("-", "").replace(":", "").replace("+00:00", "").replace(".", "")
+
+
+def _resolved_invite_job_dir(invite_job_dir: str | Path) -> Path:
+    raw = str(invite_job_dir or "").strip()
+    if not raw:
+        return Path(".").resolve()
+    try:
+        from .telegram_gui_helpers import resolve_invite_job_dir
+
+        return resolve_invite_job_dir(raw)
+    except Exception:
+        return Path(raw).expanduser().resolve()
+
+
+def _invite_execution_id_for_job(invite_job_dir: str | Path) -> str:
+    job_dir = _resolved_invite_job_dir(invite_job_dir)
+    base = _invite_execution_id_now()
+    executions_dir = job_dir / "executions"
+    candidate = base
+    suffix = 1
+    while (executions_dir / candidate).exists():
+        candidate = f"{base}-{suffix:02d}"
+        suffix += 1
+    return candidate
+
+
+def _invite_expected_artifacts(invite_job_dir: str | Path, execution_id: str) -> dict[str, str]:
+    if not str(invite_job_dir or "").strip() or not str(execution_id or "").strip():
+        return {}
+    job_dir = _resolved_invite_job_dir(invite_job_dir)
+    run_dir = job_dir / "executions" / str(execution_id).strip()
+    return {
+        "job_dir": str(job_dir),
+        "run_dir": str(run_dir),
+        "progress_json": str(run_dir / "batch_progress.json"),
+        "batch_json": str(run_dir / "batch_contact_add.json"),
+        "log_path": str(run_dir / "batch_contact_add.log"),
+    }
 
 
 def combined_flow_state_path(
@@ -221,7 +266,7 @@ def combined_state_from_jobs(
 
 
 def _runtime_config_output_path(job_id: str) -> Path:
-    output_root = DEFAULT_TELEGRAM_STATE_ROOT / "runtime_configs"
+    output_root = runtime_config_root()
     output_root.mkdir(parents=True, exist_ok=True)
     return output_root / f"{job_id}-{uuid.uuid4().hex[:8]}.json"
 
@@ -239,6 +284,32 @@ def _normalized_message_settings(context: dict[str, Any]) -> dict[str, Any]:
         "view_min_seconds": int(payload.get("view_min_seconds") or 3),
         "view_max_seconds": int(payload.get("view_max_seconds") or 6),
         "base_config_path": str(payload.get("base_config_path") or "").strip(),
+    }
+
+
+def _session_progress_context_patch(job: dict[str, Any]) -> dict[str, Any]:
+    context = dict(job.get("context") or {})
+    settings = _normalized_message_settings(context)
+    session_snapshot = profile_workspace_snapshot(
+        profile_name=str(job.get("profile_name") or ""),
+        profile_dir=str(job.get("profile_dir") or ""),
+        limit=4,
+        timeline_limit=4,
+    ).get("session_snapshot")
+    baseline_sent_total = 0
+    if isinstance(session_snapshot, dict):
+        baseline_sent_total = max(int(session_snapshot.get("messages_sent_total") or 0), 0)
+    target_total: int | None = None
+    messages_per_cycle = max(int(settings.get("messages_per_cycle") or 0), 0)
+    total_message_limit = max(int(settings.get("total_message_limit") or 0), 0)
+    if not bool(context.get("continuous_session")) and messages_per_cycle > 0:
+        bounded_target = messages_per_cycle
+        if total_message_limit > 0:
+            bounded_target = min(bounded_target, max(total_message_limit - baseline_sent_total, 0))
+        target_total = baseline_sent_total + max(bounded_target, 0)
+    return {
+        "session_baseline_sent_total": baseline_sent_total,
+        "session_target_sent_total": target_total,
     }
 
 
@@ -407,6 +478,7 @@ def _build_invite_batch_command(job: dict[str, Any]) -> CommandSpec:
         output_root=str(context.get("output_root") or ""),
         statuses=[str(item) for item in context.get("statuses") or [] if str(item).strip()] or None,
         dry_run=bool(context.get("dry_run")),
+        execution_id=str(context.get("invite_execution_id") or ""),
     )
     return CommandSpec(argv=list(command.argv), cwd=command.cwd)
 
@@ -437,6 +509,58 @@ def _build_session_run_command(job: dict[str, Any]) -> tuple[CommandSpec, Path]:
         continuous=bool(context.get("continuous_session")),
     )
     return CommandSpec(argv=list(command.argv), cwd=command.cwd), runtime_config
+
+
+def _session_runtime_paths() -> tuple[Path, Path]:
+    from .telegram_gui_helpers import DEFAULT_SESSION_RUNS_DIR, DEFAULT_SESSION_STATE_FILE
+
+    return (
+        Path(DEFAULT_SESSION_STATE_FILE).expanduser().resolve(),
+        Path(DEFAULT_SESSION_RUNS_DIR).expanduser().resolve(),
+    )
+
+
+def _enrich_session_artifacts(
+    job: dict[str, Any],
+    payload: dict[str, Any] | None,
+    artifact_paths: dict[str, str],
+) -> dict[str, str]:
+    context = dict(job.get("context") or {})
+    resolved = dict(artifact_paths or {})
+    state_path, runs_dir = _session_runtime_paths()
+    runtime_config = str(context.get("last_runtime_config_path") or "").strip()
+    if runtime_config:
+        resolved.setdefault("runtime_config", runtime_config)
+    resolved.setdefault("state_path", str(Path(str(context.get("last_session_state_path") or state_path)).expanduser().resolve()))
+    resolved.setdefault("runs_dir", str(Path(str(context.get("last_session_runs_dir") or runs_dir)).expanduser().resolve()))
+
+    runtime_payload = payload if isinstance(payload, dict) else {}
+    run_payload = runtime_payload.get("run") if isinstance(runtime_payload.get("run"), dict) else runtime_payload
+    run_id = str(run_payload.get("run_id") or runtime_payload.get("run_id") or "").strip()
+    run_dir_value = str(resolved.get("run_dir") or "").strip()
+    if not run_dir_value and run_id:
+        run_dir_value = str(Path(resolved["runs_dir"]).expanduser().resolve() / run_id)
+        resolved["run_dir"] = run_dir_value
+    if not run_dir_value:
+        return resolved
+
+    run_dir = Path(run_dir_value).expanduser().resolve()
+    run_json = run_dir / "run.json"
+    plan_json = run_dir / "plan.json"
+    if run_json.exists():
+        resolved.setdefault("session_run", str(run_json))
+        resolved.setdefault("path", str(run_json))
+    if plan_json.exists():
+        resolved.setdefault("plan_json", str(plan_json))
+    if not str(resolved.get("screenshot_path") or "").strip():
+        screenshots = sorted(
+            run_dir.glob("*.png"),
+            key=lambda item: item.stat().st_mtime if item.exists() else 0,
+            reverse=True,
+        )
+        if screenshots:
+            resolved["screenshot_path"] = str(screenshots[0])
+    return resolved
 
 
 def _combined_current_step(context: dict[str, Any]) -> tuple[list[str], int, str]:
@@ -588,8 +712,24 @@ def _combined_invite_snapshot(job: dict[str, Any]) -> dict[str, Any] | None:
 def _build_command_for_job(job: dict[str, Any]) -> tuple[str, str, CommandSpec, dict[str, Any]]:
     workflow_kind = str(job.get("workflow_kind") or "").strip()
     context = dict(job.get("context") or {})
+    session_state_path, session_runs_dir = _session_runtime_paths()
     if workflow_kind == "invite_batch":
-        command = _build_invite_batch_command(job)
+        invite_job_dir = str(context.get("invite_job_dir") or "").strip()
+        normalized_invite_job_dir = str(_resolved_invite_job_dir(invite_job_dir)) if invite_job_dir else ""
+        execution_id = str(context.get("invite_execution_id") or "").strip()
+        if normalized_invite_job_dir and not execution_id:
+            execution_id = _invite_execution_id_for_job(normalized_invite_job_dir)
+        expected_artifacts = _invite_expected_artifacts(normalized_invite_job_dir, execution_id)
+        command = _build_invite_batch_command(
+            {
+                **job,
+                "context": {
+                    **context,
+                    "invite_job_dir": normalized_invite_job_dir,
+                    "invite_execution_id": execution_id,
+                },
+            }
+        )
         return (
             "1",
             "invite_batch",
@@ -597,11 +737,17 @@ def _build_command_for_job(job: dict[str, Any]) -> tuple[str, str, CommandSpec, 
             {
                 "phase": "contact_add",
                 "action_label": str(context.get("action_label") or "добавление контактов"),
-                "context_patch": {},
+                "artifact_paths": expected_artifacts,
+                "context_patch": {
+                    "invite_job_dir": normalized_invite_job_dir,
+                    "invite_execution_id": execution_id,
+                    "last_invite_run_dir": str(expected_artifacts.get("run_dir") or ""),
+                },
             },
         )
     if workflow_kind == "session_run":
         command, runtime_config = _build_session_run_command(job)
+        progress_patch = _session_progress_context_patch(job)
         return (
             "2",
             "session_run",
@@ -609,21 +755,34 @@ def _build_command_for_job(job: dict[str, Any]) -> tuple[str, str, CommandSpec, 
             {
                 "phase": "session_running",
                 "action_label": str(context.get("action_label") or "запуск session runner"),
-                "context_patch": {"last_runtime_config_path": str(runtime_config)},
+                "context_patch": {
+                    "last_runtime_config_path": str(runtime_config),
+                    "last_session_state_path": str(session_state_path),
+                    "last_session_runs_dir": str(session_runs_dir),
+                    **progress_patch,
+                },
             },
         )
     if workflow_kind != "combined_pattern":
         raise ValueError(f"unsupported workflow kind: {workflow_kind}")
     tokens, cursor, step_code = _combined_current_step(context)
     if step_code == "1":
+        invite_job_dir = str(context.get("invite_job_dir") or "").strip()
+        normalized_invite_job_dir = str(_resolved_invite_job_dir(invite_job_dir)) if invite_job_dir else ""
+        execution_id = str(context.get("invite_execution_id") or "").strip()
+        if normalized_invite_job_dir and not execution_id:
+            execution_id = _invite_execution_id_for_job(normalized_invite_job_dir)
+        expected_artifacts = _invite_expected_artifacts(normalized_invite_job_dir, execution_id)
         command = _build_invite_batch_command(
             {
                 **job,
                 "context": {
                     **context,
                     "input_path": str(context.get("input_path") or ""),
+                    "invite_job_dir": normalized_invite_job_dir,
                     "statuses": ["new", "checked"],
                     "action_label": "совместный шаг: добавление контактов",
+                    "invite_execution_id": execution_id,
                 },
             }
         )
@@ -634,15 +793,20 @@ def _build_command_for_job(job: dict[str, Any]) -> tuple[str, str, CommandSpec, 
             {
                 "phase": "contact_add",
                 "action_label": "совместный шаг: добавление контактов",
+                "artifact_paths": expected_artifacts,
                 "context_patch": {
                     "step_cursor": cursor,
                     "step_label": combined_step_label(step_code),
+                    "invite_job_dir": normalized_invite_job_dir,
+                    "invite_execution_id": execution_id,
+                    "last_invite_run_dir": str(expected_artifacts.get("run_dir") or ""),
                     "last_action": "combined_contact_add_started",
                     "last_status": "running",
                 },
             },
         )
     command, runtime_config = _build_session_run_command(job)
+    progress_patch = _session_progress_context_patch(job)
     return (
         step_code,
         "session_run",
@@ -654,6 +818,9 @@ def _build_command_for_job(job: dict[str, Any]) -> tuple[str, str, CommandSpec, 
                 "step_cursor": cursor,
                 "step_label": combined_step_label(step_code),
                 "last_runtime_config_path": str(runtime_config),
+                "last_session_state_path": str(session_state_path),
+                "last_session_runs_dir": str(session_runs_dir),
+                **progress_patch,
                 "last_action": "combined_session_started",
                 "last_status": "running",
             },
@@ -684,6 +851,7 @@ def run_workflow(job_id: str, *, index_path: str | Path = DEFAULT_JOB_INDEX_PATH
         action_label=str(metadata["action_label"]),
         status="running",
         summary=f"Выполняется: {metadata['action_label']}",
+        artifact_paths=dict(metadata.get("artifact_paths") or {}),
         index_path=index_path,
     )
     job = update_job(
@@ -691,6 +859,7 @@ def run_workflow(job_id: str, *, index_path: str | Path = DEFAULT_JOB_INDEX_PATH
         status="running",
         phase=str(metadata["phase"]),
         summary=f"Выполняется: {metadata['action_label']}",
+        artifact_paths=dict(metadata.get("artifact_paths") or {}),
         next_hint="Дождись завершения subprocess или нажми `Стоп`.",
         context_patch={
             **dict(metadata.get("context_patch") or {}),
@@ -703,7 +872,7 @@ def run_workflow(job_id: str, *, index_path: str | Path = DEFAULT_JOB_INDEX_PATH
                 "step_status": "running",
                 "started_at": str(step.get("started_at") or ""),
                 "completed_at": "",
-                "artifact_paths": {},
+                "artifact_paths": dict(metadata.get("artifact_paths") or {}),
             },
         },
         index_path=index_path,
@@ -745,6 +914,7 @@ def complete_workflow_step(
             step_id=step_id,
             status="stopped",
             summary="Остановлено оператором",
+            artifact_paths=dict(running_step.get("artifact_paths") or {}),
             completed=True,
             index_path=index_path,
         )
@@ -783,7 +953,7 @@ def complete_workflow_step(
                         "step_status": "stopped",
                         "started_at": str(running_step.get("started_at") or ""),
                         "completed_at": now_utc(),
-                        "artifact_paths": {},
+                        "artifact_paths": dict(running_step.get("artifact_paths") or {}),
                     },
                 },
                 index_path=index_path,
@@ -797,6 +967,7 @@ def complete_workflow_step(
             step_id=step_id,
             status="error",
             summary=error_text,
+            artifact_paths=dict(running_step.get("artifact_paths") or {}),
             completed=True,
             index_path=index_path,
         )
@@ -823,7 +994,7 @@ def complete_workflow_step(
                     "step_status": "error",
                     "started_at": str(running_step.get("started_at") or ""),
                     "completed_at": now_utc(),
-                    "artifact_paths": {},
+                    "artifact_paths": dict(running_step.get("artifact_paths") or {}),
                 },
             },
             index_path=index_path,
@@ -840,6 +1011,8 @@ def complete_workflow_step(
 
     normalized = normalize_runtime_payload(payload, fallback_status="completed", fallback_phase=str(job.get("phase") or ""))
     step_artifacts = dict(normalized["artifact_paths"])
+    if str(running_step.get("step_kind") or "") == "session_run":
+        step_artifacts = _enrich_session_artifacts(job, payload, step_artifacts)
     update_job_step(
         job_id,
         step_id=step_id,

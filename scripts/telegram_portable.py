@@ -15,12 +15,20 @@ import warnings
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
+import sys
 from typing import Any
 from urllib.request import Request, urlopen
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from tool_platform.telegram_runtime import profiles_root, telegram_desktop_cache_root
+
+
 DEFAULT_TELEGRAM_LINUX_URL = "https://telegram.org/dl/desktop/linux"
-DEFAULT_OUTPUT_ROOT = Path.home()
-DEFAULT_RUNTIME_CACHE_DIR = Path.home() / ".cache" / "site-control-kit" / "telegram-portable-runtime"
+DEFAULT_OUTPUT_ROOT = profiles_root()
+DEFAULT_RUNTIME_CACHE_DIR = telegram_desktop_cache_root()
 PROFILE_PREFIX = "TelegramPortable-"
 LEGACY_PROFILE_PREFIX_RE = re.compile(r"^TelegramPortable[-_]?", re.I)
 LOG_EVENT_RE = re.compile(r"^\[(?P<timestamp>[^\]]+)\]\s+(?P<kind>[^:]+):\s*(?P<message>.*)$")
@@ -338,6 +346,101 @@ def _wmctrl_windows_by_pid() -> dict[int, list[dict[str, Any]]]:
     return windows_by_pid
 
 
+def _window_title_key(window: dict[str, Any]) -> str:
+    return str(window.get("title") or "").strip().lower()
+
+
+def _attach_title_hints(target_dir: Path) -> list[str]:
+    hints: list[str] = []
+    try:
+        metadata = read_profile_metadata(target_dir)
+    except Exception:
+        metadata = {}
+    account = metadata.get("account") if isinstance(metadata.get("account"), dict) else {}
+    raw_values = [
+        account.get("label"),
+        account.get("username"),
+        metadata.get("profile_name"),
+        target_dir.name,
+    ]
+    for raw in raw_values:
+        text = str(raw or "").strip().lower().lstrip("@")
+        if not text:
+            continue
+        normalized = " ".join(text.split())
+        if normalized and normalized not in hints:
+            hints.append(normalized)
+    return hints
+
+
+def _attach_window_candidates(windows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    sized = [
+        item
+        for item in windows
+        if isinstance(item, dict)
+        and int(item.get("width", 0) or 0) > 0
+        and int(item.get("height", 0) or 0) > 0
+    ]
+    if not sized:
+        return []
+    primary = [item for item in sized if _window_title_key(item) != "media viewer"]
+    return primary or sized
+
+
+def _attach_status_payload(
+    target_dir: Path,
+    *,
+    pids: list[int],
+    windows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    candidates = _attach_window_candidates(windows)
+    if not pids:
+        return {
+            "attach_status": "no_process",
+            "attach_message": (
+                "Профиль сейчас не запущен. Live workflow может запустить его сам, "
+                "но attach к окну пока ещё не установлен."
+            ),
+            "attach_candidates": [],
+        }
+    if not candidates:
+        return {
+            "attach_status": "running_without_window",
+            "attach_message": (
+                "Процесс профиля запущен, но собственное X11-окно Telegram не найдено. "
+                "Live-действия нужно остановить, иначе они могут попасть в другой аккаунт."
+            ),
+            "attach_candidates": [],
+        }
+    title_hints = _attach_title_hints(target_dir)
+    if len(candidates) > 1 and title_hints:
+        matched = [
+            item
+            for item in candidates
+            if any(hint in _window_title_key(item) for hint in title_hints)
+        ]
+        if len(matched) == 1:
+            return {
+                "attach_status": "title_match",
+                "attach_message": "Окно профиля найдено по title-match среди нескольких Telegram окон.",
+                "attach_candidates": matched,
+            }
+    if len(candidates) == 1:
+        return {
+            "attach_status": "exact_window",
+            "attach_message": "Окно профиля найдено и однозначно привязано к процессу Telegram.",
+            "attach_candidates": candidates,
+        }
+    return {
+        "attach_status": "ambiguous_window",
+        "attach_message": (
+            f"Для профиля найдено несколько окон Telegram ({len(candidates)}). "
+            "Live-действия заблокированы, пока attach не станет однозначным."
+        ),
+        "attach_candidates": candidates,
+    }
+
+
 def profile_status(target_dir: Path) -> dict[str, Any]:
     target_dir = target_dir.expanduser().resolve()
     binary_path = target_dir / "Telegram"
@@ -345,6 +448,7 @@ def profile_status(target_dir: Path) -> dict[str, Any]:
     windows_by_pid = _wmctrl_windows_by_pid()
     windows = [window for pid in pids for window in windows_by_pid.get(pid, [])]
     metadata = read_profile_metadata(target_dir)
+    attach = _attach_status_payload(target_dir, pids=pids, windows=windows)
     try:
         profile_name = str(metadata.get("profile_name") or "").strip() or _profile_name_from_dir(target_dir)
     except ValueError:
@@ -362,6 +466,9 @@ def profile_status(target_dir: Path) -> dict[str, Any]:
         "running": bool(pids),
         "pids": pids,
         "windows": windows,
+        "attach_status": str(attach.get("attach_status") or ""),
+        "attach_message": str(attach.get("attach_message") or ""),
+        "attach_candidates": [item for item in attach.get("attach_candidates") or [] if isinstance(item, dict)],
         "log_path": str(target_dir / "portable-launch.log"),
         "telegram_log_path": str(_telegram_log_path(target_dir)),
     }
@@ -758,12 +865,15 @@ def _resolved_window(status: dict[str, Any], window_id: str = "") -> dict[str, A
             continue
         if window_id and str(item.get("window_id") or "") == str(window_id):
             return item
-    for item in windows:
-        if not isinstance(item, dict):
-            continue
-        if int(item.get("width", 0) or 0) > 0 and int(item.get("height", 0) or 0) > 0:
-            return item
-    return windows[0] if windows and isinstance(windows[0], dict) else {}
+    candidates = status.get("attach_candidates") if isinstance(status.get("attach_candidates"), list) else []
+    if str(status.get("attach_status") or "") in {"exact_window", "title_match"} and candidates:
+        first = candidates[0]
+        return first if isinstance(first, dict) else {}
+    if not str(status.get("attach_status") or "").strip():
+        unique_windows = [item for item in windows if isinstance(item, dict)]
+        if len(unique_windows) == 1:
+            return unique_windows[0]
+    return {}
 
 
 ASCII_KEY_MAP: dict[str, list[str]] = {
@@ -825,10 +935,12 @@ def _contains_non_ascii(text: str) -> bool:
 
 def type_portable_text(target_dir: Path, text: str, *, window_id: str = "", press_enter: bool = False, dry_run: bool = False) -> dict[str, Any]:
     status = profile_status(target_dir)
-    windows = status.get("windows") if isinstance(status.get("windows"), list) else []
-    resolved_window_id = window_id or (str(windows[0].get("window_id") or "") if windows and isinstance(windows[0], dict) else "")
+    window = _resolved_window(status, window_id=window_id)
+    resolved_window_id = str(window.get("window_id") or "")
     if not resolved_window_id:
-        raise RuntimeError(f"no X11 window found for portable profile: {target_dir}")
+        raise RuntimeError(
+            str(status.get("attach_message") or f"no X11 window found for portable profile: {target_dir}")
+        )
     if dry_run:
         try:
             dry_run_sequences = _ascii_text_to_key_sequences(text)
@@ -875,10 +987,12 @@ def press_portable_keys(
     dry_run: bool = False,
 ) -> dict[str, Any]:
     status = profile_status(target_dir)
-    windows = status.get("windows") if isinstance(status.get("windows"), list) else []
-    resolved_window_id = window_id or (str(windows[0].get("window_id") or "") if windows and isinstance(windows[0], dict) else "")
+    window = _resolved_window(status, window_id=window_id)
+    resolved_window_id = str(window.get("window_id") or "")
     if not resolved_window_id:
-        raise RuntimeError(f"no X11 window found for portable profile: {target_dir}")
+        raise RuntimeError(
+            str(status.get("attach_message") or f"no X11 window found for portable profile: {target_dir}")
+        )
     normalized_sequences = [list(sequence) for sequence in sequences if sequence]
     if not normalized_sequences:
         raise ValueError("at least one key sequence is required")
@@ -913,7 +1027,9 @@ def click_portable_window(
     window = _resolved_window(status, window_id=window_id)
     resolved_window_id = str(window.get("window_id") or "")
     if not resolved_window_id:
-        raise RuntimeError(f"no X11 window found for portable profile: {target_dir}")
+        raise RuntimeError(
+            str(status.get("attach_message") or f"no X11 window found for portable profile: {target_dir}")
+        )
     point = None
     requested_coordinate_space = str(coordinate_space or "auto").strip() or "auto"
     if requested_coordinate_space not in {"auto", "window_geometry", "accessible_window"}:
@@ -971,7 +1087,9 @@ def capture_portable_window_screenshot(
     window = _resolved_window(status, window_id=window_id)
     resolved_window_id = str(window.get("window_id") or "")
     if not resolved_window_id:
-        raise RuntimeError(f"no X11 window found for portable profile: {target_dir}")
+        raise RuntimeError(
+            str(status.get("attach_message") or f"no X11 window found for portable profile: {target_dir}")
+        )
     output_path = output_path.expanduser().resolve()
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -1045,7 +1163,12 @@ def _pick_accessible_window(target_dir: Path) -> tuple[Any, Any, dict[str, Any],
         raise RuntimeError("AT-SPI cannot find a running TelegramDesktop application")
 
     status = profile_status(target_dir)
-    preferred_windows = [item for item in status.get("windows") or [] if isinstance(item, dict)]
+    resolved_window = _resolved_window(status)
+    if not resolved_window:
+        raise RuntimeError(
+            str(status.get("attach_message") or "У профиля нет безопасного attach к собственному окну Telegram.")
+        )
+    preferred_windows = [resolved_window]
     preferred_titles = [
         _normalize_accessible_window_name(str(item.get("title") or ""))
         for item in preferred_windows
@@ -1064,12 +1187,11 @@ def _pick_accessible_window(target_dir: Path) -> tuple[Any, Any, dict[str, Any],
 
     if not accessible_windows:
         raise RuntimeError("AT-SPI Telegram application has no accessible windows")
-
-    for candidate in accessible_windows:
-        if str(candidate.get_name() or "").strip().lower() != "media viewer":
-            return Atspi, candidate, status, _extents_payload(candidate.get_extents(Atspi.CoordType.SCREEN))
-    fallback = accessible_windows[0]
-    return Atspi, fallback, status, _extents_payload(fallback.get_extents(Atspi.CoordType.SCREEN))
+    expected_title = str(resolved_window.get("title") or "").strip() or "неизвестное окно"
+    raise RuntimeError(
+        "Найдено X11-окно профиля, но AT-SPI не смог однозначно сопоставить его с доступным окном Telegram.\n\n"
+        f"Ожидалось окно: {expected_title}"
+    )
 
 
 def _extents_payload(extents: Any) -> dict[str, int]:

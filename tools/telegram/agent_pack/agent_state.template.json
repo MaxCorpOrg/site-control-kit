@@ -1,10 +1,13 @@
 {
   "schema_version": 1,
-  "current_priority": "Поднять richer profile artifact history и sent/draft-level session timeline поверх уже работающего Telegram profile workspace dashboard.",
+  "current_priority": "После product-grade AK3 smoke и live apply для repair-invite-artifacts доводить session/combined parity до invite-grade, продолжать deeper thinning gui.py / telegram_gui_helpers.py и затем закрывать historical backfill + docs as product.",
   "active_risks": [
-    "gui.py всё ещё содержит часть readback/UI-связывания и нуждается в дальнейшем истончении поверх jobs.py/workflows.py.",
-    "Unified session_run jobs пока не пишут собственные artifact_paths, поэтому session artifact center частично держится на session_history_snapshot() fallback.",
-    "Artifact center пока open-first и ещё не даёт более сильный history/preview слой по профилю.",
+    "AK3 live invite path на project-local профиле теперь уже подтверждён до 70 contact_added / 1416 new / 0 failed, но следующий реальный риск снова operational: выбирать controlled tranche и не уходить в длинный rollout без pause-point и живого лога.",
+    "Historical invite jobs на AK3 уже canonicalized через explicit repair, но session/combined historical continuity и provenance всё ещё нужно довести до такого же product-grade уровня.",
+    "gui.py стал тоньше, но часть formatting/open-policy и readback/UI-связывания всё ещё полезно дальше выносить поверх jobs.py/workflows.py, чтобы GUI оставался чистым thin client.",
+    "Session-runner code намеренно остаётся external repo; mutable data уже переведены в runtime/telegram/session, но этот boundary нужно держать явным и не размазывать бизнес-логику между репозиториями.",
+    "Operator entry docs уже добавлены, но templates, examples и часть historical handoff всё ещё требуют дальнейшей нормализации под canonical runtime/telegram.",
+    "Project-local AK3 иногда может приходить в состояние running_without_window после старого orphaned процесса; безопасный способ восстановления уже подтверждён как relaunch профиля, а не ослабление attach gating.",
     "Linux live-path сильнее остальных ОС; Windows/macOS пока требуют adapter-first layering."
   ],
   "default_decisions": {
@@ -12,15 +15,19 @@
     "platform_support": "tiered",
     "first_major_stage_after_bugfix": "workflow_engine_and_job_store",
     "session_runner_runtime": "standalone_repo_contract",
-    "persistent_state_root": "~/.site-control-kit/telegram"
+    "persistent_state_root": "/home/max/site-control-kit/runtime/telegram/state"
   },
   "last_verified_artifacts": {
     "project_status": "/home/max/site-control-kit/docs/PROJECT_STATUS_RU.md",
     "supertool_roadmap": "/home/max/site-control-kit/docs/TELEGRAM_SUPERTOOL_ROADMAP_RU.md",
     "next_chat_prompt": "/home/max/site-control-kit/tools/telegram/NEXT_CHAT_AGENT_PROMPT_RU.md",
-    "safe_readback_live": "/tmp/telegram-architecture-audit-safe-readback/result.json",
-    "session_send_confirm": "/tmp/telegram-architecture-audit-send-confirm-final/result.json",
-    "session_send_run": "/home/max/telegram-portable-session-tool/runs/20260504T140725Z-0c50fab7/run.json"
+    "operator_entry": "/home/max/site-control-kit/docs/TELEGRAM_CONTROL_CENTER_OPERATOR_RU.md",
+    "maintainer_runbook": "/home/max/site-control-kit/docs/TELEGRAM_CONTROL_CENTER_RUNBOOK_RU.md",
+    "runtime_checkpoint": "/home/max/site-control-kit/runtime/telegram/state/agent/workspace_checkpoint.json",
+    "ak3_controlled10_result": "/tmp/telegram-ak3-controlled10-rrH2bx/result.json",
+    "ak3_pathfix_smoke_result": "/tmp/telegram-ak3-pathfix-smoke-te3fk5ga/result.json",
+    "ak3_post_refactor_smoke_result": "/tmp/telegram-ak3-post-refactor-smoke-vqh2kbgb/result.json",
+    "ak3_product_grade_smoke_result": "/tmp/telegram-ak3-product-grade-smoke-1o3xssvd/result.json"
   },
-  "next_recommended_step": "Поднять richer profile artifact history и sent/draft-level session timeline; затем вынести ещё больше formatting/fallback логики из gui.py и по возможности писать artifact_paths прямо в unified session_run jobs."
+  "next_recommended_step": "Сначала довести session/combined progress + recoverability до invite-grade на canonical runtime/telegram, затем продолжить deeper thinning gui.py / telegram_gui_helpers.py и после этого закрыть historical backfill и docs as product."
 }

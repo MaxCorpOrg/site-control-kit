@@ -1,16 +1,29 @@
 from __future__ import annotations
 
 import json
+import re
 import tempfile
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from .telegram_runtime import (
+    LEGACY_PANEL_LOG_PATH,
+    LEGACY_STATE_ROOT,
+    job_index_path as runtime_job_index_path,
+    panel_log_path as runtime_panel_log_path,
+    preferred_read_path,
+    runtime_config_root as runtime_runtime_config_root,
+    session_repo_binary,
+    state_root as runtime_state_root,
+)
 
-DEFAULT_TELEGRAM_STATE_ROOT = Path.home() / ".site-control-kit" / "telegram"
-DEFAULT_JOB_INDEX_PATH = DEFAULT_TELEGRAM_STATE_ROOT / "jobs" / "index.json"
-DEFAULT_PANEL_LOG_PATH = Path("/tmp/telegram-control-center-panel.log")
+
+DEFAULT_TELEGRAM_STATE_ROOT = runtime_state_root()
+DEFAULT_JOB_INDEX_PATH = runtime_job_index_path()
+DEFAULT_PANEL_LOG_PATH = runtime_panel_log_path()
+LEGACY_JOB_INDEX_PATH = LEGACY_STATE_ROOT / "jobs" / "index.json"
 DEFAULT_TIMELINE_LIMIT = 20
 WORKSPACE_WORKFLOW_KINDS = ("invite_batch", "session_run", "combined_pattern")
 JOB_STATUSES = {
@@ -42,15 +55,68 @@ RESUMABLE_JOB_STATUSES = {"planned", "stopped", "completed_with_errors", "error"
 SUCCESSFUL_JOB_STATUSES = {"completed", "dry_run"}
 ARTIFACT_CENTER_LABELS = {
     "panel_log": "Лог панели",
+    "progress_json": "Текущий invite progress",
     "batch_json": "Последний batch json",
     "session_run": "Последний session run",
     "execution_record": "Последний execution record",
     "screenshot": "Последний screenshot",
 }
+ARTIFACT_HISTORY_LABELS = {
+    "session_run": "Session run",
+    "plan_json": "Session plan",
+    "runtime_config": "Runtime config",
+    "state_path": "Session state",
+    "progress_json": "Invite progress",
+    "batch_json": "Batch json",
+    "execution_record": "Execution record",
+    "screenshot": "Screenshot",
+}
+SESSION_MESSAGE_PREVIEW_LIMIT = 2
+SESSION_RUN_MATCH_TOLERANCE = timedelta(seconds=2)
+SESSION_RUN_PREFIX_RE = re.compile(r"^(?P<prefix>\d{8}T\d{6}Z)")
 
 
 def now_utc() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _session_run_prefix(value: Any) -> str:
+    match = SESSION_RUN_PREFIX_RE.match(str(value or "").strip())
+    return str(match.group("prefix") or "").strip() if match else ""
+
+
+def _session_run_prefix_from_timestamp(value: Any) -> str:
+    raw_value = str(value or "").strip()
+    if not raw_value:
+        return ""
+    try:
+        parsed = datetime.fromisoformat(raw_value.replace("Z", "+00:00"))
+    except ValueError:
+        return ""
+    return parsed.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
+def _session_run_timestamp(prefix: str) -> datetime | None:
+    normalized = _session_run_prefix(prefix)
+    if not normalized:
+        return None
+    try:
+        return datetime.strptime(normalized, "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+def _session_runtime_defaults() -> tuple[Path, Path]:
+    from .telegram_gui_helpers import DEFAULT_SESSION_RUNS_DIR, DEFAULT_SESSION_STATE_FILE
+
+    return (
+        preferred_read_path(DEFAULT_SESSION_STATE_FILE),
+        preferred_read_path(DEFAULT_SESSION_RUNS_DIR),
+    )
+
+
+def _session_runtime_config_root() -> Path:
+    return runtime_runtime_config_root().expanduser().resolve()
 
 
 def _safe_slug(value: str, fallback: str) -> str:
@@ -101,6 +167,524 @@ def _normalize_artifact_paths(payload: Any) -> dict[str, str]:
         for key, value in payload.items()
         if str(key).strip() and str(value).strip()
     }
+
+
+def _existing_path(value: Any) -> Path | None:
+    raw_value = str(value or "").strip()
+    if not raw_value:
+        return None
+    path = Path(raw_value).expanduser().resolve()
+    return path if path.exists() else None
+
+
+def _safe_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _parse_utc_timestamp(value: Any) -> datetime | None:
+    raw_value = str(value or "").strip()
+    if not raw_value:
+        return None
+    try:
+        return datetime.fromisoformat(raw_value.replace("Z", "+00:00")).astimezone(timezone.utc)
+    except ValueError:
+        return None
+
+
+def _elapsed_seconds_between(started_at: Any, completed_at: Any | None = None) -> int | None:
+    started = _parse_utc_timestamp(started_at)
+    if started is None:
+        return None
+    completed = _parse_utc_timestamp(completed_at) if completed_at else datetime.now(timezone.utc)
+    if completed is None:
+        return None
+    return max(int((completed - started).total_seconds()), 0)
+
+
+def _session_run_index(
+    runs_dir: str | Path,
+    *,
+    cache: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    resolved_runs_dir = Path(runs_dir).expanduser().resolve()
+    cache_key = f"session-run-index:{resolved_runs_dir}"
+    if isinstance(cache, dict):
+        cached = cache.get(cache_key)
+        if isinstance(cached, list):
+            return cached
+
+    rows: list[dict[str, Any]] = []
+    if resolved_runs_dir.is_dir():
+        for child in sorted(resolved_runs_dir.iterdir()):
+            if not child.is_dir():
+                continue
+            prefix = _session_run_prefix(child.name)
+            if not prefix:
+                continue
+            rows.append(
+                {
+                    "path": child.resolve(),
+                    "prefix": prefix,
+                    "timestamp": _session_run_timestamp(prefix),
+                }
+            )
+    if isinstance(cache, dict):
+        cache[cache_key] = rows
+    return rows
+
+
+def _session_run_matches_by_prefix(
+    runs_dir: str | Path,
+    prefix: str,
+    *,
+    cache: dict[str, Any] | None = None,
+) -> list[Path]:
+    normalized = _session_run_prefix(prefix)
+    if not normalized:
+        return []
+    return [
+        Path(item["path"]).resolve()
+        for item in _session_run_index(runs_dir, cache=cache)
+        if str(item.get("prefix") or "") == normalized
+    ]
+
+
+def _session_run_matches_near_timestamp(
+    runs_dir: str | Path,
+    timestamp_value: Any,
+    *,
+    tolerance: timedelta = SESSION_RUN_MATCH_TOLERANCE,
+    cache: dict[str, Any] | None = None,
+) -> list[Path]:
+    prefix = _session_run_prefix(timestamp_value) or _session_run_prefix_from_timestamp(timestamp_value)
+    timestamp = _session_run_timestamp(prefix)
+    if timestamp is None:
+        return []
+    matches: list[tuple[float, Path]] = []
+    for item in _session_run_index(runs_dir, cache=cache):
+        run_timestamp = item.get("timestamp")
+        run_path = item.get("path")
+        if not isinstance(run_timestamp, datetime) or not isinstance(run_path, Path):
+            continue
+        delta = abs((run_timestamp - timestamp).total_seconds())
+        if delta <= tolerance.total_seconds():
+            matches.append((delta, run_path.resolve()))
+    matches.sort(key=lambda payload: (payload[0], str(payload[1])))
+    return [path for _, path in matches]
+
+
+def _session_step_records(job: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        _normalize_step_record(item, position=index)
+        for index, item in enumerate(job.get("steps") or [])
+        if isinstance(item, dict) and str(item.get("step_kind") or "").strip() == "session_run"
+    ]
+
+
+def _is_latest_session_step(job: dict[str, Any], step: dict[str, Any]) -> bool:
+    steps = _session_step_records(job)
+    if not steps:
+        return False
+    return str(steps[-1].get("step_id") or "") == str(step.get("step_id") or "")
+
+
+def _session_runtime_config_path(
+    job: dict[str, Any],
+    *,
+    step: dict[str, Any] | None = None,
+) -> Path | None:
+    context = _job_context(job)
+    context_path = _existing_path(context.get("last_runtime_config_path"))
+    if context_path is not None:
+        if step is None:
+            return context_path
+        session_steps = _session_step_records(job)
+        if len(session_steps) <= 1 or _is_latest_session_step(job, step):
+            return context_path
+
+    runtime_root = _session_runtime_config_root()
+    if not runtime_root.is_dir():
+        return None
+    job_id = str(job.get("job_id") or "").strip()
+    if not job_id:
+        return None
+    matches = sorted(runtime_root.glob(f"{job_id}-*.json"))
+    if step is None and len(matches) == 1:
+        return matches[0].resolve()
+    if step is not None and len(_session_step_records(job)) <= 1 and len(matches) == 1:
+        return matches[0].resolve()
+    return None
+
+
+def _session_artifact_result(
+    artifact_paths: dict[str, str],
+    *,
+    run_match_strategy: str = "",
+    unresolved: list[str] | None = None,
+) -> dict[str, Any]:
+    return {
+        "artifact_paths": _normalize_artifact_paths(artifact_paths),
+        "run_match_strategy": str(run_match_strategy or "").strip(),
+        "unresolved": [str(item).strip() for item in unresolved or [] if str(item).strip()],
+    }
+
+
+def _resolve_session_artifacts(
+    job: dict[str, Any],
+    *,
+    step: dict[str, Any] | None = None,
+    cache: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    target = dict(step) if isinstance(step, dict) else dict(job)
+    raw_artifacts = _normalize_artifact_paths(target.get("artifact_paths"))
+    if step is not None and not raw_artifacts and str(job.get("workflow_kind") or "") == "session_run" and _is_latest_session_step(job, step):
+        raw_artifacts = _normalize_artifact_paths(job.get("artifact_paths"))
+
+    resolved: dict[str, str] = {}
+    unresolved: list[str] = []
+    run_match_strategy = ""
+
+    state_path_default, runs_dir_default = _session_runtime_defaults()
+    context = _job_context(job)
+
+    state_path = _existing_path(raw_artifacts.get("state_path")) or _existing_path(context.get("last_session_state_path")) or (
+        state_path_default if state_path_default.exists() else None
+    )
+    if state_path is not None:
+        resolved["state_path"] = str(state_path)
+
+    runs_dir = _existing_path(raw_artifacts.get("runs_dir")) or _existing_path(context.get("last_session_runs_dir")) or (
+        runs_dir_default if runs_dir_default.exists() else None
+    )
+    if runs_dir is not None:
+        resolved["runs_dir"] = str(runs_dir)
+
+    runtime_config = _existing_path(raw_artifacts.get("runtime_config")) or _session_runtime_config_path(job, step=step)
+    if runtime_config is not None:
+        resolved["runtime_config"] = str(runtime_config)
+    elif str(target.get("step_kind") or target.get("workflow_kind") or "").strip() == "session_run":
+        unresolved.append("runtime_config")
+
+    run_dir_candidates: list[Path] = []
+    for key in ("session_run", "path", "run_dir"):
+        candidate = _existing_path(raw_artifacts.get(key))
+        if candidate is None:
+            continue
+        run_dir = candidate.parent if candidate.is_file() else candidate
+        if run_dir not in run_dir_candidates:
+            run_dir_candidates.append(run_dir)
+    if len(run_dir_candidates) == 1:
+        resolved_run_dir = run_dir_candidates[0]
+        run_match_strategy = "existing_artifact"
+    else:
+        resolved_run_dir = None
+        if len(run_dir_candidates) > 1:
+            unresolved.append("ambiguous_existing_run_dir")
+
+    if resolved_run_dir is None and runs_dir is not None:
+        exact_anchors = (
+            ("exact_started_at", _session_run_prefix_from_timestamp(target.get("started_at"))),
+            ("exact_completed_at", _session_run_prefix_from_timestamp(target.get("completed_at"))),
+            ("exact_job_id", _session_run_prefix(target.get("workflow_job_id") or job.get("job_id"))),
+        )
+        for strategy, prefix in exact_anchors:
+            matches = _session_run_matches_by_prefix(runs_dir, prefix, cache=cache)
+            if len(matches) == 1:
+                resolved_run_dir = matches[0]
+                run_match_strategy = strategy
+                break
+            if len(matches) > 1:
+                unresolved.append(f"ambiguous_{strategy}")
+
+    if resolved_run_dir is None and runs_dir is not None:
+        near_anchors = (
+            ("near_started_at", target.get("started_at")),
+            ("near_completed_at", target.get("completed_at")),
+            ("near_job_id", str(job.get("job_id") or "").split("-", 1)[0]),
+        )
+        for strategy, raw_timestamp in near_anchors:
+            matches = _session_run_matches_near_timestamp(runs_dir, raw_timestamp, cache=cache)
+            if len(matches) == 1:
+                resolved_run_dir = matches[0]
+                run_match_strategy = strategy
+                break
+            if len(matches) > 1:
+                unresolved.append(f"ambiguous_{strategy}")
+
+    if resolved_run_dir is None:
+        unresolved.append("run_dir")
+        return _session_artifact_result(resolved, run_match_strategy=run_match_strategy, unresolved=unresolved)
+
+    resolved["run_dir"] = str(resolved_run_dir)
+    run_json = resolved_run_dir / "run.json"
+    if run_json.exists():
+        resolved["session_run"] = str(run_json)
+        resolved["path"] = str(run_json)
+    else:
+        unresolved.append("session_run")
+    plan_json = resolved_run_dir / "plan.json"
+    if plan_json.exists():
+        resolved["plan_json"] = str(plan_json)
+    else:
+        unresolved.append("plan_json")
+    screenshots = sorted(
+        resolved_run_dir.glob("*.png"),
+        key=lambda item: item.stat().st_mtime if item.exists() else 0,
+        reverse=True,
+    )
+    if screenshots:
+        resolved["screenshot_path"] = str(screenshots[0])
+    return _session_artifact_result(resolved, run_match_strategy=run_match_strategy, unresolved=unresolved)
+
+
+def _invite_run_prefix(value: Any) -> str:
+    raw_value = str(value or "").strip()
+    if not raw_value:
+        return ""
+    if SESSION_RUN_PREFIX_RE.match(raw_value):
+        return raw_value[:16]
+    parsed = _parse_utc_timestamp(raw_value)
+    if parsed is None:
+        return ""
+    return parsed.strftime("%Y%m%dT%H%M%SZ")
+
+
+def _invite_run_index(job_dir: str | Path, *, cache: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    resolved_job_dir = Path(job_dir).expanduser().resolve()
+    cache_key = f"invite-run-index:{resolved_job_dir}"
+    if isinstance(cache, dict):
+        cached = cache.get(cache_key)
+        if isinstance(cached, list):
+            return cached
+    rows: list[dict[str, Any]] = []
+    executions_dir = resolved_job_dir / "executions"
+    if executions_dir.is_dir():
+        for child in sorted(executions_dir.iterdir()):
+            if not child.is_dir():
+                continue
+            prefix = _invite_run_prefix(child.name)
+            rows.append(
+                {
+                    "path": child.resolve(),
+                    "prefix": prefix,
+                    "timestamp": _parse_utc_timestamp(prefix) if prefix else None,
+                }
+            )
+    if isinstance(cache, dict):
+        cache[cache_key] = rows
+    return rows
+
+
+def _invite_run_matches_by_prefix(
+    job_dir: str | Path,
+    prefix: str,
+    *,
+    cache: dict[str, Any] | None = None,
+) -> list[Path]:
+    normalized_prefix = _invite_run_prefix(prefix)
+    if not normalized_prefix:
+        return []
+    matches: list[Path] = []
+    for row in _invite_run_index(job_dir, cache=cache):
+        row_prefix = str(row.get("prefix") or "").strip()
+        if row_prefix == normalized_prefix and isinstance(row.get("path"), Path):
+            matches.append(row["path"])
+    return matches
+
+
+def _invite_resolved_job_dir(value: Any) -> Path | None:
+    raw_value = str(value or "").strip()
+    if not raw_value:
+        return None
+    from .telegram_gui_helpers import resolve_invite_job_dir
+
+    resolved = resolve_invite_job_dir(raw_value)
+    return resolved if resolved.exists() else None
+
+
+def _invite_artifact_result(
+    stored_artifact_paths: dict[str, str],
+    canonical_artifact_paths: dict[str, str],
+    *,
+    job_dir_match_strategy: str = "",
+    run_match_strategy: str = "",
+    unresolved: list[str] | None = None,
+) -> dict[str, Any]:
+    return {
+        "stored_artifact_paths": _normalize_artifact_paths(stored_artifact_paths),
+        "artifact_paths": _normalize_artifact_paths(canonical_artifact_paths),
+        "job_dir_match_strategy": str(job_dir_match_strategy or "").strip(),
+        "run_match_strategy": str(run_match_strategy or "").strip(),
+        "unresolved": [str(item).strip() for item in unresolved or [] if str(item).strip()],
+    }
+
+
+def _resolve_invite_artifacts(
+    job: dict[str, Any],
+    *,
+    step: dict[str, Any] | None = None,
+    cache: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    target = dict(step) if isinstance(step, dict) else dict(job)
+    raw_artifacts = _normalize_artifact_paths(target.get("artifact_paths"))
+    context = _job_context(job)
+    stored_artifacts = dict(raw_artifacts)
+    unresolved: list[str] = []
+    job_dir_match_strategy = ""
+    run_match_strategy = ""
+
+    stored_job_dir = (
+        raw_artifacts.get("job_dir")
+        or context.get("invite_job_dir")
+        or ""
+    )
+    job_dir = _invite_resolved_job_dir(stored_job_dir)
+    if job_dir is not None:
+        job_dir_match_strategy = "stored_or_context"
+    else:
+        unresolved.append("job_dir")
+        return _invite_artifact_result(stored_artifacts, {}, unresolved=unresolved)
+
+    resolved: dict[str, str] = {"job_dir": str(job_dir)}
+    state_path = job_dir / "invite_state.json"
+    if state_path.exists():
+        resolved["state_path"] = str(state_path)
+
+    run_dir: Path | None = None
+    stored_run_dir = raw_artifacts.get("run_dir") or context.get("last_invite_run_dir") or ""
+    if stored_run_dir:
+        stored_path = Path(stored_run_dir).expanduser().resolve()
+        canonical_candidate = job_dir / "executions" / stored_path.name
+        if canonical_candidate.exists():
+            run_dir = canonical_candidate
+            run_match_strategy = "stored_run_dir"
+        elif stored_path.exists():
+            run_dir = stored_path
+            run_match_strategy = "stored_run_dir"
+    if run_dir is None:
+        execution_id = str(context.get("invite_execution_id") or "").strip()
+        if execution_id:
+            candidate = job_dir / "executions" / execution_id
+            if candidate.exists():
+                run_dir = candidate
+                run_match_strategy = "context_execution_id"
+    if run_dir is None:
+        for strategy, value in (
+            ("exact_started_at", target.get("started_at")),
+            ("exact_completed_at", target.get("completed_at")),
+            ("exact_job_id", target.get("workflow_job_id") or job.get("job_id")),
+        ):
+            matches = _invite_run_matches_by_prefix(job_dir, value, cache=cache)
+            if len(matches) == 1:
+                run_dir = matches[0]
+                run_match_strategy = strategy
+                break
+            if len(matches) > 1:
+                unresolved.append(f"ambiguous_{strategy}")
+
+    if run_dir is not None:
+        resolved["run_dir"] = str(run_dir)
+        progress_json = run_dir / "batch_progress.json"
+        batch_json = run_dir / "batch_contact_add.json"
+        execution_record = run_dir / "execution_record.json"
+        log_path = run_dir / "batch_contact_add.log"
+        if progress_json.exists():
+            resolved["progress_json"] = str(progress_json)
+        if batch_json.exists():
+            resolved["batch_json"] = str(batch_json)
+        if execution_record.exists():
+            resolved["execution_record"] = str(execution_record)
+        if log_path.exists():
+            resolved["log_path"] = str(log_path)
+    else:
+        unresolved.append("run_dir")
+
+    return _invite_artifact_result(
+        stored_artifacts,
+        resolved,
+        job_dir_match_strategy=job_dir_match_strategy,
+        run_match_strategy=run_match_strategy,
+        unresolved=unresolved,
+    )
+
+
+def _session_run_record_from_path(
+    run_path: str | Path,
+    *,
+    cache: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    path = Path(run_path).expanduser().resolve()
+    if path.is_dir():
+        path = path / "run.json"
+    cache_key = str(path)
+    if isinstance(cache, dict) and cache_key in cache:
+        return dict(cache[cache_key])
+    payload = _load_json(path)
+    if not isinstance(payload, dict):
+        if isinstance(cache, dict):
+            cache[cache_key] = {}
+        return {}
+    messages = payload.get("messages") if isinstance(payload.get("messages"), list) else []
+    sent_messages = [
+        {
+            "index": int(item.get("index") or 0),
+            "text": str(item.get("text") or ""),
+            "sent": bool(item.get("sent")),
+            "send_mode": str(item.get("send_mode") or ""),
+        }
+        for item in messages
+        if isinstance(item, dict) and bool(item.get("sent"))
+    ]
+    unsent_messages = [
+        {
+            "index": int(item.get("index") or 0),
+            "text": str(item.get("text") or ""),
+            "sent": bool(item.get("sent")),
+            "send_mode": str(item.get("send_mode") or ""),
+        }
+        for item in messages
+        if isinstance(item, dict) and not bool(item.get("sent"))
+    ]
+    plan_payload = payload.get("plan") if isinstance(payload.get("plan"), dict) else {}
+    record = {
+        "run_id": str(payload.get("run_id") or path.parent.name),
+        "status": str(payload.get("status") or "").strip(),
+        "visit_count": len(payload.get("visits") or []),
+        "message_count": len(messages),
+        "draft_count": len(unsent_messages),
+        "sent_count": int(payload.get("sent_count") or sum(1 for item in messages if isinstance(item, dict) and bool(item.get("sent")))),
+        "message_target_username": str(plan_payload.get("message_target_username") or "").strip(),
+        "run_dir": str(path.parent),
+        "path": str(path),
+        "sent_messages": sent_messages[:5],
+        "unsent_messages": unsent_messages[:5],
+        "sent_preview": [str(item.get("text") or "").strip() for item in sent_messages[:SESSION_MESSAGE_PREVIEW_LIMIT] if str(item.get("text") or "").strip()],
+        "draft_preview": [str(item.get("text") or "").strip() for item in unsent_messages[:SESSION_MESSAGE_PREVIEW_LIMIT] if str(item.get("text") or "").strip()],
+    }
+    if isinstance(cache, dict):
+        cache[cache_key] = dict(record)
+    return record
+
+
+def _session_run_record_from_artifact_index(
+    artifact_index: dict[str, str],
+    *,
+    cache: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    run_candidates = _artifact_candidates_from_index(artifact_index, "session_run")
+    if not run_candidates:
+        return {}
+    return _session_run_record_from_path(run_candidates[0], cache=cache)
 
 
 def _job_status(job: dict[str, Any] | None) -> str:
@@ -235,7 +819,10 @@ def normalize_job_record(payload: dict[str, Any]) -> dict[str, Any]:
 
 def load_job_index(index_path: str | Path = DEFAULT_JOB_INDEX_PATH) -> dict[str, Any]:
     resolved = Path(index_path).expanduser().resolve()
-    payload = _load_json(resolved)
+    read_path = resolved
+    if resolved == DEFAULT_JOB_INDEX_PATH and not resolved.exists() and LEGACY_JOB_INDEX_PATH.exists():
+        read_path = LEGACY_JOB_INDEX_PATH
+    payload = _load_json(read_path)
     index = default_job_index()
     jobs = payload.get("jobs")
     if isinstance(jobs, list):
@@ -286,7 +873,7 @@ def normalize_runtime_payload(
     normalized_artifacts: dict[str, str] = {}
     if isinstance(artifact_paths, dict):
         normalized_artifacts.update(_normalize_artifact_paths(artifact_paths))
-    for key in ("run_dir", "job_dir", "state_path", "runtime_config", "log_path", "screenshot_path"):
+    for key in ("run_dir", "job_dir", "state_path", "runtime_config", "log_path", "screenshot_path", "progress_json", "batch_json"):
         value = str(payload.get(key) or "").strip()
         if value:
             normalized_artifacts[key] = value
@@ -606,11 +1193,17 @@ def workflow_artifact_index(job_id: str, index_path: str | Path = DEFAULT_JOB_IN
     job = get_job(job_id, index_path=index_path)
     if job is None:
         raise KeyError(f"unknown job_id: {job_id}")
+    cache: dict[str, Any] = {}
     artifacts = dict(job.get("artifact_paths") or {})
+    if str(job.get("workflow_kind") or "") == "session_run":
+        artifacts.update(_resolve_session_artifacts(job, cache=cache)["artifact_paths"])
     for step in job.get("steps") or []:
         if not isinstance(step, dict):
             continue
-        artifacts.update(_normalize_artifact_paths(step.get("artifact_paths")))
+        step_artifacts = _normalize_artifact_paths(step.get("artifact_paths"))
+        if str(step.get("step_kind") or "") == "session_run":
+            step_artifacts.update(_resolve_session_artifacts(job, step=step, cache=cache)["artifact_paths"])
+        artifacts.update(step_artifacts)
     return artifacts
 
 
@@ -703,9 +1296,17 @@ def _workflow_resume_decision(
 
 def _invite_context_from_job(job: dict[str, Any] | None) -> dict[str, Any]:
     context = _job_context(job)
+    invite_job_dir = str(context.get("invite_job_dir") or "").strip()
+    if invite_job_dir:
+        try:
+            from .telegram_gui_helpers import resolve_invite_job_dir
+
+            invite_job_dir = str(resolve_invite_job_dir(invite_job_dir))
+        except Exception:
+            invite_job_dir = str(Path(invite_job_dir).expanduser().resolve())
     return {
         "input_path": str(context.get("input_path") or "").strip(),
-        "invite_job_dir": str(context.get("invite_job_dir") or "").strip(),
+        "invite_job_dir": invite_job_dir,
         "invite_batch_limit": int(context.get("invite_batch_limit") or 0),
         "statuses": [str(item).strip() for item in context.get("statuses") or [] if str(item).strip()],
     }
@@ -781,6 +1382,7 @@ def _invite_queue_decisions(
             "statuses": ["failed"],
         },
         "invite_snapshot": snapshot,
+        "progress_summary": dict(snapshot.get("progress_summary") or {}) if isinstance(snapshot, dict) else {},
         "next_operator_action": next_action,
     }
 
@@ -856,11 +1458,40 @@ def _profile_history_groups_from_jobs(
     step_limit: int,
 ) -> list[dict[str, Any]]:
     groups: list[dict[str, Any]] = []
+    session_cache: dict[str, dict[str, Any]] = {}
+    resolve_cache: dict[str, Any] = {}
     for item in jobs[: max(limit, 1)]:
+        job_payload = dict(item)
+        if str(job_payload.get("workflow_kind") or "") == "session_run":
+            job_artifacts = dict(job_payload.get("artifact_paths") or {})
+            job_artifacts.update(_resolve_session_artifacts(job_payload, cache=resolve_cache)["artifact_paths"])
+            session_summary = _session_summary_from_artifact_index(
+                job_artifacts,
+                cache=session_cache,
+            )
+            if session_summary:
+                job_payload["session_summary"] = session_summary
+        steps: list[dict[str, Any]] = []
+        for step in _job_timeline(item, limit=step_limit):
+            if not isinstance(step, dict):
+                continue
+            step_payload = dict(step)
+            if str(step_payload.get("step_kind") or "") == "session_run":
+                artifact_source = dict(step_payload.get("artifact_paths") or {})
+                artifact_source.update(_resolve_session_artifacts(job_payload, step=step_payload, cache=resolve_cache)["artifact_paths"])
+                if not artifact_source:
+                    artifact_source = dict(job_payload.get("artifact_paths") or {})
+                session_summary = _session_summary_from_artifact_index(
+                    artifact_source,
+                    cache=session_cache,
+                )
+                if session_summary:
+                    step_payload["session_summary"] = session_summary
+            steps.append(step_payload)
         groups.append(
             {
-                "job": item,
-                "steps": _job_timeline(item, limit=step_limit),
+                "job": job_payload,
+                "steps": steps,
             }
         )
     return groups
@@ -881,6 +1512,9 @@ def _profile_timeline_from_groups(groups: list[dict[str, Any]]) -> list[dict[str
                     "summary": str(job.get("summary") or "").strip(),
                     "started_at": str(job.get("started_at") or "").strip(),
                     "completed_at": str(job.get("completed_at") or "").strip(),
+                    "session_summary": dict(job.get("session_summary") or {})
+                    if isinstance(job.get("session_summary"), dict)
+                    else {},
                 }
             )
         for step in group.get("steps") or []:
@@ -900,6 +1534,9 @@ def _profile_timeline_from_groups(groups: list[dict[str, Any]]) -> list[dict[str
                     "summary": str(step.get("summary") or "").strip(),
                     "started_at": str(step.get("started_at") or "").strip(),
                     "completed_at": str(step.get("completed_at") or "").strip(),
+                    "session_summary": dict(step.get("session_summary") or {})
+                    if isinstance(step.get("session_summary"), dict)
+                    else {},
                 }
             )
     return timeline
@@ -934,6 +1571,13 @@ def _artifact_candidates_from_index(artifact_index: dict[str, str], artifact_kin
 
     if artifact_kind == "panel_log":
         _append_candidate(DEFAULT_PANEL_LOG_PATH)
+        _append_candidate(LEGACY_PANEL_LOG_PATH)
+    elif artifact_kind == "progress_json":
+        _append_candidate(artifact_index.get("progress_json"))
+        run_dir = artifact_index.get("run_dir")
+        if str(run_dir or "").strip():
+            _append_candidate(Path(str(run_dir)) / "batch_progress.json")
+        _append_from_glob(artifact_index.get("job_dir"), "executions/*/batch_progress.json")
     elif artifact_kind == "batch_json":
         _append_candidate(artifact_index.get("batch_json"))
         run_dir = artifact_index.get("run_dir")
@@ -947,6 +1591,15 @@ def _artifact_candidates_from_index(artifact_index: dict[str, str], artifact_kin
         if str(run_dir or "").strip():
             _append_candidate(Path(str(run_dir)) / "run.json")
         _append_candidate(run_dir)
+    elif artifact_kind == "plan_json":
+        _append_candidate(artifact_index.get("plan_json"))
+        run_dir = artifact_index.get("run_dir")
+        if str(run_dir or "").strip():
+            _append_candidate(Path(str(run_dir)) / "plan.json")
+    elif artifact_kind == "runtime_config":
+        _append_candidate(artifact_index.get("runtime_config"))
+    elif artifact_kind == "state_path":
+        _append_candidate(artifact_index.get("state_path"))
     elif artifact_kind == "execution_record":
         _append_candidate(artifact_index.get("execution_record"))
         run_dir = artifact_index.get("run_dir")
@@ -960,6 +1613,36 @@ def _artifact_candidates_from_index(artifact_index: dict[str, str], artifact_kin
         if str(run_dir or "").strip():
             _append_from_glob(run_dir, "*.png")
     return candidates
+
+
+def _safe_message_preview(value: Any, *, limit: int = 80) -> str:
+    text = " ".join(str(value or "").split())
+    if len(text) <= limit:
+        return text
+    return text[: max(limit - 1, 1)].rstrip() + "…"
+
+
+def _session_summary_from_artifact_index(
+    artifact_index: dict[str, str],
+    *,
+    cache: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    record = _session_run_record_from_artifact_index(artifact_index, cache=cache)
+    if not record:
+        return {}
+    return {
+        "run_id": str(record.get("run_id") or "").strip(),
+        "status": str(record.get("status") or "").strip(),
+        "visit_count": int(record.get("visit_count") or 0),
+        "message_count": int(record.get("message_count") or 0),
+        "draft_count": int(record.get("draft_count") or 0),
+        "sent_count": int(record.get("sent_count") or 0),
+        "message_target_username": str(record.get("message_target_username") or "").strip(),
+        "sent_messages": list(record.get("sent_preview") or []),
+        "draft_messages": list(record.get("draft_preview") or []),
+        "path": str(record.get("path") or "").strip(),
+        "run_dir": str(record.get("run_dir") or "").strip(),
+    }
 
 
 def _session_history_artifacts() -> dict[str, str]:
@@ -982,6 +1665,588 @@ def _session_history_artifacts() -> dict[str, str]:
     return payload
 
 
+def _session_history_state_snapshot() -> dict[str, Any]:
+    from .telegram_gui_helpers import session_history_snapshot
+
+    try:
+        snapshot = session_history_snapshot()
+    except Exception:
+        return {}
+    return snapshot if isinstance(snapshot, dict) else {}
+
+
+def _session_history_records_from_jobs(
+    jobs: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    run_cache: dict[str, dict[str, Any]] = {}
+    resolve_cache: dict[str, Any] = {}
+    records: list[dict[str, Any]] = []
+    seen_paths: set[str] = set()
+
+    def _append_record(job: dict[str, Any], *, step: dict[str, Any] | None = None) -> None:
+        resolved = _resolve_session_artifacts(job, step=step, cache=resolve_cache)
+        record = _session_run_record_from_artifact_index(
+            resolved.get("artifact_paths") if isinstance(resolved.get("artifact_paths"), dict) else {},
+            cache=run_cache,
+        )
+        if not record:
+            return
+        path = str(record.get("path") or "").strip()
+        if not path or path in seen_paths:
+            return
+        seen_paths.add(path)
+        record_with_meta = dict(record)
+        record_with_meta["workflow_job_id"] = str(job.get("job_id") or "").strip()
+        record_with_meta["workflow_kind"] = str(job.get("workflow_kind") or "").strip()
+        record_with_meta["step_id"] = str((step or {}).get("step_id") or "").strip()
+        record_with_meta["updated_at"] = str(
+            (step or {}).get("completed_at")
+            or (step or {}).get("started_at")
+            or job.get("updated_at")
+            or job.get("completed_at")
+            or job.get("started_at")
+            or ""
+        ).strip()
+        records.append(record_with_meta)
+
+    for job in jobs:
+        if not isinstance(job, dict):
+            continue
+        workflow_kind = str(job.get("workflow_kind") or "").strip()
+        if workflow_kind == "session_run":
+            session_steps = _session_step_records(job)
+            if session_steps:
+                for step in session_steps:
+                    _append_record(job, step=step)
+            else:
+                _append_record(job)
+            continue
+        for step in _session_step_records(job):
+            _append_record(job, step=step)
+
+    records.sort(
+        key=lambda item: (
+            str(item.get("updated_at") or ""),
+            str(item.get("run_id") or ""),
+        )
+    )
+    return records
+
+
+def _session_message_settings(job: dict[str, Any] | None) -> dict[str, Any]:
+    context = _job_context(job)
+    raw = context.get("message_settings")
+    return dict(raw) if isinstance(raw, dict) else {}
+
+
+def _session_current_target_label(job: dict[str, Any] | None, snapshot: dict[str, Any]) -> str:
+    settings = _session_message_settings(job)
+    targets = [dict(item) for item in settings.get("message_targets") or [] if isinstance(item, dict)]
+    cursor = max(_safe_int(snapshot.get("message_target_cursor")), 0)
+    if targets:
+        target = targets[cursor % len(targets)]
+        return str(target.get("label") or target.get("handle") or target.get("username") or "").strip()
+    last_run = snapshot.get("last_run") if isinstance(snapshot.get("last_run"), dict) else {}
+    return str(last_run.get("message_target_username") or "").strip()
+
+
+def _session_current_template_preview(job: dict[str, Any] | None, snapshot: dict[str, Any]) -> str:
+    settings = _session_message_settings(job)
+    templates = [str(item).strip() for item in settings.get("message_templates") or [] if str(item).strip()]
+    cursor = max(_safe_int(snapshot.get("message_cursor")), 0)
+    if templates:
+        return templates[cursor % len(templates)]
+    last_run = snapshot.get("last_run") if isinstance(snapshot.get("last_run"), dict) else {}
+    for preview_key in ("draft_preview", "sent_preview"):
+        items = last_run.get(preview_key) if isinstance(last_run.get(preview_key), list) else []
+        for item in items:
+            text = str(item or "").strip()
+            if text:
+                return text
+    return ""
+
+
+def _session_progress_summary_from_jobs(
+    jobs: list[dict[str, Any]],
+    *,
+    snapshot: dict[str, Any],
+) -> dict[str, Any]:
+    session_jobs = [item for item in jobs if str(item.get("workflow_kind") or "").strip() == "session_run"]
+    active_job = next((item for item in session_jobs if _job_status(item) == "running"), None)
+    last_job = session_jobs[0] if session_jobs else None
+    anchor_job = active_job or last_job
+    if anchor_job is None:
+        return {
+            "status": str(snapshot.get("status") or "missing"),
+            "history_source": str(snapshot.get("history_source") or "missing"),
+            "current_phase": "idle",
+            "elapsed_seconds": 0,
+            "processed_count": 0,
+            "selected_target": 0,
+            "remaining_in_run": None,
+            "messages_sent_total": _safe_int(snapshot.get("messages_sent_total")),
+            "rate_per_minute": None,
+            "eta_seconds": None,
+            "eta_mode": "unknown",
+            "current_target_label": "",
+            "current_template_preview": "",
+            "run_mode": "idle",
+            "continuous": False,
+            "workflow_job_id": "",
+        }
+
+    context = _job_context(anchor_job)
+    settings = _session_message_settings(anchor_job)
+    continuous = bool(context.get("continuous_session"))
+    messages_per_cycle = max(_safe_int(settings.get("messages_per_cycle")), 0)
+    total_message_limit = max(_safe_int(settings.get("total_message_limit")), 0)
+    messages_sent_total = max(_safe_int(snapshot.get("messages_sent_total")), 0)
+    baseline_sent_total = max(_safe_int(context.get("session_baseline_sent_total")), 0)
+    bounded_target_total = context.get("session_target_sent_total")
+    bounded_target_total_int = _safe_int(bounded_target_total, default=-1)
+    if bounded_target_total_int >= 0:
+        selected_target = max(bounded_target_total_int - baseline_sent_total, 0)
+    elif not continuous and messages_per_cycle > 0:
+        selected_target = messages_per_cycle
+    else:
+        selected_target = 0
+    if active_job:
+        processed_count = max(messages_sent_total - baseline_sent_total, 0)
+        elapsed_seconds = _elapsed_seconds_between(anchor_job.get("started_at")) or 0
+    else:
+        last_run = snapshot.get("last_run") if isinstance(snapshot.get("last_run"), dict) else {}
+        processed_count = max(_safe_int(last_run.get("sent_count") or last_run.get("message_count")), 0)
+        elapsed_seconds = _elapsed_seconds_between(anchor_job.get("started_at"), anchor_job.get("completed_at")) or 0
+    rate_per_minute = None
+    if processed_count > 0 and elapsed_seconds > 0:
+        rate_per_minute = round((float(processed_count) * 60.0) / float(elapsed_seconds), 2)
+    eta_seconds: int | None
+    remaining_in_run: int | None
+    eta_mode = "unknown"
+    if continuous:
+        remaining_in_run = None
+        eta_seconds = None
+        eta_mode = "continuous"
+    elif selected_target > 0:
+        remaining_in_run = max(selected_target - processed_count, 0)
+        if remaining_in_run <= 0:
+            eta_seconds = 0
+            eta_mode = "bounded"
+        elif rate_per_minute and rate_per_minute > 0:
+            eta_seconds = max(int(round((float(remaining_in_run) * 60.0) / float(rate_per_minute))), 0)
+            eta_mode = "bounded"
+        else:
+            eta_seconds = None
+    else:
+        remaining_in_run = None
+        eta_seconds = None
+
+    return {
+        "status": _job_status(anchor_job) or str(snapshot.get("status") or "ready"),
+        "history_source": str(snapshot.get("history_source") or "unified_jobs"),
+        "current_phase": str(anchor_job.get("phase") or anchor_job.get("status") or "ready"),
+        "elapsed_seconds": elapsed_seconds,
+        "processed_count": processed_count,
+        "selected_target": selected_target,
+        "remaining_in_run": remaining_in_run,
+        "messages_sent_total": messages_sent_total,
+        "messages_per_cycle": messages_per_cycle,
+        "total_message_limit": total_message_limit,
+        "rate_per_minute": rate_per_minute,
+        "eta_seconds": eta_seconds,
+        "eta_mode": eta_mode,
+        "current_target_label": _session_current_target_label(anchor_job, snapshot),
+        "current_template_preview": _session_current_template_preview(anchor_job, snapshot),
+        "run_mode": "continuous" if continuous else "bounded",
+        "continuous": continuous,
+        "workflow_job_id": str(anchor_job.get("job_id") or ""),
+    }
+
+
+def _session_snapshot_from_jobs(jobs: list[dict[str, Any]]) -> dict[str, Any]:
+    fallback = _session_history_state_snapshot()
+    records = _session_history_records_from_jobs(jobs)
+    if not records and not fallback:
+        return {
+            "status": "missing",
+            "state_file": str(_session_runtime_defaults()[0]),
+            "runs_dir": str(_session_runtime_defaults()[1]),
+            "messages_sent_total": 0,
+            "message_cursor": 0,
+            "message_target_cursor": 0,
+            "history": [],
+            "latest_runs": [],
+            "last_run": {},
+            "history_source": "missing",
+            "progress_summary": {
+                "status": "missing",
+                "history_source": "missing",
+                "current_phase": "idle",
+                "elapsed_seconds": 0,
+                "processed_count": 0,
+                "selected_target": 0,
+                "remaining_in_run": None,
+                "messages_sent_total": 0,
+                "rate_per_minute": None,
+                "eta_seconds": None,
+                "eta_mode": "unknown",
+                "current_target_label": "",
+                "current_template_preview": "",
+                "run_mode": "idle",
+                "continuous": False,
+                "workflow_job_id": "",
+            },
+        }
+    if not records:
+        snapshot = dict(fallback)
+        snapshot["history_source"] = "session_history_fallback"
+        snapshot["progress_summary"] = _session_progress_summary_from_jobs(jobs, snapshot=snapshot)
+        return snapshot
+
+    latest_runs = records[-8:]
+    messages_sent_total = int(fallback.get("messages_sent_total") or sum(int(item.get("sent_count") or 0) for item in records))
+    snapshot = {
+        "status": "ready",
+        "state_file": str(fallback.get("state_file") or _session_runtime_defaults()[0]),
+        "runs_dir": str(fallback.get("runs_dir") or _session_runtime_defaults()[1]),
+        "messages_sent_total": messages_sent_total,
+        "message_cursor": int(fallback.get("message_cursor") or 0),
+        "message_target_cursor": int(fallback.get("message_target_cursor") or 0),
+        "history": list(fallback.get("history") or [])[-8:] if isinstance(fallback.get("history"), list) else [],
+        "latest_runs": latest_runs,
+        "last_run": latest_runs[-1] if latest_runs else {},
+        "history_source": "unified_jobs+state_fallback" if fallback else "unified_jobs",
+    }
+    snapshot["progress_summary"] = _session_progress_summary_from_jobs(jobs, snapshot=snapshot)
+    return snapshot
+
+
+def repair_session_artifacts(
+    *,
+    job_id: str | None = None,
+    profile_name: str | None = None,
+    profile_dir: str | Path | None = None,
+    apply: bool = False,
+    index_path: str | Path = DEFAULT_JOB_INDEX_PATH,
+) -> dict[str, Any]:
+    index = load_job_index(index_path)
+    resolve_cache: dict[str, Any] = {}
+    matched_jobs: list[str] = []
+    matched_steps: list[dict[str, Any]] = []
+    repaired_jobs: list[dict[str, Any]] = []
+    repaired_steps: list[dict[str, Any]] = []
+    unresolved: list[dict[str, Any]] = []
+    changed = False
+
+    resolved_profile_dir = str(Path(profile_dir).expanduser().resolve()) if profile_dir is not None else ""
+    for raw_job_index, raw_job in enumerate(index.get("jobs", [])):
+        if not isinstance(raw_job, dict):
+            continue
+        job = normalize_job_record(raw_job)
+        if job_id is not None and str(job.get("job_id") or "") != str(job_id):
+            continue
+        if profile_name is not None and str(job.get("profile_name") or "") != str(profile_name):
+            continue
+        if profile_dir is not None and str(job.get("profile_dir") or "") != resolved_profile_dir:
+            continue
+        workflow_kind = str(job.get("workflow_kind") or "").strip()
+        session_steps = _session_step_records(job)
+        is_session_parent = workflow_kind == "session_run"
+        if not is_session_parent and not session_steps:
+            continue
+        matched_jobs.append(str(job.get("job_id") or ""))
+
+        repaired_step_records: list[tuple[dict[str, Any], dict[str, Any]]] = []
+        for step in session_steps:
+            resolved = _resolve_session_artifacts(job, step=step, cache=resolve_cache)
+            matched_steps.append(
+                {
+                    "job_id": str(job.get("job_id") or ""),
+                    "step_id": str(step.get("step_id") or ""),
+                    "artifact_paths": dict(resolved.get("artifact_paths") or {}),
+                    "run_match_strategy": str(resolved.get("run_match_strategy") or ""),
+                    "unresolved": list(resolved.get("unresolved") or []),
+                }
+            )
+            resolved_artifacts = dict(resolved.get("artifact_paths") or {})
+            has_session_run = bool(resolved_artifacts.get("run_dir") or resolved_artifacts.get("session_run"))
+            if has_session_run:
+                repaired_step_records.append((step, resolved))
+                existing_step_artifacts = _normalize_artifact_paths(step.get("artifact_paths"))
+                additions = {key: value for key, value in resolved_artifacts.items() if existing_step_artifacts.get(key) != value}
+                if additions:
+                    repaired_steps.append(
+                        {
+                            "job_id": str(job.get("job_id") or ""),
+                            "step_id": str(step.get("step_id") or ""),
+                            "artifact_paths": additions,
+                            "run_match_strategy": str(resolved.get("run_match_strategy") or ""),
+                        }
+                    )
+                    if apply:
+                        raw_steps = [dict(item) for item in raw_job.get("steps") or [] if isinstance(item, dict)]
+                        for raw_index, raw_step in enumerate(raw_steps):
+                            if not isinstance(raw_step, dict):
+                                continue
+                            if str(raw_step.get("step_id") or "") != str(step.get("step_id") or ""):
+                                continue
+                            merged = dict(raw_step.get("artifact_paths") or {})
+                            merged.update(additions)
+                            raw_step["artifact_paths"] = merged
+                            raw_steps[raw_index] = raw_step
+                            raw_job["steps"] = raw_steps
+                            changed = True
+                            break
+            else:
+                unresolved.append(
+                    {
+                        "job_id": str(job.get("job_id") or ""),
+                        "step_id": str(step.get("step_id") or ""),
+                        "kind": "step",
+                        "issues": list(resolved.get("unresolved") or []),
+                    }
+                )
+
+        if is_session_parent:
+            freshest_step_resolution: dict[str, Any] | None = None
+            if repaired_step_records:
+                freshest_step_resolution = repaired_step_records[-1][1]
+            else:
+                parent_resolution = _resolve_session_artifacts(job, cache=resolve_cache)
+                parent_artifacts = dict(parent_resolution.get("artifact_paths") or {})
+                if parent_artifacts.get("run_dir") or parent_artifacts.get("session_run"):
+                    freshest_step_resolution = parent_resolution
+                else:
+                    unresolved.append(
+                        {
+                            "job_id": str(job.get("job_id") or ""),
+                            "kind": "job",
+                            "issues": list(parent_resolution.get("unresolved") or []),
+                        }
+                    )
+
+            if freshest_step_resolution is not None:
+                resolved_artifacts = dict(freshest_step_resolution.get("artifact_paths") or {})
+                existing_job_artifacts = _normalize_artifact_paths(raw_job.get("artifact_paths"))
+                additions = {key: value for key, value in resolved_artifacts.items() if existing_job_artifacts.get(key) != value}
+                context_patch: dict[str, Any] = {}
+                if resolved_artifacts.get("run_dir"):
+                    existing_run_dir = str(((raw_job.get("context") or {}) if isinstance(raw_job.get("context"), dict) else {}).get("last_session_run_dir") or "").strip()
+                    if existing_run_dir != str(resolved_artifacts.get("run_dir") or ""):
+                        context_patch["last_session_run_dir"] = str(resolved_artifacts.get("run_dir") or "")
+                recent_step = ((raw_job.get("context") or {}) if isinstance(raw_job.get("context"), dict) else {}).get("recent_step")
+                if isinstance(recent_step, dict):
+                    recent_step_artifacts = dict(recent_step.get("artifact_paths") or {})
+                    merged_recent_step_artifacts = dict(recent_step_artifacts)
+                    merged_recent_step_artifacts.update(resolved_artifacts)
+                    if merged_recent_step_artifacts != recent_step_artifacts:
+                        updated_recent_step = dict(recent_step)
+                        updated_recent_step["artifact_paths"] = merged_recent_step_artifacts
+                        context_patch["recent_step"] = updated_recent_step
+                if additions or context_patch:
+                    repaired_jobs.append(
+                        {
+                            "job_id": str(job.get("job_id") or ""),
+                            "artifact_paths": additions,
+                            "context_patch": context_patch,
+                            "run_match_strategy": str(freshest_step_resolution.get("run_match_strategy") or ""),
+                        }
+                    )
+                    if apply:
+                        merged_job_artifacts = dict(raw_job.get("artifact_paths") or {})
+                        merged_job_artifacts.update(additions)
+                        raw_job["artifact_paths"] = merged_job_artifacts
+                        if context_patch:
+                            merged_context = dict(raw_job.get("context") or {})
+                            merged_context.update(context_patch)
+                            raw_job["context"] = merged_context
+                        changed = True
+
+        index["jobs"][raw_job_index] = normalize_job_record(raw_job)
+
+    if apply and changed:
+        save_job_index(index, index_path=index_path)
+    return {
+        "status": "completed",
+        "apply": bool(apply),
+        "changed": bool(changed),
+        "matched_jobs": matched_jobs,
+        "matched_steps": matched_steps,
+        "repaired_jobs": repaired_jobs,
+        "repaired_steps": repaired_steps,
+        "unresolved": unresolved,
+    }
+
+
+def repair_invite_artifacts(
+    *,
+    job_id: str | None = None,
+    profile_name: str | None = None,
+    profile_dir: str | Path | None = None,
+    apply: bool = False,
+    index_path: str | Path = DEFAULT_JOB_INDEX_PATH,
+) -> dict[str, Any]:
+    index = load_job_index(index_path)
+    resolve_cache: dict[str, Any] = {}
+    matched_jobs: list[str] = []
+    matched_steps: list[dict[str, Any]] = []
+    repaired_jobs: list[dict[str, Any]] = []
+    repaired_steps: list[dict[str, Any]] = []
+    unresolved: list[dict[str, Any]] = []
+    changed = False
+
+    resolved_profile_dir = str(Path(profile_dir).expanduser().resolve()) if profile_dir is not None else ""
+    for raw_job_index, raw_job in enumerate(index.get("jobs", [])):
+        if not isinstance(raw_job, dict):
+            continue
+        job = normalize_job_record(raw_job)
+        if job_id is not None and str(job.get("job_id") or "") != str(job_id):
+            continue
+        if profile_name is not None and str(job.get("profile_name") or "") != str(profile_name):
+            continue
+        if profile_dir is not None and str(job.get("profile_dir") or "") != resolved_profile_dir:
+            continue
+        workflow_kind = str(job.get("workflow_kind") or "").strip()
+        invite_steps = [
+            _normalize_step_record(item, position=index)
+            for index, item in enumerate(job.get("steps") or [])
+            if isinstance(item, dict) and str(item.get("step_kind") or "").strip() == "invite_batch"
+        ]
+        if workflow_kind not in {"invite_batch", "combined_pattern"} and not invite_steps:
+            continue
+        matched_jobs.append(str(job.get("job_id") or ""))
+
+        repaired_step_records: list[tuple[dict[str, Any], dict[str, Any]]] = []
+        for step in invite_steps:
+            resolved = _resolve_invite_artifacts(job, step=step, cache=resolve_cache)
+            matched_steps.append(
+                {
+                    "job_id": str(job.get("job_id") or ""),
+                    "step_id": str(step.get("step_id") or ""),
+                    "stored_artifact_paths": dict(resolved.get("stored_artifact_paths") or {}),
+                    "artifact_paths": dict(resolved.get("artifact_paths") or {}),
+                    "job_dir_match_strategy": str(resolved.get("job_dir_match_strategy") or ""),
+                    "run_match_strategy": str(resolved.get("run_match_strategy") or ""),
+                    "unresolved": list(resolved.get("unresolved") or []),
+                }
+            )
+            resolved_artifacts = dict(resolved.get("artifact_paths") or {})
+            if resolved_artifacts.get("job_dir"):
+                repaired_step_records.append((step, resolved))
+                existing_step_artifacts = _normalize_artifact_paths(step.get("artifact_paths"))
+                additions = {
+                    key: value
+                    for key, value in resolved_artifacts.items()
+                    if existing_step_artifacts.get(key) != value
+                }
+                if additions:
+                    repaired_steps.append(
+                        {
+                            "job_id": str(job.get("job_id") or ""),
+                            "step_id": str(step.get("step_id") or ""),
+                            "stored_artifact_paths": dict(resolved.get("stored_artifact_paths") or {}),
+                            "artifact_paths": additions,
+                            "job_dir_match_strategy": str(resolved.get("job_dir_match_strategy") or ""),
+                            "run_match_strategy": str(resolved.get("run_match_strategy") or ""),
+                        }
+                    )
+                    if apply:
+                        raw_steps = [dict(item) for item in raw_job.get("steps") or [] if isinstance(item, dict)]
+                        for raw_step_index, raw_step in enumerate(raw_steps):
+                            if str(raw_step.get("step_id") or "") != str(step.get("step_id") or ""):
+                                continue
+                            merged = dict(raw_step.get("artifact_paths") or {})
+                            merged.update(additions)
+                            raw_step["artifact_paths"] = merged
+                            raw_steps[raw_step_index] = raw_step
+                            raw_job["steps"] = raw_steps
+                            changed = True
+                            break
+            else:
+                unresolved.append(
+                    {
+                        "job_id": str(job.get("job_id") or ""),
+                        "step_id": str(step.get("step_id") or ""),
+                        "kind": "step",
+                        "issues": list(resolved.get("unresolved") or []),
+                    }
+                )
+
+        if workflow_kind not in {"invite_batch", "combined_pattern"}:
+            index["jobs"][raw_job_index] = normalize_job_record(raw_job)
+            continue
+
+        parent_resolution = _resolve_invite_artifacts(job, cache=resolve_cache)
+        resolved_artifacts = dict(parent_resolution.get("artifact_paths") or {})
+        existing_job_artifacts = _normalize_artifact_paths(raw_job.get("artifact_paths"))
+        parent_artifact_keys = {"job_dir", "state_path"}
+        if workflow_kind == "invite_batch":
+            parent_artifact_keys.update({"run_dir", "progress_json", "batch_json", "execution_record", "log_path"})
+        additions = {
+            key: value
+            for key, value in resolved_artifacts.items()
+            if key in parent_artifact_keys and existing_job_artifacts.get(key) != value
+        }
+        context_patch: dict[str, Any] = {}
+        existing_context = dict(raw_job.get("context") or {}) if isinstance(raw_job.get("context"), dict) else {}
+        if resolved_artifacts.get("job_dir") and str(existing_context.get("invite_job_dir") or "").strip() != str(resolved_artifacts.get("job_dir") or ""):
+            context_patch["invite_job_dir"] = str(resolved_artifacts.get("job_dir") or "")
+        if resolved_artifacts.get("run_dir") and str(existing_context.get("last_invite_run_dir") or "").strip() != str(resolved_artifacts.get("run_dir") or ""):
+            context_patch["last_invite_run_dir"] = str(resolved_artifacts.get("run_dir") or "")
+        recent_step = existing_context.get("recent_step")
+        if isinstance(recent_step, dict) and str(recent_step.get("step_kind") or "") == "invite_batch" and resolved_artifacts:
+            recent_step_artifacts = dict(recent_step.get("artifact_paths") or {})
+            merged_recent_step_artifacts = dict(recent_step_artifacts)
+            merged_recent_step_artifacts.update(resolved_artifacts)
+            if merged_recent_step_artifacts != recent_step_artifacts:
+                updated_recent_step = dict(recent_step)
+                updated_recent_step["artifact_paths"] = merged_recent_step_artifacts
+                context_patch["recent_step"] = updated_recent_step
+        if additions or context_patch:
+            repaired_jobs.append(
+                {
+                    "job_id": str(job.get("job_id") or ""),
+                    "stored_artifact_paths": dict(parent_resolution.get("stored_artifact_paths") or {}),
+                    "artifact_paths": additions,
+                    "context_patch": context_patch,
+                    "job_dir_match_strategy": str(parent_resolution.get("job_dir_match_strategy") or ""),
+                    "run_match_strategy": str(parent_resolution.get("run_match_strategy") or ""),
+                }
+            )
+            if apply:
+                merged_job_artifacts = dict(raw_job.get("artifact_paths") or {})
+                merged_job_artifacts.update(additions)
+                raw_job["artifact_paths"] = merged_job_artifacts
+                if context_patch:
+                    merged_context = dict(raw_job.get("context") or {})
+                    merged_context.update(context_patch)
+                    raw_job["context"] = merged_context
+                changed = True
+        elif not resolved_artifacts.get("job_dir"):
+            unresolved.append(
+                {
+                    "job_id": str(job.get("job_id") or ""),
+                    "kind": "job",
+                    "issues": list(parent_resolution.get("unresolved") or []),
+                }
+            )
+
+        index["jobs"][raw_job_index] = normalize_job_record(raw_job)
+
+    if apply and changed:
+        save_job_index(index, index_path=index_path)
+    return {
+        "status": "completed",
+        "apply": bool(apply),
+        "changed": bool(changed),
+        "matched_jobs": matched_jobs,
+        "matched_steps": matched_steps,
+        "repaired_jobs": repaired_jobs,
+        "repaired_steps": repaired_steps,
+        "unresolved": unresolved,
+    }
+
+
 def _resolved_artifact_shortcuts(
     artifact_index: dict[str, str],
     *,
@@ -998,6 +2263,7 @@ def _resolved_artifact_shortcuts(
 
     artifact_sources = {
         "panel_log": [artifact_index],
+        "progress_json": [_bucket_artifacts("invite_batch"), artifact_index],
         "batch_json": [_bucket_artifacts("invite_batch"), artifact_index],
         "session_run": [_bucket_artifacts("session_run"), _session_history_artifacts(), artifact_index],
         "execution_record": [
@@ -1033,6 +2299,42 @@ def _artifact_center_rows(shortcuts: dict[str, str]) -> list[dict[str, Any]]:
                 "available": bool(path),
             }
         )
+    return rows
+
+
+def _profile_artifact_history_from_jobs(
+    jobs: list[dict[str, Any]],
+    *,
+    index_path: str | Path,
+    limit: int,
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for job in jobs:
+        artifact_index = workflow_artifact_index(str(job.get("job_id") or ""), index_path=index_path)
+        for artifact_kind, label in ARTIFACT_HISTORY_LABELS.items():
+            candidates = _artifact_candidates_from_index(artifact_index, artifact_kind)
+            if not candidates:
+                continue
+            path = str(candidates[0])
+            dedupe_key = (artifact_kind, path)
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+            rows.append(
+                {
+                    "artifact_kind": artifact_kind,
+                    "label": label,
+                    "path": path,
+                    "workflow_kind": str(job.get("workflow_kind") or "").strip(),
+                    "job_id": str(job.get("job_id") or "").strip(),
+                    "status": _job_status(job),
+                    "summary": str(job.get("summary") or "").strip(),
+                    "updated_at": _job_timestamp(job),
+                }
+            )
+            if len(rows) >= max(limit, 1):
+                return rows
     return rows
 
 
@@ -1076,6 +2378,74 @@ def _profile_artifact_index_from_jobs(
             if normalized_key and normalized_value and normalized_key not in artifact_index:
                 artifact_index[normalized_key] = normalized_value
     return artifact_index
+
+
+def _combined_phase_label(phase: str) -> str:
+    mapping = {
+        "contact_add": "Шаг 1: добавление контактов",
+        "review": "Добавление завершилось с ошибками",
+        "session_ready": "Шаг 2 готов: можно запускать сессию",
+        "session_running": "Шаг 2 выполняется: сессия работает",
+        "stopped": "Остановлено / завершено",
+    }
+    return mapping.get(str(phase or "").strip(), "Неизвестная фаза")
+
+
+def _combined_progress_summary(
+    *,
+    bucket: dict[str, Any],
+    state: dict[str, Any],
+    session_snapshot: dict[str, Any],
+) -> dict[str, Any]:
+    from .telegram_gui_helpers import contact_job_snapshot, parse_combined_step_pattern
+
+    active_job = bucket.get("active_job") if isinstance(bucket.get("active_job"), dict) else None
+    resume_decision = bucket.get("resume_decision") if isinstance(bucket.get("resume_decision"), dict) else {}
+    phase = str(state.get("phase") or "contact_add").strip() or "contact_add"
+    pattern_tokens = parse_combined_step_pattern(str(state.get("step_pattern") or ""))
+    cursor = max(_safe_int(state.get("step_cursor")), 0)
+    current_step_code = pattern_tokens[cursor % len(pattern_tokens)] if pattern_tokens else "1"
+    next_step_code = pattern_tokens[(cursor + 1) % len(pattern_tokens)] if pattern_tokens else "2"
+    invite_snapshot = {}
+    invite_job_dir = str(state.get("invite_job_dir") or "").strip()
+    if invite_job_dir:
+        try:
+            invite_snapshot = contact_job_snapshot(invite_job_dir)
+        except Exception:
+            invite_snapshot = {}
+    elapsed_seconds = (
+        _elapsed_seconds_between((active_job or {}).get("started_at"))
+        if isinstance(active_job, dict)
+        else _elapsed_seconds_between(state.get("updated_at"), state.get("updated_at"))
+    ) or 0
+    waiting_reason = str(state.get("next_hint") or state.get("last_summary") or resume_decision.get("action_text") or "").strip()
+    child_progress = {}
+    child_history_source = ""
+    if phase in {"contact_add", "review", "session_ready"} and isinstance(invite_snapshot.get("progress_summary"), dict):
+        child_progress = dict(invite_snapshot.get("progress_summary") or {})
+        child_history_source = str(child_progress.get("history_source") or "invite")
+    elif phase in {"session_running", "stopped"} and isinstance(session_snapshot.get("progress_summary"), dict):
+        child_progress = dict(session_snapshot.get("progress_summary") or {})
+        child_history_source = str(child_progress.get("history_source") or "session")
+    return {
+        "status": str((active_job or {}).get("status") or state.get("job_status") or state.get("last_status") or "idle"),
+        "phase": phase,
+        "phase_label": _combined_phase_label(phase),
+        "current_step_code": current_step_code,
+        "current_step_label": "добавление контактов" if current_step_code == "1" else "сессия и сообщения",
+        "next_step_code": next_step_code,
+        "next_step_label": "добавление контактов" if next_step_code == "1" else "сессия и сообщения",
+        "elapsed_seconds": elapsed_seconds,
+        "waiting_reason": waiting_reason,
+        "recoverable": bool((bucket.get("recoverable_job") if isinstance(bucket.get("recoverable_job"), dict) else None)),
+        "child_history_source": child_history_source,
+        "invite_pending_total": _safe_int(invite_snapshot.get("pending_total")),
+        "invite_failed_total": _safe_int(invite_snapshot.get("failed_total")),
+        "invite_added_total": _safe_int(invite_snapshot.get("added_total")),
+        "session_eta_mode": str((session_snapshot.get("progress_summary") or {}).get("eta_mode") or ""),
+        "session_run_mode": str((session_snapshot.get("progress_summary") or {}).get("run_mode") or ""),
+        "workflow_job_id": str(state.get("workflow_job_id") or ""),
+    }
 
 
 def active_workflow_job(
@@ -1145,6 +2515,7 @@ def profile_workspace_snapshot(
     from .locks import get_profile_lock
     from .platform_adapters import current_platform_id, platform_capabilities
     from .telegram_profiles import get_profile_status
+    from .workflows import combined_state_from_jobs
 
     profile_id = profile_id_for(profile_name, profile_dir)
     jobs = list_jobs(profile_id=profile_id, limit=max(limit * 8, 24), index_path=index_path)
@@ -1176,6 +2547,24 @@ def profile_workspace_snapshot(
         step_limit=timeline_limit,
     )
     profile_timeline = _profile_timeline_from_groups(history_groups)
+    session_snapshot = _session_snapshot_from_jobs(jobs)
+    session_bucket = workflow_buckets.get("session_run") if isinstance(workflow_buckets.get("session_run"), dict) else None
+    if isinstance(session_bucket, dict):
+        session_bucket["progress_summary"] = dict(session_snapshot.get("progress_summary") or {})
+        session_bucket["session_snapshot"] = dict(session_snapshot)
+    combined_state = combined_state_from_jobs(
+        profile_name=profile_name,
+        profile_dir=profile_dir,
+        index_path=index_path,
+    ) or {}
+    combined_bucket = workflow_buckets.get("combined_pattern") if isinstance(workflow_buckets.get("combined_pattern"), dict) else None
+    if isinstance(combined_bucket, dict):
+        combined_bucket["combined_state"] = dict(combined_state)
+        combined_bucket["progress_summary"] = _combined_progress_summary(
+            bucket=combined_bucket,
+            state=combined_state,
+            session_snapshot=session_snapshot,
+        )
     resume_decision = _workflow_resume_decision(
         active_job=active_workflow,
         recoverable_job=recoverable_workflow,
@@ -1191,6 +2580,11 @@ def profile_workspace_snapshot(
         artifact_index,
         workflow_buckets=workflow_buckets,
     )
+    artifact_history = _profile_artifact_history_from_jobs(
+        jobs,
+        index_path=index_path,
+        limit=max(limit * 3, 10),
+    )
     current_lock = get_profile_lock(profile_name=profile_name, profile_dir=profile_dir)
     try:
         profile_status = get_profile_status(profile_dir)
@@ -1200,9 +2594,17 @@ def profile_workspace_snapshot(
     health = {
         "platform_id": current_platform_id(),
         "profile_running": bool(profile_status.get("running")),
+        "attach_status": str(profile_status.get("attach_status") or ""),
+        "attach_message": str(profile_status.get("attach_message") or ""),
+        "attach_ready": str(profile_status.get("attach_status") or "") in {"exact_window", "title_match"},
+        "attach_candidate_count": len(
+            profile_status.get("attach_candidates")
+            if isinstance(profile_status.get("attach_candidates"), list)
+            else profile_status.get("windows") or []
+        ),
         "window_automation_available": bool((capabilities.get("window_automation") or {}).get("available")),
         "accessibility_available": bool((capabilities.get("accessibility") or {}).get("available")),
-        "session_runtime_reachable": (Path("/home/max/telegram-portable-session-tool") / "bin" / "telegram-portable-session-tool").exists(),
+        "session_runtime_reachable": session_repo_binary().exists(),
         "panel_backend_status": "ready",
     }
     if str(resume_decision.get("kind") or "") == "running":
@@ -1232,8 +2634,11 @@ def profile_workspace_snapshot(
         "last_successful_job": last_success,
         "history_groups": history_groups,
         "profile_timeline": profile_timeline,
+        "session_snapshot": session_snapshot,
+        "combined_state": combined_state,
         "artifact_index": artifact_index,
         "artifact_shortcuts": artifact_shortcuts,
         "artifact_center": _artifact_center_rows(artifact_shortcuts),
+        "artifact_history": artifact_history,
         "workflow_buckets": workflow_buckets,
     }

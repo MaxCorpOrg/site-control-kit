@@ -5,10 +5,12 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from .jobs import DEFAULT_TELEGRAM_STATE_ROOT, now_utc, profile_id_for
+from .jobs import now_utc, profile_id_for
+from .telegram_runtime import LEGACY_STATE_ROOT, preferred_read_path, profile_locks_path
 
 
-DEFAULT_PROFILE_LOCKS_PATH = DEFAULT_TELEGRAM_STATE_ROOT / "locks" / "profiles.json"
+DEFAULT_PROFILE_LOCKS_PATH = profile_locks_path()
+LEGACY_PROFILE_LOCKS_PATH = LEGACY_STATE_ROOT / "locks" / "profiles.json"
 
 
 def default_profile_locks() -> dict[str, Any]:
@@ -41,7 +43,10 @@ def _atomic_write_json(path: Path, payload: dict[str, Any]) -> Path:
 
 def load_profile_locks(locks_path: str | Path = DEFAULT_PROFILE_LOCKS_PATH) -> dict[str, Any]:
     resolved = Path(locks_path).expanduser().resolve()
-    payload = _load_json(resolved)
+    read_path = resolved
+    if resolved == DEFAULT_PROFILE_LOCKS_PATH:
+        read_path = preferred_read_path(resolved, LEGACY_PROFILE_LOCKS_PATH)
+    payload = _load_json(read_path)
     locks = default_profile_locks()
     raw_locks = payload.get("locks")
     if isinstance(raw_locks, dict):

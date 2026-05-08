@@ -959,6 +959,115 @@ class TelegramInviteExecutorTests(unittest.TestCase):
             self.assertFalse(any(step.get("label") == "dialog_submit_click" for step in payload["steps"]))
             self.assertTrue(any(step.get("label") == "precheck_contact_verification" for step in payload["steps"]))
 
+    def test_desktop_add_contact_profile_retries_when_first_verify_still_shows_add_contact(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            job_dir = Path(tmpdir) / "job"
+            self._seed_state(job_dir)
+            self._call_json(
+                self.executor.command_configure,
+                Namespace(
+                    job_dir=str(job_dir),
+                    invite_link=None,
+                    message_template=None,
+                    note=None,
+                    requires_approval=True,
+                    client_id=None,
+                    tab_id=None,
+                    url_pattern=None,
+                    active=None,
+                    portable_profile_name="AK3",
+                    portable_profile_dir="/home/max/TelegramPortable-AK3",
+                    account_username="",
+                    account_label="AK3",
+                ),
+            )
+
+            state = {"dialog_open": False, "verified": False, "submit_count": 0}
+
+            def fake_portable(_repo_root, command):
+                if "status" in command:
+                    payload = {
+                        "status": "completed",
+                        "running": True,
+                        "pids": [19374],
+                        "windows": [{"window_id": "0x04c0002e", **self._dialog_window()}],
+                    }
+                elif "log-diagnose" in command:
+                    payload = {"status": "completed", "alerts": []}
+                elif "accessibility-dump" in command:
+                    query = command[command.index("--query") + 1]
+                    if query == "@alice_123":
+                        payload = {"status": "completed", "matches": [{"name": "@alice_123", "role": "label"}]}
+                    elif query in self.executor.DESKTOP_ADD_CONTACT_BUTTON_TERMS or query in self.executor.DESKTOP_ADD_TO_CONTACTS_CHAT_TERMS:
+                        matches = [] if state["verified"] or state["dialog_open"] else [self._profile_add_match()]
+                        payload = {"status": "completed", "matches": matches}
+                    elif query in self.executor.DESKTOP_FIRST_NAME_TERMS:
+                        matches = [self._dialog_first_name_match()] if state["dialog_open"] else []
+                        payload = {"status": "completed", "matches": matches}
+                    elif query in self.executor.DESKTOP_DONE_BUTTON_TERMS:
+                        matches = [self._dialog_done_match()] if state["dialog_open"] else []
+                        payload = {"status": "completed", "matches": matches}
+                    elif query in self.executor.DESKTOP_CONTACT_DELETE_TERMS:
+                        matches = [{"name": "Удалить контакт", "role": "push button"}] if state["verified"] else []
+                        payload = {"status": "completed", "matches": matches}
+                    else:
+                        payload = {"status": "completed", "matches": []}
+                elif "window-click" in command:
+                    x_ratio = float(command[command.index("--x-ratio") + 1])
+                    y_ratio = float(command[command.index("--y-ratio") + 1])
+                    if abs(x_ratio - 0.3364) < 0.01 and abs(y_ratio - 0.4688) < 0.02:
+                        state["dialog_open"] = True
+                    elif state["dialog_open"]:
+                        state["dialog_open"] = False
+                        state["submit_count"] += 1
+                        if state["submit_count"] >= 2:
+                            state["verified"] = True
+                    payload = {"status": "completed"}
+                elif "window-screenshot" in command:
+                    output_path = command[command.index("--output") + 1]
+                    payload = {"status": "completed", "output_path": output_path, "window_id": "0x04c0002e"}
+                else:
+                    payload = {"status": "completed"}
+                return {"command": command, "returncode": 0, "stdout": json.dumps(payload), "stderr": "", "stdout_json": payload}
+
+            with mock.patch.object(self.executor, "_run_portable_json", side_effect=fake_portable), mock.patch.object(
+                self.executor.time, "sleep"
+            ):
+                rc, payload = self._call_json(
+                    self.executor.command_desktop_add_contact_profile,
+                    Namespace(
+                        job_dir=str(job_dir),
+                        username="@alice_123",
+                        execution_id="20260507T160000Z",
+                        open_wait=0,
+                        after_add_wait=0,
+                        after_done_wait=0,
+                        verify_wait=0,
+                        add_click_x_ratio=0.3364,
+                        add_click_y_ratio=0.5417,
+                        done_click_x_ratio=0.5785,
+                        done_click_y_ratio=0.7956,
+                        done_click_repeat=1,
+                        last_name_text="",
+                        press_enter_after_last_name=False,
+                        launch_if_needed=False,
+                        verify_profile_reopen=True,
+                        confirm_add=True,
+                        dry_run=False,
+                    ),
+                )
+
+            self.assertEqual(rc, 0)
+            self.assertEqual(payload["status"], "completed")
+            self.assertEqual(payload["outcome"], "contact_added_verified")
+            self.assertEqual(payload["verification"]["stage"], "verify_reopen_retry")
+            self.assertTrue(payload["verification"]["success_visible"])
+            self.assertFalse(payload["verification"]["add_visible"])
+            self.assertTrue(any(step.get("label") == "verify_reopen_retry_requested" for step in payload["steps"]))
+            self.assertTrue(any(step.get("label") == "recovery_dialog_submit_click" for step in payload["steps"]))
+            self.assertIn("profile_after_retry_actions", payload["screenshots"])
+            self.assertIn("profile_verify_retry", payload["screenshots"])
+
     def test_desktop_add_contact_batch_initializes_job_and_marks_contact_added(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -1017,6 +1126,10 @@ class TelegramInviteExecutorTests(unittest.TestCase):
 
             with mock.patch.object(self.executor, "_run_portable_json", side_effect=fake_portable), mock.patch.object(
                 self.executor.time, "sleep"
+            ), mock.patch.object(
+                self.executor.time,
+                "monotonic",
+                side_effect=[100.0, 100.0, 130.0, 160.0, 220.0, 220.0],
             ):
                 rc, payload = self._call_json(
                     self.executor.command_desktop_add_contact_batch,
@@ -1053,8 +1166,20 @@ class TelegramInviteExecutorTests(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertTrue(payload["initialized_from_input"])
             self.assertEqual(payload["selected_users"], 1)
+            self.assertEqual(payload["processed_count"], 1)
             self.assertEqual(payload["added_count"], 1)
             self.assertEqual(payload["failed_count"], 0)
+            self.assertEqual(payload["elapsed_seconds"], 120)
+            self.assertEqual(payload["rate_per_minute"], 0.5)
+            self.assertTrue(payload["started_at"])
+            self.assertTrue(payload["completed_at"])
+            self.assertTrue(payload["progress_json"].endswith("batch_progress.json"))
+            self.assertTrue(payload["batch_json"].endswith("batch_contact_add.json"))
+            self.assertTrue(payload["artifact_paths"]["progress_json"].endswith("batch_progress.json"))
+            progress_payload = json.loads(Path(payload["progress_json"]).read_text(encoding="utf-8"))
+            self.assertEqual(progress_payload["status"], "completed")
+            self.assertEqual(progress_payload["processed_count"], 1)
+            self.assertEqual(progress_payload["remaining_in_run"], 0)
             self.assertTrue((Path(payload["run_dir"]) / "batch_contact_add.json").exists())
             state = self.manager.load_state(job_dir)
             self.assertEqual(state["users"][0]["status"], "contact_added")
