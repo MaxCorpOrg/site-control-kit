@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import subprocess
 import threading
 import time
 import tempfile
@@ -120,6 +122,98 @@ class TelegramMembersExportGuiTests(unittest.TestCase):
         self.assertEqual(errors, ["boom"])
         self.assertEqual(renders, [True])
 
+    def test_close_request_during_export_requests_cancel_and_defers_close(self) -> None:
+        class FakeLabel:
+            def __init__(self) -> None:
+                self.value = ""
+
+            def set_label(self, value: str) -> None:
+                self.value = value
+
+            def get_label(self) -> str:
+                return self.value
+
+        class FakeController:
+            def __init__(self) -> None:
+                self.cancel_requested = False
+
+            def request_cancel(self) -> None:
+                self.cancel_requested = True
+
+        progress = mod.ExportProgressState(started_at=time.monotonic(), last_update_at=time.monotonic())
+        controller = FakeController()
+        logs: list[str] = []
+        renders: list[bool] = []
+        idle_calls: list[object] = []
+        fake_window = types.SimpleNamespace(
+            current_task="export",
+            current_controller=controller,
+            export_progress_state=progress,
+            hero_status=FakeLabel(),
+            _close_after_task=False,
+            _append_log=lambda message: logs.append(message),
+            _render_progress_state=lambda: renders.append(True),
+            get_application=lambda: None,
+            destroy=lambda: None,
+        )
+
+        with patch.object(mod.GLib, "idle_add", side_effect=lambda callback, *args: idle_calls.append((callback, args))):
+            result = mod.TelegramMembersExportWindow._on_close_request(fake_window)
+
+        self.assertTrue(result)
+        self.assertTrue(controller.cancel_requested)
+        self.assertTrue(fake_window._close_after_task)
+        self.assertEqual(fake_window.hero_status.get_label(), "Останавливаем и закрываем...")
+        self.assertEqual(logs, ["Запрошено закрытие окна после мягкой остановки экспорта."])
+        self.assertEqual(renders, [True])
+        self.assertEqual(idle_calls, [])
+        self.assertEqual(progress.stage, "stop-requested")
+
+    def test_close_request_without_active_export_schedules_immediate_close(self) -> None:
+        idle_calls: list[object] = []
+        fake_window = types.SimpleNamespace(
+            current_task=None,
+            current_controller=None,
+            export_progress_state=None,
+            get_application=lambda: None,
+            destroy=lambda: None,
+            _close_window_now=lambda: False,
+        )
+
+        with patch.object(mod.GLib, "idle_add", side_effect=lambda callback, *args: idle_calls.append((callback, args))):
+            result = mod.TelegramMembersExportWindow._on_close_request(fake_window)
+
+        self.assertFalse(result)
+        self.assertEqual(idle_calls, [(fake_window._close_window_now, ())])
+
+    def test_finish_task_success_finalizes_pending_close(self) -> None:
+        class FakeButton:
+            def __init__(self) -> None:
+                self.sensitive = True
+
+            def set_sensitive(self, value: bool) -> None:
+                self.sensitive = value
+
+        callbacks: list[str] = []
+        fake_window = types.SimpleNamespace(
+            current_task="export",
+            current_controller=object(),
+            stop_button=FakeButton(),
+            _finalize_pending_close=lambda: callbacks.append("finalize"),
+        )
+
+        result = mod.TelegramMembersExportWindow._finish_task_success(
+            fake_window,
+            lambda payload: callbacks.append(f"callback:{payload}"),
+            "done",
+        )
+
+        self.assertFalse(result)
+        self.assertEqual(fake_window.current_task, None)
+        self.assertEqual(fake_window.current_controller, None)
+        self.assertFalse(fake_window.stop_button.sensitive)
+        self.assertEqual(callbacks, ["callback:done", "finalize"])
+
     def test_handle_chats_loaded_supports_tdata_target(self) -> None:
         class FakeLabel:
             def __init__(self) -> None:
@@ -140,8 +234,14 @@ class TelegramMembersExportGuiTests(unittest.TestCase):
             chat_rows=[],
             hero_status=FakeLabel(),
             chat_meta_label=FakeLabel(),
+            recent_runs=[],
+            pinned_chats=[],
+            _selected_account=lambda: None,
             _apply_chat_filter=lambda: applied.append(True),
             _append_log=lambda message: logs.append(message),
+        )
+        fake_window._merge_known_chat_rows = lambda chats: mod.TelegramMembersExportWindow._merge_known_chat_rows(
+            fake_window, chats
         )
         target = mod.BrowserTarget(
             client_id="tdata:test",
@@ -170,6 +270,454 @@ class TelegramMembersExportGuiTests(unittest.TestCase):
         self.assertIn("напрямую из Telegram-сессии", fake_window.chat_meta_label.get_label())
         self.assertEqual(logs, ["Чаты загружены: 1"])
         self.assertEqual(applied, [True])
+
+    def test_handle_chats_loaded_appends_known_history_chat_when_missing(self) -> None:
+        class FakeLabel:
+            def __init__(self) -> None:
+                self.value = ""
+
+            def set_label(self, value: str) -> None:
+                self.value = value
+
+            def get_label(self) -> str:
+                return self.value
+
+        backend = mod.TelegramGuiBackend(action_log_path=Path("/tmp/gui-actions.log"))
+        account = mod.AccountOption(
+            key="registry:TG_CONTACT 2",
+            label="TG_CONTACT 2",
+            name="TG_CONTACT 2",
+            token="token",
+            profile_source="/tmp/profile",
+            source_kind="registry",
+            sort_key=(0, "tg_contact_2", "/tmp/profile"),
+        )
+        known_run = mod.RunRecord(
+            run_id="run-1",
+            created_at="2026-05-05T12:00:00Z",
+            surface_key="tdata",
+            surface_label="Telegram Desktop tdata",
+            surface_badge="Primary tdata",
+            preset_key="quick_check",
+            preset_label="Quick Check",
+            account_key="registry:@AK-LIVE",
+            account_label="@AK-LIVE",
+            chat_ref="-1001461811598",
+            chat_title="Чат BigpharmaMarket",
+            output_path=Path("/tmp/bigpharma.md"),
+            interrupted=False,
+            safe_count=12,
+            usernames_found=12,
+            history_messages_scanned=400,
+            artifacts=mod.ArtifactBundle(
+                markdown=Path("/tmp/bigpharma.md"),
+                usernames_txt=Path("/tmp/bigpharma_usernames.txt"),
+            ),
+            status="done",
+        )
+        applied: list[bool] = []
+        logs: list[str] = []
+        fake_window = types.SimpleNamespace(
+            backend=backend,
+            connected_target=None,
+            chat_rows=[],
+            hero_status=FakeLabel(),
+            chat_meta_label=FakeLabel(),
+            recent_runs=[known_run],
+            pinned_chats=[],
+            _selected_account=lambda: account,
+            _apply_chat_filter=lambda: applied.append(True),
+            _append_log=lambda message: logs.append(message),
+        )
+        fake_window._merge_known_chat_rows = lambda chats: mod.TelegramMembersExportWindow._merge_known_chat_rows(
+            fake_window, chats
+        )
+        target = mod.BrowserTarget(
+            client_id="tdata:test",
+            tab_id=0,
+            tab_title="Telegram Desktop",
+            tab_url="/tmp/tdata",
+        )
+        chats = [
+            mod.ChatOption(
+                title="Test chat",
+                subtitle="group",
+                url="-1001",
+                fragment="-1001",
+                peer_id="-1001",
+                active=True,
+                visible=True,
+                ordinal=0,
+            )
+        ]
+
+        mod.TelegramMembersExportWindow._handle_chats_loaded(fake_window, (target, chats))
+
+        self.assertEqual(len(fake_window.chat_rows), 2)
+        self.assertEqual(fake_window.chat_rows[1].fragment, "-1001461811598")
+        self.assertEqual(fake_window.chat_rows[1].title, "Чат BigpharmaMarket")
+        self.assertEqual(fake_window.chat_rows[1].source_kind, "known")
+        self.assertIn("known chats из истории/закреплений", fake_window.chat_meta_label.get_label())
+        self.assertEqual(logs, ["Чаты загружены: 1 (+1 known)"])
+        self.assertEqual(applied, [True])
+
+    def test_save_security_token_inline_validates_empty_and_quickstart(self) -> None:
+        class FakeLabel:
+            def __init__(self) -> None:
+                self.value = ""
+
+            def set_label(self, value: str) -> None:
+                self.value = value
+
+            def get_label(self) -> str:
+                return self.value
+
+        class FakeEntry:
+            def __init__(self, value: str) -> None:
+                self.value = value
+
+            def get_text(self) -> str:
+                return self.value
+
+            def set_text(self, value: str) -> None:
+                self.value = value
+
+        account = mod.AccountOption(
+            key="auto:1",
+            label="Слот 1",
+            name="Слот 1",
+            token=mod.DEFAULT_TOKEN,
+            profile_source="/tmp/profile",
+            source_kind="auto",
+            sort_key=(0, "slot 1", "/tmp/profile"),
+            slot_number="1",
+            token_source="quickstart",
+        )
+        fake_window = types.SimpleNamespace(
+            _selected_account=lambda: account,
+            security_token_entry=FakeEntry("   "),
+            security_feedback_label=FakeLabel(),
+        )
+
+        mod.TelegramMembersExportWindow._save_security_token_inline(fake_window)
+        self.assertEqual(fake_window.security_feedback_label.get_label(), "Введите token перед сохранением.")
+
+        fake_window.security_token_entry.set_text(mod.DEFAULT_TOKEN)
+        mod.TelegramMembersExportWindow._save_security_token_inline(fake_window)
+        self.assertEqual(
+            fake_window.security_feedback_label.get_label(),
+            "Quickstart token нельзя сохранять как secure token.",
+        )
+
+    def test_run_export_blocks_known_chat_for_tdata_when_not_in_live_dialog_list(self) -> None:
+        class FakeEntry:
+            def __init__(self, value: str) -> None:
+                self.value = value
+
+            def get_text(self) -> str:
+                return self.value
+
+            def set_text(self, value: str) -> None:
+                self.value = value
+
+        backend = mod.TelegramGuiBackend(action_log_path=Path("/tmp/gui-actions.log"))
+        account = mod.AccountOption(
+            key="registry:TG_CONTACT 2",
+            label="TG_CONTACT 2",
+            name="TG_CONTACT 2",
+            token="token",
+            profile_source="/tmp/profile",
+            source_kind="registry",
+            sort_key=(0, "tg_contact_2", "/tmp/profile"),
+        )
+        chat = mod.ChatOption(
+            title="Чат BigpharmaMarket",
+            subtitle="known chat | history | @AK-LIVE",
+            url="-1001461811598",
+            fragment="-1001461811598",
+            peer_id="-1001461811598",
+            active=False,
+            visible=True,
+            ordinal=99,
+            source_kind="known",
+        )
+        target = mod.BrowserTarget(
+            client_id="tdata:test",
+            tab_id=0,
+            tab_title="Telegram Desktop",
+            tab_url="/tmp/tdata",
+        )
+        errors: list[str] = []
+        fake_window = types.SimpleNamespace(
+            _selected_account=lambda: account,
+            _selected_chat=lambda: chat,
+            output_entry=FakeEntry("/tmp/out.md"),
+            _selected_preset_key=lambda: "quick_check",
+            last_session=None,
+            connected_target=target,
+            backend=backend,
+            _show_error=lambda text: errors.append(text),
+        )
+
+        mod.TelegramMembersExportWindow._run_export(fake_window)
+
+        self.assertEqual(len(errors), 1)
+        self.assertIn("known chat", errors[0])
+        self.assertIn("live dialog list", errors[0])
+
+    def test_save_security_token_inline_reloads_same_profile(self) -> None:
+        class FakeLabel:
+            def __init__(self) -> None:
+                self.value = ""
+
+            def set_label(self, value: str) -> None:
+                self.value = value
+
+            def get_label(self) -> str:
+                return self.value
+
+        class FakeEntry:
+            def __init__(self, value: str) -> None:
+                self.value = value
+
+            def get_text(self) -> str:
+                return self.value
+
+            def set_text(self, value: str) -> None:
+                self.value = value
+
+        class FakeRevealer:
+            def __init__(self) -> None:
+                self.revealed = True
+
+            def set_reveal_child(self, value: bool) -> None:
+                self.revealed = value
+
+        account = mod.AccountOption(
+            key="auto:1",
+            label="Слот 1",
+            name="Слот 1",
+            token=mod.DEFAULT_TOKEN,
+            profile_source="/tmp/profile",
+            source_kind="auto",
+            sort_key=(0, "slot 1", "/tmp/profile"),
+            slot_number="1",
+            token_source="quickstart",
+        )
+        logs: list[str] = []
+        reload_calls: list[tuple[str, str]] = []
+        saved: list[tuple[str, str]] = []
+        fake_window = types.SimpleNamespace(
+            _selected_account=lambda: account,
+            security_token_entry=FakeEntry("new-secure-token-12345"),
+            security_feedback_label=FakeLabel(),
+            output_entry=FakeEntry("/tmp/export.md"),
+            backend=types.SimpleNamespace(save_secure_token=lambda acc, token: saved.append((acc.label, token))),
+            hero_status=FakeLabel(),
+            security_form_revealer=FakeRevealer(),
+            _append_log=lambda message: logs.append(message),
+            _load_accounts_into_ui=lambda **kwargs: reload_calls.append(
+                (kwargs.get("preferred_profile_source") or "", kwargs.get("preserve_output") or "")
+            ),
+            _sanitize_text=lambda text: text,
+        )
+
+        mod.TelegramMembersExportWindow._save_security_token_inline(fake_window)
+
+        self.assertEqual(saved, [("Слот 1", "new-secure-token-12345")])
+        self.assertEqual(fake_window.hero_status.get_label(), "Secure token сохранён")
+        self.assertIn("registry secret store", fake_window.security_feedback_label.get_label())
+        self.assertFalse(fake_window.security_form_revealer.revealed)
+        self.assertEqual(reload_calls, [("/tmp/profile", "/tmp/export.md")])
+        self.assertEqual(logs, ["Secure token сохранён для профиля: Слот 1"])
+
+    def test_refresh_fallback_card_shows_manual_bridge_setup_hint(self) -> None:
+        class FakeLabel:
+            def __init__(self) -> None:
+                self.value = ""
+
+            def set_label(self, value: str) -> None:
+                self.value = value
+
+            def get_label(self) -> str:
+                return self.value
+
+        class FakeBox:
+            def __init__(self) -> None:
+                self.visible = False
+
+            def set_visible(self, value: bool) -> None:
+                self.visible = value
+
+        class FakeButton:
+            def __init__(self) -> None:
+                self.sensitive = False
+
+            def set_sensitive(self, value: bool) -> None:
+                self.sensitive = value
+
+        info = mod.PreflightInfo(
+            surface_key="fallback",
+            surface_label="Fallback surface",
+            surface_badge="Fallback required",
+            is_primary=False,
+            tdata_ready=False,
+            helper_ready=False,
+            output_path=None,
+            preset_key="full_history",
+            preset_label="Full History",
+            history_limit="0",
+            timeout_sec=None,
+            resume_available=False,
+            fallback_bridge=mod.FallbackReadiness(
+                surface_key="bridge",
+                surface_label="Telegram Web bridge",
+                surface_badge="Fallback Bridge",
+                state="extension_setup_required",
+                detail="Load unpacked is required",
+            ),
+            fallback_cdp=mod.FallbackReadiness(
+                surface_key="cdp",
+                surface_label="Chrome profile direct",
+                surface_badge="Fallback CDP",
+                state="client_offline",
+                detail="CDP browser profile is offline",
+            ),
+        )
+        fake_window = types.SimpleNamespace(
+            fallback_card=FakeBox(),
+            fallback_title_label=FakeLabel(),
+            fallback_bridge_label=FakeLabel(),
+            fallback_cdp_label=FakeLabel(),
+            fallback_hint_label=FakeLabel(),
+            fallback_prepare_bridge_button=FakeButton(),
+            fallback_retry_button=FakeButton(),
+            current_task=None,
+            _fallback_state_label=lambda readiness: mod.TelegramMembersExportWindow._fallback_state_label(None, readiness),  # type: ignore[arg-type]
+        )
+
+        mod.TelegramMembersExportWindow._refresh_fallback_card(fake_window, info, object())
+
+        self.assertTrue(fake_window.fallback_card.visible)
+        self.assertEqual(fake_window.fallback_title_label.get_label(), "Fallback required")
+        self.assertIn("extension_setup_required", fake_window.fallback_bridge_label.get_label())
+        self.assertIn("Load unpacked", fake_window.fallback_hint_label.get_label())
+        self.assertTrue(fake_window.fallback_prepare_bridge_button.sensitive)
+        self.assertTrue(fake_window.fallback_retry_button.sensitive)
+
+    def test_handle_bridge_prepared_sets_connected_target(self) -> None:
+        class FakeLabel:
+            def __init__(self) -> None:
+                self.value = ""
+
+            def set_label(self, value: str) -> None:
+                self.value = value
+
+            def get_label(self) -> str:
+                return self.value
+
+        target = mod.BrowserTarget(
+            client_id="client-1",
+            tab_id=77,
+            tab_title="Telegram",
+            tab_url="https://web.telegram.org/a/",
+        )
+        readiness = mod.FallbackReadiness(
+            surface_key="bridge",
+            surface_label="Telegram Web bridge",
+            surface_badge="Fallback Bridge",
+            state="ready",
+            detail="Bridge ready",
+            target=target,
+        )
+        logs: list[str] = []
+        refreshed: list[bool] = []
+        fake_window = types.SimpleNamespace(
+            connected_target=None,
+            hero_status=FakeLabel(),
+            _append_log=lambda message: logs.append(message),
+            _refresh_preflight=lambda **kwargs: refreshed.append(bool(kwargs.get("schedule_deep"))),
+        )
+
+        mod.TelegramMembersExportWindow._handle_bridge_prepared(fake_window, readiness)
+
+        self.assertEqual(fake_window.connected_target, target)
+        self.assertEqual(fake_window.hero_status.get_label(), "Bridge profile готов")
+        self.assertEqual(logs, ["Fallback bridge: ready | Bridge ready"])
+        self.assertEqual(refreshed, [True])
+
+    def test_do_activate_presents_window_before_bootstrap(self) -> None:
+        order: list[str] = []
+        fake_window = types.SimpleNamespace(
+            present=lambda: order.append("present"),
+            bootstrap_async=lambda: order.append("bootstrap"),
+        )
+        fake_app = types.SimpleNamespace(backend=object(), window=None)
+
+        with (
+            patch.object(mod, "install_css"),
+            patch.object(mod, "TelegramMembersExportWindow", return_value=fake_window),
+        ):
+            mod.TelegramMembersExportApp.do_activate(fake_app)
+
+        self.assertEqual(order, ["present", "bootstrap"])
+        self.assertIs(fake_app.window, fake_window)
+
+    def test_output_path_change_refreshes_light_only(self) -> None:
+        refresh_calls: list[dict[str, object]] = []
+        fake_window = types.SimpleNamespace(
+            _ui_syncing=False,
+            _refresh_preflight=lambda **kwargs: refresh_calls.append(kwargs),
+        )
+
+        mod.TelegramMembersExportWindow._on_output_path_changed(fake_window)
+
+        self.assertEqual(refresh_calls, [{}])
+
+    def test_chat_selection_refreshes_light_only(self) -> None:
+        class FakeLabel:
+            def __init__(self) -> None:
+                self.value = ""
+
+            def set_label(self, value: str) -> None:
+                self.value = value
+
+            def get_label(self) -> str:
+                return self.value
+
+        class FakeEntry:
+            def __init__(self, value: str) -> None:
+                self.value = value
+
+            def get_text(self) -> str:
+                return self.value
+
+            def set_text(self, value: str) -> None:
+                self.value = value
+
+        chat = mod.ChatOption(
+            title="BigpharmaMarket",
+            subtitle="group",
+            url="https://web.telegram.org/a/#-1001",
+            fragment="-1001",
+            peer_id="-1001",
+            active=True,
+            visible=True,
+            ordinal=0,
+        )
+        refresh_calls: list[dict[str, object]] = []
+        fake_window = types.SimpleNamespace(
+            _selected_chat=lambda: chat,
+            chat_title_label=FakeLabel(),
+            chat_url_label=FakeLabel(),
+            output_entry=FakeEntry("/tmp/export.md"),
+            _refresh_preflight=lambda **kwargs: refresh_calls.append(kwargs),
+        )
+
+        mod.TelegramMembersExportWindow._on_chat_selected(fake_window)
+
+        self.assertEqual(fake_window.chat_title_label.get_label(), "BigpharmaMarket")
+        self.assertEqual(refresh_calls, [{}])
 
     def test_slugify_filename_strips_telegram_suffix(self) -> None:
         self.assertEqual(mod.slugify_filename("BigpharmaMarket | Telegram"), "bigpharmamarket")
@@ -434,7 +982,7 @@ class TelegramMembersExportGuiTests(unittest.TestCase):
 
         self.assertEqual(resolved, extracted)
 
-    def test_resolve_tdata_dir_prefers_matching_collector_import(self) -> None:
+    def test_list_candidate_tdata_dirs_uses_collector_only_in_explicit_debug_mode(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td) / "profile"
             root.mkdir(parents=True)
@@ -456,11 +1004,13 @@ class TelegramMembersExportGuiTests(unittest.TestCase):
             old_collector_tdata = mod.TELEGRAM_API_COLLECTOR_TDATA_DIR
             try:
                 mod.TELEGRAM_API_COLLECTOR_TDATA_DIR = collector_tdata
-                resolved = mod.resolve_tdata_dir(root)
+                default_candidates = mod.list_candidate_tdata_dirs(root)
+                debug_candidates = mod.list_candidate_tdata_dirs(root, include_collector_debug=True)
             finally:
                 mod.TELEGRAM_API_COLLECTOR_TDATA_DIR = old_collector_tdata
 
-        self.assertEqual(resolved, collector_tdata.resolve())
+        self.assertNotEqual(default_candidates[0], collector_tdata.resolve())
+        self.assertEqual(debug_candidates[-1], collector_tdata.resolve())
 
     def test_ensure_tdata_target_does_not_launch_portable_binary(self) -> None:
         backend = mod.TelegramGuiBackend(action_log_path=Path("/tmp/gui-actions.log"))
@@ -655,6 +1205,126 @@ class TelegramMembersExportGuiTests(unittest.TestCase):
                 mod.TDATA_HELPER_SCRIPT = old_helper
 
         self.assertEqual(payload["stats"]["history_messages_scanned"], 12)
+
+    def test_run_tdata_helper_serializes_parallel_calls(self) -> None:
+        backend = mod.TelegramGuiBackend(action_log_path=Path("/tmp/gui-actions.log"))
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            helper = root / "parallel_helper.py"
+            helper.write_text(
+                "\n".join(
+                    [
+                        "import json, time",
+                        "time.sleep(0.2)",
+                        "print(json.dumps({'ok': True, 'items': []}), flush=True)",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            tdata_dir = root / "tdata"
+            tdata_dir.mkdir()
+            old_python = mod.TELEGRAM_API_COLLECTOR_PYTHON
+            old_helper = mod.TDATA_HELPER_SCRIPT
+            active_lock = threading.Lock()
+            active_calls = 0
+            max_active = 0
+            original_run = backend.process_runner.run
+
+            def wrapped_run(*args, **kwargs):
+                nonlocal active_calls, max_active
+                with active_lock:
+                    active_calls += 1
+                    max_active = max(max_active, active_calls)
+                try:
+                    return original_run(*args, **kwargs)
+                finally:
+                    with active_lock:
+                        active_calls -= 1
+
+            try:
+                mod.TELEGRAM_API_COLLECTOR_PYTHON = Path(sys.executable)
+                mod.TDATA_HELPER_SCRIPT = helper
+                backend.process_runner.run = wrapped_run  # type: ignore[method-assign]
+                errors: list[Exception] = []
+
+                def worker() -> None:
+                    try:
+                        backend._run_tdata_helper("list-chats", tdata_dir=tdata_dir, timeout_sec=5)
+                    except Exception as exc:  # pragma: no cover - assertion inspects collected errors
+                        errors.append(exc)
+
+                threads = [
+                    threading.Thread(target=worker)
+                    for _ in range(2)
+                ]
+                for thread in threads:
+                    thread.start()
+                for thread in threads:
+                    thread.join(timeout=5)
+            finally:
+                backend.process_runner.run = original_run  # type: ignore[method-assign]
+                mod.TELEGRAM_API_COLLECTOR_PYTHON = old_python
+                mod.TDATA_HELPER_SCRIPT = old_helper
+
+        self.assertTrue(all(not thread.is_alive() for thread in threads))
+        self.assertEqual(errors, [])
+        self.assertEqual(max_active, 1)
+
+    def test_selected_helper_python_prefers_managed_env_before_legacy(self) -> None:
+        old_managed = mod.MANAGED_HELPER_PYTHON
+        old_legacy = mod.TELEGRAM_API_COLLECTOR_PYTHON
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                root = Path(td)
+                managed = root / "managed" / ".venv" / "bin" / "python"
+                legacy = root / "legacy" / ".venv" / "bin" / "python"
+                managed.parent.mkdir(parents=True, exist_ok=True)
+                legacy.parent.mkdir(parents=True, exist_ok=True)
+                managed.write_text("#!/bin/sh\n", encoding="utf-8")
+                legacy.write_text("#!/bin/sh\n", encoding="utf-8")
+                os.chmod(managed, 0o755)
+                os.chmod(legacy, 0o755)
+                mod.MANAGED_HELPER_PYTHON = managed
+                mod.TELEGRAM_API_COLLECTOR_PYTHON = legacy
+                with patch.dict(os.environ, {"TELEGRAM_API_COLLECTOR_PYTHON": ""}, clear=False):
+                    selected = mod._selected_helper_python()
+        finally:
+            mod.MANAGED_HELPER_PYTHON = old_managed
+            mod.TELEGRAM_API_COLLECTOR_PYTHON = old_legacy
+
+        assert selected is not None
+        self.assertEqual(selected[0], "managed")
+        self.assertEqual(selected[1], managed)
+
+    def test_packaged_resource_paths_live_under_scripts_dir(self) -> None:
+        self.assertEqual(mod.RUN_ONCE_SCRIPT.parent, mod.SCRIPTS_DIR)
+        self.assertEqual(mod.SAFE_SNAPSHOT_SCRIPT.parent, mod.SCRIPTS_DIR)
+        self.assertEqual(mod.START_BROWSER_SCRIPT.parent, mod.SCRIPTS_DIR)
+        self.assertEqual(mod.CDP_HELPER_SCRIPT.parent, mod.SCRIPTS_DIR)
+        self.assertEqual(mod.TDATA_HELPER_SCRIPT.parent, mod.SCRIPTS_DIR)
+        self.assertEqual(mod.HELPER_REQUIREMENTS_FILE.parent, mod.SCRIPTS_DIR)
+
+    def test_bootstrap_doctor_reports_linux_install_foundation_paths(self) -> None:
+        script = Path("/home/max/site-control-kit/scripts/bootstrap_telegram_workstation.sh")
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            env = os.environ.copy()
+            env["TELEGRAM_WORKSPACE_ROOT"] = str(root / "workspace")
+            env["TELEGRAM_MANAGED_HELPER_ROOT"] = str(root / "workspace" / "managed_helper")
+            env["PYTHON_BIN"] = sys.executable
+            completed = subprocess.run(
+                ["bash", str(script), "--doctor"],
+                check=True,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+
+        self.assertIn("workspace_root=", completed.stdout)
+        self.assertIn("managed_helper_root=", completed.stdout)
+        self.assertIn("requirements_ready=1", completed.stdout)
+        self.assertIn("selected_helper_source=", completed.stdout)
 
 
 if __name__ == "__main__":

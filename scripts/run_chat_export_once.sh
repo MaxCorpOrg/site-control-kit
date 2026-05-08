@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-TOKEN="${1:-${SITECTL_TOKEN:-}}"
+TOKEN="${SITECTL_TOKEN:-${1:-}}"
 if [[ -z "$TOKEN" ]]; then
   echo "ERROR: pass token as first arg or set SITECTL_TOKEN" >&2
   exit 1
 fi
+export SITECTL_TOKEN="$TOKEN"
 
 OUTPUT="${2:-/home/max/Загрузки/Telegram Desktop/3.md}"
 GROUP_URL="${3:-https://web.telegram.org/k/#-2181640359}"
@@ -17,7 +18,8 @@ CHAT_DEEP_MODE="${8:-url}"
 FORCED_CLIENT_ID="${10:-${CHAT_CLIENT_ID:-}}"
 FORCED_TAB_ID="${11:-${CHAT_TAB_ID:-}}"
 
-ROOT="/home/max/site-control-kit"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 HUB_URL="http://127.0.0.1:8765"
 STARTED_HUB=0
 START_TELEGRAM_SCRIPT="$ROOT/scripts/start_telegram.sh"
@@ -33,12 +35,14 @@ trap cleanup EXIT
 
 has_bridge_client() {
   local target_client_id="${1:-}"
-  python3 - "$HUB_URL" "$TOKEN" "$target_client_id" <<'PY'
+  python3 - "$HUB_URL" "$target_client_id" <<'PY'
 import json
+import os
 import sys
 from urllib.request import Request, urlopen
 
-hub_url, token, forced_client_id = sys.argv[1], sys.argv[2], str(sys.argv[3] or "").strip()
+hub_url, forced_client_id = sys.argv[1], str(sys.argv[2] or "").strip()
+token = os.environ["SITECTL_TOKEN"]
 req = Request(
     f"{hub_url}/api/clients",
     headers={"Accept": "application/json", "X-Access-Token": token},
@@ -65,11 +69,15 @@ PY
 
 if ! curl -fsS --max-time 1 "$HUB_URL/health" >/dev/null 2>&1; then
   echo "INFO: hub not healthy on ${HUB_URL}, starting/recovering..."
+  if [[ "${SITECTL_SKIP_HUB_BOOT:-0}" == "1" ]]; then
+    echo "ERROR: hub is not healthy and SITECTL_SKIP_HUB_BOOT=1 forbids bridge export script from recovering port 8765." >&2
+    exit 1
+  fi
+
   stale_pids="$(ss -ltnp 'sport = :8765' 2>/dev/null | sed -n 's/.*pid=\([0-9]\+\).*/\1/p' | sort -u)"
   if [[ -n "${stale_pids}" ]]; then
-    # Port is occupied but health endpoint is dead; terminate stale listeners.
-    kill -9 ${stale_pids} >/dev/null 2>&1 || true
-    sleep 0.4
+    echo "ERROR: port 8765 is occupied by another process and bridge export script will not kill it automatically." >&2
+    exit 1
   fi
 
   python3 -m webcontrol serve \
@@ -137,7 +145,6 @@ if [[ -n "${FORCED_TAB_ID}" ]]; then
 fi
 
 python3 -u "$ROOT/scripts/export_telegram_members_non_pii.py" \
-  --token "$TOKEN" \
   --group-url "$GROUP_URL" \
   --source chat \
   --force-navigate \

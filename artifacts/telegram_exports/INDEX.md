@@ -675,3 +675,139 @@ Usernames TXT: `/tmp/telegram_contact_batch.BrpA6L_usernames.txt`
 Usernames JSON: `/tmp/telegram_contact_batch.BrpA6L_usernames.json`
 Архив usernames TXT: `/home/max/site-control-kit/artifacts/telegram_exports/20260426_122412_chat_1002465948544_13_usernames_txt.txt`
 Архив usernames JSON: `/home/max/site-control-kit/artifacts/telegram_exports/20260426_122412_chat_1002465948544_13_usernames_json.json`
+
+## 20260508T082402Z
+Аккаунт: `TG_CONTACT 4`
+Чат: `Косметолог на Миллион`
+Chat ref: `-1001506021345`
+Preset: `Quick Check`
+Surface: `Primary tdata`
+Status: `done`
+Markdown: `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_cosmetologna_quick_check_20260508T082312Z.md`
+Usernames TXT: `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_cosmetologna_quick_check_20260508T082312Z_usernames.txt`
+Usernames JSON: `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_cosmetologna_quick_check_20260508T082312Z_usernames.json`
+Safe TXT: `/home/max/.site-control-kit/telegram_workspace/live_smokes/telegram_export_косметолог_на_миллион/latest_safe.txt`
+Safe MD: `/home/max/.site-control-kit/telegram_workspace/live_smokes/telegram_export_косметолог_на_миллион/latest_safe.md`
+Run log: `/home/max/.site-control-kit/telegram_workspace/logs/export_run_20260508T082357Z.log`
+Action log: `/home/max/.site-control-kit/telegram_workspace/logs/gui_actions_tg_contact4_cosmetologna_live_20260508T082312Z.log`
+
+## 20260508T082623Z
+Аккаунт: `TG_CONTACT 4`
+Чат: `Косметолог на Миллион`
+Chat ref: `-1001506021345`
+Preset: `Full History`
+Surface: `Primary tdata`
+Status: `done`
+Markdown: `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_cosmetologna_full_history_20260508T082312Z.md`
+Usernames TXT: `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_cosmetologna_full_history_20260508T082312Z_usernames.txt`
+Usernames JSON: `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_cosmetologna_full_history_20260508T082312Z_usernames.json`
+Safe TXT: `/home/max/.site-control-kit/telegram_workspace/live_smokes/telegram_export_косметолог_на_миллион/latest_safe.txt`
+Safe MD: `/home/max/.site-control-kit/telegram_workspace/live_smokes/telegram_export_косметолог_на_миллион/latest_safe.md`
+Run log: `/home/max/.site-control-kit/telegram_workspace/logs/export_run_20260508T082408Z.log`
+Action log: `/home/max/.site-control-kit/telegram_workspace/logs/gui_actions_tg_contact4_cosmetologna_live_20260508T082312Z.log`
+
+## 20260508T085250Z
+Аккаунт: `TG_CONTACT 4`
+Чат: `FitPharma`
+Chat ref: `-1001739132808`
+Preset: `Quick Check`
+Surface: `Primary tdata`
+Status: `done`
+Markdown: `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_fitpharma_quick_check_20260508T085146Z.md`
+Usernames TXT: `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_fitpharma_quick_check_20260508T085146Z_usernames.txt`
+Usernames JSON: `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_fitpharma_quick_check_20260508T085146Z_usernames.json`
+Safe TXT: `/home/max/.site-control-kit/telegram_workspace/live_smokes/telegram_export_fitpharma/latest_safe.txt`
+Safe MD: `/home/max/.site-control-kit/telegram_workspace/live_smokes/telegram_export_fitpharma/latest_safe.md`
+Run log: `/home/max/.site-control-kit/telegram_workspace/logs/export_run_20260508T085239Z.log`
+Action log: `/home/max/.site-control-kit/telegram_workspace/logs/gui_actions_tg_contact4_fitpharma_live_20260508T085146Z.log`
+
+## 20260508T085743Z
+Аккаунт: `TG_CONTACT 4`
+Чат: `FitPharma`
+Chat ref: `-1001739132808`
+Preset: `Full History`
+Surface: `Primary tdata`
+Status: `done`
+Markdown: `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_fitpharma_full_history_20260508T085146Z.md`
+Usernames TXT: `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_fitpharma_full_history_20260508T085146Z_usernames.txt`
+Usernames JSON: `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_fitpharma_full_history_20260508T085146Z_usernames.json`
+Safe TXT: `/home/max/.site-control-kit/telegram_workspace/live_smokes/telegram_export_fitpharma/latest_safe.txt`
+Safe MD: `/home/max/.site-control-kit/telegram_workspace/live_smokes/telegram_export_fitpharma/latest_safe.md`
+Run log: `/home/max/.site-control-kit/telegram_workspace/logs/export_run_20260508T085255Z.log`
+Action log: `/home/max/.site-control-kit/telegram_workspace/logs/gui_actions_tg_contact4_fitpharma_live_20260508T085146Z.log`
+
+## 20260508T090002Z
+Аккаунт: `TG_CONTACT 4`
+Чат: `FitPharma`
+Chat ref: `-1001739132808`
+Preset: `Quick Check`
+Surface: `Primary tdata`
+Status: `done`
+Markdown: `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_fitpharma_quick_check_20260508T085911Z.md`
+Usernames TXT: `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_fitpharma_quick_check_20260508T085911Z_usernames.txt`
+Usernames JSON: `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_fitpharma_quick_check_20260508T085911Z_usernames.json`
+Safe TXT: `/home/max/.site-control-kit/telegram_workspace/live_smokes/telegram_export_fitpharma/latest_safe.txt`
+Safe MD: `/home/max/.site-control-kit/telegram_workspace/live_smokes/telegram_export_fitpharma/latest_safe.md`
+Run log: `/home/max/.site-control-kit/telegram_workspace/logs/export_run_20260508T085955Z.log`
+Action log: `/home/max/.site-control-kit/telegram_workspace/logs/gui_actions_tg_contact4_fitpharma_live_20260508T085911Z.log`
+
+## 20260508T090508Z
+Аккаунт: `TG_CONTACT 4`
+Чат: `FitPharma`
+Chat ref: `-1001739132808`
+Preset: `Full History`
+Surface: `Primary tdata`
+Status: `done`
+Markdown: `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_fitpharma_full_history_20260508T085911Z.md`
+Usernames TXT: `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_fitpharma_full_history_20260508T085911Z_usernames.txt`
+Usernames JSON: `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_fitpharma_full_history_20260508T085911Z_usernames.json`
+Safe TXT: `/home/max/.site-control-kit/telegram_workspace/live_smokes/telegram_export_fitpharma/latest_safe.txt`
+Safe MD: `/home/max/.site-control-kit/telegram_workspace/live_smokes/telegram_export_fitpharma/latest_safe.md`
+Run log: `/home/max/.site-control-kit/telegram_workspace/logs/export_run_20260508T090006Z.log`
+Action log: `/home/max/.site-control-kit/telegram_workspace/logs/gui_actions_tg_contact4_fitpharma_live_20260508T085911Z.log`
+
+## 20260508T103834Z
+Аккаунт: `TG_CONTACT 4`
+Чат: `НаДопинге 2.0 ЧАТ | Бодибилдинг | Фитнес | Спорт Фармакология`
+Chat ref: `-1002465948544`
+Preset: `Quick Check`
+Surface: `Primary tdata`
+Status: `done`
+Markdown: `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_nadopinge20_quick_check_20260508T103755Z.md`
+Usernames TXT: `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_nadopinge20_quick_check_20260508T103755Z_usernames.txt`
+Usernames JSON: `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_nadopinge20_quick_check_20260508T103755Z_usernames.json`
+Safe TXT: `/home/max/.site-control-kit/telegram_workspace/live_smokes/telegram_export_надопинге_2.0_чат_бодибилдинг_фитнес_спорт_фармакология/latest_safe.txt`
+Safe MD: `/home/max/.site-control-kit/telegram_workspace/live_smokes/telegram_export_надопинге_2.0_чат_бодибилдинг_фитнес_спорт_фармакология/latest_safe.md`
+Run log: `/home/max/.site-control-kit/telegram_workspace/logs/export_run_20260508T103827Z.log`
+Action log: `/home/max/.site-control-kit/telegram_workspace/logs/gui_actions_tg_contact4_nadopinge20_live_20260508T103755Z.log`
+
+## 20260508T112141Z
+Аккаунт: `TG_CONTACT 4`
+Чат: `НаДопинге 2.0 ЧАТ | Бодибилдинг | Фитнес | Спорт Фармакология`
+Chat ref: `-1002465948544`
+Preset: `Full History`
+Surface: `Primary tdata`
+Status: `done`
+Markdown: `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_nadopinge20_full_history_20260508T103755Z.md`
+Usernames TXT: `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_nadopinge20_full_history_20260508T103755Z_usernames.txt`
+Usernames JSON: `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_nadopinge20_full_history_20260508T103755Z_usernames.json`
+Safe TXT: `/home/max/.site-control-kit/telegram_workspace/live_smokes/telegram_export_надопинге_2.0_чат_бодибилдинг_фитнес_спорт_фармакология/latest_safe.txt`
+Safe MD: `/home/max/.site-control-kit/telegram_workspace/live_smokes/telegram_export_надопинге_2.0_чат_бодибилдинг_фитнес_спорт_фармакология/latest_safe.md`
+Run log: `/home/max/.site-control-kit/telegram_workspace/logs/export_run_20260508T103838Z.log`
+Action log: `/home/max/.site-control-kit/telegram_workspace/logs/gui_actions_tg_contact4_nadopinge20_live_20260508T103755Z.log`
+
+## 20260508T130215Z
+Аккаунт: `TG_CONTACT 4`
+Чат: `Чат BigpharmaMarket`
+Chat ref: `-1001461811598`
+Preset: `Full History`
+Surface: `Primary tdata`
+Status: `partial`
+Markdown: `/home/max/3/@BigpharmaMarket`
+Usernames TXT: `/home/max/3/@BigpharmaMarket_usernames.txt`
+Usernames JSON: `/home/max/3/@BigpharmaMarket_usernames.json`
+Safe TXT: `/home/max/3/telegram_export_чат_bigpharmamarket/latest_safe.txt`
+Safe MD: `/home/max/3/telegram_export_чат_bigpharmamarket/latest_safe.md`
+Run log: `/home/max/.site-control-kit/telegram_workspace/logs/export_run_20260508T120205Z.log`
+Action log: `/home/max/.site-control-kit/telegram_workspace/logs/gui_actions_tg_contact4_bigpharmamarket_retry_live_20260508T120151Z.log`
+Action log: `/home/max/.site-control-kit/telegram_workspace/logs/gui_actions_tg_contact4_bigpharmamarket_retry_live_20260508T120151Z.log`

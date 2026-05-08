@@ -1,8 +1,215 @@
 # Перечень изменений (русская версия)
 
-Дата фиксации состояния: **30 апреля 2026**.
+Дата фиксации состояния: **4 мая 2026**.
 
 Этот документ описывает, что именно реализовано в `site-control-kit`, какие проблемы закрыты и где находятся ключевые файлы.
+
+## 0. Актуализация состояния на 4 мая 2026
+
+### 0.0 TG_CONTACT 2 As New Primary Portable Profile (4 мая 2026)
+- Обновлён `scripts/telegram_gui/models.py`:
+  - added `PortableProfileRemovalResult`.
+- Обновлён `scripts/telegram_gui/services/secrets.py`:
+  - added `delete_secret()` для cleanup неиспользуемых profile secrets.
+- Обновлён `scripts/telegram_user_registry.py`:
+  - added `remove_user_by_profile()` для удаления registry rows по `profile`.
+- Обновлён `scripts/telegram_gui/services/portable_profiles.py`:
+  - added portable profile kind detection (`managed`, `adopted`, `legacy`);
+  - added removal flow for managed/adopted profiles;
+  - legacy slot runtime profiles are now explicitly non-removable;
+  - managed slug generation now keeps `TelegramPortable-tg-contact-2` for `TG_CONTACT 2`.
+- Обновлён `scripts/telegram_gui/app.py`:
+  - `import_portable_profile()` получил additive flag `set_default`;
+  - import from `TG_CONTACT/<slot>/...zip` now suggests label `TG_CONTACT <slot>`;
+  - portable-card got inline action `Убрать из панели`;
+  - removal confirmation stays inline and differs for managed vs adopted profile;
+  - removal now works by `profile_dir`, not by display label.
+- Проверено:
+  - `python3 -m py_compile scripts/telegram_gui/app.py scripts/telegram_gui/models.py scripts/telegram_gui/services/portable_profiles.py scripts/telegram_gui/services/secrets.py scripts/telegram_user_registry.py tests/test_telegram_gui_backend_features.py tests/test_telegram_gui_portable_profiles.py tests/test_telegram_gui_secrets.py tests/test_telegram_user_registry.py` -> OK
+  - `python3 -m unittest discover -s tests -p 'test_*.py'` -> `248 tests OK`
+  - `/tmp/telegram_tg_contact2_primary_live_20260504T125745Z.json`
+  - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact2_primary_quick_check_20260504T125745Z.md`
+  - `/home/max/.site-control-kit/telegram_workspace/logs/export_run_20260504T125849Z.log`
+  - `/home/max/.site-control-kit/telegram_workspace/logs/gui_actions_tg_contact2_primary_20260504T125745Z.log`
+- Практический итог:
+  - `/home/max/site-control-kit/TG_CONTACT/2/tdata-20260430T111415Z-3-001.zip` imported as managed profile `TG_CONTACT 2`;
+  - new default managed directory is `/home/max/.site-control-kit/telegram_workspace/PortableProfiles/TelegramPortable-tg-contact-2`;
+  - `TG_CONTACT 2` became `default_user` and `Local secure token`;
+  - temporary live-check profiles `@AK-GUI-WALK` and `@AK-ADOPT-WALK` were removed from panel/selectors;
+  - managed directory for `@AK-GUI-WALK` was deleted, while adopted external folder `/tmp/telegram-portable-real-window-adopt-20260504t121610z` stayed on disk.
+
+### 0.0 Portable Profile Orchestration v1 (4 мая 2026)
+- Добавлен `scripts/telegram_gui/services/portable_profiles.py`:
+  - managed/adopted portable profiles;
+  - metadata contract `portable-profile.json`;
+  - operations `import_zip`, `adopt_profile`, `list_profiles`, `profile_status`, `launch_profile`.
+- Обновлён `scripts/telegram_gui/models.py`:
+  - added `PortableProfile`;
+  - added `PortableProfileStatus`;
+  - `AccountOption` и `PreflightInfo` теперь несут portable profile metadata.
+- Обновлён `scripts/telegram_workspace_layout.py`:
+  - workspace теперь резервирует `PortableProfiles/`.
+- Обновлён `scripts/telegram_gui/app.py`:
+  - portable-card стал profile-first;
+  - added dropdown всех portable profiles;
+  - added actions `Импортировать tdata.zip`, `Подключить существующую папку`, `Запустить профиль`, `Обновить статус`;
+  - selected `profile_dir` теперь sync-ится в account registry и идёт дальше в обычный `tdata-history-authors` workflow;
+  - legacy slot runtimes автоматически синхронизируются в `accounts/N/runtime/portable-profile.json`.
+- Проверено:
+  - `python3 -m unittest discover -s tests -p 'test_*.py'` -> `241 tests OK`
+  - `/tmp/telegram_portable_profiles_live.json`
+  - `/tmp/telegram_portable_profiles_adopt_live.json`
+  - `/tmp/telegram_portable_profiles_gui_probe.json`
+  - `/home/max/.site-control-kit/telegram_workspace/live_smokes/portable_profile_live_quick_check.md`
+  - `/tmp/telegram_portable_profiles_real_window_walkthrough_20260504T121610Z.json`
+  - `/home/max/.site-control-kit/telegram_workspace/live_smokes/portable_profile_real_window_walkthrough_20260504T121610Z.md`
+  - `/home/max/.site-control-kit/telegram_workspace/logs/export_run_20260504T121716Z.log`
+  - `/home/max/.site-control-kit/telegram_workspace/logs/gui_actions_portable_profiles_real_window_20260504T121610Z.log`
+- Дополнительный live-итог:
+  - закрыт реальный GTK/operator walkthrough portable-panel в одном окне: `import zip -> adopt folder -> launch profile -> refresh status -> export`;
+  - imported profile `@AK-GUI-WALK` реально стартует, загружает `7` чатов и даёт quick-check export `12/400` на `Чат BigpharmaMarket`;
+  - новые imported/adopted profiles пока остаются на `Insecure local token`, пока оператор не прогонит inline secure setup.
+
+### 0.0 Portable tdata Restore v1 (4 мая 2026)
+- Возвращён portable `tdata` как основной operator path без старого опасного auto-launch на live `collector import`.
+- Обновлён `scripts/telegram_gui/models.py`:
+  - added `PortableSourceInfo`;
+  - added `PortableRuntimeState`;
+  - `AccountOption` и `PreflightInfo` теперь несут portable source/runtime metadata.
+- Обновлён `scripts/telegram_workspace_layout.py`:
+  - каждый slot теперь резервирует `runtime/`;
+  - added `first_empty_slot()` для safe slot onboarding.
+- Обновлён `scripts/telegram_gui/app.py`:
+  - added import flow `Добавить portable tdata`;
+  - added persistent runtime clone `accounts/N/runtime/portable_tdata`;
+  - added runtime alias `accounts/N/runtime/tdata -> portable_tdata`, чтобы helper и portable binary работали на одном наборе данных;
+  - added explicit actions `Открыть portable Telegram` и `Обновить portable-копию`;
+  - `collector import` removed from normal precedence and left only as explicit debug fallback via `TELEGRAM_TDATA_ALLOW_COLLECTOR_FALLBACK=1`.
+- Проверено:
+  - `python3 -m unittest discover -s tests -p 'test_*.py'` -> `237 tests OK`
+  - `/tmp/telegram_portable_restore_live_recovered.json`
+  - `/tmp/telegram_portable_restore_safety.json`
+  - `/tmp/telegram_portable_restore_gui_headless.json`
+  - `/home/max/.site-control-kit/telegram_workspace/live_smokes/portable_restore_slot2_quick_check.md`
+  - `/home/max/.site-control-kit/telegram_workspace/logs/export_run_20260504T110826Z.log`
+  - `/home/max/.site-control-kit/telegram_workspace/logs/gui_actions_portable_restore_20260504T110753Z.log`
+- Практический итог:
+  - slot `2` импортирован из `TG_CONTACT` как `Слот 2 · portable ZIP`;
+  - runtime clone `ready`, `authorized=true`, `binary_path=/home/max/Загрузки/Telegram Desktop/e/Telegram`;
+  - quick-check export на `Чат BigpharmaMarket` завершился `status=done`, `safe_count=12`, `history_messages_scanned=400`;
+  - hash-based safety verify подтвердил, что ни repo-local `TG_CONTACT`, ни `~/telegram-api-collector/tdata_import/tdata` не меняются при `import + runtime rebuild`.
+
+### 0.0 Telegram Workstation v1.3 Secondary Surface Live Closure (4 мая 2026)
+- Обновлён `scripts/telegram_gui/app.py`:
+  - added typed fallback readiness for `bridge` and `cdp`;
+  - added explicit backend methods `prepare_bridge_surface()`, `prepare_cdp_surface()`, `probe_bridge_readiness()`, `probe_cdp_readiness()`;
+  - added cached fallback state so preflight/UI keeps the last actionable secondary blocker after `prepare`;
+  - added compact fallback-card in the existing single-window flow.
+- Обновлён `scripts/telegram_gui/models.py`:
+  - added `FallbackReadiness`;
+  - `PreflightInfo` now carries `fallback_bridge` and `fallback_cdp`.
+- Обновлён `scripts/telegram_gui/services/preflight.py`:
+  - fallback metadata now flows through typed preflight state instead of ad-hoc strings.
+- Обновлён `scripts/telegram_cdp_helper.js`:
+  - QR-login page now maps to `auth_required`, not to a generic chat-list timeout.
+- Проверено:
+  - `python3 -m unittest discover -s tests -p 'test_*.py'` -> `232 tests OK`
+  - `/tmp/telegram_workstation_v13_backend_live.json`
+  - `/tmp/telegram_workstation_v13_gui_fallback.json`
+  - `/tmp/telegram_workstation_v13_screen.png`
+  - `/home/max/.site-control-kit/telegram_workspace/live_smokes/v13_fallback_live_status.md`
+- Практический итог:
+  - `bridge` now reports `foreign_hub` non-destructively when `:8765` is occupied by another token;
+  - `cdp` now reports `telegram_auth_required` when the dedicated profile lands on Telegram Web QR login;
+  - fallback-card shows both blockers even while `Primary tdata` remains the active surface.
+
+### 0.0 Telegram Workstation v1.2 Secure Token Operator Setup (4 мая 2026)
+- Реальный operator slot `1` переведён на secure-token steady-state:
+  - `registry/users.json` хранит только metadata + `secret_ref`;
+  - token лежит только в `~/.site-control-kit/telegram_workspace/registry/secrets/users/*`;
+  - `accounts/1/keys/api_token.txt` очищен и теперь считается legacy import-source.
+- Обновлён `scripts/telegram_gui/app.py`:
+  - added `Настроить secure token` inline action;
+  - added inline save flow в том же GTK окне;
+  - GUI refresh-ит account list/preflight сразу после save;
+  - security card остаётся видимой и в secure-state, если на `:8765` есть внешний hub/process с другим token.
+- Обновлён `scripts/telegram_user_registry.py`:
+  - появился profile-based upsert, чтобы выбранный slot после secure setup закреплялся в registry и предпочитался над auto-row.
+- Проверено:
+  - `python3 -m unittest discover -s tests -p 'test_*.py'` -> `221 tests OK`
+  - `/tmp/telegram_workstation_v12_gui_live.json`
+  - `/tmp/telegram_workstation_v12_foreign_hub_warning.json`
+  - `/home/max/.site-control-kit/telegram_workspace/live_smokes/gui_v12_secure_quick_check.md`
+
+### 0.0 Telegram Workstation v1.1 Hardening + Panel UX (4 мая 2026)
+- Доведён single-window GUI layer:
+  - `status strip`;
+  - checklist `Preflight`;
+  - quick/pinned chats;
+  - history filters;
+  - one-click `Repeat last run` и `Open last artifacts`.
+- Добавлены новые runtime/service слои:
+  - `scripts/telegram_gui/services/secrets.py`
+  - `scripts/telegram_gui/services/preflight.py`
+  - `scripts/telegram_gui/services/ui_tasks.py`
+  - совместимые alias-модули `scripts/telegram_gui/backend.py` и `scripts/telegram_gui/ui/window.py`.
+- Security hardening:
+  - `scripts/telegram_user_registry.py` и `scripts/telegram_api_accounts.py` больше не должны сохранять raw token в JSON;
+  - registry хранит `secret_ref`, а сами токены кладутся в `~/.site-control-kit/telegram_workspace/registry/secrets/*`;
+  - bridge path использует env-token и больше не должен тащить token через argv;
+  - `run_chat_export_once.sh` больше не должен автоматически убивать чужой listener на `:8765`.
+- Проверено:
+  - `python3 -m unittest discover -s tests -p 'test_*.py'` -> `214 tests OK`
+  - `/tmp/telegram_workstation_v11_backend_live.json`
+  - `/tmp/telegram_workstation_v11_backend_full_stop_retry.json`
+  - `/tmp/telegram_workstation_v11_gui_live.json`
+  - `/tmp/telegram_workstation_v11_foreign_port_verify.json`
+
+### 0.0 Telegram Workstation v1 (4 мая 2026)
+- Собран новый package `scripts/telegram_gui/`:
+  - `models.py`
+  - `adapters/{tdata,bridge,cdp}.py`
+  - `services/{process_runner,run_history,artifact_index}.py`
+  - `ui/panels.py`
+- `scripts/telegram_members_export_gui.py` больше не держит всю логику в себе:
+  - теперь это совместимый launcher/facade;
+  - shell-wrapper и старый путь запуска не сломаны.
+- `scripts/telegram_gui/app.py` получил новый workstation surface:
+  - backend стал adapter-driven;
+  - справа появился `Run Center` с вкладками `Прогресс`, `Артефакты`, `История`;
+  - добавлены preflight-panel и surface badging (`Primary tdata`, `Fallback CDP`, `Fallback Bridge`);
+  - добавлены presets `Full History`, `Quick Check`, `Resume Last`;
+  - добавлены run history `~/.site-control-kit/telegram_workspace/runs/index.jsonl` и last-session state `~/.site-control-kit/telegram_workspace/state/last_session.json`.
+- Закрыт P0 stop/progress drift:
+  - subprocess orchestration вынесен в `ProcessRunner`;
+  - старый cancel-path test теперь зелёный;
+  - если helper уже отдал `PROGRESS ... done=1`, stop-button в GUI гасится сразу, чтобы оператор не убил почти завершённый run поздним click.
+- Новый coverage:
+  - `tests/test_telegram_gui_process_runner.py`
+  - `tests/test_telegram_gui_run_history.py`
+  - `tests/test_telegram_gui_backend_features.py`
+- Проверено:
+  - `python3 -m unittest discover -s tests -p 'test_*.py'` -> `205 tests OK`
+  - live backend quick-check outside sandbox:
+    - `/tmp/telegram_workstation_backend_smoke_ok.md`
+    - `safe_count=31`
+    - `history_messages_scanned=400`
+  - live GTK smoke outside sandbox:
+    - `/tmp/telegram_workstation_gui_smoke_ok.md`
+    - `safe_count=31`
+    - `history_messages_scanned=400`
+  - live full-history stop verify outside sandbox:
+    - `/tmp/telegram_workstation_full_history_ok.md`
+    - `/home/max/.site-control-kit/telegram_workspace/logs/export_run_20260504T064547Z.log`
+    - `history_messages_scanned=85300`
+    - `safe_count=1032`
+    - `interrupted=true`
+  - live fallback smoke against real hub:
+    - hub ответил, но bridge-clients были `is_online=false`
+    - adapter smoke подтвердил fallback badging/selection без нового GUI regress.
+- Отдельно зафиксирован environment note:
+  - в обычном sandbox `Gtk` и MTProto могли падать по ограничениям среды;
+  - вне sandbox тот же код и backend-path прошли успешно.
 
 ## 0. Актуализация состояния на 27 апреля 2026
 

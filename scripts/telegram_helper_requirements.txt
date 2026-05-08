@@ -1,0 +1,4 @@
+opentele==1.15.1
+telethon==1.43.2
+tgcrypto==1.2.5
+python-dotenv==1.2.2

@@ -20,6 +20,13 @@ dependencies = []
 
 [project.scripts]
 sitectl = "webcontrol.cli:main"
+telegram-username-collector = "scripts.telegram_gui.app:main"
 
 [tool.setuptools]
-packages = ["webcontrol"]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["webcontrol", "scripts", "scripts.*"]
+
+[tool.setuptools.package-data]
+scripts = ["*.sh", "*.js", "*.txt"]

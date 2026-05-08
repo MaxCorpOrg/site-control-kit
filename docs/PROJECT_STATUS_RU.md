@@ -1,6 +1,6 @@
 # Project Status RU
 
-Последнее обновление: 2026-04-30
+Последнее обновление: 2026-05-08
 
 Этот файл нужен как точка входа для любого нового чата и любого нового агента.
 Перед новой задачей его нужно прочитать целиком.
@@ -11,6 +11,846 @@ Repo-root entrypoint для любого агента: `AGENT_START_HERE.md`.
 Читать его нужно по номерам файлов, начиная с `00_START_HERE.md`.
 
 ## Сделано
+
+### Обновление 2026-05-08 (GTK Window Close -> Stop Save -> Auto Close)
+- Закрыт отдельный GUI UX gap:
+  - `scripts/telegram_gui/app.py` теперь явно обрабатывает закрытие окна;
+  - если export активен, закрытие окна теперь означает мягкий stop с ожиданием partial-save и последующим auto-close;
+  - если export не активен, окно закрывается сразу и приложение завершает `Gtk.Application`.
+- Verify после фикса:
+  - `python3 -m unittest tests.test_telegram_members_export_gui tests.test_telegram_tdata_helper` -> `47 tests OK`
+  - `python3 -m unittest discover -s tests -p 'test_*.py'` -> `280 tests OK`
+  - `git diff --check` -> clean
+- Практический результат:
+  - старое окно `Telegram Username Collector`, зависшее уже после завершённого run без активного helper child, было снято;
+  - после закрытия `DISPLAY=:0 xwininfo -root -tree | rg "Telegram Username Collector"` больше не видит GTK окно;
+  - новый close-path теперь согласован с уже подтверждённым правилом `Stop сохраняет partial contacts`.
+- Практический вывод:
+  - оператор больше не должен получать сценарий `окно не закрывается`, если длинный export ещё в процессе;
+  - close-path теперь ведёт себя так же безопасно, как и явная кнопка stop.
+
+### Обновление 2026-05-08 (TG_CONTACT 4 `BigpharmaMarket` Retry Fix + Partial Stop Save)
+- Закрыт новый runtime gap в `tdata-history-authors` path:
+  - `scripts/telegram_tdata_helper.py` теперь не умирает на `MsgidDecreaseRetryError`, а продолжает history scan с меньшего `message_id`;
+  - неожиданные helper-исключения теперь печатают полный traceback в stderr;
+  - `tests/test_telegram_tdata_helper.py` получил recovery-тест для этого сценария.
+- Verify после фикса:
+  - `python3 -m unittest discover -s tests -p 'test_*.py'` -> `277 tests OK`
+  - `python3 -m webcontrol --help` -> OK
+  - `python3 -m webcontrol browser --help` -> OK
+  - `./browser.sh status` -> OK
+  - `./browser.sh tabs` -> OK
+  - `git diff --check` -> clean
+- Новый live `BigpharmaMarket` run на `TG_CONTACT 4` уже доведён до partial-save checkpoint:
+  - target:
+    - `Чат BigpharmaMarket`
+    - `chat_ref=-1001461811598`
+    - output path: `/home/max/3/@BigpharmaMarket`
+  - summary:
+    - `/tmp/tg_contact4_bigpharmamarket_retry_live_20260508T120151Z.json`
+  - action log:
+    - `/home/max/.site-control-kit/telegram_workspace/logs/gui_actions_tg_contact4_bigpharmamarket_retry_live_20260508T120151Z.log`
+  - progress log:
+    - `/home/max/.site-control-kit/telegram_workspace/logs/live_progress_tg_contact4_bigpharmamarket_retry_20260508T120151Z.log`
+  - run log:
+    - `/home/max/.site-control-kit/telegram_workspace/logs/export_run_20260508T120205Z.log`
+  - saved artifacts:
+    - `/home/max/3/@BigpharmaMarket`
+    - `/home/max/3/@BigpharmaMarket_usernames.txt`
+    - `/home/max/3/@BigpharmaMarket_usernames.json`
+    - `/home/max/3/telegram_export_чат_bigpharmamarket/latest_safe.txt`
+    - `/home/max/3/telegram_export_чат_bigpharmamarket/latest_safe.md`
+    - `artifacts/telegram_exports/INDEX.md`
+- Результат:
+  - прежний fatal blocker около `1000` сообщений больше не воспроизводится как crash;
+  - live run дошёл до `304900` сообщений и `436` usernames;
+  - после мягкого stop helper вернул `interrupted=1 done=1`, и partial artifacts всё равно были записаны;
+  - итог этого checkpoint: `status=partial`, а не `failed`.
+- Практический вывод:
+  - для `BigpharmaMarket` `MsgidDecreaseRetryError` теперь подтверждён как recoverable warning;
+  - правило `нажал Stop -> контакты сохранились` теперь подтверждено не только тестом, но и живым run;
+  - если нужен полный естественный конец этого чата, это уже вопрос времени, а не blocker-а.
+
+### Обновление 2026-05-08 (TG_CONTACT 4 `НаДопинге 2.0` Live Run)
+- Новый strongest target на `TG_CONTACT 4` уже подтверждён живым прогоном:
+  - нового кода в этом цикле не потребовалось;
+  - использован прямой live-row path, потому что чат уже был виден этому профилю в текущем dialog list;
+  - backend `ensure_connected -> fetch_chats` на `TG_CONTACT 4` подтвердил:
+    - `НаДопинге 2.0 ЧАТ | Бодибилдинг | Фитнес | Спорт Фармакология`
+    - `chat_ref=-1002465948544`
+    - `source_kind=live`
+- Preflight перед прогоном был чистым:
+  - `./browser.sh status` -> OK
+  - `./browser.sh tabs` -> OK
+  - `bash scripts/bootstrap_telegram_workstation.sh --doctor` -> `managed_helper_ready=1`, `selected_helper_source=managed`
+- Новый live GTK cycle на `DISPLAY=:0` уже закрыт:
+  - source live row:
+    - `НаДопинге 2.0 ЧАТ | Бодибилдинг | Фитнес | Спорт Фармакология`
+    - `chat_ref=-1002465948544`
+  - summary:
+    - `/tmp/tg_contact4_nadopinge20_live_20260508T103755Z.json`
+  - action log:
+    - `/home/max/.site-control-kit/telegram_workspace/logs/gui_actions_tg_contact4_nadopinge20_live_20260508T103755Z.log`
+  - quick artifacts:
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_nadopinge20_quick_check_20260508T103755Z.md`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_nadopinge20_quick_check_20260508T103755Z_usernames.txt`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_nadopinge20_quick_check_20260508T103755Z_usernames.json`
+    - `/home/max/.site-control-kit/telegram_workspace/logs/export_run_20260508T103827Z.log`
+  - full artifacts:
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_nadopinge20_full_history_20260508T103755Z.md`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_nadopinge20_full_history_20260508T103755Z_usernames.txt`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_nadopinge20_full_history_20260508T103755Z_usernames.json`
+    - `/home/max/.site-control-kit/telegram_workspace/logs/export_run_20260508T103838Z.log`
+  - artifact index:
+    - `artifacts/telegram_exports/INDEX.md` уже автоматически получил entries для `Quick Check` и `Full History`
+- Результат:
+  - quick-check: `33` usernames / `400` messages;
+  - full-history: `1614` usernames / `187829` messages;
+  - helper/export шли через managed helper venv;
+  - live window и save dialog были снова подтверждены на `DISPLAY=:0`;
+  - `security_mode` у `TG_CONTACT 4` остаётся `Insecure local token`.
+- Практический вывод:
+  - `НаДопинге 2.0` теперь самый сильный подтверждённый live target для `TG_CONTACT 4` по абсолютному числу `@username`;
+  - для этого target не понадобились `resolve-chat` и invite path, потому что он уже виден как live row;
+  - следующий шаг теперь уже брать ещё один target на `TG_CONTACT 4`, не смешивая этот цикл с secure token / legacy cleanup.
+
+### Обновление 2026-05-08 (TG_CONTACT 4 `FitPharma` Live Run)
+- Новый live target на уже закрытом public-target path теперь тоже проверен:
+  - нового кода в этом цикле не потребовалось;
+  - использован уже существующий interface:
+    - helper `resolve-chat`
+    - GUI action `Открыть чат по ссылке / @username`
+    - existing `Primary tdata` export path
+- Preflight перед прогоном был чистым:
+  - `./browser.sh status` -> OK
+  - `./browser.sh tabs` -> OK
+  - `bash scripts/bootstrap_telegram_workstation.sh --doctor` -> `managed_helper_ready=1`, `selected_helper_source=managed`
+  - backend-resolve `https://t.me/FitPharma` подтвердил `FitPharma / @FitPharma / chat_ref=-1001739132808`
+- Новый live GTK cycle на `DISPLAY=:0` уже закрыт:
+  - source public link:
+    - `https://t.me/FitPharma`
+  - resolved chat:
+    - `FitPharma`
+    - `@FitPharma`
+    - `chat_ref=-1001739132808`
+  - summary:
+    - `/tmp/tg_contact4_fitpharma_live_20260508T085911Z.json`
+  - action log:
+    - `/home/max/.site-control-kit/telegram_workspace/logs/gui_actions_tg_contact4_fitpharma_live_20260508T085911Z.log`
+  - quick artifacts:
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_fitpharma_quick_check_20260508T085911Z.md`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_fitpharma_quick_check_20260508T085911Z_usernames.txt`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_fitpharma_quick_check_20260508T085911Z_usernames.json`
+    - `/home/max/.site-control-kit/telegram_workspace/logs/export_run_20260508T085955Z.log`
+  - full artifacts:
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_fitpharma_full_history_20260508T085911Z.md`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_fitpharma_full_history_20260508T085911Z_usernames.txt`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_fitpharma_full_history_20260508T085911Z_usernames.json`
+    - `/home/max/.site-control-kit/telegram_workspace/logs/export_run_20260508T090006Z.log`
+  - artifact index:
+    - `artifacts/telegram_exports/INDEX.md` уже автоматически получил entries для `Quick Check` и `Full History`
+- Результат:
+  - quick-check: `34` usernames / `400` messages;
+  - full-history: `253` usernames / `28509` messages;
+  - helper/export шли через managed helper venv;
+  - live window и save dialog были снова подтверждены на `DISPLAY=:0`;
+  - `security_mode` у `TG_CONTACT 4` остаётся `Insecure local token`.
+- Практический вывод:
+  - `https://t.me/FitPharma` теперь тоже подтверждён как продуктивный public target;
+  - плотность `@username` у этого target ниже, чем у `@cosmetologna`, но path прошёл полностью и без нового blocker-а;
+  - следующий шаг теперь уже брать ещё один live target на `TG_CONTACT 4`, не смешивая это с secure token / legacy cleanup.
+
+### Обновление 2026-05-08 (TG_CONTACT 4 Public Resolve + Linux Bootstrap + `@cosmetologna` Live Run)
+- Закрыт новый product gap в `TG_CONTACT 4` operator-path:
+  - `scripts/telegram_tdata_helper.py` теперь умеет `resolve-chat` для public `t.me/<slug>`, `@slug` и `peer_id`;
+  - `scripts/telegram_gui/app.py` теперь даёт single-window action `Открыть чат по ссылке / @username` и backend path `resolve_tdata_chat_target(...)`;
+  - resolved target превращается в обычный `ChatOption(source_kind="resolved")` и может идти в `Primary tdata export`, даже если чата нет в текущем live dialog list;
+  - старый `known-only` guard сохранён только для synthetic history/pinned rows.
+- Одновременно заложена Linux install foundation:
+  - появился `scripts/bootstrap_telegram_workstation.sh`;
+  - source-of-truth helper stack теперь живёт в `scripts/telegram_helper_requirements.txt`;
+  - `pyproject.toml` теперь даёт installable launcher `telegram-username-collector`;
+  - discovery order helper python теперь такой: explicit env -> managed helper venv -> legacy external collector.
+- В этом же цикле закрыт реальный GUI race:
+  - background deep preflight и `connect` могли одновременно бить в один и тот же `tdata helper/session`;
+  - fix: helper вызовы сериализованы одним lock в backend path;
+  - live GTK rerun после фикса уже не воспроизвёл старый `Portable профиль найден, но helper не смог открыть сессию`.
+- Verify после фикса:
+  - `bash scripts/bootstrap_telegram_workstation.sh --doctor` -> `managed_helper_ready=1`, `selected_helper_source=managed`
+  - `python3 -m unittest discover -s tests -p 'test_*.py'` -> `276 tests OK`
+  - `python3 -m webcontrol --help` -> OK
+  - `python3 -m webcontrol browser --help` -> OK
+  - `./browser.sh status` -> OK
+  - `./browser.sh tabs` -> OK
+  - `git diff --check` -> clean
+- Новый live GTK cycle на `DISPLAY=:0` уже закрыт:
+  - source public link:
+    - `https://t.me/cosmetologna`
+  - resolved chat:
+    - `Косметолог на Миллион`
+    - `@cosmetologna`
+    - `chat_ref=-1001506021345`
+  - summary:
+    - `/tmp/tg_contact4_cosmetologna_live_20260508T082312Z.json`
+  - action log:
+    - `/home/max/.site-control-kit/telegram_workspace/logs/gui_actions_tg_contact4_cosmetologna_live_20260508T082312Z.log`
+  - quick artifacts:
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_cosmetologna_quick_check_20260508T082312Z.md`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_cosmetologna_quick_check_20260508T082312Z_usernames.txt`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_cosmetologna_quick_check_20260508T082312Z_usernames.json`
+    - `/home/max/.site-control-kit/telegram_workspace/logs/export_run_20260508T082357Z.log`
+  - full artifacts:
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_cosmetologna_full_history_20260508T082312Z.md`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_cosmetologna_full_history_20260508T082312Z_usernames.txt`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_cosmetologna_full_history_20260508T082312Z_usernames.json`
+    - `/home/max/.site-control-kit/telegram_workspace/logs/export_run_20260508T082408Z.log`
+  - artifact index:
+    - `artifacts/telegram_exports/INDEX.md` теперь уже автоматически получил entries для `Quick Check` и `Full History`
+- Результат:
+  - quick-check: `117` usernames / `400` messages;
+  - full-history: `1534` usernames / `13055` messages;
+  - helper/export шли через managed helper venv;
+  - `security_mode` у `TG_CONTACT 4` остаётся `Insecure local token`.
+- Практический вывод:
+  - `https://t.me/cosmetologna` теперь уже не special-case blocker, а подтверждённый продуктивный public target;
+  - install foundation уже реально поднят на этой Linux-машине;
+  - следующий шаг теперь уже брать новый live target на `TG_CONTACT 4`, а secure-token hardening и cleanup legacy profiles держать отдельными решениями.
+
+### Обновление 2026-05-07 (TG_CONTACT 4 Invite Join Fix + `RIVIVE LIFE Chat` Live Run)
+- Закрыт новый practical gap в operator-path:
+  - `scripts/telegram_tdata_helper.py` теперь умеет `join-invite` для `t.me/+...`;
+  - `scripts/telegram_gui/app.py` теперь умеет backend path `join_tdata_invite(...)`;
+  - тем самым invite-link можно сразу переводить в рабочий `chat_ref` на `TG_CONTACT 4`.
+- Verify после фикса:
+  - `python3 -m unittest discover -s tests -p 'test_*.py'` -> `265 tests OK`
+  - `python3 -m webcontrol --help` -> OK
+  - `python3 -m webcontrol browser --help` -> OK
+  - `./browser.sh status` -> OK
+  - `./browser.sh tabs` -> OK
+  - `git diff --check` -> clean
+- Live invite-cycle на `TG_CONTACT 4` уже закрыт:
+  - source invite:
+    - `http://t.me/+6FMgmFJCh0I4M2Yy`
+  - practical join result:
+    - `joined=False`
+    - `already_member=True`
+  - resolved chat:
+    - `RIVIVE LIFE Chat`
+    - `chat_ref=-1002269737802`
+  - summary:
+    - `/tmp/tg_contact4_invite_live_20260507T123136Z.json`
+  - action log:
+    - `/home/max/.site-control-kit/telegram_workspace/logs/gui_actions_tg_contact4_invite_live_20260507T123136Z.log`
+  - quick artifacts:
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_invite_quick_check_20260507T123136Z.md`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_invite_quick_check_20260507T123136Z_usernames.txt`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_invite_quick_check_20260507T123136Z_usernames.json`
+    - `/home/max/.site-control-kit/telegram_workspace/logs/export_run_20260507T123156Z.log`
+  - full artifacts:
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_invite_full_history_20260507T123136Z.md`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_invite_full_history_20260507T123136Z_usernames.txt`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_invite_full_history_20260507T123136Z_usernames.json`
+    - `/home/max/.site-control-kit/telegram_workspace/logs/export_run_20260507T123200Z.log`
+- Результат:
+  - quick-check: `56` usernames / `400` messages;
+  - full-history: `1158` usernames / `62029` messages;
+  - full-history дошёл до естественного конца без runtime-поломки.
+- Практический вывод:
+  - invite-gap уже закрыт кодом и живым прогоном;
+  - этот invite не оказался новым незнакомым чатом, а уже резолвился как `RIVIVE LIFE Chat`;
+  - следующий шаг теперь уже новый invite/live target или отдельный cleanup legacy-профилей.
+
+### Обновление 2026-05-07 (TG_CONTACT 4 Next Productive Chat = `@cosmochatrussia` Repeat Run)
+- Следующий продуктивный чат на текущем operator profile уже заново подтверждён:
+  - профиль: `TG_CONTACT 4`
+  - `default_user` остаётся `TG_CONTACT 4`
+  - live chat:
+    - `Чат Косметологов | Косметологи чат | Чат косметологов России`
+    - `@cosmochatrussia`
+    - `chat_ref=-1001909598727`
+- Свежий productive rerun уже записан:
+  - summary:
+    - `/tmp/tg_contact4_cosmochatrussia_repeat_20260507T094441Z.json`
+  - action log:
+    - `/home/max/.site-control-kit/telegram_workspace/logs/gui_actions_tg_contact4_cosmochatrussia_repeat_20260507T094441Z.log`
+  - quick artifacts:
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_cosmochatrussia_repeat_quick_check_20260507T094441Z.md`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_cosmochatrussia_repeat_quick_check_20260507T094441Z_usernames.txt`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_cosmochatrussia_repeat_quick_check_20260507T094441Z_usernames.json`
+    - `/home/max/.site-control-kit/telegram_workspace/logs/export_run_20260507T094455Z.log`
+  - full artifacts:
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_cosmochatrussia_repeat_full_history_20260507T094441Z.md`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_cosmochatrussia_repeat_full_history_20260507T094441Z_usernames.txt`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_cosmochatrussia_repeat_full_history_20260507T094441Z_usernames.json`
+    - `/home/max/.site-control-kit/telegram_workspace/logs/export_run_20260507T094504Z.log`
+- Результат:
+  - quick-check: `103` usernames / `400` messages;
+  - full-history: `1486` usernames / `9351` messages;
+  - helper/export снова шли через `runtime/helper_workdir/tdata`;
+  - во время full-history был transient `MsgidDecreaseRetryError`, но прогон завершился успешно.
+- Практический вывод:
+  - `@cosmochatrussia` заново подтверждён как продуктивный чат на `TG_CONTACT 4`;
+  - `@slivcosmo` был пустым именно по контенту;
+  - следующий шаг теперь уже брать новый target после `@cosmochatrussia`, а не заново доказывать, что `TG_CONTACT 4` рабочий.
+
+### Обновление 2026-05-07 (TG_CONTACT 4 Only Operator Pivot + Repeat `@slivcosmo` Live Verify)
+- Текущий operator contract теперь уже зафиксирован так:
+  - вся текущая работа идёт через `TG_CONTACT 4`;
+  - `~/.site-control-kit/telegram_workspace/registry/users.json` уже переключён на `default_user = TG_CONTACT 4`;
+  - `TG_CONTACT 2`, `TG_CONTACT 3`, `@AK-LIVE`, `@AK-ADOPTED`, `Слот 1`, `Слот 2` не удалялись в этом цикле, но больше не считаются текущим рабочим путём;
+  - cleanup legacy-профилей остаётся отдельным явным шагом.
+- Повторный live GTK run уже снова прошёл только через `TG_CONTACT 4`:
+  - summary:
+    - `/tmp/tg_contact4_only_slivcosmo_live_verify_20260507T084752Z.json`
+  - action log:
+    - `/home/max/.site-control-kit/telegram_workspace/logs/gui_actions_tg_contact4_only_slivcosmo_live_verify_20260507T084752Z.log`
+  - quick artifacts:
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_only_slivcosmo_quick_check_20260507T084752Z.md`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_only_slivcosmo_quick_check_20260507T084752Z_usernames.txt`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_only_slivcosmo_quick_check_20260507T084752Z_usernames.json`
+    - `/home/max/.site-control-kit/telegram_workspace/logs/export_run_20260507T084840Z.log`
+  - full artifacts:
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_only_slivcosmo_full_history_20260507T084752Z.md`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_only_slivcosmo_full_history_20260507T084752Z_usernames.txt`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_only_slivcosmo_full_history_20260507T084752Z_usernames.json`
+    - `/home/max/.site-control-kit/telegram_workspace/logs/export_run_20260507T084855Z.log`
+  - result:
+    - в summary ещё виден historical pre-pivot state `registry_default_before = TG_CONTACT 2` / `registry_default_after = TG_CONTACT 2`, потому что promotion в registry была выполнена сразу после самого rerun;
+    - фактический current state уже другой: `default_user = TG_CONTACT 4`;
+    - quick-check: `status=done`, `safe_count=0`, `history_messages_scanned=400`;
+    - full-history: `status=done`, `safe_count=0`, `history_messages_scanned=1358`;
+    - helper/export снова шли через `runtime/helper_workdir/tdata`;
+    - `security_mode=Insecure local token`.
+- Практический вывод:
+  - `TG_CONTACT 4` теперь уже не auxiliary, а текущий рабочий operator profile;
+  - `@slivcosmo` подтверждён как content-zero чат для текущего extraction path;
+  - следующий узкий шаг: либо брать новый productive chat на `TG_CONTACT 4`, либо отдельно решать cleanup legacy-профилей.
+
+### Обновление 2026-05-07 (TG_CONTACT 4 Safe Launch Clone + `@slivcosmo` Live Verify)
+- Launch/runtime isolation для imported `TG_CONTACT 4` уже подтверждена живым GTK циклом:
+  - portable launch больше не использует канонический `TelegramForcePortable/tdata`;
+  - launch теперь идёт через `/home/max/.site-control-kit/telegram_workspace/PortableProfiles/TelegramPortable-tg-contact-4/runtime/launch_workdir`;
+  - helper/export теперь идут через `/home/max/.site-control-kit/telegram_workspace/PortableProfiles/TelegramPortable-tg-contact-4/runtime/helper_workdir/tdata`;
+  - `Обновить статус` теперь live-синхронизирует stopped `launch_workdir -> helper_workdir`.
+- Повторно подтверждён verify-контур после этих правок:
+  - `python3 -m unittest discover -s tests -p 'test_*.py'` -> `262 tests OK`
+  - `python3 -m webcontrol --help` -> OK
+  - `python3 -m webcontrol browser --help` -> OK
+  - `./start-browser.sh`, `./browser.sh status`, `./browser.sh tabs` -> OK
+  - `git diff --check` -> clean
+- Реальный GTK live-run на `DISPLAY=:0` уже прошёл путь `launch -> close -> refresh -> connect -> @slivcosmo -> save dialog -> Quick Check -> Full History`:
+  - summary:
+    - `/tmp/tg_contact4_slivcosmo_live_verify_20260507T083138Z.json`
+  - action log:
+    - `/home/max/.site-control-kit/telegram_workspace/logs/gui_actions_tg_contact4_slivcosmo_live_verify_20260507T083138Z.log`
+  - live target:
+    - `БЕСПЛАТНАЯ КОСМЕТОЛОГИЯ`
+    - `@slivcosmo`
+    - `chat_ref=-1001555954026`
+  - quick-check artifacts:
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_slivcosmo_quick_check_20260507T083138Z.md`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_slivcosmo_quick_check_20260507T083138Z_usernames.txt`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_slivcosmo_quick_check_20260507T083138Z_usernames.json`
+    - `/home/max/.site-control-kit/telegram_workspace/logs/export_run_20260507T083217Z.log`
+  - full-history artifacts:
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_slivcosmo_full_history_20260507T083138Z.md`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_slivcosmo_full_history_20260507T083138Z_usernames.txt`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_slivcosmo_full_history_20260507T083138Z_usernames.json`
+    - `/home/max/.site-control-kit/telegram_workspace/logs/export_run_20260507T083226Z.log`
+  - runtime/result:
+    - `default_user` остался `TG_CONTACT 2`
+    - helper target реально переключился на `runtime/helper_workdir/tdata`
+    - quick-check: `status=done`, `safe_count=0`, `history_messages_scanned=400`
+    - full-history: `status=done`, `safe_count=0`, `history_messages_scanned=1358`
+    - `security_mode=Insecure local token`
+- Практический вывод:
+  - launch-triggered `OpenTeleException: No account has been loaded` больше не воспроизвёлся на новом isolated runtime path;
+  - `@slivcosmo` дал content-zero результат, поэтому это уже не runtime blocker, а пустой target для текущего `history-authors` path;
+  - `TG_CONTACT 4` не стоит автоматически продвигать в secure/default role, пока не выбран следующий продуктивный чат или отдельный цикл по promotion.
+
+### Обновление 2026-05-07 (TG_CONTACT 4 `@cosmochatrussia` Live Collection)
+- Новый самый свежий live-факт уже не blocker-only:
+  - `TG_CONTACT 4` реально собрал `@username` по live-чату `@cosmochatrussia` (`-1001909598727`)
+  - `default_user` по-прежнему остаётся `TG_CONTACT 2`
+  - managed profile остаётся `/home/max/.site-control-kit/telegram_workspace/PortableProfiles/TelegramPortable-tg-contact-4`
+- Реальный GTK quick-check уже завершён:
+  - артефакты:
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_cosmochatrussia_quick_check_20260507T073523Z.md`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_cosmochatrussia_quick_check_20260507T073523Z_usernames.txt`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_cosmochatrussia_quick_check_20260507T073523Z_usernames.json`
+    - `/home/max/.site-control-kit/telegram_workspace/logs/export_run_20260507T073607Z.log`
+    - `/home/max/.site-control-kit/telegram_workspace/logs/gui_actions_tg_contact4_cosmochatrussia_live_20260507T073523Z_20260507T073540Z.log`
+  - practical result:
+    - `status=done`
+    - `safe_count=103`
+    - `history_messages_scanned=400`
+- Реальный GTK `Full History` по тому же live dialog row тоже уже завершён:
+  - summary:
+    - `/tmp/tg_contact4_cosmochatrussia_full_only_20260507T074001Z.json`
+  - артефакты:
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_cosmochatrussia_full_history_20260507T074001Z.md`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_cosmochatrussia_full_history_20260507T074001Z_usernames.txt`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_cosmochatrussia_full_history_20260507T074001Z_usernames.json`
+    - `/home/max/.site-control-kit/telegram_workspace/logs/export_run_20260507T074039Z.log`
+    - `/home/max/.site-control-kit/telegram_workspace/logs/gui_actions_tg_contact4_cosmochatrussia_full_only_20260507T074001Z_20260507T074016Z.log`
+  - practical result:
+    - `status=done`
+    - `safe_count=1486`
+    - `history_messages_scanned=9341`
+    - `security_mode=Insecure local token`
+- Новый важный residual того же цикла:
+  - первый combined pass `quick -> full` после portable launch оказался нестабильным;
+  - quick-check успел завершиться, но immediate full-history hit дал helper failure `OpenTeleException: No account has been loaded`;
+  - managed `tdata` пришлось повторно восстановить из `/home/max/site-control-kit/TG_CONTACT/4/tdata-003.zip`;
+  - drifted copy сохранена как `/home/max/.site-control-kit/telegram_workspace/PortableProfiles/TelegramPortable-tg-contact-4/TelegramForcePortable/tdata.backup_20260507T073936Z`;
+  - successful full pass получен только на втором GTK walkthrough без повторного portable launch, поэтому именно launch-triggered runtime drift теперь главный следующий технический риск.
+
+### Обновление 2026-05-07 (TG_CONTACT 4 Managed Import + Runtime Blocker)
+- `TG_CONTACT 4` уже больше не только source-of-next-work:
+  - source: `/home/max/site-control-kit/TG_CONTACT/4/tdata-003.zip`
+  - companion metadata: `/home/max/site-control-kit/TG_CONTACT/4/apiapp.txt`
+  - managed profile уже создан как `/home/max/.site-control-kit/telegram_workspace/PortableProfiles/TelegramPortable-tg-contact-4`
+  - row `TG_CONTACT 4` уже записан в `~/.site-control-kit/telegram_workspace/registry/users.json`
+  - `default_user` по-прежнему остаётся `TG_CONTACT 2`
+- Повторно подтверждён verify/contour перед этим циклом:
+  - `python3 -m unittest discover -s tests -p 'test_*.py'` -> `258 tests OK`
+  - `python3 -m webcontrol --help` -> OK
+  - `python3 -m webcontrol browser --help` -> OK
+  - `./start-browser.sh`, `./browser.sh status`, `./browser.sh tabs` -> OK
+- Import/live evidence по `TG_CONTACT 4`:
+  - `/home/max/.site-control-kit/telegram_workspace/logs/gui_actions_tg_contact4_first_live_20260507T065536Z_20260507T065600Z.log`
+  - этот action log уже фиксирует:
+    - `portable_profile_imported`
+    - `portable_profile_account_synced`
+    - `client_ready portable_tdata ...`
+    - `chats_loaded ... count=30`
+- Текущий blocker status по этому профилю:
+  - `/tmp/tg_contact4_direct_live_20260507T070439Z.json`
+  - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact4_runtime_blocker_20260507T070439Z.md`
+  - `/home/max/.site-control-kit/telegram_workspace/logs/gui_actions_tg_contact4_direct_live_20260507T070439Z_20260507T070446Z.log`
+  - direct GTK re-check остановился в `ensure_connected()` с `PrimarySurfaceBlocked`
+  - повторный direct probe даёт `prepare_portable_runtime() -> unauthorized`
+  - detail: `Portable профиль найден, но helper не смог открыть сессию. Откройте этот Telegram Desktop профиль и дождитесь полной загрузки.`
+- Практический итог:
+  - `TG_CONTACT 4` уже импортирован и виден в selector рядом с `TG_CONTACT 2`, `TG_CONTACT 3`, `@AK-ADOPTED`, `@AK-LIVE`, `Слот 1`, `Слот 2`
+  - `TG_CONTACT 4` пока остаётся auxiliary profile на quickstart token, а не secure/default profile
+  - свежий export artifact pack для него пока не создан, потому что blocker-pass остановился до export start
+  - следующий узкий шаг теперь только один: открыть managed portable `TG_CONTACT 4`, дождаться полной загрузки Telegram-сессии и сразу повторить `connect -> fetch chats -> choose live dialog row -> save dialog -> Quick Check`
+
+### Обновление 2026-05-07 (Operator Pivot: TG_CONTACT 4)
+- Зафиксирован новый operator target для следующего цикла:
+  - source: `/home/max/site-control-kit/TG_CONTACT/4/tdata-003.zip`
+  - companion metadata: `/home/max/site-control-kit/TG_CONTACT/4/apiapp.txt`
+- На момент фиксации этого pivot подтверждено только source-state:
+  - ZIP существует и читается как валидный archive;
+  - внутри уже видны `tdata/key_datas`, `tdata/D877F783D5D3EF8C/maps`, `tdata/D877F783D5D3EF8Cs`;
+  - managed profile `TG_CONTACT 4` ещё не создан в `PortableProfiles/`;
+  - row `TG_CONTACT 4` ещё не появился в `registry/users.json`;
+  - `TG_CONTACT 4` ещё не импортирован, не live-подтверждён и не продвинут в `default_user`.
+- Что теперь считать правильным следующим ходом:
+  - весь следующий операторский цикл вести уже вокруг `TG_CONTACT 4`, а не вокруг дальнейшего продвижения `TG_CONTACT 3`;
+  - сначала импортировать ZIP как managed profile `TG_CONTACT 4`, не меняя `default_user`;
+  - затем подтвердить selector/dropdown visibility;
+  - затем довести runtime до `ready`;
+  - затем прогнать live GTK путь `connect -> fetch chats -> choose chat -> save dialog -> Quick Check`;
+  - только после этого принимать решение, оставлять ли `TG_CONTACT 4` вспомогательным profile или продвигать его в основной.
+
+### Обновление 2026-05-07 (Checkpoint Stabilization + TG_CONTACT 3 Runtime Blocker)
+- Повторно прогнан обязательный verify-контур репозитория:
+  - `python3 -m unittest discover -s tests -p 'test_*.py'` -> `258 tests OK`
+  - `python3 -m webcontrol --help` -> OK
+  - `python3 -m webcontrol browser --help` -> OK
+- Обязательный browser contour перед live Telegram verify снова подтверждён:
+  - `./start-browser.sh` снова поднял hub на `http://127.0.0.1:8765`;
+  - `./browser.sh status` снова показал online browser client;
+  - `./browser.sh tabs` снова вернул live tab list без `Connection refused`.
+- Повторно подтверждён current-list GTK path для `TG_CONTACT 2`:
+  - реальное окно `Telegram Username Collector` снова было видно на `DISPLAY=:0`;
+  - системный save dialog снова реально открылся и был принят;
+  - свежие артефакты:
+    - `/tmp/tg_contact2_live_walkthrough_20260507T061343Z.json`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact2_live_walkthrough_20260507T061343Z.md`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact2_live_walkthrough_20260507T061343Z_usernames.txt`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact2_live_walkthrough_20260507T061343Z_usernames.json`
+    - `/home/max/.site-control-kit/telegram_workspace/logs/export_run_20260507T061359Z.log`
+    - `/home/max/.site-control-kit/telegram_workspace/logs/gui_actions_tg_contact2_live_walkthrough_20260507T061343Z_20260507T061343Z.log`
+  - practical result:
+    - `TG_CONTACT 2` остаётся `default_user` с `Local secure token`;
+    - export на `Патрик Stars | Звёзды и подарки бесплатно` (`7996790736`) снова прошёл до конца;
+    - итог `status=done`, `safe_count=1`, `history_messages_scanned=12`.
+- Повторно подтверждён live known-only guard для `TG_CONTACT 2` на `BigpharmaMarket`:
+  - свежие артефакты:
+    - `/tmp/tg_contact2_bigpharma_known_guard_20260507T061415Z.json`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact2_bigpharma_known_guard_20260507T061415Z.md`
+    - `/home/max/.site-control-kit/telegram_workspace/logs/gui_actions_tg_contact2_bigpharma_known_guard_20260507T061415Z_20260507T061416Z.log`
+  - practical result:
+    - `Чат BigpharmaMarket` снова показывается как `known chat`;
+    - GUI снова режет export до старта helper/export path сообщением, что этот профиль не видит чат в live dialog list;
+    - новые export sidecars по этому сценарию не создавались, потому что запуск был остановлен до старта export.
+- Статус `TG_CONTACT 3` изменился относительно handoff от `2026-05-05`:
+  - старый Bigpharma success остаётся историческим фактом, но на `2026-05-07` этот профиль уже не прошёл re-verify;
+  - свежие blocker artifacts:
+    - `/tmp/tg_contact3_bigpharma_blocker_20260507T061738Z.json`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact3_bigpharma_blocker_20260507T061738Z.md`
+  - practical result:
+    - `prepare_portable_runtime()` для `TG_CONTACT 3` сейчас возвращает `unauthorized`;
+    - helper не смог открыть сессию и упёрся в `tdata helper timed out after 12s: list-chats /home/max/.site-control-kit/telegram_workspace/PortableProfiles/TelegramPortable-tg-contact-3/TelegramForcePortable/tdata`;
+    - повторный launch portable binary не вернул профиль в `ready`, поэтому новый live Bigpharma export не стартовал.
+- Новый selector fact:
+  - текущий live GTK selector сейчас показывает `TG_CONTACT 2`, `@AK-ADOPTED`, `@AK-LIVE`, `TG_CONTACT 3`, `Слот 1`, `Слот 2`;
+  - это новее старого текста, где legacy row ещё фигурировал как `Слот 2 · portable ZIP`.
+- Новый residual:
+  - `TG_CONTACT 2` остаётся рабочим default profile и save-dialog path подтверждён заново;
+  - `BigpharmaMarket` на `TG_CONTACT 2` по-прежнему только `known-only`;
+  - `TG_CONTACT 3` сейчас нельзя считать current live-confirmed Bigpharma profile, пока его desktop session не будет восстановлена;
+  - automated GTK harness после успешного export поймал `Gtk-CRITICAL gtk_box_remove ...`, но итоговые артефакты и run history всё равно записались.
+
+### Обновление 2026-05-05 (Known Chat Guard + TG_CONTACT 3 Bigpharma Live Path)
+- Уточнён operator path для known chats:
+  - chat list теперь может показывать synthetic `known chat` rows из pinned/history, даже если текущий `fetch_chats()` их не вернул;
+  - эти rows больше не теряют метку происхождения по дороге к export;
+  - для `Primary tdata` export на known-only row теперь блокируется заранее понятной operator-ошибкой, если текущий профиль не видит этот чат в live dialog list.
+- Подтверждён новый current-list live path для `TG_CONTACT 2`:
+  - real GTK walkthrough на `DISPLAY=:0` прошёл `startup -> connect -> choose chat -> save dialog -> Quick Check`;
+  - целевой живой чат из текущего списка: `Патрик Stars | Звёзды и подарки бесплатно` (`7996790736`);
+  - артефакты:
+    - `/tmp/telegram_live_walkthrough_20260505T131711Z.json`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact2_live_walkthrough_20260505T131711Z.md`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact2_live_walkthrough_20260505T131711Z_usernames.txt`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact2_live_walkthrough_20260505T131711Z_usernames.json`
+    - `/home/max/.site-control-kit/telegram_workspace/logs/export_run_20260505T131726Z.log`
+    - `/home/max/.site-control-kit/telegram_workspace/logs/gui_actions_live_walkthrough_20260505T131711Z.log`
+  - результат:
+    - `TG_CONTACT 2` остаётся default profile с `Local secure token`;
+    - quick-check завершился `status=done`, `safe_count=1`, `history_messages_scanned=9`.
+- Зафиксирован честный статус `BigpharmaMarket` на `TG_CONTACT 2`:
+  - synthetic row `Чат BigpharmaMarket` теперь можно увидеть в списке как known chat;
+  - но сам export из `TG_CONTACT 2` больше не падает в поздний Telethon traceback, а сразу объясняет, что выбранный профиль не видит этот чат в live dialog list и поэтому не может разрешить entity по одному `chat_ref`.
+- Импортирован и live-подтверждён новый managed profile `TG_CONTACT 3`:
+  - source: `/home/max/site-control-kit/TG_CONTACT/3/tdata-20260505T131440Z-3-001.zip`
+  - managed dir: `/home/max/.site-control-kit/telegram_workspace/PortableProfiles/TelegramPortable-tg-contact-3`
+  - важно: `TG_CONTACT 2` не снимался с `default_user`; `TG_CONTACT 3` пока добавлен как дополнительный рабочий профиль.
+- Новый confirmed Bigpharma path через `TG_CONTACT 3`:
+  - real GTK walkthrough на `DISPLAY=:0` прошёл `select TG_CONTACT 3 -> connect -> BigpharmaMarket -> save dialog -> Quick Check`;
+  - артефакты:
+    - `/tmp/telegram_tg_contact3_live_20260505T131952Z.json`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact3_bigpharma_quick_check_20260505T131952Z.md`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact3_bigpharma_quick_check_20260505T131952Z_usernames.txt`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact3_bigpharma_quick_check_20260505T131952Z_usernames.json`
+    - `/home/max/.site-control-kit/telegram_workspace/logs/export_run_20260505T132011Z.log`
+    - `/home/max/.site-control-kit/telegram_workspace/logs/gui_actions_tg_contact3_live_20260505T131952Z.log`
+  - результат:
+    - `TG_CONTACT 3` реально видит `Чат BigpharmaMarket` (`-1001461811598`) в своём live dialog list;
+    - quick-check завершился `status=done`, `safe_count=14`, `history_messages_scanned=400`.
+- Новый regression coverage:
+  - `ChatOption` теперь имеет `source_kind`;
+  - расширены `tests/test_telegram_members_export_gui.py`;
+  - полный suite после этих правок зелёный: `258 tests OK`.
+- Safety:
+  - `ss -ltnp '( sport = :8765 )'` после этого цикла снова пуст, то есть listener на `:8765` не затрагивался.
+- Новый residual:
+  - `TG_CONTACT 2` остаётся основным default profile и уже живо экспортирует свои current-list чаты, но для `BigpharmaMarket` нужен другой профиль;
+  - `TG_CONTACT 3` уже рабочий профиль для `BigpharmaMarket`, но пока сидит на `Insecure local token`;
+  - отдельно всё ещё открыты решения по `@AK-LIVE`, `@AK-ADOPTED` и legacy slot `2`.
+
+### Обновление 2026-05-05 (TG_CONTACT 2 Non-Blocking GUI Startup)
+- Убран блокирующий startup у Telegram GTK панели:
+  - окно теперь открывается сразу, а bootstrap аккаунтов и deep preflight догружаются фоном;
+  - missing external profile больше не валит всю панель на старте;
+  - startup errors во время bootstrap теперь идут inline в hero/preflight/log, а не через modal dialog.
+- Добавлен light/deep preflight split:
+  - light refresh работает только по локальному filesystem/cached state и подходит для частых UI-событий;
+  - deep refresh запускается в фоне на startup, account change и явных operator actions.
+- Selector UX дополнительно очищен:
+  - `@AK-ADOPTED` остаётся видимым как `missing` с конкретным путём `/tmp/telegram-portable-adopt-live`;
+  - устранён живой дубликат `Слот 1`, когда registry row жил в `accounts/1/runtime`, а auto-row в `accounts/1/profile`.
+- Новый regression coverage:
+  - расширены `tests/test_telegram_gui_backend_features.py`
+  - расширены `tests/test_telegram_gui_portable_profiles.py`
+  - расширены `tests/test_telegram_gui_preflight.py`
+  - расширены `tests/test_telegram_members_export_gui.py`
+  - полный suite теперь `256 tests OK`
+- Live verify на реальном `~/.site-control-kit/telegram_workspace`:
+  - startup/window smoke:
+    - `/tmp/telegram_gui_nonblocking_smoke.json`
+    - `/tmp/telegram_gui_nonblocking_smoke2.json`
+    - `xwininfo -root -tree | rg "Telegram Username Collector Smoke"` подтвердил реальное GTK окно на `DISPLAY=:0`
+  - operator/connect/export smoke:
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact2_nonblocking_start_quick_check_20260505T123731Z.md`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact2_nonblocking_start_quick_check_20260505T123731Z_usernames.txt`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact2_nonblocking_start_quick_check_20260505T123731Z_usernames.json`
+    - `/home/max/.site-control-kit/telegram_workspace/logs/export_run_20260505T123731Z.log`
+    - `/home/max/.site-control-kit/telegram_workspace/logs/live_verify_export_20260505.log`
+  - practical result:
+    - `TG_CONTACT 2` остаётся selected/default profile c `Local secure token` и `Primary tdata`;
+    - `@AK-ADOPTED` виден как `missing`, а не ломает startup;
+    - live `ensure_connected -> fetch_chats` вернул `19` чатов;
+    - quick-check export на чате `астра | языки и темы` прошёл по пути `connect -> list -> export`, но снова дал `safe_count=0`, `history_messages_scanned=400`;
+    - `ss -ltnp '( sport = :8765 )'` до и после smoke был пустым, то есть этот цикл не трогал listener на `:8765`.
+- Новый residual:
+  - P0 startup/freezing слой закрыт;
+  - следующий content-level verify всё ещё должен идти на чате с ожидаемыми `@username`, потому что текущие quick-check дают `0/400`;
+  - отдельно остаётся operator decision по `@AK-LIVE` / `@AK-ADOPTED` и по legacy slot `2`.
+
+### Обновление 2026-05-04 (TG_CONTACT 2 As New Primary Portable Profile)
+- `TG_CONTACT 2` закреплён как новый основной operator profile:
+  - source `/home/max/site-control-kit/TG_CONTACT/2/tdata-20260430T111415Z-3-001.zip` импортируется как managed profile;
+  - deterministic managed directory теперь `/home/max/.site-control-kit/telegram_workspace/PortableProfiles/TelegramPortable-tg-contact-2`;
+  - imported profile сразу может стать default operator profile через additive backend flag `set_default=True`.
+- Добавлен removal flow для non-legacy portable profiles:
+  - portable-card теперь показывает `Убрать из панели`;
+  - подтверждение встроено в тот же single-window card, без отдельного modal flow;
+  - managed profile удаляет workspace-managed directory;
+  - adopted profile удаляет только panel/registry link и сохраняет внешний folder плюс `portable-profile.json`;
+  - legacy slot runtime profiles удалять нельзя.
+- Усилен cleanup/security слой:
+  - registry теперь умеет удалять user row по `profile`, а не по display name;
+  - unused secret file удаляется только если он больше никем не используется;
+  - `TG_CONTACT 2` после live setup работает как `Local secure token`, а не как quickstart fallback.
+- Новый regression coverage:
+  - расширены `tests/test_telegram_gui_backend_features.py`
+  - расширены `tests/test_telegram_gui_portable_profiles.py`
+  - расширены `tests/test_telegram_gui_secrets.py`
+  - расширены `tests/test_telegram_user_registry.py`
+  - полный suite теперь `248 tests OK`
+- Live verify на реальном `~/.site-control-kit/telegram_workspace`:
+  - summary:
+    - `/tmp/telegram_tg_contact2_primary_live_20260504T125745Z.json`
+  - output/logs:
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact2_primary_quick_check_20260504T125745Z.md`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact2_primary_quick_check_20260504T125745Z_usernames.txt`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg_contact2_primary_quick_check_20260504T125745Z_usernames.json`
+    - `/home/max/.site-control-kit/telegram_workspace/logs/export_run_20260504T125849Z.log`
+    - `/home/max/.site-control-kit/telegram_workspace/logs/gui_actions_tg_contact2_primary_20260504T125745Z.log`
+  - practical result:
+    - `TG_CONTACT 2` стал selected/default profile и `default_user` в registry;
+    - security mode переведён в `Local secure token`;
+    - quick-check export по `Primary tdata` завершился `status=done`, `safe_count=0`, `history_messages_scanned=400`;
+    - temporary profiles `@AK-GUI-WALK` и `@AK-ADOPT-WALK` удалены из selectors;
+    - managed directory `TelegramPortable-ak-gui-walk-21610z` удалён, а adopted external folder `/tmp/telegram-portable-real-window-adopt-20260504t121610z` сохранён.
+- Continuation prompt для следующего агента сохранён отдельно:
+  - `/home/max/Desktop/TG_CONTACT_2_CHECKPOINT_PROMPT_2026-05-04.md`
+  - `/home/max/Рабочий стол/TG_CONTACT_2_CHECKPOINT_PROMPT_2026-05-04.md`
+- Новый residual:
+  - для текущего operator сценария default profile теперь именно `TG_CONTACT 2`;
+  - `@AK-LIVE` и `@AK-ADOPTED` остались как дополнительные profiles;
+  - legacy slot `2` всё ещё существует как compatibility/runtime path и не мигрирован.
+
+### Обновление 2026-05-04 (Portable Profile Orchestration v1)
+- Введён profile-first Telegram Desktop portable layer поверх прежнего slot-runtime baseline:
+  - новый `scripts/telegram_gui/services/portable_profiles.py` хранит и читает `portable-profile.json`, умеет `import_zip`, `adopt_profile`, `list_profiles`, `profile_status`, `launch_profile`;
+  - `scripts/telegram_workspace_layout.py` теперь резервирует `PortableProfiles/` в workspace;
+  - `scripts/telegram_gui/models.py` теперь несёт `PortableProfile` / `PortableProfileStatus`, а `AccountOption` / `PreflightInfo` получают portable profile metadata additively.
+- Обновлён single-window GUI:
+  - portable-card теперь profile-first, а не source-first;
+  - появился dropdown всех portable profiles в одной панели;
+  - появились действия `Импортировать tdata.zip`, `Подключить существующую папку`, `Запустить профиль`, `Обновить статус`;
+  - выбранный `profile_dir` синхронизируется в account registry и используется дальше в обычном export workflow.
+- Legacy slot runtimes не потеряны:
+  - `accounts/N/runtime/portable-profile.json` теперь создаётся/синхронизируется для legacy portable slots;
+  - это позволяет видеть slot `1/2` рядом с managed/adopted profiles в одном portable dropdown.
+- Новый regression coverage:
+  - added `tests/test_telegram_gui_portable_profiles.py`;
+  - полный suite теперь `241 tests OK`.
+- Live verify на реальном `~/.site-control-kit/telegram_workspace`:
+  - managed profile import/export:
+    - `/tmp/telegram_portable_profiles_live.json`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/portable_profile_live_quick_check.md`
+    - `/home/max/.site-control-kit/telegram_workspace/logs/export_run_20260504T115535Z.log`
+    - `/home/max/.site-control-kit/telegram_workspace/logs/gui_actions_portable_profiles_live.log`
+  - adopted external profile:
+    - `/tmp/telegram_portable_profiles_adopt_live.json`
+  - GTK panel probe:
+    - `/tmp/telegram_portable_profiles_gui_probe.json`
+  - practical result:
+    - managed profile `PortableProfiles/TelegramPortable-ak-live` реально создан из `TG_CONTACT` ZIP и дал quick-check export `status=done`, `safe_count=12`, `history_messages_scanned=400`;
+    - adopted folder `/tmp/telegram-portable-adopt-live` получил metadata, workspace-link и registry row;
+    - GTK panel на `DISPLAY=:0` увидела `4` portable profiles в одном dropdown и держит `Primary tdata` на выбранном profile.
+  - real-window operator walkthrough:
+    - `/tmp/telegram_portable_profiles_real_window_walkthrough_20260504T121610Z.json`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/portable_profile_real_window_walkthrough_20260504T121610Z.md`
+    - `/home/max/.site-control-kit/telegram_workspace/logs/export_run_20260504T121716Z.log`
+    - `/home/max/.site-control-kit/telegram_workspace/logs/gui_actions_portable_profiles_real_window_20260504T121610Z.log`
+  - additional practical result:
+    - в одном реальном GTK окне прошёл полный flow `import zip -> adopt folder -> launch profile -> refresh status -> connect -> list chats -> export`;
+    - imported managed profile `TelegramPortable-ak-gui-walk-21610z` и adopted external folder `/tmp/telegram-portable-real-window-adopt-20260504t121610z` реально попали в portable dropdown и account selector;
+    - quick-check на `Чат BigpharmaMarket` завершился `status=done`, `safe_count=12`, `history_messages_scanned=400`.
+  - новый residual:
+    - live walkthrough для portable-panel закрыт;
+    - но новые imported/adopted profiles по умолчанию всё ещё создаются с `Insecure local token`, пока оператор отдельно не прогонит inline secure-token setup.
+
+### Обновление 2026-05-04 (Portable tdata Restore v1)
+- Возвращён portable `tdata` как основной operator path, но уже безопасно и slot-based:
+  - `scripts/telegram_gui/app.py` теперь импортирует `TG_CONTACT`-подобные ZIP/папки в workspace slots;
+  - для каждого slot появился persistent runtime clone `accounts/N/runtime/portable_tdata`;
+  - рядом держится runtime alias `accounts/N/runtime/tdata -> portable_tdata`, чтобы portable binary и helper работали на одном и том же наборе данных;
+  - helper/export path больше не должен молча предпочитать `~/telegram-api-collector/tdata_import/tdata`, если оператор работает из portable slot source; `collector import` оставлен только как explicit debug fallback через `TELEGRAM_TDATA_ALLOW_COLLECTOR_FALLBACK=1`.
+- Обновлён GUI portable UX без отхода от single-window:
+  - рядом с profile block появился portable-card;
+  - card показывает source path, runtime state и действия `Добавить portable tdata`, `Открыть portable Telegram`, `Обновить portable-копию`;
+  - `AccountOption` и `PreflightInfo` теперь несут typed portable metadata, а не собирают состояние из ad-hoc строк.
+- Новый regression coverage:
+  - расширены `tests/test_telegram_workspace_layout.py`
+  - расширены `tests/test_telegram_gui_backend_features.py`
+  - расширены `tests/test_telegram_members_export_gui.py`
+  - полный suite теперь `237 tests OK`.
+- Live verify на реальном `~/.site-control-kit/telegram_workspace`:
+  - slot `2` импортирован из `/home/max/site-control-kit/TG_CONTACT` и стал `Слот 2 · portable ZIP`;
+  - portable backend/export baseline:
+    - `/tmp/telegram_portable_restore_live_recovered.json`
+    - `/tmp/telegram_portable_restore_safety.json`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/portable_restore_slot2_quick_check.md`
+    - `/home/max/.site-control-kit/telegram_workspace/logs/export_run_20260504T110826Z.log`
+    - `/home/max/.site-control-kit/telegram_workspace/logs/gui_actions_portable_restore_20260504T110753Z.log`
+  - итог:
+    - runtime state `ready`, `authorized=true`, `binary_path=/home/max/Загрузки/Telegram Desktop/e/Telegram`;
+    - runtime alias реально создан как symlink `accounts/2/runtime/tdata -> accounts/2/runtime/portable_tdata`;
+    - quick-check export на `Чат BigpharmaMarket` (`-1001461811598`) завершился `status=done`, `safe_count=12`, `history_messages_scanned=400`;
+    - before/after safety hashes показали `source_unchanged=true`, `collector_unchanged=true`, то есть ни repo-local `TG_CONTACT`, ни `~/telegram-api-collector/tdata_import/tdata` не были изменены при `import + runtime rebuild`.
+- Ограничение этого цикла:
+  - scripted real-window GTK smoke на `DISPLAY=:0` оказался нестабилен как environment-runner и был убит средой, поэтому GUI evidence сейчас зафиксирован через headless GTK binding summary `/tmp/telegram_portable_restore_gui_headless.json` плюс полноценный live backend/export path на том же slot.
+
+### Обновление 2026-05-04 (Telegram Workstation v1.3 Secondary Surface Live Closure)
+- Усилен fallback/backend слой без поломки single-window GTK flow:
+  - `scripts/telegram_gui/app.py` теперь держит typed fallback readiness для `bridge` и `cdp`;
+  - добавлены explicit backend methods `prepare_bridge_surface()`, `prepare_cdp_surface()`, `probe_bridge_readiness()`, `probe_cdp_readiness()`;
+  - preflight теперь помнит и показывает последний actionable fallback result, а не только быстрый `status`.
+- Обновлён UI secondary-surface state:
+  - в существующем export/preflight блоке появился compact fallback-card;
+  - card показывает `Bridge` / `CDP` state, action `Подготовить bridge profile` и action `Повторить проверку`;
+  - fallback-card виден даже когда primary `tdata` готов, то есть operator видит состояние secondary surfaces без ухода из основного flow.
+- Усилен CDP auth detection:
+  - `scripts/telegram_cdp_helper.js` теперь распознаёт QR-login page как `auth_required`, а не как общий timeout `chat list was not ready`.
+- Новый regression coverage:
+  - расширен `tests/test_telegram_gui_backend_features.py`;
+  - расширен `tests/test_telegram_members_export_gui.py`;
+  - полный suite теперь `232 tests OK`.
+- Live verify на реальном `~/.site-control-kit/telegram_workspace`:
+  - backend fallback summary:
+    - `/tmp/telegram_workstation_v13_backend_live.json`
+    - `/home/max/.site-control-kit/telegram_workspace/logs/gui_actions_v13_backend_live.log`
+    - итог: `bridge_probe=foreign_hub`, `bridge_prepare=foreign_hub`, `cdp_prepare=telegram_auth_required`, `cdp_target=cdp:9430`
+  - GUI fallback summary на `DISPLAY=:0`:
+    - `/tmp/telegram_workstation_v13_gui_fallback.json`
+    - итог: `surface_badge=Primary tdata`, fallback-card visible, `Bridge: foreign_hub`, `CDP: telegram_auth_required`
+  - visual evidence:
+    - `/tmp/telegram_workstation_v13_screen.png`
+    - screenshot показывает QR login page Telegram Web в dedicated CDP profile
+  - workspace note:
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/v13_fallback_live_status.md`
+- Новый остаточный blocker:
+  - полноценный secondary export пока не подтверждён не из-за code regression, а из-за текущего host state:
+    - `bridge` blocked by foreign hub on `127.0.0.1:8765` with another token;
+    - `cdp` blocked by Telegram Web QR login in the dedicated profile.
+
+### Обновление 2026-05-04 (Telegram Workstation v1.2 Secure Token Operator Setup)
+- Закрыт operator residual по `Insecure local token` для реального slot `1`:
+  - основной steady-state source-of-truth теперь `registry + secret_ref + secret files`;
+  - `accounts/N/keys/api_token.txt` переведён в роль legacy import-source и после миграции/secure setup очищается;
+  - GUI теперь предпочитает registry-row выбранного профиля и больше не откатывается обратно в auto quickstart fallback.
+- Обновлён GUI/security flow:
+  - в том же single-window окне появился inline security card;
+  - action `Настроить secure token` сохраняет token через `SecretStore`, без modal wizard и без shell detour;
+  - после сохранения account list и preflight refresh-ятся сразу;
+  - `Run History` теперь пишет secure runs как `security_mode=Local secure token`.
+- Архитектурно усилено:
+  - `AccountOption` теперь несёт `slot_number` и `token_source`;
+  - `PreflightInfo` теперь несёт actionable security metadata для setup/restart warning path;
+  - `telegram_user_registry.py` теперь умеет profile-based upsert;
+  - GUI/Preflight больше не скрывает warning, если на `:8765` уже живёт внешний hub/process с другим token.
+- Проверено:
+  - `python3 -m unittest discover -s tests -p 'test_*.py'` -> `221 tests OK`
+  - реальный GTK walkthrough на `DISPLAY=:0`:
+    - `/tmp/telegram_workstation_v12_gui_live.json`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/gui_v12_secure_quick_check.md`
+    - результат: `status=done`, `safe_count=12`, `history_messages_scanned=400`, `security_mode=Local secure token`
+  - real foreign-hub warning verify:
+    - `/tmp/telegram_workstation_v12_foreign_hub_warning.json`
+    - card остаётся видимой и явно пишет, что внешний `:8765` listener использует другой token, но не получает destructive kill path
+  - token hygiene:
+    - `users.json` без raw token;
+    - secret только в `~/.site-control-kit/telegram_workspace/registry/secrets/users/*`;
+    - `accounts/1/keys/api_token.txt` после setup пустой.
+
+### Обновление 2026-05-04 (Telegram Workstation v1.1 Hardening + Panel UX)
+- Поверх `Workstation v1` собран следующий product-layer:
+  - `status strip` в верхней части окна;
+  - checklist-style `Preflight` вместо raw multiline label;
+  - quick/pinned chats, history filters, `Repeat last run`, `Open last artifacts`.
+- Усилен security/runtime слой:
+  - новые `services/secrets.py`, `services/preflight.py`, `services/ui_tasks.py`;
+  - registry users/api accounts теперь мигрируют inline `token` в `secret_ref` + secret files под `~/.site-control-kit/telegram_workspace/registry/secrets/*`;
+  - bridge path больше не должен тащить token через argv в GUI backend path;
+  - GUI больше не должен автоматически убивать чужой listener на `:8765`.
+- Архитектурный cleanup:
+  - `scripts/telegram_gui/backend.py` и `scripts/telegram_gui/ui/window.py` добавлены как совместимые точки дальнейшего разрезания;
+  - `ui/styles.py` теперь реально владеет CSS install path.
+- Новый regression coverage:
+  - `tests/test_telegram_gui_secrets.py`
+  - `tests/test_telegram_gui_preflight.py`
+  - расширены registry/history/backend GUI tests
+  - полный suite теперь `214 tests OK`.
+- Проверено live уже на реальном `~/.site-control-kit/telegram_workspace`, а не только на `/tmp` smoke-root:
+  - backend quick-check:
+    - `/tmp/telegram_workstation_v11_backend_live.json`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/backend_v11_quick_check.md`
+    - результат: `status=done`, `safe_count=31`, `history_messages_scanned=400`
+  - backend full-history stop verify:
+    - `/tmp/telegram_workstation_v11_backend_full_stop_retry.json`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/backend_v11_full_history_stop_retry.md`
+    - результат: `status=partial`, `interrupted=true`, `safe_count=30`, `history_messages_scanned=300`
+  - live GTK walkthrough через реальное окно на `DISPLAY=:0`:
+    - `/tmp/telegram_workstation_v11_gui_live.json`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/gui_v11_partial_stop.md`
+    - результат: visible progress `250/27`, stop, partial save `300/30`
+  - foreign-port verify:
+    - `/tmp/telegram_workstation_v11_foreign_port_verify.json`
+    - listener `pid=17766` на `:8765` остался жив при token mismatch.
+
+### Обновление 2026-05-04
+- Собран `Telegram Workstation v1` поверх текущего `tdata-history-authors` baseline:
+  - старый `scripts/telegram_members_export_gui.py` теперь только совместимый фасад;
+  - реальный код вынесен в package `scripts/telegram_gui/`;
+  - backend теперь выбирает явные adapters: `tdata`, `bridge`, `cdp`.
+- Правый блок GUI больше не сводится к export+log:
+  - появился `Run Center` с вкладками `Прогресс`, `Артефакты`, `История`;
+  - добавлены preflight-panel, surface badging (`Primary tdata`, `Fallback CDP`, `Fallback Bridge`) и presets `Full History`, `Quick Check`, `Resume Last`.
+- Добавлена операторская история запусков:
+  - `~/.site-control-kit/telegram_workspace/runs/index.jsonl`
+  - `~/.site-control-kit/telegram_workspace/state/last_session.json`
+  - GUI теперь может показать последние run’ы и хранит last-session state для `Resume Last`.
+- Закрыт новый reliability gap:
+  - subprocess orchestration вынесён в `ProcessRunner`;
+  - старый fail на helper cancel/progress path закрыт;
+  - если helper уже отдал `PROGRESS ... done=1`, stop-button теперь сразу отключается, чтобы поздний stop не ломал почти завершённый run.
+- Новый regression coverage:
+  - `tests/test_telegram_gui_process_runner.py`
+  - `tests/test_telegram_gui_run_history.py`
+  - `tests/test_telegram_gui_backend_features.py`
+- Проверено:
+  - `python3 -m unittest discover -s tests -p 'test_*.py'` -> `205 tests OK`
+  - live backend quick-check outside sandbox:
+    - `/tmp/telegram_workstation_backend_smoke_ok.md`
+    - `/tmp/telegram_workstation_backend_smoke_ok_usernames.json`
+    - `/tmp/telegram_export_надопинге_чат_бодибилдинг_фитнес/latest_safe.md`
+    - `safe_count=31`, `history_messages_scanned=400`, `interrupted=false`
+  - live GTK smoke outside sandbox:
+    - `/tmp/telegram_workstation_gui_smoke_ok.md`
+    - `/tmp/tg_workstation_gui_ws_escalated/logs/export_run_20260504T062030Z.log`
+    - `safe_count=31`, `history_messages_scanned=400`, `interrupted=false`
+  - live full-history stop-verify outside sandbox:
+    - `/tmp/telegram_workstation_full_history_ok.md`
+    - `/tmp/telegram_workstation_full_history_ok_usernames.txt`
+    - `/tmp/telegram_workstation_full_history_ok_usernames.json`
+    - `/home/max/.site-control-kit/telegram_workspace/logs/export_run_20260504T064547Z.log`
+    - `history_messages_scanned=85300`, `safe_count=1032`, `interrupted=true`
+    - новый `full_history` run записан в `~/.site-control-kit/telegram_workspace/runs/index.jsonl`, а `Resume Last` обновил `~/.site-control-kit/telegram_workspace/state/last_session.json`
+  - live fallback smoke against real hub:
+    - `browser status` ответил через живой hub, но bridge-clients были `is_online=false`
+    - adapter smoke подтвердил fallback badging/selection (`surface=fallback`, `badge=Fallback required`, `BRIDGE_TARGET none`)
+- Новый environment fact:
+  - внутри sandbox `Gtk` и MTProto могли падать по ограничениям среды;
+  - вне sandbox тот же path прошёл, значит это не code regression, а ограничение среды verify.
 
 ### Обновление 2026-04-30
 - Закрыт новый GUI-регресс по размеру окна:

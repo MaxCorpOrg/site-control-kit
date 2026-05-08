@@ -59,10 +59,45 @@ class TelegramApiAccountsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             target = Path(td) / "accounts.json"
             mod.save_registry(target, registry)
+            raw_text = target.read_text(encoding="utf-8")
             loaded = mod.load_registry(target)
             resolved = mod.resolve_account(loaded)
             self.assertEqual(resolved.get("name"), "prod")
             self.assertEqual(resolved.get("client_id"), "client-prod")
+            self.assertEqual(resolved.get("token"), "very-secret-token")
+            self.assertNotIn("very-secret-token", raw_text)
+            self.assertIn("secret_ref", raw_text)
+            secrets_dir = target.parent / "secrets" / "api_accounts"
+            self.assertTrue(secrets_dir.is_dir())
+            self.assertTrue(any(path.read_text(encoding="utf-8").strip() == "very-secret-token" for path in secrets_dir.iterdir()))
+
+    def test_load_registry_migrates_inline_token_into_secret_store(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td) / "accounts.json"
+            target.write_text(
+                """
+{
+  "default_account": "legacy",
+  "accounts": [
+    {
+      "name": "legacy",
+      "client_id": "client-1",
+      "token": "legacy-token",
+      "updated_at": "2026-05-04T12:00:00+00:00"
+    }
+  ]
+}
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+            loaded = mod.load_registry(target)
+            raw_text = target.read_text(encoding="utf-8")
+
+        resolved = mod.resolve_account(loaded)
+        self.assertEqual(resolved.get("token"), "legacy-token")
+        self.assertNotIn('"token"', raw_text)
+        self.assertIn("secret_ref", raw_text)
 
 
 if __name__ == "__main__":

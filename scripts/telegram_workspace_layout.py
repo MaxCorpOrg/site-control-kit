@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,7 @@ def _workspace_paths(root: Path) -> dict[str, Path]:
         "registry_file": root / "registry" / "users.json",
         "profiles_dir": root / "profiles",
         "default_profile_dir": root / "profiles" / "default",
+        "portable_profiles_dir": root / "PortableProfiles",
         "cache_unpacked_dir": root / "cache" / "unpacked_profiles",
         "accounts_dir": root / "accounts",
         "readme_file": root / "README.txt",
@@ -34,16 +36,31 @@ def _write_if_missing(path: Path, content: str) -> None:
         return
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
+    _chmod_best_effort(path, 0o600)
+
+
+def _chmod_best_effort(path: Path, mode: int) -> None:
+    try:
+        os.chmod(path, mode)
+    except OSError:
+        pass
 
 
 def _ensure_slot(slot_dir: Path, slot_index: int) -> None:
     profile_dir = slot_dir / "profile"
     imports_dir = slot_dir / "imports"
     keys_dir = slot_dir / "keys"
+    runtime_dir = slot_dir / "runtime"
 
     profile_dir.mkdir(parents=True, exist_ok=True)
     imports_dir.mkdir(parents=True, exist_ok=True)
     keys_dir.mkdir(parents=True, exist_ok=True)
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    _chmod_best_effort(slot_dir, 0o700)
+    _chmod_best_effort(profile_dir, 0o700)
+    _chmod_best_effort(imports_dir, 0o700)
+    _chmod_best_effort(keys_dir, 0o700)
+    _chmod_best_effort(runtime_dir, 0o700)
 
     _write_if_missing(
         slot_dir / "README.txt",
@@ -55,6 +72,8 @@ def _ensure_slot(slot_dir: Path, slot_index: int) -> None:
                 "- profile/: профиль браузера с Telegram (можно копировать tdata/Default и т.д.)",
                 "- imports/: zip-архивы portable-профиля (GUI покажет auto-слоты)",
                 "- keys/api_token.txt: SITECTL token для этого пользователя",
+                "- runtime/portable_tdata: рабочая portable-копия tdata для запуска Telegram",
+                "- runtime/portable_state.json: metadata по portable runtime clone",
                 "- keys/api_id.txt: Telegram API ID (опционально)",
                 "- keys/api_hash.txt: Telegram API Hash (опционально)",
                 "",
@@ -77,8 +96,10 @@ def ensure_workspace(root: Path, slots: int) -> dict[str, Any]:
         "default_profile_dir",
         "cache_unpacked_dir",
         "accounts_dir",
+        "portable_profiles_dir",
     ):
         paths[key].mkdir(parents=True, exist_ok=True)
+        _chmod_best_effort(paths[key], 0o700)
 
     _write_if_missing(
         paths["readme_file"],
@@ -91,13 +112,15 @@ def ensure_workspace(root: Path, slots: int) -> dict[str, Any]:
                 "Структура:",
                 "- registry/users.json: реестр пользователей GUI",
                 "- profiles/default: профиль по умолчанию",
+                "- PortableProfiles: portable профили Telegram Desktop с portable-profile.json",
                 "- cache/unpacked_profiles: кэш распаковки zip-профилей",
-                "- accounts/1..10: слоты пользователей (profile/imports/keys)",
+                "- accounts/1..10: слоты пользователей (profile/imports/keys/runtime)",
                 "",
                 "Как использовать slots:",
                 "1) Кладите tdata/профиль в accounts/N/profile",
                 "2) Или zip в accounts/N/imports",
                 "3) Ключи храните в accounts/N/keys",
+                "4) Рабочая portable-копия создаётся в accounts/N/runtime",
                 "",
             ]
         ),
@@ -108,6 +131,7 @@ def ensure_workspace(root: Path, slots: int) -> dict[str, Any]:
             paths["registry_file"].write_text(LEGACY_REGISTRY_PATH.read_text(encoding="utf-8"), encoding="utf-8")
         else:
             paths["registry_file"].write_text(json.dumps(_empty_registry(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        _chmod_best_effort(paths["registry_file"], 0o600)
 
     for index in range(1, max(slots, 1) + 1):
         _ensure_slot(paths["accounts_dir"] / str(index), index)
@@ -116,6 +140,7 @@ def ensure_workspace(root: Path, slots: int) -> dict[str, Any]:
         "workspace_root": str(paths["root"]),
         "registry_file": str(paths["registry_file"]),
         "default_profile_dir": str(paths["default_profile_dir"]),
+        "portable_profiles_dir": str(paths["portable_profiles_dir"]),
         "cache_unpacked_dir": str(paths["cache_unpacked_dir"]),
         "accounts_dir": str(paths["accounts_dir"]),
         "slots": max(slots, 1),
@@ -168,6 +193,27 @@ def list_profiles(root: Path) -> list[tuple[str, str]]:
         seen.add(key)
         deduped.append((name, value))
     return deduped
+
+
+def slot_dir(root: Path, slot: int) -> Path:
+    if slot < 1:
+        raise ValueError("slot must be >= 1")
+    ensure_workspace(root, slots=max(slot, 10))
+    return _workspace_paths(root)["accounts_dir"] / str(slot)
+
+
+def first_empty_slot(root: Path, *, max_slots: int = 10) -> int:
+    ensure_workspace(root, slots=max(max_slots, 1))
+    accounts_dir = _workspace_paths(root)["accounts_dir"]
+    for index in range(1, max(max_slots, 1) + 1):
+        slot_root = accounts_dir / str(index)
+        profile_dir = slot_root / "profile"
+        imports_dir = slot_root / "imports"
+        has_profile = _directory_has_payload(profile_dir)
+        has_imports = imports_dir.is_dir() and any(imports_dir.glob("*.zip"))
+        if not has_profile and not has_imports:
+            return index
+    return max(max_slots, 1)
 
 
 def build_parser() -> argparse.ArgumentParser:

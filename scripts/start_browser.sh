@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-EXT_DIR="$ROOT_DIR/extension"
+EXT_DIR="${SITECTL_EXTENSION_DIR:-$ROOT_DIR/extension}"
 HUB_START_SCRIPT="$ROOT_DIR/scripts/start_hub.sh"
 
 HOST="${SITECTL_HOST:-127.0.0.1}"

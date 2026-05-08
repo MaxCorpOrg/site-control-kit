@@ -556,7 +556,20 @@ async function commandListChats(args) {
       connection,
       `(() => {
         const ready = Boolean(document.querySelector(${JSON.stringify(CHAT_LIST_READY_SELECTOR)}));
-        const authRequired = Boolean(document.querySelector("canvas[aria-label*='QR'], .auth-code-form, .input-field-phone, .LoginPage"));
+        const authRequired = Boolean(
+          document.querySelector(
+            [
+              "canvas[aria-label*='QR']",
+              "canvas[aria-label*='qr']",
+              ".auth-code-form",
+              ".input-field-phone",
+              ".LoginPage",
+              "[data-testid='auth-qr-code']"
+            ].join(", ")
+          ) ||
+          /log in to telegram by qr code/i.test(String(document.body?.innerText || "")) ||
+          /link desktop device/i.test(String(document.body?.innerText || ""))
+        );
         return ready ? { ready: true } : authRequired ? { auth_required: true } : null;
       })()`,
       timeoutMs,

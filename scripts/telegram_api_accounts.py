@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from scripts.telegram_gui.services.secrets import SecretStore, mask_secret
+
 
 DEFAULT_REGISTRY_PATH = Path.home() / ".site-control-kit" / "telegram_workspace" / "registry" / "api_accounts.json"
 
@@ -24,6 +26,7 @@ def _normalize_account_payload(
     name: str,
     token: str,
     client_id: str = "",
+    secret_ref: str = "",
     updated_at: str | None = None,
 ) -> dict[str, str]:
     account_name = str(name or "").strip()
@@ -36,6 +39,7 @@ def _normalize_account_payload(
         "name": account_name,
         "token": access_token,
         "client_id": str(client_id or "").strip(),
+        "secret_ref": str(secret_ref or "").strip(),
         "updated_at": str(updated_at or _now_iso()),
     }
 
@@ -49,14 +53,22 @@ def load_registry(path: Path) -> dict[str, Any]:
         return _empty_registry()
     if not isinstance(payload, dict):
         return _empty_registry()
+    store = SecretStore(path.parent / "secrets")
     accounts_payload = payload.get("accounts")
     rows: list[dict[str, str]] = []
+    needs_migration = False
     if isinstance(accounts_payload, list):
         for item in accounts_payload:
             if not isinstance(item, dict):
                 continue
             name = str(item.get("name") or "").strip()
             token = str(item.get("token") or "").strip()
+            secret_ref = str(item.get("secret_ref") or "").strip()
+            if not token and secret_ref:
+                token = store.load_secret(secret_ref)
+            if token and not secret_ref:
+                secret_ref = store.save_secret(namespace="api_accounts", name=name, token=token)
+                needs_migration = True
             if not name or not token:
                 continue
             rows.append(
@@ -64,18 +76,41 @@ def load_registry(path: Path) -> dict[str, Any]:
                     name=name,
                     token=token,
                     client_id=str(item.get("client_id") or "").strip(),
+                    secret_ref=secret_ref,
                     updated_at=str(item.get("updated_at") or "").strip() or None,
                 )
             )
     default_account = str(payload.get("default_account") or "").strip()
     if default_account and all(row["name"] != default_account for row in rows):
         default_account = rows[0]["name"] if rows else ""
-    return {"default_account": default_account, "accounts": rows}
+    registry = {"default_account": default_account, "accounts": rows}
+    if needs_migration:
+        save_registry(path, registry)
+    return registry
 
 
 def save_registry(path: Path, registry: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(registry, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    store = SecretStore(path.parent / "secrets")
+    payload = {"default_account": str(registry.get("default_account") or "").strip(), "accounts": []}
+    for row in list_accounts(registry):
+        token = str(row.get("token") or "").strip()
+        secret_ref = str(row.get("secret_ref") or "").strip()
+        if token:
+            secret_ref = store.save_secret(
+                namespace="api_accounts",
+                name=str(row.get("name") or ""),
+                token=token,
+                secret_ref=secret_ref,
+            )
+        payload["accounts"].append(
+            {
+                "name": str(row.get("name") or "").strip(),
+                "client_id": str(row.get("client_id") or "").strip(),
+                "secret_ref": secret_ref,
+                "updated_at": str(row.get("updated_at") or "").strip() or _now_iso(),
+            }
+        )
+    store.save_registry_file(path, json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
 
 
 def list_accounts(registry: dict[str, Any]) -> list[dict[str, str]]:
@@ -88,10 +123,7 @@ def list_accounts(registry: dict[str, Any]) -> list[dict[str, str]]:
 
 
 def token_mask(value: str) -> str:
-    token = str(value or "")
-    if len(token) <= 8:
-        return "*" * len(token) if token else ""
-    return f"{token[:4]}...{token[-4:]}"
+    return mask_secret(value)
 
 
 def add_or_update_account(

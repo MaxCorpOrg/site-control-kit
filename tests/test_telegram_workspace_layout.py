@@ -17,6 +17,7 @@ class TelegramWorkspaceLayoutTests(unittest.TestCase):
             self.assertTrue((root / "registry" / "users.json").exists())
             self.assertTrue((root / "accounts" / "1" / "profile").exists())
             self.assertTrue((root / "accounts" / "3" / "keys" / "api_token.txt").exists())
+            self.assertTrue((root / "accounts" / "2" / "runtime").exists())
 
     def test_list_profiles_includes_slot_profile_and_zip(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -41,6 +42,17 @@ class TelegramWorkspaceLayoutTests(unittest.TestCase):
             rows = mod.list_profiles(root)
 
             self.assertEqual(rows, [])
+
+    def test_first_empty_slot_picks_first_slot_without_profile_or_imports(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "telegram_workspace"
+            mod.ensure_workspace(root, slots=3)
+            (root / "accounts" / "1" / "profile" / "Default").mkdir(parents=True)
+            (root / "accounts" / "2" / "imports" / "portable.zip").write_bytes(b"PK")
+
+            slot = mod.first_empty_slot(root, max_slots=3)
+
+        self.assertEqual(slot, 3)
 
 
 if __name__ == "__main__":

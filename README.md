@@ -263,6 +263,21 @@ cd /home/max/site-control-kit
 ./scripts/telegram_members_export_gui.sh
 ```
 
+Новый Linux-first install/run path для этого GUI:
+
+```bash
+cd /home/max/site-control-kit
+bash scripts/bootstrap_telegram_workstation.sh --doctor
+bash scripts/bootstrap_telegram_workstation.sh
+telegram-username-collector
+```
+
+Что это даёт:
+- `bootstrap_telegram_workstation.sh --doctor` проверяет `gi/GTK`, `python3`, helper requirements и текущий helper source;
+- обычный `bootstrap_telegram_workstation.sh` поднимает managed helper venv в `~/.site-control-kit/telegram_workspace/managed_helper/.venv`;
+- launcher `telegram-username-collector` идёт из `pyproject.toml` и поднимает тот же single-window GUI;
+- helper discovery order теперь такой: `TELEGRAM_API_COLLECTOR_PYTHON` -> managed helper venv -> legacy external collector path.
+
 Что умеет GUI теперь:
 - отдельное GTK-приложение вместо `zenity`-формы;
 - единый Telegram workspace: `~/.site-control-kit/telegram_workspace`;

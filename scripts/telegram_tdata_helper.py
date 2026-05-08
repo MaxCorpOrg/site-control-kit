@@ -7,6 +7,7 @@ import json
 import re
 import signal
 import sys
+import traceback
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,17 @@ try:
 except ImportError:
     utils = None
 
+try:
+    from telethon.errors.rpcerrorlist import MsgidDecreaseRetryError
+except ImportError:
+    MsgidDecreaseRetryError = None
+
+try:
+    from telethon.tl.functions.messages import CheckChatInviteRequest, ImportChatInviteRequest
+except ImportError:
+    CheckChatInviteRequest = None
+    ImportChatInviteRequest = None
+
 
 class StopState:
     def __init__(self) -> None:
@@ -35,6 +47,8 @@ class StopState:
 
 
 _SIGNAL_STOP_STATE = StopState()
+HISTORY_RETRY_LIMIT = 5
+HISTORY_RETRY_BASE_DELAY_SEC = 1.0
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -48,6 +62,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     list_parser = subparsers.add_parser("list-chats", parents=[common], help="List dialogs from imported tdata session.")
     list_parser.add_argument("--limit", type=int, default=200, help="Maximum number of dialogs to list.")
+
+    resolve_parser = subparsers.add_parser("resolve-chat", parents=[common], help="Resolve a public Telegram chat target.")
+    resolve_parser.add_argument("--chat", required=True, help="Public chat target: https://t.me/name, @name or peer id.")
+
+    join_parser = subparsers.add_parser("join-invite", parents=[common], help="Join a Telegram chat by invite link.")
+    join_parser.add_argument("--invite-link", required=True, help="Telegram invite link like https://t.me/+hash.")
 
     export_parser = subparsers.add_parser("export-chat", parents=[common], help="Collect usernames from one chat.")
     export_parser.add_argument("--chat-ref", required=True, help="Dialog reference returned by list-chats.")
@@ -123,6 +143,44 @@ def _peer_id(entity: Any) -> str:
     return ""
 
 
+def _invite_hash_from_value(value: str | None) -> str:
+    text = _compact(value)
+    if not text:
+        return ""
+    for pattern in (
+        r"(?:https?://)?t\.me/\+([A-Za-z0-9_-]+)",
+        r"(?:https?://)?t\.me/joinchat/([A-Za-z0-9_-]+)",
+        r"tg://join\?invite=([A-Za-z0-9_-]+)",
+    ):
+        match = re.search(pattern, text, flags=re.I)
+        if match:
+            return _compact(match.group(1))
+    if re.fullmatch(r"[A-Za-z0-9_-]{8,128}", text) and not text.lstrip("-").isdigit():
+        return text
+    return ""
+
+
+def _public_chat_ref_from_value(value: str | None) -> str:
+    text = _compact(value)
+    if not text or _invite_hash_from_value(text):
+        return ""
+    if re.fullmatch(r"-?\d+", text):
+        return text
+    for pattern in (
+        r"(?:https?://)?t\.me/(?!joinchat/|\+)([A-Za-z0-9_]{5,32})(?:[/?].*)?$",
+        r"@([A-Za-z0-9_]{5,32})",
+    ):
+        match = re.search(pattern, text, flags=re.I)
+        if match:
+            candidate = _compact(match.group(1))
+            if _is_valid_username_candidate(candidate):
+                return f"@{candidate}"
+    candidate = text[1:] if text.startswith("@") else text
+    if _is_valid_username_candidate(candidate):
+        return f"@{candidate}"
+    return ""
+
+
 def _entity_kind(entity: Any) -> str:
     kind = entity.__class__.__name__.lower()
     if "channel" in kind:
@@ -148,6 +206,44 @@ def _dialog_title(dialog: Any) -> str:
     return _compact(getattr(entity, "first_name", None)) or "Telegram"
 
 
+def _chat_item_from_entity(entity: Any, *, title: str = "") -> dict[str, Any]:
+    username = _compact(getattr(entity, "username", None))
+    display_title = _compact(title) or _compact(getattr(entity, "title", None)) or _compact(getattr(entity, "first_name", None)) or username or "Telegram"
+    return {
+        "title": display_title,
+        "chat_ref": _peer_id(entity) or username or display_title,
+        "username": f"@{username}" if username else "",
+        "peer_id": _peer_id(entity),
+        "subtitle": _entity_kind(entity),
+    }
+
+
+def _resolve_access_state(exc: Exception) -> str:
+    name = exc.__class__.__name__
+    if name in {
+        "UsernameInvalidError",
+        "UsernameNotOccupiedError",
+        "PeerIdInvalidError",
+        "ValueError",
+    }:
+        return "not_found"
+    if name in {
+        "InviteHashExpiredError",
+        "InviteHashInvalidError",
+        "InviteRequestSentError",
+    }:
+        return "invite_required"
+    if name in {
+        "ChannelInvalidError",
+        "ChannelPrivateError",
+        "ChatAdminRequiredError",
+        "ChatForbiddenError",
+        "UserNotParticipantError",
+    }:
+        return "resolved_but_no_access"
+    return "not_found"
+
+
 async def _open_client(tdata_path: str, session_path: str, passcode: str | None):
     if TDesktop is None or UseCurrentSession is None:
         raise SystemExit("Missing opentele dependency. Run this helper via the collector venv.")
@@ -170,19 +266,99 @@ async def list_chats(*, tdata_path: str, session_path: str, passcode: str | None
             entity = getattr(dialog, "entity", None)
             if entity is None:
                 continue
-            username = _compact(getattr(entity, "username", None))
-            items.append(
-                {
-                    "title": _dialog_title(dialog),
-                    "chat_ref": _peer_id(entity) or username or _dialog_title(dialog),
-                    "username": f"@{username}" if username else "",
-                    "peer_id": _peer_id(entity),
-                    "subtitle": _entity_kind(entity),
-                }
-            )
+            items.append(_chat_item_from_entity(entity, title=_dialog_title(dialog)))
     finally:
         await client.disconnect()
     return {"ok": True, "items": items}
+
+
+async def resolve_chat(*, tdata_path: str, session_path: str, passcode: str | None, chat: str) -> dict[str, Any]:
+    raw_target = _compact(chat)
+    normalized = _public_chat_ref_from_value(raw_target)
+    if not normalized:
+        access_state = "invite_required" if _invite_hash_from_value(raw_target) else "not_found"
+        detail = (
+            "Этот target выглядит как invite. Используйте join-invite path."
+            if access_state == "invite_required"
+            else f"Unsupported Telegram public chat target: {raw_target}"
+        )
+        return {
+            "ok": False,
+            "chat": raw_target,
+            "access_state": access_state,
+            "detail": detail,
+        }
+
+    client = await _open_client(tdata_path, session_path, passcode)
+    try:
+        try:
+            entity = await client.get_entity(int(normalized) if normalized.lstrip("-").isdigit() else normalized)
+        except Exception as exc:
+            return {
+                "ok": False,
+                "chat": normalized,
+                "access_state": _resolve_access_state(exc),
+                "detail": _compact(str(exc)) or "Failed to resolve Telegram chat target.",
+            }
+
+        item = _chat_item_from_entity(entity)
+        access_state = "ok"
+        detail = ""
+        try:
+            async for _msg in client.iter_messages(entity, limit=1):
+                break
+        except Exception as exc:
+            access_state = _resolve_access_state(exc)
+            if access_state == "not_found":
+                access_state = "resolved_but_no_access"
+            detail = _compact(str(exc)) or "Resolved target is not accessible for export."
+        return {
+            "ok": access_state == "ok",
+            "chat": normalized,
+            "access_state": access_state,
+            "detail": detail,
+            "item": item,
+        }
+    finally:
+        await client.disconnect()
+
+
+async def join_invite(*, tdata_path: str, session_path: str, passcode: str | None, invite_link: str) -> dict[str, Any]:
+    if CheckChatInviteRequest is None or ImportChatInviteRequest is None:
+        raise SystemExit("Missing Telethon invite dependency. Run this helper via the collector venv.")
+    invite_hash = _invite_hash_from_value(invite_link)
+    if not invite_hash:
+        raise SystemExit(f"Unsupported Telegram invite link: {invite_link}")
+
+    client = await _open_client(tdata_path, session_path, passcode)
+    try:
+        preview = await client(CheckChatInviteRequest(invite_hash))
+        entity = getattr(preview, "chat", None)
+        title = _compact(getattr(preview, "title", None))
+        already_member = entity is not None
+        joined = False
+        if entity is None:
+            updates = await client(ImportChatInviteRequest(invite_hash))
+            joined = True
+            chats = list(getattr(updates, "chats", []) or [])
+            entity = chats[0] if chats else None
+            if entity is None:
+                followup = await client(CheckChatInviteRequest(invite_hash))
+                entity = getattr(followup, "chat", None)
+                if not title:
+                    title = _compact(getattr(followup, "title", None))
+        if entity is None:
+            raise SystemExit("Invite import succeeded, but the joined chat could not be resolved.")
+        item = _chat_item_from_entity(entity, title=title)
+        return {
+            "ok": True,
+            "joined": joined,
+            "already_member": already_member,
+            "invite_hash": invite_hash,
+            "item": item,
+        }
+    finally:
+        await client.disconnect()
 
 
 def _merge_row(rows_by_peer: dict[str, dict[str, str]], row: dict[str, str]) -> None:
@@ -263,6 +439,81 @@ def _emit_progress(
     print(" ".join(parts), file=sys.stderr, flush=True)
 
 
+def _message_id(message: Any) -> int:
+    try:
+        value = int(getattr(message, "id", 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+    return value if value > 0 else 0
+
+
+def _is_msgid_decrease_retry_error(exc: Exception) -> bool:
+    if MsgidDecreaseRetryError is not None and isinstance(exc, MsgidDecreaseRetryError):
+        return True
+    return exc.__class__.__name__ == "MsgidDecreaseRetryError"
+
+
+def _emit_history_retry(chat_ref: str, *, retry: int, offset_id: int, remaining: int | None, exc: Exception) -> None:
+    parts = [
+        "RETRY",
+        f"chat={chat_ref}",
+        f"retry={retry}",
+        f"reason={exc.__class__.__name__}",
+    ]
+    if offset_id > 0:
+        parts.append(f"offset_id={offset_id}")
+    if remaining is not None:
+        parts.append(f"remaining={max(int(remaining), 0)}")
+    detail = _compact(str(exc))
+    if detail:
+        parts.append(f"detail={detail}")
+    print(" ".join(parts), file=sys.stderr, flush=True)
+
+
+async def _iter_history_messages_with_retry(
+    client: Any,
+    entity: Any,
+    *,
+    chat_ref: str,
+    message_limit: int | None,
+) -> Any:
+    remaining = message_limit
+    offset_id = 0
+    retry_count = 0
+    while True:
+        iter_kwargs: dict[str, Any] = {}
+        if remaining is not None:
+            iter_kwargs["limit"] = remaining
+        if offset_id > 0:
+            iter_kwargs["offset_id"] = offset_id
+        try:
+            async for msg in client.iter_messages(entity, **iter_kwargs):
+                retry_count = 0
+                msg_id = _message_id(msg)
+                if msg_id > 0:
+                    offset_id = msg_id
+                if remaining is not None:
+                    remaining -= 1
+                yield msg
+                if remaining is not None and remaining <= 0:
+                    return
+            return
+        except Exception as exc:
+            if not _is_msgid_decrease_retry_error(exc):
+                raise
+            retry_count += 1
+            if retry_count > HISTORY_RETRY_LIMIT:
+                raise
+            _emit_history_retry(
+                chat_ref,
+                retry=retry_count,
+                offset_id=offset_id,
+                remaining=remaining,
+                exc=exc,
+            )
+            await asyncio.sleep(min(HISTORY_RETRY_BASE_DELAY_SEC * retry_count, 5.0))
+
+
 async def _resolve_message_sender(client: Any, sender_id: int | None, sender: Any, sender_cache: dict[int, Any | None]) -> Any | None:
     if sender_id is None:
         return None
@@ -340,7 +591,12 @@ async def export_chat(
             message_limit = None if history_limit <= 0 else history_limit
             kept = 0
             _emit_progress(chat_ref, messages_scanned=0, usernames_found=len(rows_by_peer), stage="start")
-            async for msg in client.iter_messages(entity, limit=message_limit):
+            async for msg in _iter_history_messages_with_retry(
+                client,
+                entity,
+                chat_ref=chat_ref,
+                message_limit=message_limit,
+            ):
                 if _stop_requested(stop_state):
                     interrupted = True
                     break
@@ -406,6 +662,20 @@ async def _async_main(args: argparse.Namespace) -> dict[str, Any]:
             passcode=args.passcode,
             limit=int(args.limit),
         )
+    if args.command == "resolve-chat":
+        return await resolve_chat(
+            tdata_path=tdata_path,
+            session_path=session_path,
+            passcode=args.passcode,
+            chat=str(args.chat),
+        )
+    if args.command == "join-invite":
+        return await join_invite(
+            tdata_path=tdata_path,
+            session_path=session_path,
+            passcode=args.passcode,
+            invite_link=str(args.invite_link),
+        )
     if args.command == "export-chat":
         return await export_chat(
             tdata_path=tdata_path,
@@ -425,7 +695,13 @@ async def _async_main(args: argparse.Namespace) -> dict[str, Any]:
 def main() -> int:
     args = build_parser().parse_args()
     _install_signal_handlers(_SIGNAL_STOP_STATE)
-    payload = asyncio.run(_async_main(args))
+    try:
+        payload = asyncio.run(_async_main(args))
+    except SystemExit:
+        raise
+    except Exception:
+        traceback.print_exc()
+        return 1
     print(json.dumps(payload, ensure_ascii=False, indent=2))
     return 0
 
