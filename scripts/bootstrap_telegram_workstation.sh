@@ -2,13 +2,20 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-WORKSPACE_ROOT="${TELEGRAM_WORKSPACE_ROOT:-$HOME/.site-control-kit/telegram_workspace}"
+PYTHON_BIN="${PYTHON_BIN:-python3}"
+
+eval "$("$PYTHON_BIN" -m webcontrol runtime-env --format shell)"
+
+WORKSPACE_ROOT="${TELEGRAM_WORKSPACE_ROOT:-$ROOT_DIR/var/site-control-kit/telegram_workspace}"
 MANAGED_HELPER_ROOT="${TELEGRAM_MANAGED_HELPER_ROOT:-$WORKSPACE_ROOT/managed_helper}"
 VENV_DIR="$MANAGED_HELPER_ROOT/.venv"
 REQ_FILE="$ROOT_DIR/scripts/telegram_helper_requirements.txt"
-SYSTEM_PYTHON="${PYTHON_BIN:-python3}"
-LEGACY_COLLECTOR_ROOT="${TELEGRAM_API_COLLECTOR_ROOT:-$HOME/telegram-api-collector}"
-LEGACY_HELPER_PYTHON="$LEGACY_COLLECTOR_ROOT/.venv/bin/python"
+SYSTEM_PYTHON="$PYTHON_BIN"
+LEGACY_COLLECTOR_ROOT="${TELEGRAM_API_COLLECTOR_ROOT:-}"
+LEGACY_HELPER_PYTHON=""
+if [[ -n "$LEGACY_COLLECTOR_ROOT" ]]; then
+  LEGACY_HELPER_PYTHON="$LEGACY_COLLECTOR_ROOT/.venv/bin/python"
+fi
 
 usage() {
   cat <<'EOF'
@@ -17,7 +24,7 @@ Usage: scripts/bootstrap_telegram_workstation.sh [--doctor]
 --doctor   Print Linux Telegram workstation/bootstrap diagnostics without mutating anything.
 
 Default mode:
-- creates managed helper venv inside ~/.site-control-kit/telegram_workspace/managed_helper
+- creates managed helper venv inside TELEGRAM_WORKSPACE_ROOT/managed_helper
 - installs pinned Telegram helper requirements from scripts/telegram_helper_requirements.txt
 - keeps GUI runtime on system Python/GTK
 EOF
@@ -66,6 +73,14 @@ print_doctor() {
   helper_row="$(selected_helper)"
   helper_source="${helper_row%%$'\t'*}"
   helper_python="${helper_row#*$'\t'}"
+  printf 'runtime_root=%s\n' "${SITECTL_RUNTIME_ROOT:-$ROOT_DIR/var/site-control-kit}"
+  printf 'logs_root=%s\n' "${SITECTL_LOG_DIR:-$ROOT_DIR/var/site-control-kit/logs}"
+  printf 'reports_root=%s\n' "${SITECTL_REPORTS_ROOT:-$ROOT_DIR/var/site-control-kit/reports}"
+  printf 'hub_state_file=%s\n' "${SITECTL_STATE_FILE:-$ROOT_DIR/var/site-control-kit/state/state.json}"
+  printf 'runtime_events_log=%s\n' "${SITECTL_RUNTIME_EVENTS_LOG:-$ROOT_DIR/var/site-control-kit/logs/runtime_events.jsonl}"
+  printf 'runtime_errors_log=%s\n' "${SITECTL_RUNTIME_ERRORS_LOG:-$ROOT_DIR/var/site-control-kit/logs/runtime_errors.jsonl}"
+  printf 'local_config_path=%s\n' "$ROOT_DIR/.site-control-kit/local.yaml"
+  printf 'generated_token_file=%s\n' "$ROOT_DIR/.site-control-kit/generated_token.txt"
   printf 'workspace_root=%s\n' "$WORKSPACE_ROOT"
   printf 'managed_helper_root=%s\n' "$MANAGED_HELPER_ROOT"
   printf 'managed_helper_python=%s\n' "$VENV_DIR/bin/python"

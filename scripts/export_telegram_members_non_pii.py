@@ -16,11 +16,19 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-DEFAULT_SERVER = "http://127.0.0.1:8765"
-DEFAULT_TOKEN = "local-bridge-quickstart-2026"
+SCRIPT_DIR = Path(__file__).resolve().parent
+REPO_ROOT = SCRIPT_DIR.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from webcontrol.settings import load_runtime_settings
+
+SETTINGS = load_runtime_settings(mutate=False)
+DEFAULT_SERVER = SETTINGS.server_url
+DEFAULT_TOKEN = ""
 TOKEN_ENV = "SITECTL_TOKEN"
-REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_ARCHIVE_DIR = REPO_ROOT / "artifacts" / "telegram_exports"
+DEFAULT_OUTPUT_PATH = SETTINGS.telegram_default_output_dir / "telegram_members_non_pii.md"
 ARCHIVE_STATE_DIRNAME = "state"
 TERMINAL_STATUSES = {
     "completed",
@@ -5107,7 +5115,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--token",
         default="",
-        help=f"Токен доступа (fallback: env {TOKEN_ENV}, потом {DEFAULT_TOKEN})",
+        help=f"Токен доступа (fallback: env {TOKEN_ENV})",
     )
     parser.add_argument("--client-id", default="", help="Целевой client_id (опционально)")
     parser.add_argument("--tab-id", type=int, default=None, help="Целевой tab_id (опционально)")
@@ -5118,7 +5126,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--output",
-        default="/home/max/Загрузки/Telegram Desktop/MadCoreChat_members_non_pii.md",
+        default=str(DEFAULT_OUTPUT_PATH),
         help="Путь к выходному .md файлу",
     )
     parser.add_argument(
@@ -5237,6 +5245,11 @@ def main() -> int:
     args = parser.parse_args()
 
     token = args.token or os.getenv(TOKEN_ENV, "") or DEFAULT_TOKEN
+    if not str(token or "").strip():
+        raise SystemExit(
+            f"ERROR: token is required. Pass --token or set {TOKEN_ENV}. "
+            "For local shells, `python3 -m webcontrol runtime-env --format shell` can export the active runtime token."
+        )
     server = _norm_server(args.server)
     group_url = args.group_url
     out_path = Path(args.output).expanduser()

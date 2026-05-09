@@ -16,6 +16,14 @@ from scripts import telegram_members_export_gui as mod
 
 
 class TelegramMembersExportGuiTests(unittest.TestCase):
+    def test_app_exports_owner_module_symbols(self) -> None:
+        from scripts.telegram_gui import backend as backend_mod
+        from scripts.telegram_gui.ui import window as window_mod
+
+        self.assertIs(mod.TelegramGuiBackend, backend_mod.TelegramGuiBackend)
+        self.assertIs(mod.TelegramMembersExportWindow, window_mod.TelegramMembersExportWindow)
+        self.assertIs(mod.TelegramMembersExportApp, window_mod.TelegramMembersExportApp)
+
     def test_export_timeout_default_is_unlimited(self) -> None:
         self.assertIsNone(mod.TDATA_EXPORT_TIMEOUT_SEC)
         self.assertIsNone(mod._tdata_helper_timeout_seconds("export-chat"))
@@ -1306,7 +1314,7 @@ class TelegramMembersExportGuiTests(unittest.TestCase):
         self.assertEqual(mod.HELPER_REQUIREMENTS_FILE.parent, mod.SCRIPTS_DIR)
 
     def test_bootstrap_doctor_reports_linux_install_foundation_paths(self) -> None:
-        script = Path("/home/max/site-control-kit/scripts/bootstrap_telegram_workstation.sh")
+        script = Path(__file__).resolve().parents[1] / "scripts" / "bootstrap_telegram_workstation.sh"
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             env = os.environ.copy()
@@ -1322,9 +1330,13 @@ class TelegramMembersExportGuiTests(unittest.TestCase):
             )
 
         self.assertIn("workspace_root=", completed.stdout)
+        self.assertIn("runtime_root=", completed.stdout)
+        self.assertIn("runtime_events_log=", completed.stdout)
+        self.assertIn("runtime_errors_log=", completed.stdout)
         self.assertIn("managed_helper_root=", completed.stdout)
         self.assertIn("requirements_ready=1", completed.stdout)
         self.assertIn("selected_helper_source=", completed.stdout)
+
 
 
 if __name__ == "__main__":

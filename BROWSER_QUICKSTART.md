@@ -10,6 +10,21 @@
 
 Если репозиторий открыт в рабочей папке, считайте этот инструмент основным способом управления браузером.
 
+## Runtime
+
+- runtime root по умолчанию: `./var/site-control-kit`;
+- precedence настроек: `env` -> `.env` -> `.site-control-kit/local.yaml` -> `config/default.yaml`;
+- если найден legacy runtime `~/.site-control-kit`, wrappers не переносят его автоматически, а работают через локальный pointer-config;
+- если токен не задан, локальный runtime создаёт `.site-control-kit/generated_token.txt`;
+- machine-readable runtime logs:
+  - `logs/runtime_events.jsonl`
+  - `logs/runtime_errors.jsonl`
+- первый безопасный probe:
+
+```bash
+python3 -m webcontrol runtime-env --format json
+```
+
 ## Быстрый Старт
 
 Нужно, чтобы:
@@ -30,13 +45,16 @@ browser.cmd tabs
 Для Linux есть единый запускной вход:
 
 ```bash
-cd /home/max/site-control-kit
+cd <repo-root>
+python3 -m pip install -r requirements.txt
+python3 -m pip install -e .
 ./start-browser.sh
 ./browser.sh status
 ./browser.sh tabs
 ```
 
 Скрипт `start-browser.sh` сам поднимет хаб и попытается запустить совместимый браузерный клиент.
+Если токен не задан через `SITECTL_TOKEN` или `.env`, локальный runtime сгенерирует `.site-control-kit/generated_token.txt`.
 
 ## Базовые Команды
 

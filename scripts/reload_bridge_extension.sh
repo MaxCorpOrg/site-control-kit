@@ -2,8 +2,18 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SERVER_URL="${SITECTL_SERVER:-http://127.0.0.1:8765}"
-ACCESS_TOKEN="${SITECTL_TOKEN:-local-bridge-quickstart-2026}"
+if ! env_output="$(python3 -m webcontrol runtime-env --format shell 2>/dev/null)"; then
+  echo "ERROR: failed to resolve site-control-kit runtime environment" >&2
+  exit 1
+fi
+eval "$env_output"
+
+SERVER_URL="${SITECTL_SERVER_URL:-http://127.0.0.1:8765}"
+ACCESS_TOKEN="${SITECTL_TOKEN:-}"
+if [[ -z "$ACCESS_TOKEN" ]]; then
+  echo "ERROR: SITECTL_TOKEN is not configured. Create .env from .env.example or use the generated local runtime config." >&2
+  exit 1
+fi
 EXTENSION_ID="${SCB_EXTENSION_ID:-bfmgnjibjekkbhhchjfmjfbfbfemdnbf}"
 RELOAD_X_RATIO="${SCB_RELOAD_X_RATIO:-0.93}"
 RELOAD_Y_RATIO="${SCB_RELOAD_Y_RATIO:-0.17}"
@@ -21,6 +31,11 @@ export SERVER_URL ACCESS_TOKEN REQUESTED_CLIENT_ID REQUESTED_TAB_ID VERIFY_WAIT_
 
 TARGET_URL="chrome://extensions/?id=${EXTENSION_ID}"
 SELF_RELOAD_URL="chrome-extension://${EXTENSION_ID}/options.html?action=reload-self"
+
+if ! python3 -m webcontrol health >/dev/null 2>&1; then
+  echo "ERROR: site-control-kit hub is not reachable at ${SERVER_URL}. Start the hub first." >&2
+  exit 1
+fi
 
 selection_json="$(
 python3 - <<'PY'

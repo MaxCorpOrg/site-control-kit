@@ -8,9 +8,9 @@ from pathlib import Path
 from typing import Any
 
 from scripts.telegram_gui.services.secrets import SecretStore, mask_secret
+from webcontrol.settings import load_runtime_settings
 
-
-DEFAULT_REGISTRY_PATH = Path.home() / ".site-control-kit" / "telegram_workspace" / "registry" / "users.json"
+DEFAULT_REGISTRY_PATH = load_runtime_settings(mutate=False).telegram_users_registry_file
 
 
 def _now_iso() -> str:

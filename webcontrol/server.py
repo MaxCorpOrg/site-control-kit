@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from .config import HubConfig
+from .runtime_logging import RuntimeEventLogger
+from .settings import load_runtime_settings
 from .store import ControlStore
 
 LOGGER = logging.getLogger("webcontrol.server")
@@ -270,21 +274,75 @@ class HubRequestHandler(BaseHTTPRequestHandler):
         self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "error": "not found"})
 
 
-def run_server(config: HubConfig) -> None:
+def run_server(config: HubConfig, *, log_path: str | None = None) -> None:
+    settings = load_runtime_settings(mutate=True)
+    runtime_logger = RuntimeEventLogger(
+        events_path=settings.runtime_events_log_file,
+        errors_path=settings.runtime_errors_log_file,
+    )
+    handlers: list[logging.Handler] = [logging.StreamHandler()]
+    if log_path:
+        file_path = Path(log_path).expanduser()
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        handlers.append(logging.FileHandler(file_path, encoding="utf-8"))
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
+        handlers=handlers,
+        force=True,
     )
     store = ControlStore(config.state_file)
     server = HubHTTPServer(config.host, config.port, config, store)
     LOGGER.info("Server started on %s", config.base_url)
     LOGGER.info("State file: %s", config.state_file)
+    if log_path:
+        LOGGER.info("Hub log: %s", log_path)
+    runtime_logger.log_event(
+        component="hub",
+        event="server_started",
+        status="running",
+        message=f"Hub started on {config.base_url}",
+        details={
+            "host": config.host,
+            "port": config.port,
+            "state_file": str(config.state_file),
+            "log_path": str(log_path or ""),
+            "pid": os.getpid(),
+        },
+    )
 
     try:
         server.serve_forever(poll_interval=0.5)
     except KeyboardInterrupt:
         LOGGER.info("Interrupted, shutting down")
+        runtime_logger.log_event(
+            component="hub",
+            event="server_interrupted",
+            status="stopping",
+            message="Hub interrupted by KeyboardInterrupt",
+            details={"pid": os.getpid()},
+        )
+    except Exception as exc:
+        runtime_logger.log_exception(
+            component="hub",
+            event="server_crashed",
+            exc=exc,
+            message="Hub crashed",
+            details={
+                "host": config.host,
+                "port": config.port,
+                "state_file": str(config.state_file),
+            },
+        )
+        raise
     finally:
         server.shutdown()
         server.server_close()
         LOGGER.info("Stopped")
+        runtime_logger.log_event(
+            component="hub",
+            event="server_stopped",
+            status="stopped",
+            message="Hub stopped",
+            details={"pid": os.getpid()},
+        )

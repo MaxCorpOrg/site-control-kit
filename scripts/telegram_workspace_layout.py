@@ -8,7 +8,9 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-DEFAULT_WORKSPACE_ROOT = Path.home() / ".site-control-kit" / "telegram_workspace"
+from webcontrol.settings import load_runtime_settings
+
+DEFAULT_WORKSPACE_ROOT = load_runtime_settings(mutate=False).telegram_workspace_root
 LEGACY_USERS_ROOT = Path.home() / ".site-control-kit" / "telegram_users"
 LEGACY_REGISTRY_PATH = LEGACY_USERS_ROOT / "registry.json"
 

@@ -1,6 +1,6 @@
 # Project Status RU
 
-Последнее обновление: 2026-05-08
+Последнее обновление: 2026-05-09
 
 Этот файл нужен как точка входа для любого нового чата и любого нового агента.
 Перед новой задачей его нужно прочитать целиком.
@@ -11,6 +11,154 @@ Repo-root entrypoint для любого агента: `AGENT_START_HERE.md`.
 Читать его нужно по номерам файлов, начиная с `00_START_HERE.md`.
 
 ## Сделано
+
+### Обновление 2026-05-09 (Production Hardening Change Set 3: Telegram GUI Extraction + Legacy Collector Cleanup)
+- Закрыт третий production-hardening пакет без смены Telegram export semantics:
+  - `scripts/telegram_gui/backend.py` теперь реальный owner для `TelegramGuiBackend`;
+  - `scripts/telegram_gui/ui/window.py` теперь реальный owner для `TelegramMembersExportWindow` и `TelegramMembersExportApp`;
+  - `scripts/telegram_gui/app.py` истончён до shared prelude + compatibility exports + `main()`;
+  - shared globals `app.py` теперь зеркалятся в owner-модули, поэтому старый import/test contract не сломан;
+  - implicit legacy collector home-default убран из GUI runtime и `bootstrap_telegram_workstation.sh`.
+- Verify после фикса:
+  - `python3 -m unittest discover -s tests -p 'test_*.py'` -> `294 tests OK`
+  - `python3 -m webcontrol --help` -> OK
+  - `python3 -m webcontrol browser --help` -> OK
+  - `python3 -m webcontrol runtime-env --format json --no-create` -> OK
+  - `python3 scripts/export_telegram_members_non_pii.py --help` -> OK
+  - `bash scripts/bootstrap_telegram_workstation.sh --doctor` -> OK
+  - `python3 -m webcontrol health` -> OK
+  - `python3 -m webcontrol state` -> OK
+  - clean install smoke:
+    - `pip install -r requirements.txt` -> OK
+    - `pip install -e .` -> OK
+    - `sitectl --help` -> OK
+    - `telegram-username-collector` -> controlled GTK fast-fail message вместо traceback
+  - live GTK startup smoke на `DISPLAY=:0` снова подтвердил реальное окно `Telegram Username Collector`
+  - `git diff --check` -> clean
+- Практический вывод:
+  - extraction backend/window уже landed как реальная структура, а не как alias-заготовка;
+  - hidden fallback на `/home/max/telegram-api-collector` больше не участвует в production defaults;
+  - следующий безопасный шаг теперь уже не ещё один GUI split, а Windows core smoke и короткий release checklist;
+  - exact Windows verify-набор уже зафиксирован в `README.md` и `docs/INSTALL_OTHER_DEVICES_RU.md`, и следующий агент должен пройти его перед новым feature-cycle.
+
+### Обновление 2026-05-09 (Production Hardening Change Set 2: Logging + Launcher + Install Story)
+- Закрыт второй production-hardening пакет без изменения Telegram export semantics:
+  - `var/` добавлен в `.gitignore`;
+  - `PyGObject` удалён из `requirements.txt` и `pyproject.toml`: GTK GUI теперь документирован как system dependency Linux;
+  - новый launcher `telegram-username-collector` теперь даёт controlled fast-fail на Windows и в Python-окружении без GTK bindings;
+  - `scripts/telegram_members_export_gui.py` оставлен как compatibility alias для старого import/test contract;
+  - hub теперь пишет structured runtime logs:
+    - `logs/runtime_events.jsonl`
+    - `logs/runtime_errors.jsonl`;
+  - Telegram GUI теперь пишет per-run machine-readable sidecars:
+    - `telegram_workspace/runs/<run_id>/summary.json`
+    - `telegram_workspace/runs/<run_id>/artifacts.json`
+    - `telegram_workspace/runs/<run_id>/events.jsonl`;
+  - `bootstrap_telegram_workstation.sh --doctor` теперь печатает resolved runtime/log/report paths;
+  - `scripts/telegram_contact_chain.py` теперь использует runtime reports root вместо home-path default.
+- Verify после фикса:
+  - `python3 -m unittest discover -s tests -p 'test_*.py'` -> `293 tests OK`
+  - `python3 -m webcontrol --help` -> OK
+  - `python3 -m webcontrol browser --help` -> OK
+  - `python3 -m webcontrol runtime-env --format json --no-create` -> OK
+  - `python3 scripts/export_telegram_members_non_pii.py --help` -> OK
+  - `bash scripts/bootstrap_telegram_workstation.sh --doctor` -> OK
+  - `bash scripts/start_hub.sh` -> hub поднялся; `python3 -m webcontrol health` -> OK; `python3 -m webcontrol state` -> OK
+  - clean install smoke:
+    - `pip install -r requirements.txt` -> OK
+    - `pip install -e .` -> OK
+    - `sitectl --help` -> OK
+    - `telegram-username-collector` -> controlled GTK fast-fail message вместо import/build traceback
+  - live GTK startup smoke на `DISPLAY=:0` снова подтвердил реальное окно `Telegram Username Collector`
+- Практический вывод:
+  - install story больше не ломается на `PyGObject` при чистом `pip install`
+  - runtime logging и Telegram run diagnostics теперь пригодны для сопровождения
+  - следующий безопасный шаг уже не baseline/bootstrap, а минимальный extraction backend/window orchestration из `scripts/telegram_gui/app.py`
+
+### Обновление 2026-05-09 (Production Hardening Change Set 1: Runtime/Config Baseline)
+- Закрыт первый production-hardening пакет без смены Telegram export semantics:
+  - появился общий settings-layer `webcontrol/settings.py`;
+  - в репозитории появились `requirements.txt`, `config/default.yaml`, `.env.example`;
+  - default runtime root теперь проектный: `./var/site-control-kit`;
+  - settings precedence теперь единая: `env -> .env -> .site-control-kit/local.yaml -> config/default.yaml`;
+  - если уже существует legacy runtime `~/.site-control-kit`, проект больше не переносит его автоматически, а создаёт compatibility pointer `.site-control-kit/local.yaml`;
+  - core entrypoints и wrappers больше не используют `local-bridge-quickstart-2026` как рабочий fallback token;
+  - `scripts/export_telegram_members_non_pii.py` больше не держит `/home/max/...` output path как default;
+  - `scripts/reload_bridge_extension.sh` теперь сначала честно проверяет доступность хаба и даёт понятную ошибку, а не traceback.
+- Verify после фикса:
+  - `python3 -m unittest discover -s tests -p 'test_*.py'` -> `285 tests OK`
+  - `python3 -m webcontrol --help` -> OK
+  - `python3 -m webcontrol browser --help` -> OK
+  - `python3 -m webcontrol runtime-env --format json --no-create` -> OK
+  - `bash scripts/start_hub.sh` -> hub поднялся; `python3 -m webcontrol health` -> OK; `python3 -m webcontrol state` -> OK
+  - `python3 scripts/export_telegram_members_non_pii.py --help` -> OK
+  - `bash scripts/bootstrap_telegram_workstation.sh --doctor` -> OK
+  - live GTK startup smoke:
+    - `DISPLAY=:0 python3 scripts/telegram_members_export_gui.py` -> окно реально поднялось;
+    - `DISPLAY=:0 xwininfo -root -tree | rg "Telegram Username Collector"` подтвердил окно;
+    - после завершения `xwininfo` уже не видит этот title.
+- Практический runtime-результат:
+  - на текущей машине compatibility mode реально adopted existing legacy runtime:
+    - `.site-control-kit/local.yaml` указывает на `~/.site-control-kit`;
+    - `.site-control-kit/generated_token.txt` создан локально и используется wrappers/CLI;
+    - `bootstrap --doctor` и GUI остались на legacy workspace без auto-move.
+- Практический вывод:
+  - install/runtime story уже не завязан жёстко на `/home/max/...` и больше не требует quickstart token в shell wrappers;
+  - следующий безопасный этап теперь уже про unified logging/error-reporting и минимальный extraction runtime/logging orchestration из `scripts/telegram_gui/app.py`.
+
+### Обновление 2026-05-09 (TG_CONTACT 4 `ROST FARMA` Stability And Live Export Cycle)
+- Новый strongest target на `TG_CONTACT 4` уже подтверждён живым прогоном:
+  - нового кода в репозитории в этом цикле не потребовалось;
+  - основной `Primary tdata` path уже отработал end-to-end без нового blocker-а;
+  - backend direct probe подтвердил live row:
+    - `Чат ROST FARMA`
+    - `chat_ref=-1001340567266`
+    - `source_kind=live`
+- Preflight перед прогоном был чистым:
+  - `bash scripts/bootstrap_telegram_workstation.sh --doctor` -> `managed_helper_ready=1`, `gtk_runtime=ok`, `selected_helper_source=managed`
+  - `python3 -m webcontrol --help` -> OK
+  - `python3 -m webcontrol browser --help` -> OK
+  - `python3 -m unittest discover -s tests -p 'test_*.py'` -> `280 tests OK`
+  - browser hub поднимался только как secondary contour:
+    - `bash scripts/start_hub.sh` -> OK
+    - `./browser.sh status` -> OK
+    - `./browser.sh tabs` -> OK
+    - browser clients остались stale/offline, но это не стало blocker-ом для `tdata-history-authors`
+- Новый live GTK cycle на `DISPLAY=:0` уже закрыт:
+  - source live row:
+    - `Чат ROST FARMA`
+    - `chat_ref=-1001340567266`
+  - output root:
+    - `/home/max/4`
+  - summary:
+    - `/tmp/tg_contact4_rost_farma_live_20260509T073256Z.json`
+  - action log:
+    - `/home/max/.site-control-kit/telegram_workspace/logs/gui_actions_tg_contact4_rost_farma_live_20260509T073256Z.log`
+  - quick artifacts:
+    - `/home/max/4/tg_contact4_rost_farma_quick_check_20260509T073256Z.md`
+    - `/home/max/4/tg_contact4_rost_farma_quick_check_20260509T073256Z_usernames.txt`
+    - `/home/max/4/tg_contact4_rost_farma_quick_check_20260509T073256Z_usernames.json`
+    - `/home/max/.site-control-kit/telegram_workspace/logs/export_run_20260509T073309Z.log`
+  - full artifacts:
+    - `/home/max/4/tg_contact4_rost_farma_full_history_20260509T073256Z.md`
+    - `/home/max/4/tg_contact4_rost_farma_full_history_20260509T073256Z_usernames.txt`
+    - `/home/max/4/tg_contact4_rost_farma_full_history_20260509T073256Z_usernames.json`
+    - `/home/max/.site-control-kit/telegram_workspace/logs/export_run_20260509T073315Z.log`
+  - safe continuity dir:
+    - `/home/max/4/telegram_export_чат_rost_farma/latest_safe.txt`
+    - `/home/max/4/telegram_export_чат_rost_farma/latest_safe.md`
+  - artifact index:
+    - `artifacts/telegram_exports/INDEX.md` уже автоматически получил entries для `Quick Check` и `Full History`
+- Результат:
+  - quick-check: `31` usernames / `400` messages;
+  - full-history: `2481` usernames / `269206` messages;
+  - helper/export шли через managed helper venv;
+  - live window и save dialog были снова подтверждены на `DISPLAY=:0`;
+  - `security_mode` у `TG_CONTACT 4` остаётся `Insecure local token`.
+- Практический вывод:
+  - `ROST FARMA` теперь strongest confirmed target для `TG_CONTACT 4` по абсолютному числу `@username`;
+  - browser hub/offline clients сейчас не надо путать с blocker-ом Telegram export path;
+  - следующий шаг теперь уже брать ещё один productive target на `TG_CONTACT 4`, не смешивая это с secure token / legacy cleanup.
 
 ### Обновление 2026-05-08 (GTK Window Close -> Stop Save -> Auto Close)
 - Закрыт отдельный GUI UX gap:

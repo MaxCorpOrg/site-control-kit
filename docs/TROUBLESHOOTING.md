@@ -19,7 +19,7 @@
 - Профиль Firefox хранится отдельно в `~/.site-control-kit/firefox-profile`, поэтому Telegram cookies/session можно не терять между прогонами.
 - Для snap Firefox manual шаги такие:
   - `Load Temporary Add-on`
-  - выбрать `/home/max/site-control-kit/extension/manifest.json`
+  - выбрать `<repo-root>/extension/manifest.json`
 - Проверка та же:
   - `./browser.sh status`
   - `./browser.sh tabs`
@@ -50,7 +50,7 @@
 - В свежем Telegram Web пропали старые `.bubbles`/`sticky_sentinel` селекторы, из-за чего chat-scroll мог застревать на `0 upward scroll steps`.
 - Экспортёр переведён на новый DOM (`MessageList`, `messages-container`, `backwards-trigger`) и теперь реально листает историю вверх.
 - Если нужен более широкий охват участников, увеличивайте `--chat-scroll-steps` и `--chat-max-runtime`; после этого экспортёр сам может сделать ещё несколько шагов через `--chat-auto-extra-steps`, если рост участников продолжается.
-- Все новые выгрузки дополнительно складываются в `/home/max/site-control-kit/artifacts/telegram_exports`, а список путей хранится в `INDEX.md` рядом.
+- Все новые выгрузки дополнительно складываются в `artifacts/telegram_exports`, а список путей хранится в `INDEX.md` рядом.
 - `@username` больше не нужно выковыривать из markdown вручную: рядом с каждым экспортом пишутся `*_usernames.txt` и `*_usernames.json`, а их пути тоже попадают в `INDEX.md`.
 - Для повторных прогонов больше не нужно отдельно руками собирать `identity_history.json`: экспортёр сам хранит per-chat history в `artifacts/telegram_exports/state` и подхватывает уже найденные `@username` из прежних archived sidecars.
 
@@ -94,6 +94,30 @@
 
 ## Ошибка авторизации (`401 unauthorized`)
 - Токен CLI/расширения не совпадает с токеном хаба.
+- Проверьте `python3 -m webcontrol runtime-env --format json`: там видно текущий runtime root и resolved token source.
+
+## `telegram-username-collector` завершился с ошибкой про GTK
+- Это не падение бизнес-логики, а проблема Python/GTK окружения.
+- На Linux launcher теперь должен печатать понятное сообщение вместо traceback.
+- Запустите:
+  - `bash scripts/bootstrap_telegram_workstation.sh --doctor`
+- Проверьте:
+  - `gtk_runtime=ok`
+  - `selected_helper_source=managed` или `explicit`
+- На Windows GTK GUI в v1 не поддерживается.
+
+## Нужны логи запуска и ошибок
+- Общий лог хаба: `logs/hub.log`
+- Runtime JSONL:
+  - `logs/runtime_events.jsonl`
+  - `logs/runtime_errors.jsonl`
+- Telegram GUI run-логи:
+  - `telegram_workspace/logs/gui_actions_<stamp>.log`
+  - `telegram_workspace/logs/export_run_<stamp>.log`
+- Machine-readable Telegram run sidecars:
+  - `telegram_workspace/runs/<run_id>/summary.json`
+  - `telegram_workspace/runs/<run_id>/artifacts.json`
+  - `telegram_workspace/runs/<run_id>/events.jsonl`
 
 ## `navigate` работает, а `click/fill` нет
 - Неверный CSS-селектор.

@@ -1,5 +1,144 @@
 # CODEX_STATE
 
+## 2026-05-09 (Production Hardening Change Set 3: Telegram GUI Extraction + Legacy Collector Cleanup)
+
+- Code changes:
+  - `scripts/telegram_gui/backend.py` now owns `TelegramGuiBackend`
+  - `scripts/telegram_gui/ui/window.py` now owns `TelegramMembersExportWindow` and `TelegramMembersExportApp`
+  - `scripts/telegram_gui/app.py` is now a thin shared-prelude + compatibility + `main()` module
+  - shared `app.py` globals are mirrored into owner modules so legacy tests/runtime patching via `scripts.telegram_members_export_gui` still works
+  - adapter type imports now point at `scripts.telegram_gui.backend`
+  - the implicit legacy collector fallback `/home/max/telegram-api-collector` was removed from both the GUI runtime and `bootstrap_telegram_workstation.sh`
+  - added an explicit import-compatibility test for the new owner modules
+- Verify:
+  - `python3 -m unittest discover -s tests -p 'test_*.py'` -> `294 tests OK`
+  - `python3 -m webcontrol --help` -> OK
+  - `python3 -m webcontrol browser --help` -> OK
+  - `python3 -m webcontrol runtime-env --format json --no-create` -> OK
+  - `python3 scripts/export_telegram_members_non_pii.py --help` -> OK
+  - `bash scripts/bootstrap_telegram_workstation.sh --doctor` -> OK
+  - `python3 -m webcontrol health` -> OK
+  - `python3 -m webcontrol state` -> OK
+  - clean install smoke:
+    - `pip install -r requirements.txt` -> OK
+    - `pip install -e .` -> OK
+    - `sitectl --help` -> OK
+    - `telegram-username-collector` -> clean GTK fast-fail message, exit `2`
+  - Linux GTK smoke:
+    - `DISPLAY=:0 python3 scripts/telegram_members_export_gui.py` -> window visible via `xwininfo`, then terminated cleanly
+  - `git diff --check` -> clean
+- Practical conclusion:
+  - the backend/window extraction is now real rather than alias-only
+  - the old app-module compatibility contract is still intact for tests and operator entrypoints
+  - the next step should be a real Windows core smoke plus a short v1 release checklist, not another Telegram GUI split
+  - the exact Windows smoke checklist now lives in `README.md` and `docs/INSTALL_OTHER_DEVICES_RU.md`; the next agent should execute that checklist verbatim
+
+## 2026-05-09 (Production Hardening Change Set 2: Logging + Launcher + Install Story)
+
+- Code changes:
+  - added `webcontrol/runtime_logging.py` for shared runtime JSONL events/errors
+  - runtime settings now expose `SITECTL_RUNTIME_EVENTS_LOG` and `SITECTL_RUNTIME_ERRORS_LOG`
+  - hub startup/shutdown/error paths now write structured events to `runtime_events.jsonl` / `runtime_errors.jsonl`
+  - Telegram GUI now writes `telegram_workspace/runs/<run_id>/{summary.json,artifacts.json,events.jsonl}`
+  - added `scripts/telegram_gui/runtime.py`, `scripts/telegram_gui/process_runner.py`, `scripts/telegram_gui/logging.py`
+  - `telegram-username-collector` now points to `scripts/telegram_username_collector_launcher.py`
+  - `scripts/telegram_members_export_gui.py` remains an alias to `scripts.telegram_gui.app` for compatibility/tests
+  - removed `PyGObject` from `requirements.txt` and `pyproject.toml`; Linux GTK is now explicitly a system dependency
+  - `scripts/bootstrap_telegram_workstation.sh --doctor` now prints resolved runtime/log/report paths
+  - `scripts/telegram_contact_chain.py` now defaults to runtime reports root instead of a home-path output
+- Verify:
+  - `python3 -m unittest discover -s tests -p 'test_*.py'` -> `293 tests OK`
+  - `python3 -m webcontrol --help` -> OK
+  - `python3 -m webcontrol browser --help` -> OK
+  - `python3 -m webcontrol runtime-env --format json --no-create` -> OK
+  - `python3 scripts/export_telegram_members_non_pii.py --help` -> OK
+  - `bash scripts/bootstrap_telegram_workstation.sh --doctor` -> OK
+  - `bash scripts/start_hub.sh` -> hub started; `python3 -m webcontrol health` -> OK; `python3 -m webcontrol state` -> OK
+  - clean install smoke:
+    - `pip install -r requirements.txt` -> OK
+    - `pip install -e .` -> OK
+    - `sitectl --help` -> OK
+    - `telegram-username-collector` -> clean GTK fast-fail message, exit `2`
+  - Linux GTK smoke:
+    - `DISPLAY=:0 python3 scripts/telegram_members_export_gui.py` -> window visible via `xwininfo`, then terminated cleanly
+- Practical conclusion:
+  - the install story no longer breaks on `PyGObject` build dependencies in a clean venv
+  - launcher behavior is now explicit and production-safe for both Linux-no-GTK and Windows
+  - the next step should be minimal extraction of `TelegramGuiBackend` / window orchestration from `scripts/telegram_gui/app.py`, not another baseline pass
+
+## 2026-05-09 (Production Hardening Change Set 1: Runtime/Config Baseline)
+
+- Code changes:
+  - added `webcontrol/settings.py` as the shared runtime/config layer
+  - added `requirements.txt`, `config/default.yaml`, `.env.example`
+  - `pyproject.toml` now declares the real Python dependencies and keeps `telegram-username-collector`
+  - `webcontrol/cli.py`, `webcontrol/config.py`, `webcontrol/server.py` now resolve runtime paths and token via the shared settings layer
+  - shell/PowerShell wrappers now use `python3 -m webcontrol runtime-env` instead of hardcoded home-path defaults and quickstart token fallback
+  - `scripts/export_telegram_members_non_pii.py` now uses resolved runtime defaults and requires an explicit token source
+  - `scripts/reload_bridge_extension.sh` now fails with a clear hub-not-reachable message instead of a traceback
+- Runtime contract:
+  - default runtime root is now `./var/site-control-kit`
+  - settings precedence is `env -> .env -> .site-control-kit/local.yaml -> config/default.yaml`
+  - if `~/.site-control-kit` already exists, the repo generates `.site-control-kit/local.yaml` and adopts that runtime without moving data
+  - if no token is configured, the local runtime generates `.site-control-kit/generated_token.txt`
+- Verify:
+  - `python3 -m unittest discover -s tests -p 'test_*.py'` -> `285 tests OK`
+  - `python3 -m webcontrol --help` -> OK
+  - `python3 -m webcontrol browser --help` -> OK
+  - `python3 -m webcontrol runtime-env --format json --no-create` -> OK
+  - `bash scripts/start_hub.sh` -> hub started; `python3 -m webcontrol health` -> OK; `python3 -m webcontrol state` -> OK
+  - `python3 scripts/export_telegram_members_non_pii.py --help` -> OK
+  - `bash scripts/bootstrap_telegram_workstation.sh --doctor` -> OK
+  - GTK startup smoke on `DISPLAY=:0` -> window confirmed by `xwininfo`, then closed cleanly
+- Practical conclusion:
+  - this repo now has a real install/runtime baseline for Linux and a production-safe core runtime story for Windows wrappers
+  - the next step should focus on unified startup/error/run logging and minimal extraction of runtime/logging orchestration from `scripts/telegram_gui/app.py`
+
+## 2026-05-09 (TG_CONTACT 4 `ROST FARMA` Stability And Live Export Cycle)
+
+- Code changes:
+  - no repository code changes were required in this cycle
+  - the existing `TG_CONTACT 4 -> Primary tdata` export path completed both phases without a new product blocker
+- Verify:
+  - `bash scripts/bootstrap_telegram_workstation.sh --doctor` -> `managed_helper_ready=1`, `gtk_runtime=ok`, `selected_helper_source=managed`
+  - `python3 -m webcontrol --help` -> OK
+  - `python3 -m webcontrol browser --help` -> OK
+  - `python3 -m unittest discover -s tests -p 'test_*.py'` -> `280 tests OK`
+  - browser hub probe:
+    - `bash scripts/start_hub.sh` -> hub started
+    - `./browser.sh status` / `./browser.sh tabs` -> OK
+    - clients remained stale/offline, but this did not block the tdata export path
+- Live TG_CONTACT 4 run:
+  - target:
+    - `Чат ROST FARMA`
+    - `chat_ref=-1001340567266`
+    - `source_kind=live`
+    - output root `/home/max/4`
+  - summary:
+    - `/tmp/tg_contact4_rost_farma_live_20260509T073256Z.json`
+  - action log:
+    - `/home/max/.site-control-kit/telegram_workspace/logs/gui_actions_tg_contact4_rost_farma_live_20260509T073256Z.log`
+  - quick-check:
+    - `/home/max/4/tg_contact4_rost_farma_quick_check_20260509T073256Z.md`
+    - `/home/max/4/tg_contact4_rost_farma_quick_check_20260509T073256Z_usernames.txt`
+    - `/home/max/4/tg_contact4_rost_farma_quick_check_20260509T073256Z_usernames.json`
+    - `/home/max/.site-control-kit/telegram_workspace/logs/export_run_20260509T073309Z.log`
+  - full-history:
+    - `/home/max/4/tg_contact4_rost_farma_full_history_20260509T073256Z.md`
+    - `/home/max/4/tg_contact4_rost_farma_full_history_20260509T073256Z_usernames.txt`
+    - `/home/max/4/tg_contact4_rost_farma_full_history_20260509T073256Z_usernames.json`
+    - `/home/max/.site-control-kit/telegram_workspace/logs/export_run_20260509T073315Z.log`
+- Result:
+  - quick-check: `31 usernames / 400 messages`
+  - full-history: `2481 usernames / 269206 messages`
+  - live window was confirmed on `DISPLAY=:0`
+  - save dialog was observed in both phases
+  - artifact index already contains entries for both runs
+- Practical conclusion:
+  - `ROST FARMA` is now the strongest confirmed `TG_CONTACT 4` target by absolute `@username` count
+  - browser hub state is secondary for this path; stale/offline browser clients are not a blocker for `tdata-history-authors`
+  - the next productive step is another live/public/invite target on `TG_CONTACT 4`, while secure-token hardening and legacy cleanup remain separate decisions
+
 ## 2026-05-08 (GTK Window Close -> Stop Save -> Auto Close)
 
 - Code changes:

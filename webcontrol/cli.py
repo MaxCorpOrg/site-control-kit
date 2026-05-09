@@ -17,12 +17,11 @@ from urllib.request import Request, urlopen
 
 from .config import HubConfig
 from .server import run_server
+from .settings import format_runtime_env, load_runtime_settings, resolve_hub_token
 from .store import TERMINAL_COMMAND_STATUSES
 from .utils import compact
 
-DEFAULT_SERVER = "http://127.0.0.1:8765"
 DEFAULT_TOKEN_ENV = "SITECTL_TOKEN"
-DEFAULT_QUICKSTART_TOKEN = "local-bridge-quickstart-2026"
 
 
 def _norm_server(url: str) -> str:
@@ -87,8 +86,14 @@ def _wait_command(server: str, token: str, command_id: str, timeout_sec: int, in
 
 
 def _extract_runtime(args: argparse.Namespace) -> tuple[str, str]:
-    token = args.token or os.getenv(DEFAULT_TOKEN_ENV, "") or DEFAULT_QUICKSTART_TOKEN
-    server = _norm_server(args.server or DEFAULT_SERVER)
+    settings = load_runtime_settings(mutate=False)
+    token = resolve_hub_token(settings, explicit_token=args.token or "", mutate=False)
+    if not token:
+        raise RuntimeError(
+            "Hub token is not configured. Set SITECTL_TOKEN, create .env from .env.example, "
+            "or run `python3 -m webcontrol runtime-env --format shell` once."
+        )
+    server = _norm_server(str(args.server or os.getenv("SITECTL_SERVER_URL", "") or settings.server_url))
     return server, token
 
 
@@ -613,20 +618,32 @@ def cmd_browser(args: argparse.Namespace) -> int:
 
 
 def cmd_serve(args: argparse.Namespace) -> int:
-    token = args.token or os.getenv(DEFAULT_TOKEN_ENV, "") or DEFAULT_QUICKSTART_TOKEN
+    settings = load_runtime_settings(mutate=True)
+    token = resolve_hub_token(settings, explicit_token=args.token or "", mutate=True)
+    host = str(args.host or settings.hub_host).strip() or settings.hub_host
+    port = int(args.port or settings.hub_port)
+    state_file = Path(args.state_file).expanduser() if args.state_file else settings.hub_state_file
 
     config = HubConfig(
-        host=args.host,
-        port=args.port,
+        host=host,
+        port=port,
         token=token,
-        state_file=Path(args.state_file).expanduser(),
+        state_file=state_file,
     )
-    run_server(config)
+    run_server(config, log_path=str(settings.hub_log_file))
+    return 0
+
+
+def cmd_runtime_env(args: argparse.Namespace) -> int:
+    settings = load_runtime_settings(mutate=not args.no_create)
+    token = resolve_hub_token(settings, mutate=not args.no_create)
+    sys.stdout.write(format_runtime_env(settings, token=token or None, shell=args.format))
     return 0
 
 
 def cmd_health(args: argparse.Namespace) -> int:
-    server = _norm_server(args.server or DEFAULT_SERVER)
+    settings = load_runtime_settings(mutate=False)
+    server = _norm_server(str(args.server or os.getenv("SITECTL_SERVER_URL", "") or settings.server_url))
     try:
         response = _http_json(server=server, token="health", method="GET", path="/health")
     except RuntimeError as exc:
@@ -778,6 +795,8 @@ def cmd_cancel(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    settings = load_runtime_settings(mutate=False)
+    default_server = settings.server_url
     parser = argparse.ArgumentParser(
         prog="sitectl",
         description="Local site control hub CLI",
@@ -786,26 +805,34 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     def add_runtime_options(cmd: argparse.ArgumentParser) -> None:
-        cmd.add_argument("--server", default=DEFAULT_SERVER, help=f"Hub URL (default: {DEFAULT_SERVER})")
+        cmd.add_argument("--server", default="", help=f"Hub URL (default: {default_server})")
         cmd.add_argument(
             "--token",
             default="",
             help=(
-                f"Access token (fallback env: {DEFAULT_TOKEN_ENV}; "
-                f"default quick mode: {DEFAULT_QUICKSTART_TOKEN})"
+                f"Access token (precedence: flag > env {DEFAULT_TOKEN_ENV} > generated local token)"
             ),
         )
 
     serve = sub.add_parser("serve", help="Run local API server")
-    add_runtime_options(serve)
-    serve.add_argument("--host", default="127.0.0.1")
-    serve.add_argument("--port", default=8765, type=int)
+    serve.add_argument("--token", default="", help=f"Access token (fallback env: {DEFAULT_TOKEN_ENV})")
+    serve.add_argument("--host", default="", help=f"Bind host (default: {settings.hub_host})")
+    serve.add_argument("--port", default=0, type=int, help=f"Bind port (default: {settings.hub_port})")
     serve.add_argument(
         "--state-file",
-        default=str(Path.home() / ".site-control-kit" / "state.json"),
-        help="Path to persistent state file",
+        default="",
+        help=f"Path to persistent state file (default: {settings.hub_state_file})",
     )
     serve.set_defaults(func=cmd_serve)
+
+    runtime_env = sub.add_parser("runtime-env", help="Print resolved runtime environment for shell wrappers")
+    runtime_env.add_argument("--format", choices=("shell", "powershell", "json"), default="json")
+    runtime_env.add_argument(
+        "--no-create",
+        action="store_true",
+        help="Do not create local runtime directories, token file, or legacy pointer while resolving settings",
+    )
+    runtime_env.set_defaults(func=cmd_runtime_env)
 
     health = sub.add_parser("health", help="Check hub health endpoint")
     add_runtime_options(health)

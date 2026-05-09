@@ -52,4 +52,7 @@ def build_artifact_bundle(result: ExportResult) -> ArtifactBundle:
         safe_md=result.safe_md,
         run_log=result.log_path,
         action_log=result.action_log_path,
+        summary_json=result.summary_path,
+        artifacts_json=result.artifacts_path,
+        events_jsonl=result.events_path,
     )

@@ -4,15 +4,23 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 EXT_DIR="$ROOT_DIR/extension"
 HUB_START_SCRIPT="$ROOT_DIR/scripts/start_hub.sh"
+PYTHON_BIN="${PYTHON_BIN:-python3}"
+
+eval "$("$PYTHON_BIN" -m webcontrol runtime-env --format shell)"
 
 HOST="${SITECTL_HOST:-127.0.0.1}"
 PORT="${SITECTL_PORT:-8765}"
 SERVER_URL="${SITECTL_SERVER_URL:-http://${HOST}:${PORT}}"
-TOKEN="${SITECTL_TOKEN:-local-bridge-quickstart-2026}"
-PROFILE_DIR="${SITECTL_FIREFOX_PROFILE:-$HOME/.site-control-kit/firefox-profile}"
+TOKEN="${SITECTL_TOKEN:-}"
+PROFILE_DIR="${SITECTL_FIREFOX_PROFILE:-$ROOT_DIR/var/site-control-kit/firefox-profile}"
 TARGET_URL="${SITECTL_START_URL:-https://web.telegram.org/a/}"
 AUTO_START_HUB="${SITECTL_AUTO_START_HUB:-1}"
 FIREFOX_BIN="${SITECTL_FIREFOX_BIN:-}"
+
+if [[ -z "$TOKEN" ]]; then
+  echo "ERROR: SITECTL_TOKEN is not configured. Create .env from .env.example or use the generated local runtime config." >&2
+  exit 1
+fi
 
 print_usage() {
   cat <<EOF

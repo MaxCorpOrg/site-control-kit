@@ -55,30 +55,98 @@ CLI (sitectl) <----HTTP----> Локальный хаб (Python) <----HTTP poll--
 
 Хаб — единый источник правды: клиенты, очередь команд, результаты выполнения.
 
+## Runtime И Конфиги
+
+С этого пакета стабилизации у проекта есть единый runtime-layer:
+
+- runtime root по умолчанию: `./var/site-control-kit`;
+- precedence настроек: `env` -> `.env` -> `.site-control-kit/local.yaml` -> `config/default.yaml`;
+- пример переменных: [.env.example](.env.example);
+- базовый конфиг: [config/default.yaml](config/default.yaml);
+- shell/PowerShell wrappers больше не держат hardcoded quickstart token.
+
+Что происходит при первом запуске:
+
+- если legacy runtime `~/.site-control-kit` не найден, проект создаёт локальные каталоги внутри `./var/site-control-kit`;
+- если legacy runtime уже существует, проект не переносит его автоматически, а создаёт pointer-файл `.site-control-kit/local.yaml` внутри репозитория;
+- если токен хаба не задан через `SITECTL_TOKEN` или `.env`, локальный runtime генерирует `.site-control-kit/generated_token.txt`.
+
+Проверить итоговое разрешение путей можно так:
+
+```bash
+python3 -m webcontrol runtime-env --format json
+```
+
+## Где лежат данные, логи и отчёты
+
+- базовый runtime: `./var/site-control-kit`;
+- legacy adoption, если найден `~/.site-control-kit`: `.site-control-kit/local.yaml`;
+- локально сгенерированный токен по умолчанию: `.site-control-kit/generated_token.txt`;
+- состояние хаба: `state/state.json`;
+- текстовый лог хаба: `logs/hub.log`;
+- machine-readable runtime logs:
+  - `logs/runtime_events.jsonl`
+  - `logs/runtime_errors.jsonl`
+- browser/core отчёты: `reports/`;
+- Telegram workspace:
+  - `telegram_workspace/registry/users.json`
+  - `telegram_workspace/registry/api_accounts.json`
+  - `telegram_workspace/registry/secrets/`
+  - `telegram_workspace/accounts/<N>/`
+  - `telegram_workspace/logs/`
+  - `telegram_workspace/runs/<run_id>/summary.json`
+  - `telegram_workspace/runs/<run_id>/events.jsonl`
+  - `telegram_workspace/runs/<run_id>/artifacts.json`
+- Telegram export reports по умолчанию: `reports/telegram_exports`
+
 ## Быстрый старт
 
 ### Windows
 
 1. Откройте PowerShell в корне проекта.
-2. Установите пакет в editable-режиме:
+2. Установите зависимости и пакет:
 
 ```powershell
-python -m pip install -e .
+py -3.11 -m pip install -r requirements.txt
+py -3.11 -m pip install -e .
 ```
 
-3. Запустите хаб:
+3. При необходимости создайте `.env` на основе `.env.example`.
+4. Запустите хаб:
 
 ```cmd
 scripts\start_hub.cmd
 ```
 
-4. В Chrome/Edge откройте `chrome://extensions` или `edge://extensions`.
-5. Включите `Developer mode`.
-6. Нажмите `Load unpacked`.
-7. Выберите папку `C:\site-control-kit\extension`.
-8. Откройте `Options` расширения и задайте:
+5. В Chrome/Edge откройте `chrome://extensions` или `edge://extensions`.
+6. Включите `Developer mode`.
+7. Нажмите `Load unpacked`.
+8. Выберите папку `<repo-root>\extension`.
+9. Откройте `Options` расширения и задайте:
    - `Server URL`: `http://127.0.0.1:8765`
-   - `Access Token`: тот же токен, что у хаба.
+   - `Access Token`: тот же токен, что у хаба или в `.site-control-kit\generated_token.txt`.
+
+### Windows Core Smoke Checklist
+
+Перед release или publish-checkpoint на Windows нужно пройти именно этот набор:
+
+```cmd
+cd <repo-root>
+scripts\start_hub.cmd
+browser.cmd status
+browser.cmd tabs
+python -m webcontrol --help
+python -m webcontrol browser --help
+python -m webcontrol runtime-env --format json --no-create
+```
+
+Ожидаемый результат:
+- хаб поднимается без traceback;
+- `browser.cmd status` и `browser.cmd tabs` отрабатывают через текущий runtime;
+- `runtime-env` показывает корректные runtime paths и token source;
+- в fresh checkout автоматически создаются runtime-каталоги;
+- UTF-8 пути и русский текст не ломаются в stdout/stderr;
+- `telegram-username-collector` не пытается стартовать GTK GUI на Windows, а честно завершает запуск понятным fast-fail сообщением, что Windows GTK GUI не входит в v1.
 
 ### Упаковка расширения в Windows
 
@@ -93,26 +161,33 @@ scripts\package_extension.cmd
 ## 1) Запуск хаба
 
 ```bash
-cd /home/max/site-control-kit
+cd <repo-root>
+python3 -m pip install -r requirements.txt
+python3 -m pip install -e .
 ./scripts/start_hub.sh
 ```
 
-Если `SITECTL_TOKEN` не задан, используется быстрый локальный токен:
-`local-bridge-quickstart-2026`.
-
-Важно: для реальной/удалённой эксплуатации задайте свой токен:
+GTK GUI на Linux не ставится через `pip`.
+Для него нужен системный `python3` с рабочими GTK bindings.
+Проверка окружения:
 
 ```bash
-cd /home/max/site-control-kit
-export SITECTL_TOKEN='ваш-сильный-секретный-токен'
-./scripts/start_hub.sh
+cd <repo-root>
+bash scripts/bootstrap_telegram_workstation.sh --doctor
 ```
+
+На Ubuntu 24.04 минимум нужен рабочий `python3-gi` и GTK 4 runtime.
+
+На первом запуске хаб:
+- создаёт `./var/site-control-kit`, если нет legacy runtime;
+- или использует `.site-control-kit/local.yaml`, если найден существующий `~/.site-control-kit`;
+- генерирует локальный токен в `.site-control-kit/generated_token.txt`, если вы заранее не задали `SITECTL_TOKEN`.
 
 ## 2) Установка расширения (без публикации в Store)
 1. Откройте `chrome://extensions`.
 2. Включите `Developer mode`.
 3. Нажмите `Load unpacked`.
-4. Выберите папку: `/home/max/site-control-kit/extension`.
+4. Выберите папку: `<repo-root>/extension`.
 5. Откройте `Options` расширения и проверьте:
 - `Server URL`: `http://127.0.0.1:8765`
 - `Access Token`: тот же, что у хаба.
@@ -120,7 +195,7 @@ export SITECTL_TOKEN='ваш-сильный-секретный-токен'
 Упаковка в zip:
 
 ```bash
-cd /home/max/site-control-kit
+cd <repo-root>
 ./scripts/package_extension.sh
 ```
 
@@ -131,7 +206,7 @@ cd /home/max/site-control-kit
 Если нужен один вход в рабочий контур, используйте:
 
 ```bash
-cd /home/max/site-control-kit
+cd <repo-root>
 ./start-browser.sh
 ```
 
@@ -143,7 +218,7 @@ cd /home/max/site-control-kit
 Если branded Chrome мешает, есть отдельный Firefox dev-path:
 
 ```bash
-cd /home/max/site-control-kit
+cd <repo-root>
 ./start-firefox.sh --url https://web.telegram.org/a/
 ```
 
@@ -161,7 +236,7 @@ cd /home/max/site-control-kit
 После этого рабочие команды:
 
 ```bash
-cd /home/max/site-control-kit
+cd <repo-root>
 ./browser.sh status
 ./browser.sh tabs
 ./browser.sh open https://example.com
@@ -170,7 +245,7 @@ cd /home/max/site-control-kit
 ## 3) Проверка связи
 
 ```bash
-cd /home/max/site-control-kit
+cd <repo-root>
 python3 -m webcontrol health
 python3 -m webcontrol clients
 ```
@@ -214,14 +289,14 @@ Linux-обёртка:
 Для Telegram Web есть отдельный рабочий вход:
 
 ```bash
-cd /home/max/site-control-kit
+cd <repo-root>
 ./start-telegram.sh
 ```
 
 Firefox-вариант для Telegram:
 
 ```bash
-cd /home/max/site-control-kit
+cd <repo-root>
 ./start-telegram-firefox.sh
 ```
 
@@ -233,7 +308,7 @@ cd /home/max/site-control-kit
 CLI-экспорт:
 
 ```bash
-cd /home/max/site-control-kit
+cd <repo-root>
 ./telegram-export.sh --source both --deep-usernames
 ```
 
@@ -245,9 +320,9 @@ cd /home/max/site-control-kit
 - направление скролла тут важно только для `chat`-режима: чат читается прокруткой вверх, а `info`-режим использует прокрутку вниз только когда Telegram реально отдал список участников; в `info-preview` смена направления колеса обычно ничего не меняет;
 - в текущем Telegram Web chat-проход больше не опирается на старые `.bubbles`-селектора: инструмент умеет листать историю через новый `MessageList/backwards-trigger` DOM и реально поднимать новых авторов из истории;
 - chat-проход теперь может автоматически продлеваться после `--chat-scroll-steps`, пока реально появляются новые авторы; лимит задаётся через `--chat-auto-extra-steps`;
-- каждый экспорт дополнительно архивируется в [artifacts/telegram_exports](/home/max/site-control-kit/artifacts/telegram_exports) и записывается в индекс [INDEX.md](/home/max/site-control-kit/artifacts/telegram_exports/INDEX.md);
+- каждый экспорт дополнительно архивируется в [artifacts/telegram_exports](artifacts/telegram_exports) и записывается в индекс [INDEX.md](artifacts/telegram_exports/INDEX.md);
 - рядом с каждым экспортом теперь автоматически пишутся отдельные sidecar-файлы `*_usernames.txt` и `*_usernames.json`, чтобы собранные `@username` можно было брать без парсинга markdown-таблицы;
-- экспортёр теперь автоматически ведёт per-chat history в [artifacts/telegram_exports/state](/home/max/site-control-kit/artifacts/telegram_exports/state) и при следующем прогоне поднимает уже известные `@username` из прошлых archived sidecars;
+- экспортёр теперь автоматически ведёт per-chat history в [artifacts/telegram_exports/state](artifacts/telegram_exports/state) и при следующем прогоне поднимает уже известные `@username` из прошлых archived sidecars;
 - sticky-author path теперь работает через `telegram_sticky_author`: правый клик делается по нижней прилипшей 34px иконке автора, а не по тексту сообщения и не через открытие профиля левой кнопкой;
 - `--deep-usernames` больше не должен уводить основную групповую вкладку в личные диалоги: usernames дочитываются через временные helper tabs;
 - если текущий Telegram Web отвечает `No visible menu item found by text`, это теперь трактуется как честный признак отсутствия `Mention` в текущем menu-path: exporter сразу уходит в helper-only path и не тратит оставшийся deep-step на пустые retry;
@@ -259,14 +334,14 @@ cd /home/max/site-control-kit
 GUI-экспорт:
 
 ```bash
-cd /home/max/site-control-kit
+cd <repo-root>
 ./scripts/telegram_members_export_gui.sh
 ```
 
 Новый Linux-first install/run path для этого GUI:
 
 ```bash
-cd /home/max/site-control-kit
+cd <repo-root>
 bash scripts/bootstrap_telegram_workstation.sh --doctor
 bash scripts/bootstrap_telegram_workstation.sh
 telegram-username-collector
@@ -274,15 +349,20 @@ telegram-username-collector
 
 Что это даёт:
 - `bootstrap_telegram_workstation.sh --doctor` проверяет `gi/GTK`, `python3`, helper requirements и текущий helper source;
-- обычный `bootstrap_telegram_workstation.sh` поднимает managed helper venv в `~/.site-control-kit/telegram_workspace/managed_helper/.venv`;
+- `--doctor` теперь также печатает resolved runtime root, logs root, reports root и JSONL-логи;
+- обычный `bootstrap_telegram_workstation.sh` поднимает managed helper venv в `./var/site-control-kit/telegram_workspace/managed_helper/.venv`;
 - launcher `telegram-username-collector` идёт из `pyproject.toml` и поднимает тот же single-window GUI;
-- helper discovery order теперь такой: `TELEGRAM_API_COLLECTOR_PYTHON` -> managed helper venv -> legacy external collector path.
+- внутренний ownership GUI теперь разделён так: `scripts/telegram_gui/app.py` = thin launcher/composition, `scripts/telegram_gui/backend.py` = backend owner, `scripts/telegram_gui/ui/window.py` = window/app owner;
+- если launcher запущен из Python-окружения без GTK bindings, он теперь завершается понятной ошибкой и отправляет в `bootstrap_telegram_workstation.sh --doctor`, а не падает build/import traceback;
+- helper discovery order теперь такой: `TELEGRAM_API_COLLECTOR_PYTHON` -> managed helper venv -> legacy external collector path;
+- если уже существует legacy workspace `~/.site-control-kit/telegram_workspace`, bootstrap остаётся на нём через `.site-control-kit/local.yaml`, а не переносит данные автоматически.
 
 Что умеет GUI теперь:
 - отдельное GTK-приложение вместо `zenity`-формы;
-- единый Telegram workspace: `~/.site-control-kit/telegram_workspace`;
-- реестр пользователей (имя + профиль + API token): `~/.site-control-kit/telegram_workspace/registry/users.json`;
-- слоты пользователей `1..10`: `~/.site-control-kit/telegram_workspace/accounts/<N>/`:
+- единый Telegram workspace по умолчанию: `./var/site-control-kit/telegram_workspace`;
+- при наличии legacy runtime тот же GUI может работать поверх `~/.site-control-kit/telegram_workspace` через локальный pointer-config;
+- реестр пользователей (имя + профиль + API token): `telegram_workspace/registry/users.json`;
+- слоты пользователей `1..10`: `telegram_workspace/accounts/<N>/`:
   - `profile/` (данные профиля, включая `tdata`/portable browser data),
   - `imports/` (zip-архивы профилей),
   - `keys/` (`api_token.txt`, `api_id.txt`, `api_hash.txt`);
@@ -296,6 +376,10 @@ telegram-username-collector
   - `TELEGRAM_TDATA_LIST_TIMEOUT_SEC` для чтения списка чатов;
   - `TELEGRAM_TDATA_EXPORT_TIMEOUT_SEC` для длинного history-export;
 - progress helper теперь попадает в live-log GUI строками вида `PROGRESS chat=... messages=... usernames=...`;
+- каждый запуск дополнительно получает machine-readable sidecars:
+  - `telegram_workspace/runs/<run_id>/summary.json`
+  - `telegram_workspace/runs/<run_id>/artifacts.json`
+  - `telegram_workspace/runs/<run_id>/events.jsonl`;
 - если `tdata` недоступен, GUI падает обратно на старый Telegram Web path;
 - список чатов и групп показывается внутри приложения;
 - выбранный чат можно открыть прямо в Telegram из GUI перед запуском;
@@ -305,7 +389,7 @@ telegram-username-collector
 Быстрый сбор именно `@username`, встречающихся в chat history/mentions:
 
 ```bash
-cd /home/max/site-control-kit
+cd <repo-root>
 python3 scripts/export_telegram_chat_mentions.py --target-count 40
 ```
 
@@ -314,7 +398,7 @@ python3 scripts/export_telegram_chat_mentions.py --target-count 40
 Разовый CLI-сценарий для chat-mode:
 
 ```bash
-cd /home/max/site-control-kit
+cd <repo-root>
 ./scripts/run_chat_export_once.sh "$SITECTL_TOKEN"
 ```
 
@@ -370,21 +454,21 @@ python3 -m webcontrol state
 Базовый verify-контур одной командой:
 
 ```bash
-cd /home/max/site-control-kit
+cd <repo-root>
 ./scripts/verify.sh
 ```
 
 Если уже есть живой браузерный клиент и нужно прогнать live smoke:
 
 ```bash
-cd /home/max/site-control-kit
+cd <repo-root>
 ./scripts/verify.sh --live-browser
 ```
 
 ## Установка CLI как команды `sitectl`
 
 ```bash
-cd /home/max/site-control-kit
+cd <repo-root>
 python3 -m pip install -e .
 ```
 
@@ -449,7 +533,7 @@ tests/              # Автотесты
 ## Публикация на GitHub
 
 ```bash
-cd /home/max/site-control-kit
+cd <repo-root>
 git config user.name "Ваше имя в GitHub"
 git config user.email "ваш_email@example.com"
 git add .

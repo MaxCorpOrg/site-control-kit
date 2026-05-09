@@ -37,6 +37,9 @@ class RunHistoryServiceTests(unittest.TestCase):
                     safe_md=Path("/tmp/safe.md"),
                     run_log=Path("/tmp/export.log"),
                     action_log=Path("/tmp/actions.log"),
+                    summary_json=Path("/tmp/summary.json"),
+                    artifacts_json=Path("/tmp/artifacts.json"),
+                    events_jsonl=Path("/tmp/events.jsonl"),
                 ),
             )
             service.append_run(record)
@@ -45,6 +48,7 @@ class RunHistoryServiceTests(unittest.TestCase):
         self.assertEqual(len(recent), 1)
         self.assertEqual(recent[0].surface_badge, "Primary tdata")
         self.assertEqual(recent[0].artifacts.usernames_json, Path("/tmp/export_usernames.json"))
+        self.assertEqual(recent[0].artifacts.summary_json, Path("/tmp/summary.json"))
 
     def test_list_recent_reads_old_records_without_new_fields(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -92,3 +96,43 @@ class RunHistoryServiceTests(unittest.TestCase):
             loaded = service.load_pinned_chats()
 
         self.assertEqual(loaded, rows)
+
+    def test_write_run_summary_and_artifacts_files(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            service = RunHistoryService(Path(td))
+            record = RunRecord(
+                run_id="run-1",
+                created_at="2026-05-04T10:00:00Z",
+                surface_key="tdata",
+                surface_label="Telegram Desktop tdata",
+                surface_badge="Primary tdata",
+                preset_key="full_history",
+                preset_label="Full History",
+                account_key="auto:slot-1",
+                account_label="Слот 1",
+                chat_ref="-1001",
+                chat_title="BigpharmaMarket",
+                output_path=Path("/tmp/export.md"),
+                interrupted=False,
+                safe_count=20,
+                usernames_found=24,
+                history_messages_scanned=4000,
+                artifacts=ArtifactBundle(
+                    markdown=Path("/tmp/export.md"),
+                    usernames_txt=Path("/tmp/export_usernames.txt"),
+                    run_log=Path("/tmp/export.log"),
+                    summary_json=Path("/tmp/summary.json"),
+                    artifacts_json=Path("/tmp/artifacts.json"),
+                    events_jsonl=Path("/tmp/events.jsonl"),
+                ),
+            )
+
+            summary_path = service.write_run_summary(record)
+            artifacts_path = service.write_run_artifacts(record)
+            summary_text = summary_path.read_text(encoding="utf-8")
+            artifacts_text = artifacts_path.read_text(encoding="utf-8")
+
+        self.assertEqual(summary_path.name, "summary.json")
+        self.assertEqual(artifacts_path.name, "artifacts.json")
+        self.assertIn("BigpharmaMarket", summary_text)
+        self.assertIn("events_jsonl", artifacts_text)

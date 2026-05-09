@@ -8,7 +8,7 @@ from ..models import AccountOption, BrowserTarget, ChatOption, ExportResult
 from ..services.process_runner import TaskController
 
 if TYPE_CHECKING:
-    from ..app import TelegramGuiBackend
+    from ..backend import TelegramGuiBackend
 
 
 class TdataAdapter(BaseAdapter):

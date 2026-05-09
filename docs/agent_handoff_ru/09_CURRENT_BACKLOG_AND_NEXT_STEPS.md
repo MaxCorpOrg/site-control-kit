@@ -1,5 +1,98 @@
 # Current Backlog And Next Steps
 
+## Обновление 2026-05-09 (Production Hardening Change Set 3)
+- Третий production-hardening пакет уже закрыт:
+  - `TelegramGuiBackend` переехал в реальный owner-модуль `scripts/telegram_gui/backend.py`
+  - `TelegramMembersExportWindow` и `TelegramMembersExportApp` переехали в реальный owner-модуль `scripts/telegram_gui/ui/window.py`
+  - `scripts/telegram_gui/app.py` теперь thin shared-prelude/composition layer
+  - implicit legacy collector home-default больше не используется
+- Новый ближайший следующий шаг теперь уже такой:
+  - не трогать operator UX и не добавлять новые Telegram features;
+  - прогнать отдельный Windows core smoke на реальной Windows-машине по фиксированному checklist:
+    - `scripts\\start_hub.cmd`
+    - `browser.cmd status`
+    - `browser.cmd tabs`
+    - `python -m webcontrol --help`
+    - `python -m webcontrol browser --help`
+    - `python -m webcontrol runtime-env --format json --no-create`
+    - проверить auto-create runtime directories в fresh checkout
+    - проверить UTF-8 paths и русский текст в output
+    - проверить, что `telegram-username-collector` на Windows даёт controlled fast-fail, а не traceback
+  - собрать короткий v1 release checklist:
+    - install
+    - runtime-env
+    - hub start/health
+    - browser wrappers
+    - Linux GTK launcher
+    - clean-env troubleshooting
+  - только после этого решать, нужен ли следующий технический срез уже по shared helpers в `scripts/telegram_gui/app.py`
+- Что важно не перепутать:
+  - extraction backend/window уже done-state, не pending;
+  - clean venv controlled GTK fast-fail на Linux без system bindings по-прежнему считается ожидаемым поведением;
+  - следующий цикл теперь про release confidence, а не про внутренний GUI split.
+
+## Обновление 2026-05-09 (Production Hardening Change Set 2)
+- Второй production-hardening пакет уже закрыт:
+  - install blocker на `PyGObject` removed from pip manifests
+  - launcher `telegram-username-collector` теперь production-safe и даёт controlled GTK fast-fail
+  - hub имеет `runtime_events.jsonl` / `runtime_errors.jsonl`
+  - Telegram GUI имеет per-run `summary.json` / `artifacts.json` / `events.jsonl`
+  - `bootstrap_telegram_workstation.sh --doctor` теперь печатает resolved runtime/log/report paths
+  - `scripts/telegram_contact_chain.py` больше не уходит по умолчанию в home-path output root
+- Новый ближайший следующий шаг теперь уже такой:
+  - не добавлять новые operator features;
+  - минимально вытаскивать `TelegramGuiBackend` и оконную orchestration из `scripts/telegram_gui/app.py` в owner-модули без изменения UX;
+  - после этого прогнать отдельный Windows core smoke на реальной Windows-машине;
+  - затем уже готовить release checklist/package pass, а не раньше
+- Что важно не перепутать:
+  - clean venv install теперь считается зелёным для core/browser tooling;
+  - controlled GTK fast-fail в venv без system bindings — это ожидаемое поведение, не баг;
+  - Linux GTK live path по-прежнему подтверждён на system Python
+
+## Обновление 2026-05-09 (Production Hardening Change Set 1)
+- Первый production-hardening пакет уже закрыт:
+  - repo теперь имеет `requirements.txt`, `config/default.yaml`, `.env.example`
+  - default runtime root теперь `./var/site-control-kit`
+  - compatibility mode для existing `~/.site-control-kit` уже работает через `.site-control-kit/local.yaml`
+  - quickstart token больше не является рабочим fallback для core entrypoints
+  - GTK startup smoke и verify-контур уже прошли после этих правок
+- Новый ближайший следующий шаг теперь уже такой:
+  - не добавлять новые Telegram features, а закрыть unified logging/error-reporting:
+    - startup log
+    - error log
+    - per-run JSONL
+    - summary JSON с единым schema stamp
+    - GUI tail последних строк и путь к логам
+  - минимально вынести из `scripts/telegram_gui/app.py` runtime/path/logging/process orchestration, не ломая single-window flow
+  - после этого отдельно прогнать install smoke в чистом venv и Windows core smoke по wrappers/CLI
+- Что важно не перепутать:
+  - project-local runtime root теперь canonical default, но на машинах с уже существующим `~/.site-control-kit` текущий resolved runtime может остаться home-based по compatibility pointer
+  - Telegram export semantics в этом change set не менялись: `Primary tdata`, visible save dialog, stop/save, no hidden full-history timeout остаются как были
+
+## Обновление 2026-05-09
+- Новый strongest target уже закрыт:
+  - `Чат ROST FARMA` уже успешно экспортирован на `TG_CONTACT 4`
+  - `chat_ref=-1001340567266`
+  - output root: `/home/max/4`
+  - summary: `/tmp/tg_contact4_rost_farma_live_20260509T073256Z.json`
+  - quick-check: `31 usernames / 400 messages`
+  - full-history: `2481 usernames / 269206 messages`
+  - artifact index `artifacts/telegram_exports/INDEX.md` уже получил entries для quick/full
+- Browser contour в этом цикле оказался secondary:
+  - `bash scripts/start_hub.sh`, `./browser.sh status` и `./browser.sh tabs` снова рабочие
+  - browser clients всё ещё stale/offline
+  - для `TG_CONTACT 4 -> Primary tdata` это не blocker
+- Новый ближайший следующий шаг теперь уже такой:
+  - считать `ROST FARMA` strongest confirmed target на `TG_CONTACT 4`
+  - если цель дальше расширять collection, брать следующий productive live/public/invite chat уже после этого baseline
+  - если цель сравнивать качество target-ов, использовать новый practical rank:
+    - `ROST FARMA` > `НаДопинге 2.0` > `@cosmetologna` > `@cosmochatrussia` > `RIVIVE LIFE Chat` > `FitPharma`
+  - secure token для `TG_CONTACT 4` и cleanup legacy rows по-прежнему не смешивать с live export
+- Что важно не перепутать:
+  - этот цикл не потребовал новых repo-code правок
+  - output bundle для этого run лежит именно в `/home/max/4`
+  - browser hub/offline clients сейчас не нужно чинить как prerequisite для следующего Telegram export run
+
 ## Обновление 2026-05-08
 - Window close blocker уже закрыт:
   - GTK close-request теперь запускает safe stop/save/close path вместо зависшего UX

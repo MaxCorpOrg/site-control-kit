@@ -1,0 +1,30 @@
+version: 1
+
+runtime:
+  root: var/site-control-kit
+
+hub:
+  host: 127.0.0.1
+  port: 8765
+  state_file: state/state.json
+  token_file: .site-control-kit/generated_token.txt
+  log_file: logs/hub.log
+
+browser:
+  profile_dir: browser-profile
+  firefox_profile_dir: firefox-profile
+
+logging:
+  root_dir: logs
+  runtime_events_file: logs/runtime_events.jsonl
+  runtime_errors_file: logs/runtime_errors.jsonl
+
+reports:
+  root_dir: reports
+
+telegram:
+  workspace_root: telegram_workspace
+  users_registry_file: registry/users.json
+  api_accounts_file: registry/api_accounts.json
+  managed_helper_root: managed_helper
+  default_output_dir: reports/telegram_exports

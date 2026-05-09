@@ -142,6 +142,9 @@ class ArtifactBundle:
     safe_md: Path | None = None
     run_log: Path | None = None
     action_log: Path | None = None
+    summary_json: Path | None = None
+    artifacts_json: Path | None = None
+    events_jsonl: Path | None = None
 
     def entries(self) -> list[tuple[str, Path]]:
         rows: list[tuple[str, Path]] = [
@@ -154,6 +157,9 @@ class ArtifactBundle:
             ("Safe MD", self.safe_md),
             ("Run log", self.run_log),
             ("Action log", self.action_log),
+            ("Summary JSON", self.summary_json),
+            ("Artifacts JSON", self.artifacts_json),
+            ("Events JSONL", self.events_jsonl),
         )
         for label, path in optional:
             if path is not None:
@@ -171,6 +177,9 @@ class ArtifactBundle:
                 "safe_md": self.safe_md,
                 "run_log": self.run_log,
                 "action_log": self.action_log,
+                "summary_json": self.summary_json,
+                "artifacts_json": self.artifacts_json,
+                "events_jsonl": self.events_jsonl,
             }.items()
             if value is not None
         }
@@ -185,6 +194,9 @@ class ArtifactBundle:
             safe_md=Path(str(payload["safe_md"])) if payload.get("safe_md") else None,
             run_log=Path(str(payload["run_log"])) if payload.get("run_log") else None,
             action_log=Path(str(payload["action_log"])) if payload.get("action_log") else None,
+            summary_json=Path(str(payload["summary_json"])) if payload.get("summary_json") else None,
+            artifacts_json=Path(str(payload["artifacts_json"])) if payload.get("artifacts_json") else None,
+            events_jsonl=Path(str(payload["events_jsonl"])) if payload.get("events_jsonl") else None,
         )
 
 
@@ -212,6 +224,9 @@ class ExportResult:
     status: str = ""
     failure_reason: str = ""
     security_mode: str = ""
+    summary_path: Path | None = None
+    artifacts_path: Path | None = None
+    events_path: Path | None = None
 
     def artifact_bundle(self) -> ArtifactBundle:
         return ArtifactBundle(
@@ -222,6 +237,9 @@ class ExportResult:
             safe_md=self.safe_md,
             run_log=self.log_path,
             action_log=self.action_log_path,
+            summary_json=self.summary_path,
+            artifacts_json=self.artifacts_path,
+            events_jsonl=self.events_path,
         )
 
 

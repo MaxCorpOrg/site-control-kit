@@ -16,11 +16,17 @@ classifiers = [
   "License :: OSI Approved :: MIT License",
   "Operating System :: OS Independent"
 ]
-dependencies = []
+dependencies = [
+  "python-dotenv==1.2.2",
+  "PyYAML==6.0.2",
+  "telethon==1.43.2",
+  "opentele==1.15.1",
+  "tgcrypto==1.2.5"
+]
 
 [project.scripts]
 sitectl = "webcontrol.cli:main"
-telegram-username-collector = "scripts.telegram_gui.app:main"
+telegram-username-collector = "scripts.telegram_username_collector_launcher:main"
 
 [tool.setuptools]
 include-package-data = true

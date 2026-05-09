@@ -14,6 +14,9 @@ from typing import Any
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
+ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
@@ -25,9 +28,8 @@ from telegram_profiles import (  # noqa: E402
     resolve_profile,
     resolve_profile_name,
 )
+from webcontrol.settings import load_runtime_settings  # noqa: E402
 
-
-ROOT_DIR = Path(__file__).resolve().parents[1]
 COLLECT_SCRIPT = ROOT_DIR / "scripts" / "collect_new_telegram_contacts.sh"
 COLLECT_ENV_KEYS = (
     "TELEGRAM_CHAIN_PROFILE",
@@ -158,11 +160,12 @@ def write_chain_summary(path: Path, payload: dict[str, Any]) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    default_output_root = load_runtime_settings(mutate=False).reports_root / "telegram_contact_batches"
     parser = argparse.ArgumentParser(
         description="Run multiple short Telegram contact collection passes with pauses and shared discovery state."
     )
     parser.add_argument("group_url", help="Telegram group URL")
-    parser.add_argument("output_root", nargs="?", default=str(Path.home() / "telegram_contact_batches"))
+    parser.add_argument("output_root", nargs="?", default=str(default_output_root))
     parser.add_argument(
         "--profile",
         choices=available_profiles(),

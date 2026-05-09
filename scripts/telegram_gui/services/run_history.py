@@ -20,10 +20,35 @@ class RunHistoryService:
         self.runs_dir.mkdir(parents=True, exist_ok=True)
         self.state_dir.mkdir(parents=True, exist_ok=True)
 
+    def run_dir(self, run_id: str) -> Path:
+        self.ensure()
+        return self.runs_dir / run_id
+
+    def run_summary_path(self, run_id: str) -> Path:
+        return self.run_dir(run_id) / "summary.json"
+
+    def run_artifacts_path(self, run_id: str) -> Path:
+        return self.run_dir(run_id) / "artifacts.json"
+
+    def run_events_path(self, run_id: str) -> Path:
+        return self.run_dir(run_id) / "events.jsonl"
+
     def append_run(self, record: RunRecord) -> None:
         self.ensure()
         with self.index_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record.to_json(), ensure_ascii=False) + "\n")
+
+    def write_run_summary(self, record: RunRecord) -> Path:
+        path = self.run_summary_path(record.run_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(record.to_json(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        return path
+
+    def write_run_artifacts(self, record: RunRecord) -> Path:
+        path = self.run_artifacts_path(record.run_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(record.artifacts.to_json(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        return path
 
     def list_recent(self, *, limit: int = 20) -> list[RunRecord]:
         self.ensure()

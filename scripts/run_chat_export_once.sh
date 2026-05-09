@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+PYTHON_BIN="${PYTHON_BIN:-python3}"
+
+cd "$ROOT"
+eval "$("$PYTHON_BIN" -m webcontrol runtime-env --format shell)"
+
 TOKEN="${SITECTL_TOKEN:-${1:-}}"
 if [[ -z "$TOKEN" ]]; then
   echo "ERROR: pass token as first arg or set SITECTL_TOKEN" >&2
@@ -8,7 +15,8 @@ if [[ -z "$TOKEN" ]]; then
 fi
 export SITECTL_TOKEN="$TOKEN"
 
-OUTPUT="${2:-/home/max/Загрузки/Telegram Desktop/3.md}"
+DEFAULT_OUTPUT_ROOT="${TELEGRAM_DEFAULT_OUTPUT_DIR:-$ROOT/var/site-control-kit/reports/telegram_exports}"
+OUTPUT="${2:-${DEFAULT_OUTPUT_ROOT}/3.md}"
 GROUP_URL="${3:-https://web.telegram.org/k/#-2181640359}"
 CHAT_STEPS="${4:-20}"
 CHAT_DEEP_LIMIT="${5:-10}"
@@ -17,14 +25,9 @@ CHAT_MAX_RUNTIME="${7:-180}"
 CHAT_DEEP_MODE="${8:-url}"
 FORCED_CLIENT_ID="${10:-${CHAT_CLIENT_ID:-}}"
 FORCED_TAB_ID="${11:-${CHAT_TAB_ID:-}}"
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-HUB_URL="http://127.0.0.1:8765"
+HUB_URL="${SITECTL_SERVER_URL:-http://127.0.0.1:8765}"
 STARTED_HUB=0
 START_TELEGRAM_SCRIPT="$ROOT/scripts/start_telegram.sh"
-
-cd "$ROOT"
 cleanup() {
   if [[ "${STARTED_HUB}" -eq 1 ]]; then
     kill "${HUB_PID:-}" >/dev/null 2>&1 || true
@@ -81,10 +84,10 @@ if ! curl -fsS --max-time 1 "$HUB_URL/health" >/dev/null 2>&1; then
   fi
 
   python3 -m webcontrol serve \
-    --host 127.0.0.1 \
-    --port 8765 \
+    --host "${SITECTL_HOST:-127.0.0.1}" \
+    --port "${SITECTL_PORT:-8765}" \
     --token "$TOKEN" \
-    --state-file "$HOME/.site-control-kit/state.json" \
+    --state-file "${SITECTL_STATE_FILE}" \
     >/tmp/sitectl_hub_once.log 2>&1 &
   HUB_PID=$!
   STARTED_HUB=1

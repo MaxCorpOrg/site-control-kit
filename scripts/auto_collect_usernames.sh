@@ -1,14 +1,23 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="/home/max/site-control-kit"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PYTHON_BIN="${PYTHON_BIN:-python3}"
+cd "${ROOT_DIR}"
+eval "$("$PYTHON_BIN" -m webcontrol runtime-env --format shell)"
+
 EXPORT_SCRIPT="${ROOT_DIR}/scripts/export_telegram_members_non_pii.py"
 PROFILE_HELPER="${ROOT_DIR}/scripts/telegram_profiles.py"
-HUB_URL="http://127.0.0.1:8765"
-TOKEN="${SITECTL_TOKEN:-local-bridge-quickstart-2026}"
+HUB_URL="${SITECTL_SERVER_URL:-http://127.0.0.1:8765}"
+TOKEN="${SITECTL_TOKEN:-}"
 
 GROUP_URL="${1:-https://web.telegram.org/k/#-1288116010}"
-OUT_MD="${2:-${HOME}/Загрузки/Telegram Desktop/telegram_usernames_auto.md}"
+OUT_MD="${2:-${TELEGRAM_DEFAULT_OUTPUT_DIR:-${ROOT_DIR}/var/site-control-kit/reports/telegram_exports}/telegram_usernames_auto.md}"
+
+if [[ -z "${TOKEN}" ]]; then
+  echo "ERROR: SITECTL_TOKEN is not configured. Create .env from .env.example or use the generated local runtime config." >&2
+  exit 1
+fi
 
 CHAT_PROFILE="${CHAT_PROFILE:-balanced}"
 
@@ -55,10 +64,10 @@ start_hub_if_needed() {
 
   echo "INFO: starting hub on ${HUB_URL}"
   nohup python3 -m webcontrol serve \
-    --host 127.0.0.1 \
-    --port 8765 \
+    --host "${SITECTL_HOST:-127.0.0.1}" \
+    --port "${SITECTL_PORT:-8765}" \
     --token "${TOKEN}" \
-    --state-file "${HOME}/.site-control-kit/state.json" \
+    --state-file "${SITECTL_STATE_FILE}" \
     >/tmp/telegram_auto_hub.log 2>&1 &
 
   for _ in {1..80}; do
