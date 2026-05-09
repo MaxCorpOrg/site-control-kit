@@ -1,5 +1,23 @@
 # CODEX_STATE
 
+## 2026-05-09 (Stable Release Checkpoint Handoff)
+
+- Code changes:
+  - no new runtime or Telegram feature changes were added in this checkpoint cycle
+  - the cycle only re-synced Russian handoff/docs and locked the next step as Windows release-confidence work
+- Verify:
+  - `python3 -m unittest discover -s tests -p 'test_*.py'` -> `294 tests OK`
+  - `python3 -m webcontrol --help` -> OK
+  - `python3 -m webcontrol browser --help` -> OK
+  - `python3 -m webcontrol runtime-env --format json --no-create` -> OK
+  - `python3 scripts/export_telegram_members_non_pii.py --help` -> OK
+  - `bash scripts/bootstrap_telegram_workstation.sh --doctor` -> OK
+  - `git diff --check` -> clean
+- Practical conclusion:
+  - this repository state should now be treated as the stable publish checkpoint for production-hardening v1
+  - the next agent should start from the Windows core smoke checklist in `README.md` and `docs/INSTALL_OTHER_DEVICES_RU.md`
+  - the next agent should not start another Telegram GUI split or a new Telegram feature cycle before the Windows smoke plus short v1 release checklist are complete
+
 ## 2026-05-09 (Production Hardening Change Set 3: Telegram GUI Extraction + Legacy Collector Cleanup)
 
 - Code changes:

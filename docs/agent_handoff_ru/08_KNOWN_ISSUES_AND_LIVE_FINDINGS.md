@@ -1,5 +1,14 @@
 # Known Issues And Live Findings
 
+## Самый Новый Stable Release Checkpoint
+Новый самый свежий факт на 2026-05-09 уже уже не про новый blocker, а про зафиксированную publish-ready точку:
+- новых code/runtime blocker-ов в этом цикле не появилось;
+- current production-hardening state сохранён как stable release checkpoint;
+- главный remaining risk теперь уже не Linux Telegram path, а отсутствие real Windows core smoke на живой Windows-машине;
+- practical rule:
+  - не начинать новый Telegram feature-cycle до прохождения `Windows core smoke checklist`
+  - не тянуть в commit локальные `.codex`, `TG_CONTACT/`, `.site-control-kit`, `var/` и операторские runtime/log artifacts.
+
 ## Самый Новый Production Hardening Architecture
 Новый самый свежий факт на 2026-05-09 уже уже про архитектурный repo-level слой после install/logging stabilization:
 - `scripts/telegram_gui/backend.py` и `scripts/telegram_gui/ui/window.py` больше не alias-only:

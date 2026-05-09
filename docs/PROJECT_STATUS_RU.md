@@ -12,6 +12,26 @@ Repo-root entrypoint для любого агента: `AGENT_START_HERE.md`.
 
 ## Сделано
 
+### Обновление 2026-05-09 (Stable Release Checkpoint Handoff)
+- Сохранена новая repo-level контрольная точка после production-hardening publish-пакета:
+  - новых code/runtime изменений в этом цикле не добавлялось;
+  - обновлены русскоязычные handoff-документы, чтобы следующий агент входил уже в release-confidence фазу;
+  - текущий safe next step зафиксирован явно:
+    - пройти `Windows core smoke checklist` из `README.md` и `docs/INSTALL_OTHER_DEVICES_RU.md`
+    - затем собрать короткий `v1 release checklist`
+    - не начинать новый Telegram feature-cycle до завершения этого шага
+- Verify:
+  - `python3 -m unittest discover -s tests -p 'test_*.py'` -> `294 tests OK`
+  - `python3 -m webcontrol --help` -> OK
+  - `python3 -m webcontrol browser --help` -> OK
+  - `python3 -m webcontrol runtime-env --format json --no-create` -> OK
+  - `python3 scripts/export_telegram_members_non_pii.py --help` -> OK
+  - `bash scripts/bootstrap_telegram_workstation.sh --doctor` -> OK
+  - `git diff --check` -> clean
+- Практический вывод:
+  - `Production Hardening Change Set 1-3` теперь считать стабильным publish-checkpoint, а не промежуточным экспериментом;
+  - локальные `.codex`, `TG_CONTACT/` и unstaged `artifacts/telegram_exports/INDEX.md` остаются вне этого checkpoint.
+
 ### Обновление 2026-05-09 (Production Hardening Change Set 3: Telegram GUI Extraction + Legacy Collector Cleanup)
 - Закрыт третий production-hardening пакет без смены Telegram export semantics:
   - `scripts/telegram_gui/backend.py` теперь реальный owner для `TelegramGuiBackend`;

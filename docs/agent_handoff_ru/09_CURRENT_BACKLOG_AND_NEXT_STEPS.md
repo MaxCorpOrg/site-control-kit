@@ -1,5 +1,16 @@
 # Current Backlog And Next Steps
 
+## Обновление 2026-05-09 (Stable Release Checkpoint Handoff)
+- Текущий stable publish-checkpoint уже сохранён:
+  - `Production Hardening Change Set 1-3` считать зафиксированным baseline
+  - новый Telegram feature-cycle сейчас не открывать
+  - локальные `.codex`, `TG_CONTACT/` и unstaged `artifacts/telegram_exports/INDEX.md` не являются частью checkpoint
+- Новый ближайший следующий шаг теперь уже такой:
+  - пройти `Windows core smoke checklist` из `README.md` и `docs/INSTALL_OTHER_DEVICES_RU.md`
+  - зафиксировать результат в handoff/docs
+  - собрать короткий `v1 release checklist`
+  - только после этого решать, нужен ли ещё один технический проход по shared helpers
+
 ## Обновление 2026-05-09 (Production Hardening Change Set 3)
 - Третий production-hardening пакет уже закрыт:
   - `TelegramGuiBackend` переехал в реальный owner-модуль `scripts/telegram_gui/backend.py`

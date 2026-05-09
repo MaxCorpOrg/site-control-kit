@@ -82,6 +82,14 @@ find /home/max/telegram_contact_batches/chat_-1002465948544/chains -maxdepth 2 -
 - Telegram export работает;
 - batch/safe/quarantine слои работают.
 
+Новый самый верхний handoff-факт на 2026-05-09 теперь уже такой:
+- сохранена `Stable Release Checkpoint Handoff` контрольная точка;
+- следующий агент должен входить не в новый Telegram feature-cycle, а в release-confidence цикл;
+- обязательный первый шаг теперь уже фиксированный:
+  - пройти `Windows core smoke checklist` из `README.md` и `docs/INSTALL_OTHER_DEVICES_RU.md`
+  - затем собрать короткий `v1 release checklist`
+  - только после этого решать, нужен ли ещё один технический проход по shared helpers.
+
 Новый самый свежий repo-level факт на 2026-05-09 теперь уже не про отдельный чат, а про install/runtime baseline:
 - закрыт `Production Hardening Change Set 3: Telegram GUI Extraction + Legacy Collector Cleanup`:
   - code fact:

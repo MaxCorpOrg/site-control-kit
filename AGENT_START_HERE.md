@@ -29,6 +29,24 @@
 - Цель не менялась: собирать именно peer-bound Telegram `@username` и двигаться к `100`
 
 ## Где Мы Закончили Работу
+- На 2026-05-09 сохранена `Stable Release Checkpoint Handoff`:
+  - новый state/documentation факт этого цикла:
+    - repo-level checkpoint повторно синхронизирован после publish-пакета production hardening v1;
+    - handoff/docs на русском обновлены так, чтобы следующий агент входил уже не в фазу extraction, а в фазу release confidence;
+    - фиксированный `Windows core smoke checklist` теперь считается обязательной стартовой точкой следующего цикла;
+    - новый continuation prompt для следующего агента должен лежать на рабочем столе и вести в этот же checkpoint.
+  - verify этого цикла:
+    - `python3 -m unittest discover -s tests -p 'test_*.py'` -> `294 tests OK`
+    - `python3 -m webcontrol --help` -> OK
+    - `python3 -m webcontrol browser --help` -> OK
+    - `python3 -m webcontrol runtime-env --format json --no-create` -> OK
+    - `python3 scripts/export_telegram_members_non_pii.py --help` -> OK
+    - `bash scripts/bootstrap_telegram_workstation.sh --doctor` -> OK
+    - `git diff --check` -> clean
+  - новый practical вывод:
+    - следующий агент не должен начинать новый Telegram feature-cycle;
+    - следующий агент должен пройти Windows core smoke checklist из `README.md` и `docs/INSTALL_OTHER_DEVICES_RU.md`, затем собрать короткий v1 release checklist;
+    - локальные `?? .codex`, `?? TG_CONTACT/` и unstaged `artifacts/telegram_exports/INDEX.md` не являются частью этого publish-checkpoint и не должны попадать в commit без отдельного явного решения.
 - На 2026-05-09 закрыт `Production Hardening Change Set 3: Telegram GUI Extraction + Legacy Collector Cleanup`:
   - новый code/runtime факт этого цикла:
     - `scripts/telegram_gui/backend.py` теперь реальный owner для `TelegramGuiBackend`, а не alias;
