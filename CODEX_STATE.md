@@ -20,7 +20,9 @@
     - runtime/token wiring was already correct; live client was recovered without code changes by restarting the adopted Edge debug profile with explicit `--disable-extensions-except=<repo>\extension` and `--load-extension=<repo>\extension`
     - after relaunch the hub received `200` heartbeat/poll again and `.\browser.cmd status` / `.\browser.cmd tabs` confirmed an online client with live tabs
     - `.\telegram-username-collector.cmd` -> controlled Windows fast-fail, no traceback, no GTK window
+    - after rebasing onto the latest `origin/main`, final verify exposed a Windows-host assumption in `scripts/telegram_product_runtime.py`; the minimal fix now makes `desktop_dir()` tolerant to missing home-dir env and keeps the `.desktop` execute-bit test POSIX-only
   - `git diff --check` -> only expected CRLF/LF warnings, no whitespace failures
+  - final `python -m unittest discover -s tests -p 'test_*.py'` -> `303 tests OK`
 - Practical conclusion:
   - the exact local Windows smoke is now green on the current machine without further code changes
   - the remaining practical Windows risk is adopted-profile extension load-state drift, not runtime/token contract breakage

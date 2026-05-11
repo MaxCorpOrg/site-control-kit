@@ -62,7 +62,8 @@ class ProductRuntimeTests(unittest.TestCase):
                 shortcut_path = mod.create_desktop_shortcut(destination=destination)
             self.assertTrue(shortcut_path.exists())
             self.assertIn("Exec=telegram-username-collector", shortcut_path.read_text(encoding="utf-8"))
-            self.assertTrue(shortcut_path.stat().st_mode & stat.S_IXUSR)
+            if os.name != "nt":
+                self.assertTrue(shortcut_path.stat().st_mode & stat.S_IXUSR)
 
     def test_gather_doctor_report_uses_explicit_helper_and_creates_token(self) -> None:
         root = self._make_project()

@@ -13,6 +13,10 @@
 
 - Завершён узкий Windows smoke вокруг `telegram-username-collector`, hub/runtime wrappers и browser wrappers.
 - Подтверждён adopted-legacy runtime path через `%USERPROFILE%\.site-control-kit`.
+- После rebase на актуальный `origin/main` внесён минимальный push-prep fix:
+  - `scripts/telegram_product_runtime.py` больше не зависит от обязательно определяемого home directory;
+  - `tests/test_telegram_product_runtime.py` теперь platform-aware по execute bit `.desktop` файла;
+  - итоговый `python -m unittest discover -s tests -p "test_*.py"` теперь `303 tests OK`.
 - Синхронизированы handoff/state docs:
   - `AGENT_START_HERE.md`
   - `CODEX_STATE.md`
@@ -32,6 +36,7 @@
 ### Код и тесты
 - `pyproject.toml`
 - `requirements.txt`
+- `scripts/telegram_product_runtime.py`
 - `scripts/bootstrap_telegram_workstation.sh`
 - `scripts/start_hub.ps1`
 - `scripts/telegram_members_export_gui.py`
@@ -49,6 +54,7 @@
 - `webcontrol/cli.py`
 - `webcontrol/settings.py`
 - `tests/test_settings.py`
+- `tests/test_telegram_product_runtime.py`
 - `tests/test_telegram_gui_backend_features.py`
 - `tests/test_telegram_gui_portable_profiles.py`
 - `tests/test_telegram_gui_process_runner.py`

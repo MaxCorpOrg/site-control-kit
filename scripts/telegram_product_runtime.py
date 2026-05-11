@@ -128,10 +128,11 @@ def desktop_dir() -> Path:
                 return candidate.resolve()
         except Exception:
             pass
-    for candidate in (Path.home() / "Desktop", Path.home() / "Рабочий стол"):
+    home_dir = _safe_home_dir()
+    for candidate in (home_dir / "Desktop", home_dir / "Рабочий стол"):
         if candidate.exists():
             return candidate.resolve()
-    return (Path.home() / "Desktop").resolve()
+    return (home_dir / "Desktop").resolve()
 
 
 def render_desktop_entry(executable_name: str = "telegram-username-collector") -> str:
@@ -258,6 +259,17 @@ def _gtk_runtime_status() -> str:
     except Exception:
         return "broken"
     return "ok"
+
+
+def _safe_home_dir() -> Path:
+    for env_name in ("HOME", "USERPROFILE"):
+        raw = str(os.getenv(env_name, "") or "").strip()
+        if raw:
+            return Path(raw).expanduser().resolve()
+    try:
+        return Path.home().resolve()
+    except RuntimeError:
+        return Path.cwd().resolve()
 
 
 def _hub_reachable(server_url: str) -> bool:

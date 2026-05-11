@@ -21,6 +21,7 @@
 - Windows/Git Bash launcher path больше не упирается в WindowsApps `python3` stub.
 - `telegram-username-collector` и legacy GUI entrypoints на Windows дают controlled fast-fail вместо GTK/import traceback.
 - На adopted Windows-машине подтверждён live browser client после recovery extension load state.
+- После rebase на актуальный `main` маленький cross-platform fix в `telegram_product_runtime` вернул зелёный verify на Windows-host: `303 tests OK`.
 
 ## Что осталось
 

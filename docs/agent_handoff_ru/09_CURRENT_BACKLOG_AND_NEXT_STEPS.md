@@ -13,6 +13,7 @@
   - текущая машина идёт в `legacy-adopted` через existing `%USERPROFILE%\.site-control-kit`;
   - отсутствие repo-local `var/site-control-kit` на таком host не blocker;
   - remaining practical risk — drift active unpacked-extension load state в adopted Edge debug profile; first fix это extension reload / explicit `--load-extension`, а не новый refactor.
+  - после rebase на актуальный `main` небольшой cross-platform fix в `scripts/telegram_product_runtime.py` вернул зелёный финальный verify на Windows-host: `303 tests OK`.
 - Новый ближайший следующий шаг теперь такой:
   - считать этот rerun рабочим Windows baseline для следующего агента;
   - если smoke ломается повторно, сначала восстанавливать live browser client runtime-only способом;

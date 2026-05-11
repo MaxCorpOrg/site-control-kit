@@ -16,6 +16,12 @@
   - live client восстановлен без code changes: runtime-only relaunch Edge debug profile с явными `--disable-extensions-except=<repo>\extension` и `--load-extension=<repo>\extension`;
   - после relaunch `browser.cmd status` и `browser.cmd tabs` снова показали online client и live tabs;
   - `.\telegram-username-collector.cmd` завершился expected fast-fail exit без traceback и без GTK окна.
+- final push-prep finding:
+  - после rebase на актуальный `main` полный Windows-host unittest suite кратко упёрся в `scripts/telegram_product_runtime.py`;
+  - минимальный fix уже landed:
+    - `desktop_dir()` теперь переживает отсутствие определяемого home dir;
+    - Windows-host test больше не требует POSIX execute bit для `.desktop`;
+    - итоговый `python -m unittest discover -s tests -p 'test_*.py'` теперь `303 tests OK`.
 - practical finding:
   - текущий remaining Windows risk теперь узкий и operational-only: drift active unpacked-extension load state в adopted Edge debug profile;
   - первый safe fix для такого сбоя — extension reload / explicit `--load-extension`, а не новый Telegram feature-cycle или shared-helper refactor.

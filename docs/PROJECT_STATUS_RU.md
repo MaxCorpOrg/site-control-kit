@@ -25,6 +25,7 @@ Repo-root entrypoint для любого агента: `AGENT_START_HERE.md`.
   - `runtime-env` подтвердил `legacy-adopted`, repo-local `.site-control-kit/generated_token.txt` и `.site-control-kit/local.yaml`, effective runtime/logs в `%USERPROFILE%\.site-control-kit`;
   - сначала `browser.cmd status` / `browser.cmd tabs` увидели stale offline client, после runtime-only relaunch Edge debug profile с явным `--disable-extensions-except` / `--load-extension` клиент снова стал online;
   - `telegram-username-collector` дал controlled fast-fail без traceback и без GTK окна.
+  - после rebase на актуальный `main` финальный `python -m unittest discover -s tests -p 'test_*.py'` кратко выявил Windows-host assumption в `scripts/telegram_product_runtime.py`; минимальный fix уже внесён, итоговый suite теперь `303 tests OK`.
 - Практический вывод:
   - узкий Windows smoke на текущей машине зелёный;
   - remaining risk — drift active unpacked-extension load state в adopted Edge debug profile;

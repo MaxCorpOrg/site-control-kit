@@ -43,6 +43,11 @@
     - token/runtime wiring уже были корректны; live client восстановлен без code changes перезапуском adopted Edge debug profile с явными `--disable-extensions-except=<repo>\extension` и `--load-extension=<repo>\extension`;
     - после relaunch `.\browser.cmd status` и `.\browser.cmd tabs` снова подтвердили online client и live tabs;
     - `.\telegram-username-collector.cmd` завершился controlled fast-fail без traceback и без GTK окна;
+    - во время финального rebase/push verify всплыл ещё один cross-platform test blocker в `scripts/telegram_product_runtime.py`;
+    - минимальный fix уже landed:
+      - `desktop_dir()` больше не падает при отсутствии определённого home directory;
+      - Windows-host unit test больше не требует POSIX execute bit для `.desktop` файла;
+      - итоговый `python -m unittest discover -s tests -p 'test_*.py'` теперь `303 tests OK`;
   - practical вывод:
     - локальный narrow Windows smoke сейчас зелёный;
     - отсюда не нужно начинать новый Telegram feature-cycle, GUI split или shared-helper refactor;
