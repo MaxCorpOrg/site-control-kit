@@ -29,6 +29,69 @@
 - Цель не менялась: собирать именно peer-bound Telegram `@username` и двигаться к `100`
 
 ## Где Мы Закончили Работу
+- На 2026-05-11 сохранён `Windows Smoke Handoff Narrowing + Corrected Desktop Prompt`:
+  - нового runtime/browser/Telegram кода в этом цикле не добавлялось;
+  - что изменено в этом цикле:
+    - добавлен отдельный runbook `docs/WINDOWS_SMOKE_HANDOFF_RU.md`;
+    - `README.md` и `docs/INSTALL_OTHER_DEVICES_RU.md` теперь явно включают `telegram-username-collector` в Windows checklist и ведут в новый runbook;
+    - desktop prompt `/home/max/Рабочий стол/промт_тестирование_пуша_юзеров_на_винде.txt` переписан так, чтобы Windows-агент проверял только узкий smoke, а не весь multi-platform verify.
+  - verify этого цикла:
+    - `python3 -m webcontrol --help` -> OK
+    - `python3 -m webcontrol browser --help` -> OK
+    - `python3 -m webcontrol runtime-env --format json --no-create` -> OK
+    - `python3 -m unittest tests.test_telegram_username_collector_launcher` -> `3 tests OK`
+    - `git diff --check` -> OK
+  - practical вывод:
+    - у следующего Windows-агента теперь есть один буквальный source of truth для smoke-step'ов, success/blocker classification и report format;
+    - Linux-only verify и полный release-pass теперь явно вынесены за scope этого handoff;
+    - главный remaining gap не documentation ambiguity, а всё тот же отсутствующий live run на реальной Windows-машине.
+  - новый следующий шаг:
+    - на real Windows host пройти `docs/WINDOWS_SMOKE_HANDOFF_RU.md` буквально;
+    - только после live Windows evidence обновлять handoff/docs фактическим результатом smoke;
+    - только после этого решать, нужен ли ещё один технический проход по shared helpers.
+- На 2026-05-10 сохранён `Windows Core Smoke Dry Run + Draft v1 Release Checklist`:
+  - нового repo-кода в этом цикле не добавлялось;
+  - verify этого цикла:
+    - `python3 -m unittest discover -s tests -p 'test_*.py'` -> `294 tests OK`
+    - `python3 -m webcontrol --help` -> OK
+    - `python3 -m webcontrol browser --help` -> OK
+    - `python3 -m webcontrol runtime-env --format json --no-create` -> OK
+    - `python3 scripts/export_telegram_members_non_pii.py --help` -> OK
+    - `bash scripts/bootstrap_telegram_workstation.sh --doctor` -> OK
+    - `git diff --check` -> clean
+    - browser-side smoke в текущей Linux-среде:
+      - до старта хаба `python3 -m webcontrol health`, `./browser.sh status`, `./browser.sh tabs` -> `Connection refused`
+      - `bash scripts/start_hub.sh` -> hub started
+      - `python3 -m webcontrol health` -> OK
+      - `./browser.sh status` -> OK
+      - `./browser.sh tabs` -> OK
+      - `python3 -m webcontrol clients` -> OK, но текущие клиенты в state остаются `is_online=false`
+      - после smoke hub был остановлен, `python3 -m webcontrol health` снова даёт `Connection refused`
+    - Windows launcher fast-fail дополнительно подтверждён:
+      - `python3 -m unittest tests.test_telegram_username_collector_launcher` -> `3 tests OK`
+      - `scripts/telegram_username_collector_launcher.py` по-прежнему возвращает controlled exit `2` на Windows path
+  - важные environment/findings этого цикла:
+    - текущий host — Linux; `wine`, `cmd.exe` и `pwsh` отсутствуют;
+    - поэтому exact `Windows core smoke checklist` из `README.md` и `docs/INSTALL_OTHER_DEVICES_RU.md` не был live-пройден на реальной Windows-машине;
+    - на этой машине `runtime-env --no-create` по-прежнему резолвится в adopted legacy runtime `~/.site-control-kit`, а не в fresh project-local runtime;
+    - локальный git state по-прежнему вне checkpoint:
+      - `M artifacts/telegram_exports/INDEX.md`
+      - `?? .codex`
+      - `?? TG_CONTACT/`
+  - новый practical вывод:
+    - shared runtime/wrapper contract и browser-side smoke подтверждены локально;
+    - главный remaining release-confidence gap теперь уже конкретный: нужен exact live Windows smoke на real Windows host/fresh checkout с capture stdout/stderr;
+    - собран короткий черновой `v1 release checklist`:
+      - install: `pip install -r requirements.txt` + `pip install -e .`
+      - runtime-env: `python -m webcontrol runtime-env --format json --no-create`
+      - hub start/health: `scripts\\start_hub.cmd` + `python -m webcontrol health`
+      - browser wrappers: `browser.cmd status` + `browser.cmd tabs`
+      - Windows launcher fast-fail: `telegram-username-collector` завершает запуск понятной ошибкой без traceback
+      - Linux GTK/operator path: `bash scripts/bootstrap_telegram_workstation.sh --doctor` + live launcher smoke на Linux system Python
+  - новый следующий шаг:
+    - пройти exact `Windows core smoke checklist` на реальной Windows-машине;
+    - отдельно подтвердить fresh-checkout auto-create runtime dirs, UTF-8 output и Windows launcher fast-fail уже живым запуском;
+    - только после этого решать, нужен ли ещё один технический проход по shared helpers.
 - На 2026-05-09 сохранена `Stable Release Checkpoint Handoff`:
   - новый state/documentation факт этого цикла:
     - repo-level checkpoint повторно синхронизирован после publish-пакета production hardening v1;

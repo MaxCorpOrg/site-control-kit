@@ -1,5 +1,55 @@
 # CODEX_STATE
 
+## 2026-05-11 (Windows Smoke Handoff Narrowing + Corrected Desktop Prompt)
+
+- Code changes:
+  - added `docs/WINDOWS_SMOKE_HANDOFF_RU.md` as the exact Windows smoke runbook for `telegram-username-collector`
+  - updated `README.md` and `docs/INSTALL_OTHER_DEVICES_RU.md` so the documented Windows checklist now explicitly includes `telegram-username-collector` and points to the new runbook
+  - corrected the desktop prompt `/home/max/Рабочий стол/промт_тестирование_пуша_юзеров_на_винде.txt` so a Windows agent stays inside the narrow smoke scope instead of drifting into full multi-platform verification
+- Verify:
+  - `python3 -m webcontrol --help` -> OK
+  - `python3 -m webcontrol browser --help` -> OK
+  - `python3 -m webcontrol runtime-env --format json --no-create` -> OK
+  - `python3 -m unittest tests.test_telegram_username_collector_launcher` -> `3 tests OK`
+  - `git diff --check` -> OK
+- Practical conclusion:
+  - the remaining Windows gap is now purely live execution on a real Windows host, not ambiguity in the handoff wording
+  - the next Windows agent should follow `docs/WINDOWS_SMOKE_HANDOFF_RU.md` verbatim and should not expand into Linux GTK checks, full unittest discovery, or new Telegram feature work
+
+## 2026-05-10 (Windows Core Smoke Dry Run + Draft v1 Release Checklist)
+
+- Code changes:
+  - no new runtime/browser/Telegram code changes were added in this cycle
+  - the cycle only executed the documented release-confidence contour that is available from the current Linux host and re-synced handoff/docs
+- Verify:
+  - `python3 -m unittest discover -s tests -p 'test_*.py'` -> `294 tests OK`
+  - `python3 -m webcontrol --help` -> OK
+  - `python3 -m webcontrol browser --help` -> OK
+  - `python3 -m webcontrol runtime-env --format json --no-create` -> OK
+  - `python3 scripts/export_telegram_members_non_pii.py --help` -> OK
+  - `bash scripts/bootstrap_telegram_workstation.sh --doctor` -> OK
+  - `git diff --check` -> clean
+  - browser-side smoke on this host:
+    - before hub start `python3 -m webcontrol health`, `./browser.sh status`, `./browser.sh tabs` -> `Connection refused`
+    - `bash scripts/start_hub.sh` -> hub started
+    - `python3 -m webcontrol health` -> OK
+    - `./browser.sh status` -> OK
+    - `./browser.sh tabs` -> OK
+    - `python3 -m webcontrol clients` -> OK, but visible clients remain `is_online=false`
+    - hub was stopped after the smoke
+  - `python3 -m unittest tests.test_telegram_username_collector_launcher` -> `3 tests OK`
+- Practical conclusion:
+  - the repo-level runtime/wrapper contract remains healthy, and the launcher fast-fail contract for Windows is still covered by tests
+  - the exact Windows checklist is still not fully complete because this host is Linux-only (`wine`, `cmd.exe`, `pwsh` absent) and `runtime-env --no-create` here resolves an adopted legacy runtime, not a fresh Windows checkout
+  - a short draft `v1 release checklist` is now fixed in the handoff:
+    - install
+    - runtime-env
+    - hub start/health
+    - browser wrappers
+    - Windows launcher fast-fail
+    - Linux GTK launcher + doctor
+  - the next agent should run the documented Windows smoke verbatim on a real Windows machine, capture runtime-dir / UTF-8 / fast-fail evidence, and only then decide whether another shared-helper pass is justified
+
 ## 2026-05-09 (Stable Release Checkpoint Handoff)
 
 - Code changes:

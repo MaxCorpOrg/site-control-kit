@@ -1,5 +1,49 @@
 # Known Issues And Live Findings
 
+## Самый Новый Windows Scope Fix
+Новый самый свежий факт на 2026-05-11 уже уже не про новый runtime blocker, а про исправление handoff ambiguity:
+- был риск, что Windows-агент уйдёт в слишком широкий verify-pass, потому что desktop prompt смешивал узкий Windows smoke с Linux-only и full-platform шагами;
+- для этого добавлен точный runbook:
+  - `docs/WINDOWS_SMOKE_HANDOFF_RU.md`
+- `README.md` и `docs/INSTALL_OTHER_DEVICES_RU.md` теперь тоже ведут в этот runbook и явно включают `telegram-username-collector` в checklist;
+- corrected desktop prompt теперь требует:
+  - только Windows install/runtime/wrapper/fast-fail smoke;
+  - никакого нового Telegram feature-cycle;
+  - никакого shared-helper refactor до live Windows evidence.
+- practical finding:
+  - ближайший remaining release risk теперь снова чисто live:
+    - real Windows wrapper smoke
+    - fresh-checkout runtime dir auto-create
+    - UTF-8 output on Windows console
+    - live Windows fast-fail of `telegram-username-collector`
+  - новый blocker в repo code этим циклом не найден.
+
+## Самый Новый Windows Release-Confidence Dry Run
+Новый самый свежий факт на 2026-05-10 уже уже не про новый code blocker, а про честно зафиксированный release-confidence gap:
+- локальный verify-контур снова зелёный:
+  - `python3 -m unittest discover -s tests -p 'test_*.py'` -> `294 tests OK`
+  - `python3 -m webcontrol --help` -> OK
+  - `python3 -m webcontrol browser --help` -> OK
+  - `python3 -m webcontrol runtime-env --format json --no-create` -> OK
+  - `python3 scripts/export_telegram_members_non_pii.py --help` -> OK
+  - `bash scripts/bootstrap_telegram_workstation.sh --doctor` -> OK
+  - `git diff --check` -> clean
+- browser-side smoke на текущем Linux host:
+  - без хаба `health/status/tabs` дают `Connection refused`;
+  - после `bash scripts/start_hub.sh` команды `python3 -m webcontrol health`, `./browser.sh status`, `./browser.sh tabs`, `python3 -m webcontrol clients` снова рабочие;
+  - visible clients в state остаются stale/offline (`is_online=false`), поэтому это smoke runtime/wrapper contract, а не live browser control confirmation.
+- Windows-specific finding:
+  - host остаётся Linux-only; `wine`, `cmd.exe`, `pwsh` отсутствуют;
+  - exact `Windows core smoke checklist` по-прежнему требует real Windows machine/fresh checkout;
+  - `telegram-username-collector` Windows fast-fail подтверждён тестом `tests/test_telegram_username_collector_launcher.py` (`3 tests OK`) и кодом launcher-а, но ещё не live-run на Windows console.
+- practical finding:
+  - ближайший remaining release risk теперь совсем узкий:
+    - real Windows wrapper smoke
+    - fresh-checkout runtime dir auto-create
+    - UTF-8 output on Windows console
+    - live Windows fast-fail of `telegram-username-collector`
+  - новый Linux-side product blocker в этом цикле не появился.
+
 ## Самый Новый Stable Release Checkpoint
 Новый самый свежий факт на 2026-05-09 уже уже не про новый blocker, а про зафиксированную publish-ready точку:
 - новых code/runtime blocker-ов в этом цикле не появилось;

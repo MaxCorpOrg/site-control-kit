@@ -138,15 +138,18 @@ browser.cmd tabs
 python -m webcontrol --help
 python -m webcontrol browser --help
 python -m webcontrol runtime-env --format json --no-create
+telegram-username-collector
 ```
 
 Ожидаемый результат:
 - хаб поднимается без traceback;
-- `browser.cmd status` и `browser.cmd tabs` отрабатывают через текущий runtime;
+- `browser.cmd status` и `browser.cmd tabs` отрабатывают через текущий runtime; до подключения extension первый ответ уровня `No connected browser clients...` допустим и сам по себе не blocker;
 - `runtime-env` показывает корректные runtime paths и token source;
 - в fresh checkout автоматически создаются runtime-каталоги;
 - UTF-8 пути и русский текст не ломаются в stdout/stderr;
 - `telegram-username-collector` не пытается стартовать GTK GUI на Windows, а честно завершает запуск понятным fast-fail сообщением, что Windows GTK GUI не входит в v1.
+
+Полный пошаговый handoff для этого smoke, включая `Terminal A` / `Terminal B`, runtime artifacts, UTF-8 probe и формат отчёта: [docs/WINDOWS_SMOKE_HANDOFF_RU.md](docs/WINDOWS_SMOKE_HANDOFF_RU.md).
 
 ### Упаковка расширения в Windows
 

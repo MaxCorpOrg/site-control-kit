@@ -1,5 +1,49 @@
 # Current Backlog And Next Steps
 
+## Обновление 2026-05-11 (Windows Smoke Handoff Narrowing + Corrected Desktop Prompt)
+- Текущий documentation/handoff fix уже зафиксирован:
+  - exact Windows smoke теперь описан в `docs/WINDOWS_SMOKE_HANDOFF_RU.md`;
+  - `README.md`, `docs/INSTALL_OTHER_DEVICES_RU.md` и desktop prompt больше не должны уводить Windows-агента в Linux-only verify или full-platform pass.
+- Новый ближайший следующий шаг теперь уже такой:
+  - на реальной Windows-машине пройти `docs/WINDOWS_SMOKE_HANDOFF_RU.md` буквально;
+  - зафиксировать:
+    - результат pre-extension `browser.cmd status` / `browser.cmd tabs`
+    - результат после минимальной установки extension
+    - runtime scenario `fresh` или `adopted legacy`
+    - runtime dirs / token file / logs
+    - UTF-8 output
+    - `telegram-username-collector` fast-fail без traceback
+  - только после этого обновлять handoff/docs фактическим Windows evidence.
+- Что важно не перепутать:
+  - широкий verify-контур и Linux GTK steps сейчас по-прежнему вне scope этого handoff;
+  - blocker допустимо расширять только до минимального fix в Windows wrappers/install/runtime story;
+  - новый Telegram feature-cycle и shared-helper refactor до live Windows smoke по-прежнему запрещены.
+
+## Обновление 2026-05-10 (Windows Core Smoke Dry Run + Draft v1 Release Checklist)
+- Текущий release-confidence dry run уже зафиксирован:
+  - обязательный local verify-контур снова зелёный;
+  - browser-side runtime/wrapper smoke подтверждён на Linux через `start_hub.sh`, `health`, `browser.sh status`, `browser.sh tabs`;
+  - Windows launcher fast-fail подтверждён unit-тестом, но не live Windows run.
+- Новый ближайший следующий шаг теперь уже такой:
+  - пройти exact `Windows core smoke checklist` из `README.md` и `docs/INSTALL_OTHER_DEVICES_RU.md` на реальной Windows-машине;
+  - отдельно собрать живые evidence по:
+    - auto-create runtime dirs в fresh checkout
+    - resolved runtime/token source
+    - UTF-8 пути и русский текст в stdout/stderr
+    - `telegram-username-collector` fast-fail без traceback
+  - сверить это с коротким draft `v1 release checklist`:
+    - install
+    - runtime-env
+    - hub start/health
+    - browser wrappers
+    - Windows launcher fast-fail
+    - Linux GTK launcher + doctor
+  - только после этого решать, нужен ли ещё один технический проход по shared helpers.
+- Что важно не перепутать:
+  - этот цикл не закрыл exact Windows machine smoke, потому что текущий host — Linux;
+  - локальные `.codex`, `TG_CONTACT/` и modified `artifacts/telegram_exports/INDEX.md` не являются частью publish-step;
+  - stale/offline browser clients в текущем state не равны regression-у wrappers: локальный smoke подтвердил только health/runtime contract.
+
 ## Обновление 2026-05-09 (Stable Release Checkpoint Handoff)
 - Текущий stable publish-checkpoint уже сохранён:
   - `Production Hardening Change Set 1-3` считать зафиксированным baseline

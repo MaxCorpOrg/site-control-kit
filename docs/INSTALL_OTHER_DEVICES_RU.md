@@ -182,6 +182,7 @@ browser.cmd tabs
 python -m webcontrol --help
 python -m webcontrol browser --help
 python -m webcontrol runtime-env --format json --no-create
+telegram-username-collector
 ```
 
 Что нужно подтвердить:
@@ -189,6 +190,12 @@ python -m webcontrol runtime-env --format json --no-create
 - `browser.cmd` использует resolved runtime, а не machine-specific path;
 - UTF-8 пути и русский текст читаемы в console output;
 - `telegram-username-collector` на Windows завершает запуск понятным fast-fail сообщением, а не traceback, потому что GTK GUI не входит в Windows v1.
+
+Подробный runbook для этого Windows smoke, включая shell choice, допустимый первый fail без heartbeat, runtime dirs, UTF-8 probe и report format: [docs/WINDOWS_SMOKE_HANDOFF_RU.md](WINDOWS_SMOKE_HANDOFF_RU.md).
+
+Важно:
+- `bash scripts/bootstrap_telegram_workstation.sh --doctor` не входит в этот Windows smoke;
+- широкий multi-platform verify-pass не нужно смешивать с этим handoff, если отдельно не попросили проверить всю платформу.
 
 ## 12. Что не делать
 
