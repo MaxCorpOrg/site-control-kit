@@ -3,10 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable
 
-import gi
-
-gi.require_version("Gtk", "4.0")
-from gi.repository import Gtk
+from ..gtk_compat import Gtk
 
 from ..models import ArtifactBundle, PreflightInfo, PreflightStatus, RunRecord, SessionResumeState
 

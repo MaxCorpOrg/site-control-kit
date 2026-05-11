@@ -1,40 +1,22 @@
 # Current Backlog And Next Steps
 
-## Обновление 2026-05-11 (End-of-Day Closure)
-- Завершение рабочего дня выполнено без новой разработки.
-- Checkpoint:
-  - `docs/checkpoints/CHECKPOINT_2026-05-11.md`
-  - `/home/max/Рабочий стол/CHECKPOINT_2026-05-11.md`
-- Перед следующим циклом читать:
-  - `AGENT_START_HERE.md`
-  - `CODEX_STATE.md`
-  - `docs/checkpoints/CHECKPOINT_2026-05-11.md`
-  - `NEXT_STEPS.md`
-- Главный следующий шаг не изменился:
-  - clean Ubuntu 24.04 VM;
-  - real `sudo apt install` `.deb`;
-  - `telegram-username-collector --doctor`;
-  - `telegram-username-collector --create-desktop-shortcut`;
-  - `gtk-launch telegram-username-collector`;
-  - реальные XDG dirs и отсутствие user runtime в `/opt`.
-
-## Обновление 2026-05-11 (Clean Ubuntu `.deb` Smoke Attempt)
-- Что уже проверено после push:
-  - fresh clone из GitHub `main` в `/home/max/site-control-kit-product-smoke-20260511-164357`;
-  - `HEAD` подтверждён: `3412ccd26d5ebcd3710a50b8f6c0b5b9696a6447`;
-  - `.deb` собран из fresh clone через `bash scripts/build_linux_deb.sh`;
-  - payload содержит launchers, desktop entry, icons, extension zip;
-  - forbidden payload отсутствует: handoff files, tests, `.codex`, `TG_CONTACT`, `artifacts/telegram_exports`;
-  - simulated installed-mode через `dpkg-deb -x` подтвердил `mode=installed`, `gtk_runtime=ok`, `extension_zip_ready=1`, temp XDG dirs, desktop shortcut и GUI window на `DISPLAY=:0`.
-- Что осталось главным blocker/gate:
-  - текущая машина не подтверждена как clean VM;
-  - `sudo` без пароля недоступен, поэтому `sudo apt install ./dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb` не выполнен;
-  - не проверены real installed `/usr/bin/telegram-username-collector`, `/usr/bin/sitectl`, `/opt/telegram-username-collector`, real user XDG dirs и Applications menu / `gtk-launch` после system install.
-- Следующий шаг:
-  - взять готовую чистую Ubuntu 24.04 VM с графической сессией и доступным `sudo`;
-  - повторить fresh clone/build;
-  - выполнить `sudo apt install -y ./dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`;
-  - проверить `telegram-username-collector --doctor`, `telegram-username-collector --create-desktop-shortcut`, `gtk-launch telegram-username-collector`, реальные XDG dirs и отсутствие runtime-файлов в `/opt/...`.
+## Обновление 2026-05-11 (Local Windows Smoke Rerun On Existing Machine)
+- Текущий rerun уже закрыт зелёно без новых code changes:
+  - `scripts\start_hub.cmd`
+  - `.\browser.cmd status`
+  - `.\browser.cmd tabs`
+  - `python -m webcontrol --help`
+  - `python -m webcontrol browser --help`
+  - `python -m webcontrol runtime-env --format json --no-create`
+  - `.\telegram-username-collector.cmd`
+- Что важно зафиксировать:
+  - текущая машина идёт в `legacy-adopted` через existing `%USERPROFILE%\.site-control-kit`;
+  - отсутствие repo-local `var/site-control-kit` на таком host не blocker;
+  - remaining practical risk — drift active unpacked-extension load state в adopted Edge debug profile; first fix это extension reload / explicit `--load-extension`, а не новый refactor.
+- Новый ближайший следующий шаг теперь такой:
+  - считать этот rerun рабочим Windows baseline для следующего агента;
+  - если smoke ломается повторно, сначала восстанавливать live browser client runtime-only способом;
+  - не начинать отсюда новый Telegram feature-cycle, GUI split или shared-helper refactor.
 
 ## Обновление 2026-05-11 (Linux Productization v1: `.deb` + Doctor + Desktop Shortcut)
 - Текущий Linux product baseline уже зафиксирован:

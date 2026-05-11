@@ -1,138 +1,126 @@
 # Checkpoint 2026-05-11
 
-## Git State At Start
+## Контекст
 
+- Repo: `C:\site-control-kit-win-smoke`
 - Branch: `main`
-- Remote: `origin git@github.com:MaxCorpOrg/site-control-kit.git`
-- Last commit before closure work: `3412ccd26d5ebcd3710a50b8f6c0b5b9696a6447`
-- Published productization commit: `Упаковать Telegram Username Collector как Linux-продукт`
+- Remote: `origin https://github.com/MaxCorpOrg/site-control-kit.git`
+- Base commit before end-of-day commit:
+  - `3c03277720714ff13745e659923019a3ac2f7a4d`
+  - `Сохранил release checkpoint и handoff для следующего агента`
 
-## What Was Done
+## Что сделано
 
-- Completed end-of-day documentation handoff for Linux productization.
-- Recorded fresh GitHub clone `.deb` smoke evidence.
-- Recorded why full clean VM install smoke is still open.
-- Added root `NEXT_STEPS.md` and `CHANGELOG.md`.
-- Updated project and agent docs so the next agent enters from the current release gate.
-- Added `.gitignore` protection for local env files, `.codex/`, `TG_CONTACT/`, and `node_modules/`.
+- Завершён узкий Windows smoke вокруг `telegram-username-collector`, hub/runtime wrappers и browser wrappers.
+- Подтверждён adopted-legacy runtime path через `%USERPROFILE%\.site-control-kit`.
+- Синхронизированы handoff/state docs:
+  - `AGENT_START_HERE.md`
+  - `CODEX_STATE.md`
+  - `docs/PROJECT_STATUS_RU.md`
+  - `docs/agent_handoff_ru/00_START_HERE.md`
+  - `docs/agent_handoff_ru/08_KNOWN_ISSUES_AND_LIVE_FINDINGS.md`
+  - `docs/agent_handoff_ru/09_CURRENT_BACKLOG_AND_NEXT_STEPS.md`
+- Обновлены project docs для следующего агента:
+  - `README.md`
+  - `docs/ARCHITECTURE.md`
+  - `AGENTS.md`
+  - `NEXT_STEPS.md`
+  - `CHANGELOG.md`
 
-## Changed Files Intended For Commit
+## Изменённые файлы
 
-- `.gitignore`
+### Код и тесты
+- `pyproject.toml`
+- `requirements.txt`
+- `scripts/bootstrap_telegram_workstation.sh`
+- `scripts/start_hub.ps1`
+- `scripts/telegram_members_export_gui.py`
+- `scripts/telegram_members_export_gui.sh`
+- `scripts/telegram_gui/__init__.py`
+- `scripts/telegram_gui/gtk_compat.py`
+- `scripts/telegram_gui/app.py`
+- `scripts/telegram_gui/services/portable_profiles.py`
+- `scripts/telegram_gui/services/secrets.py`
+- `scripts/telegram_gui/ui/panels.py`
+- `scripts/telegram_gui/ui/styles.py`
+- `scripts/telegram_gui/ui/window.py`
+- `telegram-username-collector.cmd`
+- `bash.cmd`
+- `webcontrol/cli.py`
+- `webcontrol/settings.py`
+- `tests/test_settings.py`
+- `tests/test_telegram_gui_backend_features.py`
+- `tests/test_telegram_gui_portable_profiles.py`
+- `tests/test_telegram_gui_process_runner.py`
+- `tests/test_telegram_members_export_gui.py`
+
+### Документация и handoff
 - `README.md`
+- `BROWSER_QUICKSTART.md`
 - `AGENTS.md`
-- `NEXT_STEPS.md`
-- `CHANGELOG.md`
 - `AGENT_START_HERE.md`
 - `CODEX_STATE.md`
 - `docs/ARCHITECTURE.md`
+- `docs/INSTALL_OTHER_DEVICES_RU.md`
 - `docs/PROJECT_STATUS_RU.md`
 - `docs/agent_handoff_ru/00_START_HERE.md`
+- `docs/agent_handoff_ru/08_KNOWN_ISSUES_AND_LIVE_FINDINGS.md`
 - `docs/agent_handoff_ru/09_CURRENT_BACKLOG_AND_NEXT_STEPS.md`
-- `docs/checkpoints/CHECKPOINT_2026-05-11.md`
-- `scripts/build_linux_deb.sh`
+- `NEXT_STEPS.md`
+- `CHANGELOG.md`
 
-## Local Files Not Intended For Commit
+## Проверки и команды
 
-- `artifacts/telegram_exports/INDEX.md`
-- `.codex`
-- `.codex/`
-- `TG_CONTACT/`
+### Git и safety
+- `git status --short --branch`
+- `git branch --show-current`
+- `git remote -v`
+- `git diff --stat`
+- `git diff --check`
+- `git status --ignored --short`
+- проверено, что `.env` отсутствует
+- проверено, что `node_modules/` отсутствует
+- проверено, что `.site-control-kit/`, `var/` и `*.log` остаются вне индекса
+- проверено, что реальный runtime token не попал в tracked text files
+
+### Windows smoke
+- `scripts\start_hub.cmd`
+- `.\browser.cmd status`
+- `.\browser.cmd tabs`
+- `python -m webcontrol --help`
+- `python -m webcontrol browser --help`
+- `python -m webcontrol runtime-env --format json --no-create`
+- `.\telegram-username-collector.cmd`
+
+### Unit tests
+- `python -m unittest discover -s tests -p "test_*.py"`
+
+## Ошибки и ограничения
+
+- На текущей машине `docs/WINDOWS_SMOKE_HANDOFF_RU.md` отсутствует, поэтому smoke шёл по зафиксированному exact checklist из handoff и пользовательского задания.
+- Effective runtime на этой машине — `legacy-adopted`, поэтому repo-local `var/site-control-kit` не создаётся и это не считается blocker-ом.
+- Главный remaining risk сейчас операционный:
+  - adopted Edge debug profile может снова потерять active unpacked-extension load state.
+- Во время финального end-of-day verify client один раз стал stale/offline:
+  - recovery снова был только runtime-side, без repo-правок;
+  - помог повторный запуск Edge debug profile с `--disable-extensions-except=<repo>\extension` и `--load-extension=<repo>\extension`;
+  - после этого `browser.cmd status` и `browser.cmd tabs` снова показали online client.
+- `telegram-username-collector` на Windows не является GUI launcher:
+  - ожидаемое поведение — controlled fast-fail без traceback и без GTK окна.
+
+## Что важно не утащить в commit
+
+- `.env`
 - `.site-control-kit/`
-- `dist/`
-- runtime logs, generated tokens, cache directories, `__pycache__/`
+- `var/`
+- `*.log`
+- `node_modules/`
+- generated tokens
+- runtime state/log artifacts
 
-## Smoke Evidence
+## Следующий шаг
 
-- Environment: `Ubuntu 24.04.4 LTS`, GNOME/X11, `Python 3.12.3`.
-- Fresh clone path: `/home/max/site-control-kit-product-smoke-20260511-164357`.
-- Fresh clone `HEAD`: `3412ccd26d5ebcd3710a50b8f6c0b5b9696a6447`.
-- Fresh clone status: `## main...origin/main`.
-- Build command: `bash scripts/build_linux_deb.sh`.
-- Built package: `/home/max/site-control-kit-product-smoke-20260511-164357/dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`.
-- Package size: `52M`.
-- `dpkg-deb --info` confirmed package `telegram-username-collector`, version `0.1.0`, arch `amd64`.
-- `dpkg-deb --contents` confirmed launchers, desktop entry, icons and bundled extension zip.
-- Forbidden payload was absent: handoff files, tests, `.codex`, `TG_CONTACT`, `artifacts/telegram_exports`.
-
-## Simulated Installed-Mode Evidence
-
-- Extract root: `/tmp/sitectl-deb-extract-20260511-164732`.
-- Temp XDG root: `/tmp/sitectl-deb-xdg-20260511-164732`.
-- `telegram-username-collector --doctor` from extracted payload:
-  - `mode=installed`
-  - `overall_status=warning`
-  - `token_present=1`
-  - `gtk_runtime=ok`
-  - `extension_zip_ready=1`
-  - `hub_reachable=0`
-- `hub_reachable=0` is expected here because the hub was not started.
-- Temp XDG config/data/state directories were created.
-- Extracted `/opt/telegram-username-collector` had no user runtime files named `generated_token.txt`, `runtime_events.jsonl`, or `state.json`.
-- `--create-desktop-shortcut` with temp `HOME` created a desktop shortcut.
-- Direct GUI launch from extracted package payload opened a real `Telegram Username Collector` window on `DISPLAY=:0`; no traceback was printed.
-
-## End-of-Day Verification
-
-- `./scripts/verify.sh` -> `299 tests OK`, `python3 -m webcontrol --help` OK, `python3 -m webcontrol browser --help` OK.
-- `python3 -m compileall webcontrol scripts tests` -> OK.
-- `python3 -m scripts.telegram_username_collector_launcher --doctor` -> OK with expected `overall_status=warning` because `hub_reachable=0`.
-- `bash scripts/build_linux_deb.sh` -> built `dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`.
-- `dpkg-deb --info dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb` -> OK.
-- `dpkg-deb --contents ...` initially found `docs/checkpoints/CHECKPOINT_2026-05-11.md` inside product payload.
-- `scripts/build_linux_deb.sh` was fixed to exclude agent/checkpoint/next-step docs from `.deb`.
-- Rebuilt `.deb` and repeated payload scan -> forbidden payload absent.
-- `git diff --check` -> OK.
-
-## Errors And Blockers
-
-- `sudo -n true` failed with `sudo: a password is required`.
-- `sudo -n apt install -y ...telegram-username-collector_0.1.0_amd64.deb` failed with `sudo: a password is required`.
-- Because of this, real system install was not executed on the current host.
-- Current host is not confirmed as a clean Ubuntu VM, so Applications menu and real `/usr/bin`/`/opt` installed-mode checks remain open.
-- No lint/typecheck command is configured in this repository; closest available static check used in this closure was `python3 -m compileall webcontrol scripts tests`.
-
-## Commands Already Run In This Closure Cycle
-
-```bash
-git status --short --branch
-git branch --show-current
-git remote -v
-git rev-parse HEAD
-cat /etc/os-release
-python3 --version
-git --version
-sudo -n true
-git clone https://github.com/MaxCorpOrg/site-control-kit.git /home/max/site-control-kit-product-smoke-20260511-164357
-git -C /home/max/site-control-kit-product-smoke-20260511-164357 rev-parse HEAD
-git -C /home/max/site-control-kit-product-smoke-20260511-164357 status --short --branch
-bash scripts/build_linux_deb.sh
-dpkg-deb --info /home/max/site-control-kit-product-smoke-20260511-164357/dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb
-dpkg-deb --contents /home/max/site-control-kit-product-smoke-20260511-164357/dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb
-dpkg-deb -x /home/max/site-control-kit-product-smoke-20260511-164357/dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb /tmp/sitectl-deb-extract-20260511-164732
-```
-
-## Next Step For The Next Agent
-
-Do not start new feature work first.
-
-Start from:
-
-1. `AGENT_START_HERE.md`
-2. `CODEX_STATE.md`
-3. `docs/checkpoints/CHECKPOINT_2026-05-11.md`
-4. `NEXT_STEPS.md`
-
-Then run clean Ubuntu 24.04 VM smoke:
-
-```bash
-git clone https://github.com/MaxCorpOrg/site-control-kit.git site-control-kit-product-smoke
-cd site-control-kit-product-smoke
-bash scripts/build_linux_deb.sh
-sudo apt install -y ./dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb
-telegram-username-collector --doctor
-telegram-username-collector --create-desktop-shortcut
-gtk-launch telegram-username-collector
-```
-
-Expected final result: `PASS` or `PASS with warning hub_reachable=0`.
+1. Не начинать новый Telegram feature-cycle.
+2. Не делать GUI split и shared-helper refactor.
+3. Если понадобится новый Windows-pass, прогонять тот же exact smoke checklist.
+4. Если live client снова пропадёт на adopted машине, сначала лечить extension reload/load-state, а не делать новый runtime redesign.

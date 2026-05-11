@@ -74,6 +74,44 @@ find /home/max/telegram_contact_batches/chat_-1002465948544/chains -maxdepth 2 -
 - какой следующий технический приоритет уже очевиден.
 
 ## Что Сейчас Самое Важное
+Верхний handoff-факт на 2026-05-10 уже такой:
+- работа велась из fresh checkout `C:\site-control-kit-win-smoke` на `main` commit `3c03277720714ff13745e659923019a3ac2f7a4d`;
+- реальный Windows code/runtime pass сделан на Windows `11 10.0.26200` / `PowerShell 5.1.26100.8115` / `Python 3.14.0`;
+- existing `%USERPROFILE%\.site-control-kit` не трогался и стал честным limitation для fresh project-local auto-create smoke.
+
+Что уже подтверждено:
+- на 2026-05-11 локальный rerun exact Windows smoke на этой же машине снова зелёный без новых repo-code правок;
+- `python -m webcontrol runtime-env --format json --no-create` сейчас стабильно показывает `legacy-adopted` + `SITECTL_TOKEN_SOURCE=token_file`, с runtime root под `%USERPROFILE%\.site-control-kit` и repo-local `.site-control-kit\generated_token.txt`;
+- `scripts\start_hub.cmd` снова поднимает hub без traceback;
+- первый `.\browser.cmd status` / `.\browser.cmd tabs` в этом rerun увидел только stale offline client, но после runtime-only relaunch Edge debug profile с явным `--load-extension` hub снова получил `200` heartbeat/poll;
+- финальный `.\browser.cmd status` вернул online client `client-win-edge-manual-20260510`, а `.\browser.cmd tabs` вернул live tabs включая `edge://extensions/`;
+- `.\telegram-username-collector.cmd` на Windows по-прежнему завершился чистым GTK fast-fail без traceback и без GTK окна;
+- `python -m unittest discover -s tests -p "test_*.py"` -> `296 tests OK`;
+- `python -m webcontrol --help` -> OK;
+- `python -m webcontrol browser --help` -> OK;
+- `python -m webcontrol runtime-env --format json --no-create` -> OK и теперь показывает `runtime mode` + `token source`;
+- `python scripts/export_telegram_members_non_pii.py --help` -> OK;
+- `bash scripts/bootstrap_telegram_workstation.sh --doctor` -> OK на Windows Git Bash;
+- `scripts\start_hub.cmd` теперь стартует без traceback на реальной Windows-машине;
+- `telegram-username-collector` на Windows теперь завершается понятным GTK-not-in-v1 fast-fail сообщением, а не traceback.
+- `bash scripts/telegram_members_export_gui.sh` и прямой `python scripts/telegram_members_export_gui.py` на Windows теперь тоже завершаются тем же Linux-only GTK fast-fail сообщением, без bare `Python` stub-вывода и без traceback.
+
+Что пока не закрыто до конца:
+- bare `browser.cmd` и `telegram-username-collector` в чистом PowerShell могут требовать `.\...` или временный PATH-prefix, потому что current directory не ищется автоматически;
+- exact fresh project-local auto-create `var/site-control-kit` на этой машине отдельно не подтверждён из-за existing `%USERPROFILE%\.site-control-kit`.
+- adopted Edge debug profile может снова потерять active unpacked-extension load state; в таком случае first fix не code-change, а explicit reload / explicit `--load-extension`.
+
+Практическое правило:
+- новый Telegram feature-cycle сейчас не начинать;
+- shared helpers сейчас не трогать: ещё один технический проход по ним не нужен;
+- live Windows browser client уже подтверждён:
+  - unpacked `extension/` поднят в Edge debug profile;
+  - после записи реального `serverUrl/token/clientId` в extension storage `browser.cmd status` показал online client `client-win-edge-manual-20260510`;
+  - `browser.cmd tabs` показал live tabs `Example Domain` и `Site Control Bridge - Настройки`.
+- если на этой adopted Windows-машине `.\browser.cmd status` снова покажет stale offline client при валидном `runtime-env`, сначала лечить именно Edge load state, а не начинать новый wrapper/runtime refactor.
+
+Исторический контекст ниже оставлен для справки.
+
 На текущем этапе проект уже не находится в состоянии "сырой прототип".
 Основной рабочий контур живой:
 - hub работает;

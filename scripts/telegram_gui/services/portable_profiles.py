@@ -17,6 +17,7 @@ from ..models import PortableProfile, PortableProfileRemovalResult, PortableProf
 
 
 TDATA_SIGNATURE_FILES = ("key_datas", "D877F783D5D3EF8Cs", "D877F783D5D3EF8C/maps")
+WORKSPACE_LINK_FILENAME = ".portable-link.json"
 
 
 def _now_iso() -> str:
@@ -47,6 +48,20 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
     _chmod_best_effort(path, 0o600)
 
 
+def _read_workspace_link_target(path: Path) -> Path | None:
+    payload = _read_json(path / WORKSPACE_LINK_FILENAME)
+    raw = str(payload.get("target") or "").strip()
+    if not raw:
+        return None
+    return Path(raw).expanduser().resolve()
+
+
+def _write_workspace_link(path: Path, target: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+    _chmod_best_effort(path, 0o700)
+    _write_json(path / WORKSPACE_LINK_FILENAME, {"target": str(target.resolve())})
+
+
 def _read_json(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
@@ -61,6 +76,13 @@ def _tdata_dir_looks_valid(path: Path) -> bool:
     if not path.is_dir():
         return False
     return any((path / relative).exists() for relative in TDATA_SIGNATURE_FILES) or (path / "key_datas").exists()
+
+
+def _replace_tree(source: Path, target: Path) -> None:
+    if target.exists():
+        shutil.rmtree(target, ignore_errors=True)
+    shutil.copytree(source, target)
+    _chmod_best_effort(target, 0o700)
 
 
 def _extract_tdata_zip(archive: Path, target_dir: Path) -> None:
@@ -270,7 +292,13 @@ class PortableProfileRegistry:
         root = Path(profile_dir).expanduser().resolve()
         metadata_path = root / "portable-profile.json"
         if not metadata_path.is_file():
-            return None
+            link_target = _read_workspace_link_target(root)
+            if link_target is None:
+                return None
+            root = link_target
+            metadata_path = root / "portable-profile.json"
+            if not metadata_path.is_file():
+                return None
         payload = _read_json(metadata_path)
         profile = self._profile_from_payload(payload, metadata_path=metadata_path)
         if profile is None:
@@ -406,7 +434,10 @@ class PortableProfileRegistry:
         if not self._is_under_profiles_root(root):
             link_path = self._unique_managed_profile_dir(profile_name or root.name, prefix="LinkedPortable")
             if not link_path.exists():
-                link_path.symlink_to(root, target_is_directory=True)
+                try:
+                    link_path.symlink_to(root, target_is_directory=True)
+                except OSError:
+                    _write_workspace_link(link_path, root)
         status = self.status(metadata.profile_dir)
         if status is None:
             raise RuntimeError("Не удалось подготовить metadata принятого portable профиля.")
@@ -487,7 +518,10 @@ class PortableProfileRegistry:
             else:
                 for link_path in self._workspace_links_for_profile(root):
                     try:
-                        link_path.unlink()
+                        if link_path.is_dir() and not link_path.is_symlink():
+                            shutil.rmtree(link_path, ignore_errors=True)
+                        else:
+                            link_path.unlink()
                     except OSError:
                         continue
                     removed_paths.append(link_path)
@@ -514,7 +548,10 @@ class PortableProfileRegistry:
         else:
             for link_path in self._workspace_links_for_profile(status.profile.profile_dir):
                 try:
-                    link_path.unlink()
+                    if link_path.is_dir() and not link_path.is_symlink():
+                        shutil.rmtree(link_path, ignore_errors=True)
+                    else:
+                        link_path.unlink()
                 except OSError:
                     continue
                 removed_paths.append(link_path)
@@ -558,7 +595,10 @@ class PortableProfileRegistry:
         elif alias_tdata.exists():
             shutil.rmtree(alias_tdata, ignore_errors=True)
         if not alias_tdata.exists():
-            alias_tdata.symlink_to(target_tdata, target_is_directory=True)
+            try:
+                alias_tdata.symlink_to(target_tdata, target_is_directory=True)
+            except OSError:
+                _replace_tree(target_tdata, alias_tdata)
         binary_path = self._ensure_profile_runtime_links(runtime_root)
         metadata = self._write_metadata(
             profile_dir=runtime_root,
@@ -630,7 +670,7 @@ class PortableProfileRegistry:
             return rows
         for item in sorted(self.profiles_root.iterdir(), key=lambda path: path.name.lower()):
             metadata_path = item / "portable-profile.json"
-            if not metadata_path.is_file():
+            if not metadata_path.is_file() and _read_workspace_link_target(item) is None:
                 continue
             status = self.status(item)
             if status is not None:
@@ -688,13 +728,16 @@ class PortableProfileRegistry:
         if not self.profiles_root.exists():
             return rows
         for item in self.profiles_root.iterdir():
-            if not item.is_symlink():
+            if item.is_symlink():
+                try:
+                    if item.resolve() == target:
+                        rows.append(item)
+                except OSError:
+                    continue
                 continue
-            try:
-                if item.resolve() == target:
-                    rows.append(item)
-            except OSError:
-                continue
+            pointer_target = _read_workspace_link_target(item)
+            if pointer_target is not None and pointer_target == target:
+                rows.append(item)
         return rows
 
     def _write_metadata(

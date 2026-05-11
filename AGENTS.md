@@ -46,21 +46,29 @@
 
 Работа не считается завершённой, если агент внёс изменения, но не оставил понятный след для следующего агента.
 
-## Завершение Рабочего Дня
-Если пользователь просит завершить рабочий день по проекту, агент не начинает новую разработку.
-Обязательный порядок:
-- проверить `git status --short --branch`, текущую ветку, `git remote -v` и последний commit;
-- отделить документационные/исходные изменения от локальных артефактов;
-- обновить project docs, handoff docs и checkpoint;
-- прогнать доступные проверки проекта;
-- перед commit проверить staged diff на секреты, токены, `.env`, логи, `node_modules`, `.codex`, Telegram-профили и build artifacts;
-- сделать обычный commit и `git push` без force push.
-
-В commit не должны попадать:
-- `.env` и любые локальные env-файлы, кроме `.env.example`;
-- `.site-control-kit/`, generated tokens, runtime logs, `var/`, `dist/`;
-- `.codex`, `.codex/`, `TG_CONTACT/`, `node_modules/`, `__pycache__/`;
-- Telegram live artifacts, если пользователь явно не попросил публиковать конкретный export result.
+## End-Of-Day Checkpoint
+- Если агент завершает рабочий день или готовит commit/push checkpoint, он обязан синхронно обновить:
+  - `README.md`
+  - `docs/ARCHITECTURE.md`
+  - `NEXT_STEPS.md`
+  - `CHANGELOG.md`
+  - `AGENT_START_HERE.md`
+  - `CODEX_STATE.md`
+- Также нужно создать `docs/checkpoints/CHECKPOINT_YYYY-MM-DD.md` и при необходимости копию на рабочий стол пользователя, чтобы следующий разговор можно было начать с одного конкретного файла.
+- В checkpoint фиксировать:
+  - ветку и remote;
+  - `git status`;
+  - изменённые файлы;
+  - проверки и команды;
+  - ошибки/ограничения;
+  - следующий узкий шаг.
+- Перед commit агент обязан убедиться, что в индекс не попадают:
+  - `.env`
+  - `.site-control-kit/`
+  - `var/`
+  - `*.log`
+  - `node_modules/`
+  - generated tokens, runtime state и прочие локальные артефакты.
 
 ## Правило Завершения Задач В Этом Проекте
 Для `site-control-kit` задача считается завершённой только тогда, когда изменённый сценарий:

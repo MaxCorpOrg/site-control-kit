@@ -53,7 +53,8 @@ class RuntimeSettings:
     def server_url(self) -> str:
         return f"http://{self.hub_host}:{self.hub_port}"
 
-    def env_map(self, *, token: str | None = None) -> dict[str, str]:
+    def env_map(self, *, token: str | None = None, token_source: str | None = None) -> dict[str, str]:
+        runtime_mode = "legacy-adopted" if self.runtime_root == self.legacy_home_root else "project-local"
         rows = {
             "SITECTL_PROJECT_ROOT": str(self.project_root),
             "SITECTL_RUNTIME_ROOT": str(self.runtime_root),
@@ -61,10 +62,14 @@ class RuntimeSettings:
             "SITECTL_PORT": str(self.hub_port),
             "SITECTL_SERVER_URL": self.server_url,
             "SITECTL_STATE_FILE": str(self.hub_state_file),
+            "SITECTL_TOKEN_FILE": str(self.hub_token_file),
+            "SITECTL_LOCAL_CONFIG_PATH": str(self.local_config_path),
             "SITECTL_LOG_DIR": str(self.logs_root),
             "SITECTL_REPORTS_ROOT": str(self.reports_root),
             "SITECTL_RUNTIME_EVENTS_LOG": str(self.runtime_events_log_file),
             "SITECTL_RUNTIME_ERRORS_LOG": str(self.runtime_errors_log_file),
+            "SITECTL_RUNTIME_MODE": runtime_mode,
+            "SITECTL_LEGACY_RUNTIME_DETECTED": "1" if self.legacy_runtime_detected else "0",
             "SITECTL_BROWSER_PROFILE": str(self.browser_profile_dir),
             "SITECTL_FIREFOX_PROFILE": str(self.firefox_profile_dir),
             "TELEGRAM_WORKSPACE_ROOT": str(self.telegram_workspace_root),
@@ -75,6 +80,8 @@ class RuntimeSettings:
         }
         if token:
             rows["SITECTL_TOKEN"] = token
+        if token_source:
+            rows["SITECTL_TOKEN_SOURCE"] = token_source
         return rows
 
 
@@ -90,7 +97,7 @@ def load_runtime_settings(*, project_root: Path | None = None, mutate: bool = Fa
     local_state_dir = root / LOCAL_STATE_DIRNAME
     local_config_path = local_state_dir / LOCAL_CONFIG_FILENAME
     config_default_path = root / DEFAULT_CONFIG_RELATIVE
-    legacy_home_root = Path.home() / LEGACY_HOME_DIRNAME
+    legacy_home_root = _resolve_legacy_home_root(root)
 
     _apply_env_defaults(env_file_path)
 
@@ -296,29 +303,49 @@ def resolve_hub_token(
     explicit_token: str = "",
     mutate: bool = False,
 ) -> str:
+    token, _token_source = resolve_hub_token_with_source(
+        settings,
+        explicit_token=explicit_token,
+        mutate=mutate,
+    )
+    return token
+
+
+def resolve_hub_token_with_source(
+    settings: RuntimeSettings,
+    *,
+    explicit_token: str = "",
+    mutate: bool = False,
+) -> tuple[str, str]:
     token = str(explicit_token or "").strip()
     if token:
-        return token
+        return token, "flag"
     token = str(os.getenv("SITECTL_TOKEN", "") or "").strip()
     if token:
-        return token
+        return token, "env"
     if settings.hub_token_file.exists():
         try:
             token = settings.hub_token_file.read_text(encoding="utf-8").strip()
         except OSError:
             token = ""
         if token:
-            return token
+            return token, "token_file"
     if not mutate:
-        return ""
+        return "", "missing"
     generated = "sitectl-" + secrets.token_hex(24)
     settings.hub_token_file.parent.mkdir(parents=True, exist_ok=True)
     settings.hub_token_file.write_text(generated + "\n", encoding="utf-8")
-    return generated
+    return generated, "generated_token_file"
 
 
-def format_runtime_env(settings: RuntimeSettings, *, token: str | None = None, shell: str = "shell") -> str:
-    rows = settings.env_map(token=token)
+def format_runtime_env(
+    settings: RuntimeSettings,
+    *,
+    token: str | None = None,
+    token_source: str | None = None,
+    shell: str = "shell",
+) -> str:
+    rows = settings.env_map(token=token, token_source=token_source)
     if shell == "json":
         import json
 
@@ -363,6 +390,21 @@ def _parse_env_file(path: Path) -> dict[str, str]:
             value = value[1:-1]
         rows[key] = value
     return rows
+
+
+def _resolve_legacy_home_root(project_root: Path) -> Path:
+    for env_name in ("HOME", "USERPROFILE"):
+        raw = str(os.getenv(env_name, "") or "").strip()
+        if raw:
+            return Path(raw).expanduser() / LEGACY_HOME_DIRNAME
+    home_drive = str(os.getenv("HOMEDRIVE", "") or "").strip()
+    home_path = str(os.getenv("HOMEPATH", "") or "").strip()
+    if home_drive and home_path:
+        return Path(f"{home_drive}{home_path}").expanduser() / LEGACY_HOME_DIRNAME
+    try:
+        return Path.home() / LEGACY_HOME_DIRNAME
+    except RuntimeError:
+        return project_root / "_home_unavailable" / LEGACY_HOME_DIRNAME
 
 
 def _load_yaml_mapping(path: Path, *, required: bool) -> dict[str, Any]:
@@ -469,25 +511,28 @@ def _legacy_runtime_present(path: Path) -> bool:
 
 
 def _write_legacy_local_config(path: Path, legacy_root: Path) -> None:
+    def _yaml_path_text(value: Path) -> str:
+        return value.as_posix()
+
     path.parent.mkdir(parents=True, exist_ok=True)
-    legacy_text = str(legacy_root)
+    legacy_text = _yaml_path_text(legacy_root)
     payload = (
         "version: 1\n"
         "runtime:\n"
         f'  root: "{legacy_text}"\n'
         "hub:\n"
-        f'  state_file: "{legacy_root / "state.json"}"\n'
+        f'  state_file: "{_yaml_path_text(legacy_root / "state.json")}"\n'
         "browser:\n"
-        f'  profile_dir: "{legacy_root / "browser-profile"}"\n'
-        f'  firefox_profile_dir: "{legacy_root / "firefox-profile"}"\n'
+        f'  profile_dir: "{_yaml_path_text(legacy_root / "browser-profile")}"\n'
+        f'  firefox_profile_dir: "{_yaml_path_text(legacy_root / "firefox-profile")}"\n'
         "logging:\n"
-        f'  root_dir: "{legacy_root / "logs"}"\n'
-        f'  runtime_events_file: "{legacy_root / "logs" / "runtime_events.jsonl"}"\n'
-        f'  runtime_errors_file: "{legacy_root / "logs" / "runtime_errors.jsonl"}"\n'
+        f'  root_dir: "{_yaml_path_text(legacy_root / "logs")}"\n'
+        f'  runtime_events_file: "{_yaml_path_text(legacy_root / "logs" / "runtime_events.jsonl")}"\n'
+        f'  runtime_errors_file: "{_yaml_path_text(legacy_root / "logs" / "runtime_errors.jsonl")}"\n'
         "reports:\n"
-        f'  root_dir: "{legacy_root / "reports"}"\n'
+        f'  root_dir: "{_yaml_path_text(legacy_root / "reports")}"\n'
         "telegram:\n"
-        f'  workspace_root: "{legacy_root / "telegram_workspace"}"\n'
+        f'  workspace_root: "{_yaml_path_text(legacy_root / "telegram_workspace")}"\n'
         "compatibility:\n"
         f'  adopted_legacy_home_root: "{legacy_text}"\n'
     )

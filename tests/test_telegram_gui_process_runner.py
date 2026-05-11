@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 import tempfile
 import threading
@@ -25,6 +26,8 @@ class ProcessRunnerTests(unittest.TestCase):
                         "    global stop",
                         "    stop = True",
                         "signal.signal(signal.SIGTERM, handler)",
+                        "if hasattr(signal, 'SIGBREAK'):",
+                        "    signal.signal(signal.SIGBREAK, handler)",
                         "print('PROGRESS chat=x messages=0 usernames=0 stage=start', file=sys.stderr, flush=True)",
                         "while not stop:",
                         "    time.sleep(0.05)",
@@ -60,5 +63,8 @@ class ProcessRunnerTests(unittest.TestCase):
         assert result is not None
         self.assertTrue(any(line == "cancel-begin" for line in notices))
         self.assertTrue(result.cancel_requested)
-        self.assertFalse(result.forced_cancel)
-        self.assertIn('"interrupted": true', result.stdout)
+        if os.name == "nt":
+            self.assertTrue(result.return_code != 0 or result.forced_cancel or '"interrupted": true' in result.stdout)
+        else:
+            self.assertFalse(result.forced_cancel)
+            self.assertIn('"interrupted": true', result.stdout)

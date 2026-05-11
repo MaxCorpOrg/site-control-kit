@@ -15,6 +15,24 @@ import sys
 from scripts import telegram_members_export_gui as mod
 
 
+def _doctor_bash_command(script: Path) -> list[str]:
+    if os.name == "nt":
+        return [str(Path(__file__).resolve().parents[1] / "bash.cmd"), str(script), "--doctor"]
+    return ["bash", str(script), "--doctor"]
+
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[1]
+
+
+def _gui_script_path() -> Path:
+    return _repo_root() / "scripts" / "telegram_members_export_gui.py"
+
+
+def _gui_wrapper_path() -> Path:
+    return _repo_root() / "scripts" / "telegram_members_export_gui.sh"
+
+
 class TelegramMembersExportGuiTests(unittest.TestCase):
     def test_app_exports_owner_module_symbols(self) -> None:
         from scripts.telegram_gui import backend as backend_mod
@@ -23,6 +41,37 @@ class TelegramMembersExportGuiTests(unittest.TestCase):
         self.assertIs(mod.TelegramGuiBackend, backend_mod.TelegramGuiBackend)
         self.assertIs(mod.TelegramMembersExportWindow, window_mod.TelegramMembersExportWindow)
         self.assertIs(mod.TelegramMembersExportApp, window_mod.TelegramMembersExportApp)
+
+    @unittest.skipUnless(os.name == "nt", "Windows-only startup contract")
+    def test_windows_script_entrypoint_fast_fails_without_traceback(self) -> None:
+        result = subprocess.run(
+            [sys.executable, str(_gui_script_path())],
+            cwd=_repo_root(),
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(result.stdout.strip(), "")
+        self.assertIn("supported only on Linux", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
+    @unittest.skipUnless(os.name == "nt", "Windows-only startup contract")
+    def test_windows_bash_wrapper_fast_fails_without_traceback(self) -> None:
+        result = subprocess.run(
+            [str(_repo_root() / "bash.cmd"), str(_gui_wrapper_path())],
+            cwd=_repo_root(),
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+
+        combined_output = result.stdout + result.stderr
+        self.assertEqual(result.returncode, 2)
+        self.assertNotEqual(result.stdout.strip(), "Python")
+        self.assertIn("supported only on Linux", combined_output)
+        self.assertNotIn("Traceback", combined_output)
 
     def test_export_timeout_default_is_unlimited(self) -> None:
         self.assertIsNone(mod.TDATA_EXPORT_TIMEOUT_SEC)
@@ -1025,7 +1074,7 @@ class TelegramMembersExportGuiTests(unittest.TestCase):
         tdata_dir = Path("/tmp/fake-tdata")
         old_python = mod.TELEGRAM_API_COLLECTOR_PYTHON
         try:
-            mod.TELEGRAM_API_COLLECTOR_PYTHON = Path("/bin/true")
+            mod.TELEGRAM_API_COLLECTOR_PYTHON = Path(sys.executable)
             with (
                 patch.object(mod, "list_candidate_tdata_dirs", return_value=[tdata_dir]),
                 patch.object(backend, "_run_tdata_helper", return_value={"ok": True, "items": []}),
@@ -1124,6 +1173,8 @@ class TelegramMembersExportGuiTests(unittest.TestCase):
                         "    global stop",
                         "    stop = True",
                         "signal.signal(signal.SIGTERM, handler)",
+                        "if hasattr(signal, 'SIGBREAK'):",
+                        "    signal.signal(signal.SIGBREAK, handler)",
                         "print('PROGRESS chat=x messages=0 usernames=0 stage=start', file=sys.stderr, flush=True)",
                         "messages = 0",
                         "while not stop and messages < 500:",
@@ -1171,12 +1222,16 @@ class TelegramMembersExportGuiTests(unittest.TestCase):
                 mod.TDATA_HELPER_SCRIPT = old_helper
 
         self.assertFalse(thread.is_alive())
-        self.assertNotIn("exc", error_box)
-        payload = result_box.get("payload")
-        self.assertIsInstance(payload, dict)
-        assert isinstance(payload, dict)
-        self.assertTrue(payload["interrupted"])
-        self.assertGreaterEqual(int((payload.get("stats") or {}).get("history_messages_scanned") or 0), 0)
+        if "exc" in error_box:
+            if os.name != "nt":
+                self.fail(f"unexpected cancel error: {error_box['exc']}")
+            self.assertIsInstance(error_box["exc"], mod.TaskCancelled)
+        else:
+            payload = result_box.get("payload")
+            self.assertIsInstance(payload, dict)
+            assert isinstance(payload, dict)
+            self.assertTrue(payload["interrupted"])
+            self.assertGreaterEqual(int((payload.get("stats") or {}).get("history_messages_scanned") or 0), 0)
         self.assertTrue(any(line.startswith("PROGRESS chat=x messages=0 usernames=0 stage=start") for line in seen))
         self.assertTrue(any("Остановка сканирования" in line for line in seen))
 
@@ -1322,7 +1377,7 @@ class TelegramMembersExportGuiTests(unittest.TestCase):
             env["TELEGRAM_MANAGED_HELPER_ROOT"] = str(root / "workspace" / "managed_helper")
             env["PYTHON_BIN"] = sys.executable
             completed = subprocess.run(
-                ["bash", str(script), "--doctor"],
+                _doctor_bash_command(script),
                 check=True,
                 capture_output=True,
                 text=True,

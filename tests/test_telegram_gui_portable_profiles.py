@@ -22,6 +22,10 @@ def _write_tdata_payload(tdata_dir: Path) -> None:
     (maps_dir / "maps").write_bytes(b"maps")
 
 
+def _normalized_path_text(value: str | Path) -> str:
+    return str(value).replace("\\", "/")
+
+
 class TelegramGuiPortableProfilesTests(unittest.TestCase):
     def test_import_portable_profile_creates_managed_metadata_and_registry_row(self) -> None:
         old_root = mod.TELEGRAM_WORKSPACE_ROOT
@@ -62,7 +66,7 @@ class TelegramGuiPortableProfilesTests(unittest.TestCase):
                 self.assertEqual(account.source_kind, "registry")
                 self.assertEqual(account.portable_profile_dir, str(status.profile_dir))
                 registry_text = mod.USER_REGISTRY_PATH.read_text(encoding="utf-8")
-                self.assertIn(str(status.profile_dir), registry_text)
+                self.assertIn(_normalized_path_text(status.profile_dir), registry_text.replace("\\\\", "/"))
                 self.assertNotIn(mod.DEFAULT_TOKEN, registry_text)
         finally:
             mod.TELEGRAM_WORKSPACE_ROOT = old_root
@@ -102,7 +106,12 @@ class TelegramGuiPortableProfilesTests(unittest.TestCase):
                 self.assertTrue(any(item.profile_dir == external.resolve() for item in profiles))
                 linked = list((root / "PortableProfiles").glob("LinkedPortable-*"))
                 self.assertTrue(linked)
-                self.assertTrue(any(item.is_symlink() for item in linked))
+                self.assertTrue(
+                    any(
+                        item.is_symlink() or (item / portable_profiles_service.WORKSPACE_LINK_FILENAME).exists()
+                        for item in linked
+                    )
+                )
         finally:
             mod.TELEGRAM_WORKSPACE_ROOT = old_root
             mod.USER_REGISTRY_PATH = old_registry
@@ -160,13 +169,17 @@ class TelegramGuiPortableProfilesTests(unittest.TestCase):
                     status = backend.import_portable_profile(str(archive), profile_name="RUNNER")
 
                 spawned: dict[str, object] = {}
+                fake_pid = 424242
 
                 def fake_popen(args, **kwargs):
                     spawned["args"] = args
                     spawned["cwd"] = kwargs.get("cwd")
-                    return SimpleNamespace(pid=os.getpid())
+                    return SimpleNamespace(pid=fake_pid)
 
-                with patch.object(portable_profiles_service.subprocess, "Popen", side_effect=fake_popen):
+                with (
+                    patch.object(portable_profiles_service.subprocess, "Popen", side_effect=fake_popen),
+                    patch.object(portable_profiles_service, "_pid_is_alive", side_effect=lambda pid: pid == fake_pid),
+                ):
                     launched, already_running = backend.launch_portable_profile_dir(str(status.profile_dir))
                     second, second_running = backend.launch_portable_profile_dir(str(status.profile_dir))
 
@@ -221,7 +234,10 @@ class TelegramGuiPortableProfilesTests(unittest.TestCase):
 
                 self.assertTrue(any(item.profile_name == "TG_CONTACT 2" for item in profiles))
                 self.assertEqual(accounts[0].label, "TG_CONTACT 2")
-                self.assertTrue(accounts[0].profile_source.endswith("PortableProfiles/TelegramPortable-tg-contact-2"))
+                self.assertIn(
+                    "/PortableProfiles/TelegramPortable-tg-contact-2",
+                    _normalized_path_text(accounts[0].profile_source),
+                )
                 registry_text = mod.USER_REGISTRY_PATH.read_text(encoding="utf-8")
                 self.assertIn('"default_user": "TG_CONTACT 2"', registry_text)
         finally:

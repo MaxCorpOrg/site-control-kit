@@ -41,6 +41,10 @@ browser.cmd open https://example.com
 Если репозиторий открыт в рабочей папке агента, считайте `site-control-kit` основным локальным инструментом управления браузером.
 
 Что читать агенту:
+- [AGENT_START_HERE.md](AGENT_START_HERE.md) — repo-root handoff: где мы остановились и откуда продолжать.
+- [CODEX_STATE.md](CODEX_STATE.md) — последний зафиксированный state/handoff по текущей ветке работ.
+- [NEXT_STEPS.md](NEXT_STEPS.md) — короткий список ближайших безопасных шагов.
+- [CHANGELOG.md](CHANGELOG.md) — high-level журнал зафиксированных изменений.
 - [AUTOPILOT.yaml](AUTOPILOT.yaml) — repo-local автопилот: как действовать без лишних подтверждений и чем проверять результат.
 - [BROWSER_QUICKSTART.md](BROWSER_QUICKSTART.md) — короткий вход и рабочие команды.
 - [AGENTS.md](AGENTS.md) — правила и политика использования инструмента в репозитории.
@@ -53,6 +57,12 @@ browser.cmd open https://example.com
 2. Проверить `browser.cmd status`.
 3. Проверить `browser.cmd tabs`.
 4. Только потом выполнять реальную задачу в браузере.
+
+## Текущий Статус
+
+- Linux-first product path уже упакован в `.deb`; детали в [docs/LINUX_PRODUCT_INSTALL_RU.md](docs/LINUX_PRODUCT_INSTALL_RU.md).
+- На текущей Windows-машине узкий smoke для `telegram-username-collector` повторно подтверждён в режиме `legacy-adopted`.
+- Последний end-of-day checkpoint: [docs/checkpoints/CHECKPOINT_2026-05-11.md](docs/checkpoints/CHECKPOINT_2026-05-11.md).
 
 ## Основные сценарии
 - Открывать нужные URL во вкладках.
@@ -165,6 +175,11 @@ telegram-username-collector
 - `telegram-username-collector` не пытается стартовать GTK GUI на Windows, а честно завершает запуск понятным fast-fail сообщением, что Windows GTK GUI не входит в v1.
 
 Полный пошаговый handoff для этого smoke, включая `Terminal A` / `Terminal B`, runtime artifacts, UTF-8 probe и формат отчёта: [docs/WINDOWS_SMOKE_HANDOFF_RU.md](docs/WINDOWS_SMOKE_HANDOFF_RU.md).
+
+Практические замечания по последнему локальному Windows rerun:
+- в PowerShell bare `.cmd` удобнее вызывать как `.\browser.cmd` и `.\telegram-username-collector.cmd`;
+- existing `%USERPROFILE%\.site-control-kit` переводит этот host в `legacy-adopted`, поэтому отсутствие repo-local `var\site-control-kit` в таком сценарии не blocker;
+- для Git Bash helper на Windows есть `bash.cmd`, который подбирает установленный `bash.exe` и не упирается в WindowsApps stub.
 
 ### Упаковка расширения в Windows
 

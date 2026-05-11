@@ -59,7 +59,10 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $rootDir = Split-Path -Parent $scriptDir
 $pythonCmd = Resolve-PythonCommand
 $runtimeEnv = Invoke-PythonCommand -PythonCommand $pythonCmd -Arguments @("-m", "webcontrol", "runtime-env", "--format", "powershell")
-if (-not [string]::IsNullOrWhiteSpace($runtimeEnv)) {
+if ($runtimeEnv -is [System.Array]) {
+  $runtimeEnv = ($runtimeEnv -join [Environment]::NewLine)
+}
+if (-not [string]::IsNullOrWhiteSpace([string]$runtimeEnv)) {
   Invoke-Expression $runtimeEnv
 }
 $token = Get-EnvValue -Name "SITECTL_TOKEN"

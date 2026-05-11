@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 import unittest
@@ -122,6 +123,31 @@ class RuntimeSettingsTests(unittest.TestCase):
         self.assertIn("export SITECTL_RUNTIME_EVENTS_LOG=", rendered)
         self.assertIn("export SITECTL_RUNTIME_ERRORS_LOG=", rendered)
         self.assertIn("export SITECTL_TOKEN=abc123", rendered)
+
+    def test_format_runtime_env_json_includes_token_source_and_paths(self) -> None:
+        root = self._make_project()
+        with mock.patch.dict(os.environ, {}, clear=True):
+            settings = mod.load_runtime_settings(project_root=root, mutate=False)
+            rendered = mod.format_runtime_env(
+                settings,
+                token="abc123",
+                token_source="token_file",
+                shell="json",
+            )
+
+        payload = json.loads(rendered)
+        self.assertEqual(payload["SITECTL_TOKEN_SOURCE"], "token_file")
+        self.assertEqual(payload["SITECTL_TOKEN_FILE"], str(root / ".site-control-kit" / "generated_token.txt"))
+        self.assertEqual(payload["SITECTL_RUNTIME_MODE"], "project-local")
+
+    def test_resolve_hub_token_with_source_reports_missing_when_not_created(self) -> None:
+        root = self._make_project()
+        with mock.patch.dict(os.environ, {}, clear=True):
+            settings = mod.load_runtime_settings(project_root=root, mutate=False)
+            token, source = mod.resolve_hub_token_with_source(settings, mutate=False)
+
+        self.assertEqual(token, "")
+        self.assertEqual(source, "missing")
 
 
 if __name__ == "__main__":

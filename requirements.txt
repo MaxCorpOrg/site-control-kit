@@ -1,5 +1,5 @@
 python-dotenv==1.2.2
 PyYAML==6.0.2
 telethon==1.43.2
-opentele==1.15.1
-tgcrypto==1.2.5
+opentele==1.15.1; platform_system != "Windows"
+tgcrypto==1.2.5; platform_system != "Windows"

@@ -25,6 +25,11 @@
 python3 -m webcontrol runtime-env --format json
 ```
 
+Этот JSON теперь полезен не только для путей, но и для диагностики режима:
+- `SITECTL_RUNTIME_MODE`
+- `SITECTL_LEGACY_RUNTIME_DETECTED`
+- `SITECTL_TOKEN_SOURCE`
+
 ## Быстрый Старт
 
 Нужно, чтобы:
@@ -39,6 +44,8 @@ start-hub.cmd
 browser.cmd status
 browser.cmd tabs
 ```
+
+Если вы запускаете команды из чистого PowerShell и bare `browser.cmd` не находится, используйте `.\browser.cmd ...` или временно добавьте корень репозитория в `PATH`.
 
 Если `status` показывает клиента, контур готов к работе.
 

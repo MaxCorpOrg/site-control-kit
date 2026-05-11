@@ -34,20 +34,16 @@
 - убрать лишние ручные аргументы;
 - дать агенту и пользователю короткий путь к живому браузеру.
 
-### 4. Linux Product Mode
+### 4. Runtime-layer и launcher contracts
 Содержит:
-- `.deb` build path для `Telegram Username Collector`;
-- системные launchers `/usr/bin/telegram-username-collector` и `/usr/bin/sitectl`;
-- установленное приложение в `/opt/telegram-username-collector`;
-- desktop entry и иконки для меню приложений;
-- companion browser extension zip внутри установленного app payload.
+- `webcontrol/settings.py` — единое разрешение runtime root, token source и лог-путей;
+- `scripts/start_hub.ps1` — Windows wrapper над `python -m webcontrol serve`;
+- `scripts/telegram_username_collector_launcher.py` и `telegram-username-collector.cmd` — startup contract для Telegram GUI entrypoint.
 
-Ключевой принцип:
-- код приложения ставится в системное место;
-- пользовательские данные не пишутся в `/opt`;
-- token/config живут в `${XDG_CONFIG_HOME:-~/.config}/site-control-kit`;
-- workspace/reports/state живут в `${XDG_DATA_HOME:-~/.local/share}/site-control-kit`;
-- logs живут в `${XDG_STATE_HOME:-~/.local/state}/site-control-kit/logs`.
+Назначение:
+- держать один источник правды по runtime mode (`project-local` vs `legacy-adopted`);
+- не допускать silent quickstart fallback для токена;
+- на Windows давать controlled fast-fail там, где production v1 сознательно Linux-only.
 
 ## Схема Потока
 
@@ -96,6 +92,7 @@ tab-level API   content.js -> DOM страницы
 - `GET /api/clients` — какие клиенты подключены.
 - `GET /api/state` — полное состояние.
 - `GET /api/commands/{id}` — подробности конкретной команды.
+- `python -m webcontrol runtime-env --format json --no-create` — эффективный runtime mode, token source и реальные пути до state/log/token.
 
 ## Роли Компонентов
 
@@ -128,6 +125,26 @@ tab-level API   content.js -> DOM страницы
 
 Требование:
 - файл должен оставаться читаемым и пригодным для ручной диагностики.
+
+## Runtime Resolution
+
+Runtime теперь резолвится так:
+
+1. `env`
+2. `.env`
+3. `.site-control-kit/local.yaml`
+4. `config/default.yaml`
+
+При этом:
+
+- canonical default runtime root — `./var/site-control-kit`;
+- если на машине уже есть `%USERPROFILE%\.site-control-kit`, проект уходит в `legacy-adopted`, а repo-local `.site-control-kit/local.yaml` указывает на существующий runtime;
+- generated local token живёт в `.site-control-kit/generated_token.txt`, если явный `SITECTL_TOKEN` не задан.
+
+Для следующего агента это значит:
+
+- не спорить с `runtime-env`, а брать пути и token source только оттуда;
+- отсутствие repo-local `var/site-control-kit` на adopted-legacy машине не считать поломкой само по себе.
 
 ## Маршрутизация
 
@@ -186,18 +203,11 @@ tab-level API   content.js -> DOM страницы
   - `chrome.alarms`
 - Очередь и история не живут в расширении, а сохраняются на стороне хаба.
 
-## Product Runtime
-
-`telegram-username-collector` имеет два режима:
-- `repo` — запуск из checkout, runtime по правилам `webcontrol.settings`;
-- `installed` — запуск из `.deb`, runtime через XDG-пути пользователя.
-
-`telegram-username-collector --doctor` печатает resolved paths, GTK status, helper python, extension zip readiness и hub reachability. `hub_reachable=0` сам по себе является warning, а не blocker, если smoke не запускал хаб.
-
 ## Ограничения
 - `chrome://*` и похожие системные страницы не доступны для content script.
 - Некоторые сайты запрещают `run_script` через CSP.
 - На чувствительных сайтах часть действий нужно делать через DOM-команды вместо произвольного JS.
+- `telegram-username-collector` в production v1 не является Windows GUI launcher: на Windows его контракт — быстрый понятный отказ без traceback и без GTK окна.
 
 ## Принципы Развития
 - сохранять обратную совместимость по API, где это возможно;

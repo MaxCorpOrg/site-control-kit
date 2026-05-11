@@ -217,6 +217,11 @@ telegram-username-collector
 - `bash scripts/bootstrap_telegram_workstation.sh --doctor` не входит в этот Windows smoke;
 - широкий multi-platform verify-pass не нужно смешивать с этим handoff, если отдельно не попросили проверить всю платформу.
 
+Практические замечания по последнему локальному Windows rerun:
+- existing `%USERPROFILE%\.site-control-kit` переводит такой host в `legacy-adopted`; это само по себе не blocker;
+- если в PowerShell bare `.cmd` не резолвится из текущего каталога, используйте `.\browser.cmd` и `.\telegram-username-collector.cmd`;
+- для Git Bash helper на Windows есть `bash.cmd`, который подбирает установленный `bash.exe`.
+
 ## 12. Что не делать
 
 - не хардкодить токен в локальных скриптах

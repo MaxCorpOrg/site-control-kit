@@ -2,19 +2,61 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PYTHON_BIN="${PYTHON_BIN:-python3}"
+
+is_windows_bash() {
+  [[ "${OSTYPE:-}" == msys* || "${OSTYPE:-}" == cygwin* || "${OS:-}" == Windows_NT ]]
+}
+
+default_python_bin() {
+  if is_windows_bash; then
+    if command -v python.exe >/dev/null 2>&1; then
+      printf 'python.exe\n'
+      return 0
+    fi
+    if command -v py >/dev/null 2>&1; then
+      printf 'py -3\n'
+      return 0
+    fi
+  fi
+  if command -v python3 >/dev/null 2>&1; then
+    printf 'python3\n'
+    return 0
+  fi
+  printf 'python\n'
+}
+
+PYTHON_BIN="${PYTHON_BIN:-$(default_python_bin)}"
+
+venv_python_path() {
+  local venv_dir="$1"
+  if is_windows_bash; then
+    printf '%s\n' "$venv_dir/Scripts/python.exe"
+    return 0
+  fi
+  printf '%s\n' "$venv_dir/bin/python"
+}
+
+helper_python_path() {
+  local helper_root="$1"
+  if is_windows_bash; then
+    printf '%s\n' "$helper_root/.venv/Scripts/python.exe"
+    return 0
+  fi
+  printf '%s\n' "$helper_root/.venv/bin/python"
+}
 
 eval "$("$PYTHON_BIN" -m webcontrol runtime-env --format shell)"
 
 WORKSPACE_ROOT="${TELEGRAM_WORKSPACE_ROOT:-$ROOT_DIR/var/site-control-kit/telegram_workspace}"
 MANAGED_HELPER_ROOT="${TELEGRAM_MANAGED_HELPER_ROOT:-$WORKSPACE_ROOT/managed_helper}"
 VENV_DIR="$MANAGED_HELPER_ROOT/.venv"
+VENV_PYTHON="$(venv_python_path "$VENV_DIR")"
 REQ_FILE="$ROOT_DIR/scripts/telegram_helper_requirements.txt"
 SYSTEM_PYTHON="$PYTHON_BIN"
 LEGACY_COLLECTOR_ROOT="${TELEGRAM_API_COLLECTOR_ROOT:-}"
 LEGACY_HELPER_PYTHON=""
 if [[ -n "$LEGACY_COLLECTOR_ROOT" ]]; then
-  LEGACY_HELPER_PYTHON="$LEGACY_COLLECTOR_ROOT/.venv/bin/python"
+  LEGACY_HELPER_PYTHON="$(helper_python_path "$LEGACY_COLLECTOR_ROOT")"
 fi
 
 usage() {
@@ -56,8 +98,8 @@ selected_helper() {
     printf 'explicit\t%s\n' "$explicit"
     return 0
   fi
-  if [[ -x "$VENV_DIR/bin/python" ]]; then
-    printf 'managed\t%s\n' "$VENV_DIR/bin/python"
+  if [[ -x "$VENV_PYTHON" ]]; then
+    printf 'managed\t%s\n' "$VENV_PYTHON"
     return 0
   fi
   if [[ -x "$LEGACY_HELPER_PYTHON" ]]; then
@@ -83,8 +125,8 @@ print_doctor() {
   printf 'generated_token_file=%s\n' "$ROOT_DIR/.site-control-kit/generated_token.txt"
   printf 'workspace_root=%s\n' "$WORKSPACE_ROOT"
   printf 'managed_helper_root=%s\n' "$MANAGED_HELPER_ROOT"
-  printf 'managed_helper_python=%s\n' "$VENV_DIR/bin/python"
-  printf 'managed_helper_ready=%s\n' "$([[ -x "$VENV_DIR/bin/python" ]] && echo 1 || echo 0)"
+  printf 'managed_helper_python=%s\n' "$VENV_PYTHON"
+  printf 'managed_helper_ready=%s\n' "$([[ -x "$VENV_PYTHON" ]] && echo 1 || echo 0)"
   printf 'requirements_file=%s\n' "$REQ_FILE"
   printf 'requirements_ready=%s\n' "$([[ -f "$REQ_FILE" ]] && echo 1 || echo 0)"
   printf 'system_python=%s\n' "$SYSTEM_PYTHON"
@@ -122,11 +164,11 @@ fi
 
 mkdir -p "$MANAGED_HELPER_ROOT"
 
-if [[ ! -x "$VENV_DIR/bin/python" ]]; then
+if [[ ! -x "$VENV_PYTHON" ]]; then
   "$SYSTEM_PYTHON" -m venv "$VENV_DIR"
 fi
 
-"$VENV_DIR/bin/python" -m pip install --upgrade pip setuptools wheel
-"$VENV_DIR/bin/python" -m pip install -r "$REQ_FILE"
+"$VENV_PYTHON" -m pip install --upgrade pip setuptools wheel
+"$VENV_PYTHON" -m pip install -r "$REQ_FILE"
 
 print_doctor

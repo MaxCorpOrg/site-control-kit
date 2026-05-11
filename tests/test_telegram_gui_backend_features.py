@@ -987,8 +987,11 @@ class TelegramGuiBackendFeatureTests(unittest.TestCase):
                 alias_dir = root / "accounts" / "1" / "runtime" / "tdata"
                 self.assertTrue(runtime_dir.exists())
                 self.assertTrue((root / "accounts" / "1" / "runtime" / "portable_state.json").exists())
-                self.assertTrue(alias_dir.is_symlink())
-                self.assertEqual(alias_dir.resolve(), runtime_dir.resolve())
+                self.assertTrue(alias_dir.is_symlink() or alias_dir.is_dir())
+                if alias_dir.is_symlink():
+                    self.assertEqual(alias_dir.resolve(), runtime_dir.resolve())
+                else:
+                    self.assertEqual((alias_dir / "key_datas").read_bytes(), (runtime_dir / "key_datas").read_bytes())
                 self.assertEqual(state.state, "binary_missing")
                 self.assertTrue(state.ready_for_export)
                 self.assertEqual(target.tab_url, str(runtime_dir))

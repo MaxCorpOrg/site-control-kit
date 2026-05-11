@@ -17,7 +17,7 @@ from urllib.request import Request, urlopen
 
 from .config import HubConfig
 from .server import run_server
-from .settings import format_runtime_env, load_runtime_settings, resolve_hub_token
+from .settings import format_runtime_env, load_runtime_settings, resolve_hub_token, resolve_hub_token_with_source
 from .store import TERMINAL_COMMAND_STATUSES
 from .utils import compact
 
@@ -636,8 +636,15 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
 def cmd_runtime_env(args: argparse.Namespace) -> int:
     settings = load_runtime_settings(mutate=not args.no_create)
-    token = resolve_hub_token(settings, mutate=not args.no_create)
-    sys.stdout.write(format_runtime_env(settings, token=token or None, shell=args.format))
+    token, token_source = resolve_hub_token_with_source(settings, mutate=not args.no_create)
+    sys.stdout.write(
+        format_runtime_env(
+            settings,
+            token=token or None,
+            token_source=token_source,
+            shell=args.format,
+        )
+    )
     return 0
 
 

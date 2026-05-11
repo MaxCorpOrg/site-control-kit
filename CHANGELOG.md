@@ -2,24 +2,48 @@
 
 ## 2026-05-11
 
-- Завершён end-of-day checkpoint pass: обновлены project docs, agent rules, next steps и checkpoint.
-- Добавлена защита `.gitignore` для локальных env/agent/Telegram/cache artifacts.
-- Исправлена hygiene сборки `.deb`: agent/checkpoint/next-step docs исключены из product payload.
-- Опубликован Linux-first productization baseline для `Telegram Username Collector`.
-- Добавлена сборка Ubuntu `.deb` пакета через `scripts/build_linux_deb.sh`.
-- Добавлены Linux product wrappers, desktop entry, иконки и bundled companion extension zip.
-- `telegram-username-collector` получил `--doctor` и `--create-desktop-shortcut`.
-- Runtime установленной версии переведён на пользовательские XDG-пути вместо записи рабочих данных в `/opt`.
-- Выполнен fresh-clone build smoke из GitHub `main`.
-- Выполнен simulated installed-mode smoke через `dpkg-deb -x`: doctor, XDG dirs, shortcut и GTK GUI startup.
-- Clean Ubuntu 24.04 system install smoke остаётся открытым, потому что на текущей машине `sudo` требует пароль и среда не подтверждена как clean VM.
+### Windows Core Smoke And End-Of-Day Checkpoint
+
+- Подтверждён narrow Windows smoke для `telegram-username-collector` и core/browser wrappers на `C:\site-control-kit-win-smoke`.
+- `scripts\start_hub.cmd` снова поднимает hub на Windows без traceback.
+- `python -m webcontrol runtime-env --format json --no-create` показывает `legacy-adopted` runtime, `token_file` source и реальные runtime paths.
+- `browser.cmd status` и `browser.cmd tabs` подтверждены на live client `client-win-edge-manual-20260510`.
+- `telegram-username-collector` на Windows подтверждён как controlled fast-fail launcher, а не как GUI runtime entrypoint.
+- End-of-day docs синхронизированы:
+  - `README.md`
+  - `docs/ARCHITECTURE.md`
+  - `NEXT_STEPS.md`
+  - `AGENTS.md`
+  - handoff/state docs
+
+### Проверки
+
+- `git diff --check`
+- `python -m unittest discover -s tests -p "test_*.py"`
+- `python -m webcontrol --help`
+- `python -m webcontrol browser --help`
+- `python -m webcontrol runtime-env --format json --no-create`
+- `.\browser.cmd status`
+- `.\browser.cmd tabs`
+- `.\telegram-username-collector.cmd`
+
+Во время финального end-of-day verify browser client один раз успел стать stale/offline; recovery снова остался runtime-only:
+
+- перезапуск Edge debug profile с `--disable-extensions-except=<repo>\extension`
+- и `--load-extension=<repo>\extension`
+
+После этого `browser.cmd status` и `browser.cmd tabs` снова стали зелёными.
+
+### Риски
+
+- adopted Edge debug profile может повторно потерять active unpacked-extension load state;
+- fresh project-local runtime path по-прежнему не подтверждён на машине с existing `%USERPROFILE%\.site-control-kit`.
 
 ## 2026-05-10
 
-- Зафиксирован Windows smoke handoff для `telegram-username-collector`.
-- Уточнено, что Windows проверяет wrappers/runtime/fast-fail, а не полный Telegram feature-cycle.
+### Windows Core Smoke + Release Confidence
 
-## 2026-05-09
-
-- Закрыт production-hardening baseline для Telegram GUI extraction и runtime diagnostics.
-- Подтверждён основной Linux GTK operator path.
+- Починен Windows PowerShell hub launcher path.
+- Усилен runtime/config слой и диагностика `runtime-env`.
+- Добавлены Windows-safe launcher paths и no-GTK fast-fail contract для Telegram GUI entrypoints.
+- Подтверждён live browser client после Windows smoke на adopted runtime.

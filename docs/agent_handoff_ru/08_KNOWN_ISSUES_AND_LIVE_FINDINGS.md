@@ -1,5 +1,25 @@
 # Known Issues And Live Findings
 
+## Самый Новый Local Windows Smoke Rerun
+Новый самый свежий факт на 2026-05-11 уже не про новый repo blocker, а про повторный live rerun текущей Windows-машины:
+- rerun делался в `C:\site-control-kit-win-smoke` на `Windows 10 Pro`, `PowerShell 5.1.26100.8115`, `Python 3.14.0`;
+- `python -m webcontrol runtime-env --format json --no-create` снова дал валидный JSON и подтвердил:
+  - `legacy-adopted`
+  - `SITECTL_TOKEN_SOURCE=token_file`
+  - repo-local `.site-control-kit/generated_token.txt`
+  - repo-local `.site-control-kit/local.yaml`
+  - effective `state.json`, `hub.log`, `runtime_events.jsonl` в `%USERPROFILE%\.site-control-kit`
+- exact Windows smoke на этом host:
+  - `scripts\start_hub.cmd` поднял hub без traceback;
+  - первый `.\browser.cmd status` / `.\browser.cmd tabs` увидел stale offline client;
+  - extension storage уже был корректный, root cause оказался не token/runtime mismatch, а drift active unpacked-extension load state в adopted Edge debug profile;
+  - live client восстановлен без code changes: runtime-only relaunch Edge debug profile с явными `--disable-extensions-except=<repo>\extension` и `--load-extension=<repo>\extension`;
+  - после relaunch `browser.cmd status` и `browser.cmd tabs` снова показали online client и live tabs;
+  - `.\telegram-username-collector.cmd` завершился expected fast-fail exit без traceback и без GTK окна.
+- practical finding:
+  - текущий remaining Windows risk теперь узкий и operational-only: drift active unpacked-extension load state в adopted Edge debug profile;
+  - первый safe fix для такого сбоя — extension reload / explicit `--load-extension`, а не новый Telegram feature-cycle или shared-helper refactor.
+
 ## Самый Новый Linux Productization Layer
 Новый самый свежий факт на 2026-05-11 уже уже не про Windows-only handoff, а про Linux-first product baseline:
 - `.deb` build path реально landed:

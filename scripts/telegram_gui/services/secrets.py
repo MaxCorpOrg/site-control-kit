@@ -91,11 +91,21 @@ class SecretStore:
         _chmod_best_effort(path, DEFAULT_FILE_MODE)
 
     def is_secure(self, path: Path) -> bool:
+        resolved_path = path.expanduser()
+        if not resolved_path.exists():
+            return False
+        if os.name == "nt":
+            try:
+                target = resolved_path.resolve()
+                base = self.base_dir.resolve()
+            except OSError:
+                return False
+            return target == base or base in target.parents
         try:
-            mode = path.stat().st_mode & 0o777
+            mode = resolved_path.stat().st_mode & 0o777
         except OSError:
             return False
-        if path.is_dir():
+        if resolved_path.is_dir():
             return mode & 0o077 == 0
         return mode & 0o177 == 0
 

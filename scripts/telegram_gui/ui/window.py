@@ -2470,7 +2470,8 @@ def _clean_tab_title(value: str) -> str:
 
 
 def _slot_number_from_source(profile_value: str) -> str:
-    match = re.search(r"/accounts/(\d+)/", str(profile_value or ""))
+    normalized = str(profile_value or "").replace("\\", "/")
+    match = re.search(r"/accounts/(\d+)/", normalized)
     return match.group(1) if match else ""
 
 
@@ -2816,7 +2817,11 @@ def _sync_portable_runtime_alias(slot_number: str) -> None:
         workdir_tdata.unlink(missing_ok=True)
     elif workdir_tdata.exists():
         shutil.rmtree(workdir_tdata, ignore_errors=True)
-    workdir_tdata.symlink_to(runtime_dir, target_is_directory=True)
+    try:
+        workdir_tdata.symlink_to(runtime_dir, target_is_directory=True)
+    except OSError:
+        shutil.copytree(runtime_dir, workdir_tdata)
+        _chmod_best_effort(workdir_tdata, 0o700)
 
 
 def _resolve_import_slot(preferred_slot: str) -> int:

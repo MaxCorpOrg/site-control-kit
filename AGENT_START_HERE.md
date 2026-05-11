@@ -25,49 +25,31 @@
 ## Что Это За Ветка
 - Репозиторий: `site-control-kit`
 - Ветка: `main`
-- Активная тема: Telegram export path
-- Цель не менялась: собирать именно peer-bound Telegram `@username` и двигаться к `100`
+- Активная тема: Linux productization + Windows smoke release confidence
+- Ближайшая цель: держать release-confidence baseline и не начинать новый Telegram feature-cycle без отдельного решения
 
 ## Где Мы Закончили Работу
-- На 2026-05-11 выполнено завершение рабочего дня по проекту без новой разработки:
-  - обновлены project docs и agent handoff docs;
-  - создан checkpoint `docs/checkpoints/CHECKPOINT_2026-05-11.md`;
-  - копия checkpoint сохранена на рабочий стол: `/home/max/Рабочий стол/CHECKPOINT_2026-05-11.md`;
-  - добавлены защитные `.gitignore` правила для `.env`, `.codex/`, `TG_CONTACT/`, `node_modules/`;
-  - при финальном package payload scan найдено, что новый checkpoint попадал в `.deb`, поэтому `scripts/build_linux_deb.sh` дополнительно исключает `AGENTS.md`, `NEXT_STEPS.md`, `docs/checkpoints`;
-  - после пересборки `dpkg-deb --contents` подтвердил, что agent/checkpoint/test/local artifacts отсутствуют в product payload.
-- На 2026-05-11 выполнен `Clean Ubuntu .deb Smoke Attempt` после публикации `main`:
-  - текущая машина: `Ubuntu 24.04.4 LTS`, GNOME/X11, `Python 3.12.3`, но это не подтверждённая clean VM;
-  - `sudo -n true` и `sudo -n apt install -y ...telegram-username-collector_0.1.0_amd64.deb` -> `sudo: a password is required`, поэтому настоящий system install / Applications menu smoke на этой машине не закрыт;
-  - fresh clone из GitHub создан в `/home/max/site-control-kit-product-smoke-20260511-164357`;
-  - clone evidence:
-    - `git rev-parse HEAD` -> `3412ccd26d5ebcd3710a50b8f6c0b5b9696a6447`
-    - `git status --short --branch` -> `## main...origin/main`
-  - build evidence из fresh clone:
-    - `bash scripts/build_linux_deb.sh` -> собран `/home/max/site-control-kit-product-smoke-20260511-164357/dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`
-    - размер `.deb`: `52M`
-    - `dpkg-deb --info` -> `Package: telegram-username-collector`, `Version: 0.1.0`, `Architecture: amd64`, depends: `python3, python3-gi, gir1.2-gtk-4.0, libgtk-4-1, xdg-utils, zip`
-    - `dpkg-deb --contents` подтвердил `/usr/bin/telegram-username-collector`, `/usr/bin/sitectl`, desktop entry, icon sizes `64/128/256`, SVG icon и bundled extension zip;
-    - forbidden payload absent: `AGENT_START_HERE`, `CODEX_STATE`, `docs/agent_handoff_ru`, `/tests/`, `TG_CONTACT`, `.codex`, `artifacts/telegram_exports`;
-  - из-за отсутствия `sudo` выполнен безопасный simulated installed-mode через `dpkg-deb -x`:
-    - package extract root: `/tmp/sitectl-deb-extract-20260511-164732`
-    - temp XDG root: `/tmp/sitectl-deb-xdg-20260511-164732`
-    - `--doctor` -> `mode=installed`, `overall_status=warning`, `token_present=1`, `gtk_runtime=ok`, `extension_zip_ready=1`, `hub_reachable=0`
-    - warning допустим в этом smoke, потому что hub не запускался;
-    - XDG dirs созданы в temp root: `config/site-control-kit`, `data/site-control-kit`, `data/site-control-kit/telegram_workspace`, `data/site-control-kit/reports`, `state/site-control-kit/logs`;
-    - в extracted `/opt/telegram-username-collector` не найдено пользовательских runtime-файлов `generated_token.txt`, `runtime_events.jsonl`, `state.json`;
-    - `--create-desktop-shortcut` с temp `HOME` создал `/tmp/sitectl-deb-xdg-20260511-164732/home/Desktop/Telegram Username Collector.desktop`;
-    - direct GUI smoke из extracted package payload на `DISPLAY=:0` подтвердил окно `Telegram Username Collector` через `xwininfo`, stderr без traceback, процесс закрыт.
-  - practical verdict:
-    - fresh clone build + payload + simulated installed-mode runtime/shortcut/GUI smoke: `PASS with warning hub_reachable=0`;
-    - настоящий clean Ubuntu installed-mode release gate всё ещё открыт, потому что не выполнены `sudo apt install`, system `/usr/bin` launchers, real `/opt/...`, real user XDG dirs и Applications menu / `gtk-launch` после system install.
-  - следующий шаг:
-    - на готовой чистой Ubuntu 24.04 VM с доступным `sudo` выполнить именно system install:
-      - `sudo apt install ./dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`
-      - `telegram-username-collector --doctor`
-      - `telegram-username-collector --create-desktop-shortcut`
-      - `gtk-launch telegram-username-collector`
-      - проверить реальные `~/.config/site-control-kit`, `~/.local/share/site-control-kit`, `~/.local/state/site-control-kit/logs` и отсутствие runtime-файлов в `/opt/telegram-username-collector`.
+- На 2026-05-11 сохранён `Local Windows Smoke Rerun On Existing Machine`:
+  - проход делался в `C:\site-control-kit-win-smoke` на `Windows 10 Pro`, `PowerShell 5.1.26100.8115`, `Python 3.14.0`;
+  - новых repo-code changes в этом rerun не добавлялось; это был узкий повторный прогон существующего Windows smoke;
+  - `python -m webcontrol runtime-env --format json --no-create` подтвердил:
+    - `legacy-adopted` runtime;
+    - `SITECTL_TOKEN_SOURCE=token_file`;
+    - repo-local `.site-control-kit/generated_token.txt` и `.site-control-kit/local.yaml`;
+    - effective runtime/log paths в `%USERPROFILE%\.site-control-kit`;
+  - exact smoke на этой машине:
+    - `scripts\start_hub.cmd` поднял hub без traceback;
+    - первый `.\browser.cmd status` / `.\browser.cmd tabs` увидел stale offline client из adopted legacy state;
+    - token/runtime wiring уже были корректны; live client восстановлен без code changes перезапуском adopted Edge debug profile с явными `--disable-extensions-except=<repo>\extension` и `--load-extension=<repo>\extension`;
+    - после relaunch `.\browser.cmd status` и `.\browser.cmd tabs` снова подтвердили online client и live tabs;
+    - `.\telegram-username-collector.cmd` завершился controlled fast-fail без traceback и без GTK окна;
+  - practical вывод:
+    - локальный narrow Windows smoke сейчас зелёный;
+    - отсюда не нужно начинать новый Telegram feature-cycle, GUI split или shared-helper refactor;
+    - главный оставшийся практический риск — drift active unpacked-extension load state в adopted Edge debug profile;
+  - следующий узкий шаг:
+    - использовать этот rerun как текущий Windows baseline;
+    - при новом сбое сначала лечить extension reload / explicit `--load-extension`, а не расширять scope.
 - На 2026-05-11 сохранён `Linux Productization v1: .deb + Doctor + Desktop Shortcut`:
   - в этом цикле repo уже переведён из состояния "dev checkout only" в состояние "есть собираемый Linux desktop product":
     - добавлен `scripts/build_linux_deb.sh`;
