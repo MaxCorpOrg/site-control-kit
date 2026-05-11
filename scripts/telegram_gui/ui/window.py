@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from .. import app as _app
 from ..backend import TelegramGuiBackend
+from ...telegram_product_runtime import create_desktop_shortcut, resolve_product_paths
+from webcontrol.settings import load_runtime_settings, resolve_hub_token
 
 globals().update(
     {
@@ -97,6 +99,9 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
         self.security_restart_button = Gtk.Button(label="Перезапустить hub этим токеном")
         self.security_form_revealer = Gtk.Revealer()
         self.security_token_entry = Gtk.Entry()
+        self.product_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        self.product_summary_label = Gtk.Label(label="Подготовка product setup...")
+        self.product_feedback_label = Gtk.Label(label="")
         self.run_stack = Gtk.Stack()
         self.run_switcher = Gtk.StackSwitcher(stack=self.run_stack)
         self.progress_panel = ProgressPanel()
@@ -114,6 +119,7 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
         self.history_panel.bind_filter(self._set_history_filter)
 
         self._build_ui()
+        self._refresh_product_setup_card()
         self.connect("close-request", self._on_close_request)
         self._apply_preflight_info(
             self.backend.build_preflight(
@@ -144,6 +150,7 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
     def _build_ui(self) -> None:
         self.root_box.append(self._build_hero())
         self.root_box.append(self._build_status_strip())
+        self.root_box.append(self._build_product_card())
         split = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
         split.set_vexpand(True)
         self.root_box.append(split)
@@ -195,6 +202,35 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
             widget.add_css_class("badge")
             strip.append(widget)
         return strip
+
+    def _build_product_card(self) -> Gtk.Widget:
+        self.product_card.add_css_class("card")
+        title = Gtk.Label(label="Установка и первый запуск")
+        title.set_xalign(0)
+        title.add_css_class("card-title")
+        self.product_summary_label.set_xalign(0)
+        self.product_summary_label.set_wrap(True)
+        self.product_summary_label.add_css_class("meta")
+        self.product_feedback_label.set_xalign(0)
+        self.product_feedback_label.set_wrap(True)
+        self.product_feedback_label.add_css_class("meta")
+
+        actions_top = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        actions_top.append(self._button("Создать ярлык на рабочем столе", self._create_product_shortcut))
+        actions_top.append(self._button("Открыть папку данных", self._open_product_runtime_root))
+        actions_top.append(self._button("Открыть папку extension", self._open_product_extension_dir))
+
+        actions_bottom = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        actions_bottom.append(self._button("Открыть extension ZIP", self._open_product_extension_zip))
+        actions_bottom.append(self._button("Копировать URL хаба", self._copy_product_hub_url))
+        actions_bottom.append(self._button("Копировать token", self._copy_product_hub_token))
+
+        self.product_card.append(title)
+        self.product_card.append(self.product_summary_label)
+        self.product_card.append(actions_top)
+        self.product_card.append(actions_bottom)
+        self.product_card.append(self.product_feedback_label)
+        return self.product_card
 
     def _build_account_section(self) -> Gtk.Widget:
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
@@ -973,6 +1009,82 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
         self.security_restart_button.set_sensitive(bool(info.security_restart_available))
         if not info.security_setup_available:
             self.security_form_revealer.set_reveal_child(False)
+
+    def _refresh_product_setup_card(self) -> None:
+        settings = load_runtime_settings(mutate=True)
+        resolve_hub_token(settings, mutate=True)
+        product_paths = resolve_product_paths(settings=settings)
+        mode_label = "Installed .deb mode" if product_paths.installed_mode else "Repo/dev mode"
+        zip_line = (
+            str(product_paths.extension_zip_path)
+            if product_paths.extension_zip_path.exists()
+            else f"{product_paths.extension_zip_path} (будет создан build-скриптом)"
+        )
+        summary_lines = [
+            f"Режим: {mode_label}",
+            f"Данные и workspace: {settings.runtime_root}",
+            f"Config/token: {settings.hub_token_file}",
+            f"Логи: {settings.logs_root}",
+            f"Отчёты: {settings.telegram_default_output_dir}",
+            f"Hub URL: {settings.server_url}",
+            f"Extension folder: {product_paths.extension_dir}",
+            f"Extension ZIP: {zip_line}",
+        ]
+        self.product_summary_label.set_label("\n".join(summary_lines))
+
+    def _copy_text_value(self, value: str, *, success_message: str) -> None:
+        display = self.get_display()
+        if display is None:
+            self._show_warning(success_message)
+            return
+        display.get_clipboard().set(value)
+        self.product_feedback_label.set_label(success_message)
+        self._append_log(success_message)
+
+    def _copy_product_hub_url(self) -> None:
+        settings = load_runtime_settings(mutate=True)
+        self._copy_text_value(settings.server_url, success_message="URL хаба скопирован.")
+
+    def _copy_product_hub_token(self) -> None:
+        settings = load_runtime_settings(mutate=True)
+        token = resolve_hub_token(settings, mutate=True)
+        if not token:
+            self._show_warning("Токен пока не создан.")
+            return
+        self._copy_text_value(token, success_message="Hub token скопирован.")
+
+    def _open_product_runtime_root(self) -> None:
+        settings = load_runtime_settings(mutate=True)
+        try:
+            open_path_in_file_manager(settings.runtime_root)
+        except Exception as exc:
+            self._show_error(str(exc))
+
+    def _open_product_extension_dir(self) -> None:
+        product_paths = resolve_product_paths(settings=load_runtime_settings(mutate=False))
+        try:
+            open_path_in_file_manager(product_paths.extension_dir)
+        except Exception as exc:
+            self._show_error(str(exc))
+
+    def _open_product_extension_zip(self) -> None:
+        product_paths = resolve_product_paths(settings=load_runtime_settings(mutate=False))
+        if not product_paths.extension_zip_path.exists():
+            self._show_warning(f"Extension ZIP ещё не найден: {product_paths.extension_zip_path}")
+            return
+        try:
+            open_item_with_default_app(product_paths.extension_zip_path)
+        except Exception as exc:
+            self._show_error(str(exc))
+
+    def _create_product_shortcut(self) -> None:
+        try:
+            shortcut_path = create_desktop_shortcut()
+        except Exception as exc:
+            self._show_error(str(exc))
+            return
+        self.product_feedback_label.set_label(f"Ярлык создан: {shortcut_path}")
+        self._append_log(f"Создан desktop shortcut: {shortcut_path}")
 
     def _on_portable_profile_changed(self) -> None:
         if self._ui_syncing:

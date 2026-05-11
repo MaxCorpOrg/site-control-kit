@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title>Telegram Username Collector</title>
+  <defs>
+    <linearGradient id="bg" x1="0%" x2="100%" y1="0%" y2="100%">
+      <stop offset="0%" stop-color="#1f5c54"/>
+      <stop offset="100%" stop-color="#c66f21"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="110" fill="url(#bg)"/>
+  <circle cx="256" cy="188" r="82" fill="#f7efe2"/>
+  <path d="M151 362c17-55 66-93 122-93 55 0 104 38 121 93" fill="none" stroke="#f7efe2" stroke-linecap="round" stroke-width="34"/>
+  <path d="M359 167l53 12-53 12 16 52-41-36-41 36 16-52-53-12 53-12-16-52 41 36 41-36z" fill="#f6b24c"/>
+</svg>

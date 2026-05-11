@@ -161,6 +161,34 @@ scripts\package_extension.cmd
 
 ### Linux/macOS
 
+### Ubuntu `.deb` product path
+
+Если нужен не repo checkout, а готовая программа для Ubuntu 24.04:
+
+```bash
+cd <repo-root>
+bash scripts/build_linux_deb.sh
+sudo apt install ./dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb
+telegram-username-collector --doctor
+telegram-username-collector
+```
+
+Дополнительно:
+
+```bash
+telegram-username-collector --create-desktop-shortcut
+```
+
+Что делает установленная версия:
+- ставит приложение в `/opt/telegram-username-collector`;
+- добавляет launcher в меню приложений;
+- хранит token/config в `${XDG_CONFIG_HOME:-~/.config}/site-control-kit`;
+- хранит workspace/reports/state в `${XDG_DATA_HOME:-~/.local/share}/site-control-kit`;
+- хранит логи в `${XDG_STATE_HOME:-~/.local/state}/site-control-kit/logs`;
+- кладёт companion extension zip в `/opt/telegram-username-collector/app/resources/site-control-bridge-extension.zip`.
+
+Подробный install/update/uninstall flow: [docs/LINUX_PRODUCT_INSTALL_RU.md](docs/LINUX_PRODUCT_INSTALL_RU.md).
+
 ## 1) Запуск хаба
 
 ```bash
@@ -351,6 +379,8 @@ telegram-username-collector
 ```
 
 Что это даёт:
+- `telegram-username-collector --doctor` теперь даёт product/runtime диагностику без запуска GTK окна;
+- `telegram-username-collector --create-desktop-shortcut` создаёт ярлык текущему Linux-пользователю;
 - `bootstrap_telegram_workstation.sh --doctor` проверяет `gi/GTK`, `python3`, helper requirements и текущий helper source;
 - `--doctor` теперь также печатает resolved runtime root, logs root, reports root и JSONL-логи;
 - обычный `bootstrap_telegram_workstation.sh` поднимает managed helper venv в `./var/site-control-kit/telegram_workspace/managed_helper/.venv`;

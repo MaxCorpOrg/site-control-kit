@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Telegram Username Collector
+Comment=Collect Telegram usernames from Telegram Desktop history
+Comment[ru]=Сбор Telegram username из истории Telegram Desktop
+Exec=telegram-username-collector
+Icon=telegram-username-collector
+Terminal=false
+Categories=Utility;Network;
+Keywords=telegram;username;collector;
+StartupWMClass=Telegram Username Collector
+StartupNotify=true

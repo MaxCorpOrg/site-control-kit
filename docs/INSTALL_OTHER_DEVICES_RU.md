@@ -6,6 +6,7 @@
 
 - Linux:
   - production-ready `hub + browser + telegram-username-collector`
+  - есть Linux-first product path в виде Ubuntu `.deb`
   - GTK GUI работает только через системный `python3` с установленными GTK bindings
 - Windows:
   - production-ready `hub + browser + wrappers + docs`
@@ -43,6 +44,17 @@ python3 -m webcontrol runtime-env --format json
 
 ### Linux
 
+Готовый продукт для Ubuntu 24.04:
+
+```bash
+cd <repo-root>
+bash scripts/build_linux_deb.sh
+sudo apt install ./dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb
+telegram-username-collector --doctor
+```
+
+Repo checkout для разработки:
+
 ```bash
 git clone <repo-url> site-control-kit
 cd site-control-kit
@@ -56,6 +68,8 @@ Telegram GUI Linux preflight:
 cd <repo-root>
 bash scripts/bootstrap_telegram_workstation.sh --doctor
 ```
+
+Linux product install/update/uninstall flow, desktop shortcut и XDG runtime dirs: [docs/LINUX_PRODUCT_INSTALL_RU.md](LINUX_PRODUCT_INSTALL_RU.md).
 
 ### Windows
 
@@ -148,6 +162,12 @@ GTK GUI не входит в Windows v1.
 - `var/site-control-kit/telegram_workspace/`
 
 В adopted legacy режиме те же каталоги будут жить под `~/.site-control-kit/...`, а `.site-control-kit/local.yaml` внутри репозитория будет только pointer-файлом.
+
+В установленном `.deb` режиме runtime-контракт другой:
+
+- config/token: `${XDG_CONFIG_HOME:-~/.config}/site-control-kit`
+- data/workspace/reports/state: `${XDG_DATA_HOME:-~/.local/share}/site-control-kit`
+- logs: `${XDG_STATE_HOME:-~/.local/state}/site-control-kit/logs`
 
 ## 10. Минимальная проверка
 

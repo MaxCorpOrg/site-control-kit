@@ -1,5 +1,26 @@
 # Current Backlog And Next Steps
 
+## Обновление 2026-05-11 (Linux Productization v1: `.deb` + Doctor + Desktop Shortcut)
+- Текущий Linux product baseline уже зафиксирован:
+  - `.deb` реально собирается через `scripts/build_linux_deb.sh`;
+  - launcher умеет `--doctor` и `--create-desktop-shortcut`;
+  - GUI already exposes product/setup actions;
+  - docs для product install/update/uninstall уже вынесены в `docs/LINUX_PRODUCT_INSTALL_RU.md`.
+- Новый ближайший следующий шаг теперь уже такой:
+  - на чистой Ubuntu 24.04 машине/VM установить `dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`;
+  - подтвердить installed-mode path end-to-end:
+    - `telegram-username-collector --doctor`
+    - запуск из меню приложений
+    - `telegram-username-collector --create-desktop-shortcut`
+    - XDG config/data/state dirs вместо repo-local `var/...`
+    - one-time extension setup из `/opt/telegram-username-collector/app/extension`
+    - bundled zip presence/use from `/opt/telegram-username-collector/app/resources/site-control-bridge-extension.zip`
+  - только после этого принимать решение, нужен ли ещё один Linux packaging polish-pass.
+- Что важно не перепутать:
+  - этот цикл уже не про новый Telegram feature work;
+  - Windows smoke теперь secondary compatibility pass, а не главный product blocker;
+  - локальные `.codex`, `TG_CONTACT/` и modified `artifacts/telegram_exports/INDEX.md` по-прежнему не часть publish artifact.
+
 ## Обновление 2026-05-11 (Windows Smoke Handoff Narrowing + Corrected Desktop Prompt)
 - Текущий documentation/handoff fix уже зафиксирован:
   - exact Windows smoke теперь описан в `docs/WINDOWS_SMOKE_HANDOFF_RU.md`;

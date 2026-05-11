@@ -83,6 +83,34 @@ find /home/max/telegram_contact_batches/chat_-1002465948544/chains -maxdepth 2 -
 - batch/safe/quarantine слои работают.
 
 Новый самый верхний handoff-факт на 2026-05-11 теперь уже такой:
+- сохранён `Linux Productization v1: .deb + Doctor + Desktop Shortcut`;
+- в репозитории теперь уже есть не только repo-flow, но и продуктовый Linux build path:
+  - `scripts/build_linux_deb.sh`
+  - product wrapper-ы в `packaging/linux/`
+  - desktop entry + icon source
+  - `scripts/telegram_product_runtime.py`
+  - `telegram-username-collector --doctor`
+  - `telegram-username-collector --create-desktop-shortcut`
+- GUI теперь показывает product/setup блок с runtime dirs, hub URL, token copy и extension actions;
+- verify этого цикла:
+  - `python3 -m unittest discover -s tests -p 'test_*.py'` -> `299 tests OK`
+  - `python3 -m webcontrol --help` -> OK
+  - `python3 -m webcontrol browser --help` -> OK
+  - `python3 -m scripts.telegram_username_collector_launcher --doctor` -> OK
+  - live GTK smoke на `DISPLAY=:0` снова подтвердил реальное окно `Telegram Username Collector`
+  - `bash scripts/build_linux_deb.sh` -> собран `dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`
+  - `dpkg-deb --contents ...` подтвердил launcher-ы, desktop file, icon sizes и bundled extension zip
+- practical next step:
+  - на чистой Ubuntu 24.04 машине/VM пройти installed-mode smoke для этого `.deb`:
+    - `telegram-username-collector --doctor`
+    - запуск из Applications menu
+    - `telegram-username-collector --create-desktop-shortcut`
+    - проверка XDG runtime dirs
+    - one-time extension setup из `/opt/telegram-username-collector/app/extension`
+  - только после этого решать, нужен ли ещё один polish-pass по packaging/runtime UX;
+  - Windows smoke теперь уже secondary compatibility pass, а не единственный release priority.
+
+Новый самый верхний handoff-факт на 2026-05-11 до этого был такой:
 - сохранён `Windows Smoke Handoff Narrowing + Corrected Desktop Prompt`;
 - новый код в репозитории в этом цикле не потребовался;
 - добавлен отдельный Windows runbook:

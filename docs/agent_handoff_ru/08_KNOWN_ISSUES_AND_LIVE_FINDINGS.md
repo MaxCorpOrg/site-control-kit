@@ -1,5 +1,31 @@
 # Known Issues And Live Findings
 
+## Самый Новый Linux Productization Layer
+Новый самый свежий факт на 2026-05-11 уже уже не про Windows-only handoff, а про Linux-first product baseline:
+- `.deb` build path реально landed:
+  - `scripts/build_linux_deb.sh` собирает `dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`;
+  - package payload подтверждён через `dpkg-deb --contents`;
+  - в пакет попадают:
+    - `/usr/bin/telegram-username-collector`
+    - `/usr/bin/sitectl`
+    - `usr/share/applications/telegram-username-collector.desktop`
+    - icon sizes `64/128/256` + scalable svg
+    - bundled `site-control-bridge-extension.zip`
+- launcher contract расширен:
+  - `telegram-username-collector --doctor`
+  - `telegram-username-collector --create-desktop-shortcut`
+- installed mode больше не должен писать artifact index в `/opt/...`: GUI/runtime уводят это в user-writable XDG reports/runtime paths.
+- live Linux finding:
+  - `DISPLAY=:0 python3 scripts/telegram_members_export_gui.py` снова реально поднял окно `Telegram Username Collector`;
+  - product `--doctor` отрабатывает без GTK traceback и печатает runtime/install diagnostics.
+- practical finding:
+  - главный remaining Linux release risk теперь уже не build, а отсутствие clean Ubuntu install evidence:
+    - Applications menu launcher
+    - actual XDG runtime dirs after install
+    - desktop shortcut creation after install
+    - one-time extension setup from installed `/opt/...` paths
+  - package размер сейчас около `52M`, основной вес даёт bundled venv + `PyQt5-Qt5` из `opentele`; это заметный, но ожидаемый tradeoff текущего v1.
+
 ## Самый Новый Windows Scope Fix
 Новый самый свежий факт на 2026-05-11 уже уже не про новый runtime blocker, а про исправление handoff ambiguity:
 - был риск, что Windows-агент уйдёт в слишком широкий verify-pass, потому что desktop prompt смешивал узкий Windows smoke с Linux-only и full-platform шагами;

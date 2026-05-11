@@ -132,6 +132,10 @@ RUNTIME_ERRORS_LOG_FILE = Path(".")
 MANAGED_HELPER_ROOT = Path(".")
 MANAGED_HELPER_VENV_DIR = Path(".")
 MANAGED_HELPER_PYTHON = Path(".")
+PRODUCT_MODE = "repo"
+PRODUCT_EXTENSION_ZIP = Path(".")
+PRODUCT_DESKTOP_FILE = Path(".")
+PRODUCT_ICON_PATH = Path(".")
 HELPER_REQUIREMENTS_FILE = SCRIPTS_DIR / "telegram_helper_requirements.txt"
 LOCK_DIR = Path(tempfile.gettempdir()) / "site-control-kit-telegram-members-export-gui.lockdir"
 LOCK_PID_FILE = LOCK_DIR / "pid"
@@ -190,6 +194,10 @@ def _apply_runtime_settings(*, mutate: bool) -> None:
     global MANAGED_HELPER_ROOT
     global MANAGED_HELPER_VENV_DIR
     global MANAGED_HELPER_PYTHON
+    global PRODUCT_MODE
+    global PRODUCT_EXTENSION_ZIP
+    global PRODUCT_DESKTOP_FILE
+    global PRODUCT_ICON_PATH
     global HUB_URL
     global TDATA_SESSION_DIR
 
@@ -216,6 +224,10 @@ def _apply_runtime_settings(*, mutate: bool) -> None:
     MANAGED_HELPER_ROOT = runtime_paths.managed_helper_root
     MANAGED_HELPER_VENV_DIR = runtime_paths.managed_helper_venv_dir
     MANAGED_HELPER_PYTHON = runtime_paths.managed_helper_python
+    PRODUCT_MODE = runtime_paths.product_mode
+    PRODUCT_EXTENSION_ZIP = runtime_paths.extension_zip_path
+    PRODUCT_DESKTOP_FILE = runtime_paths.desktop_file_path
+    PRODUCT_ICON_PATH = runtime_paths.icon_path
     HUB_URL = runtime_paths.hub_url
     TDATA_SESSION_DIR = runtime_paths.tdata_session_dir
     sync_hook = globals().get("_sync_module_exports")

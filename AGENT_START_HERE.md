@@ -29,6 +29,56 @@
 - Цель не менялась: собирать именно peer-bound Telegram `@username` и двигаться к `100`
 
 ## Где Мы Закончили Работу
+- На 2026-05-11 сохранён `Linux Productization v1: .deb + Doctor + Desktop Shortcut`:
+  - в этом цикле repo уже переведён из состояния "dev checkout only" в состояние "есть собираемый Linux desktop product":
+    - добавлен `scripts/build_linux_deb.sh`;
+    - добавлены Linux product wrappers:
+      - `packaging/linux/telegram-username-collector.wrapper.sh`
+      - `packaging/linux/sitectl.wrapper.sh`;
+    - добавлены desktop assets:
+      - `packaging/linux/telegram-username-collector.desktop`
+      - `resources/icons/telegram-username-collector.svg`
+      - build теперь рендерит PNG icon sizes `64/128/256`;
+    - добавлен product/runtime helper:
+      - `scripts/telegram_product_runtime.py`;
+    - launcher `telegram-username-collector` теперь умеет:
+      - `--doctor`
+      - `--create-desktop-shortcut`;
+    - GUI теперь показывает отдельную product/setup панель с runtime dirs, hub URL, token copy и extension actions;
+    - installed mode больше не должен писать artifact index в `/opt/...`: для product mode он уходит в user-writable reports/XDG runtime;
+    - добавлена user-facing документация:
+      - `docs/LINUX_PRODUCT_INSTALL_RU.md`
+      - обновлены `README.md` и `docs/INSTALL_OTHER_DEVICES_RU.md`.
+  - verify этого цикла:
+    - `python3 -m unittest discover -s tests -p 'test_*.py'` -> `299 tests OK`
+    - `python3 -m webcontrol --help` -> OK
+    - `python3 -m webcontrol browser --help` -> OK
+    - `python3 -m scripts.telegram_username_collector_launcher --doctor` -> OK
+    - live GTK smoke:
+      - `DISPLAY=:0 python3 scripts/telegram_members_export_gui.py` -> окно реально поднялось
+      - `DISPLAY=:0 xwininfo -root -tree | rg "Telegram Username Collector"` подтвердил живое окно
+    - `bash scripts/build_linux_deb.sh` -> собран `dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`
+    - `dpkg-deb --contents dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb` подтвердил:
+      - `/usr/bin/telegram-username-collector`
+      - `/usr/bin/sitectl`
+      - `usr/share/applications/telegram-username-collector.desktop`
+      - `usr/share/icons/hicolor/{64,128,256}/apps/telegram-username-collector.png`
+      - `opt/telegram-username-collector/app/resources/site-control-bridge-extension.zip`
+      - internal repo tests / `docs/agent_handoff_ru` / `AGENT_START_HERE.md` / `CODEX_STATE.md` больше не едут в payload
+    - `git diff --check` -> OK
+  - важные findings этого цикла:
+    - продуктовый `.deb` реально собирается локально, но clean Ubuntu install smoke ещё не выполнен;
+    - размер пакета сейчас около `52M`, основной вес даёт bundled venv + `PyQt5-Qt5` из `opentele`;
+    - Windows smoke больше не единственный release gap: перед ним теперь есть отдельный Linux installed-mode proof gap.
+  - новый следующий шаг:
+    - на чистой Ubuntu 24.04 машине/VM установить `dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`;
+    - пройти installed-mode smoke:
+      - `telegram-username-collector --doctor`
+      - запуск из Applications menu
+      - `telegram-username-collector --create-desktop-shortcut`
+      - проверка XDG runtime dirs вместо repo-local `var/...`
+      - one-time extension setup из `/opt/telegram-username-collector/app/extension` и zip companion
+    - только после этого возвращаться к optional Windows smoke как secondary compatibility pass.
 - На 2026-05-11 сохранён `Windows Smoke Handoff Narrowing + Corrected Desktop Prompt`:
   - нового runtime/browser/Telegram кода в этом цикле не добавлялось;
   - что изменено в этом цикле:

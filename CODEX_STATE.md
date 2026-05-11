@@ -1,5 +1,35 @@
 # CODEX_STATE
 
+## 2026-05-11 (Linux Productization v1: .deb + Doctor + Desktop Shortcut)
+
+- Code changes:
+  - added `scripts/telegram_product_runtime.py` for installed-mode detection, product doctor output, extension/resource paths, and desktop shortcut creation
+  - extended `scripts/telegram_username_collector_launcher.py` with `--doctor` and `--create-desktop-shortcut`
+  - updated `scripts/telegram_gui/runtime.py`, `scripts/telegram_gui/app.py`, and `scripts/telegram_gui/ui/window.py` so product mode uses XDG runtime/report paths and the GUI exposes first-run product actions
+  - added Linux packaging/build assets:
+    - `scripts/build_linux_deb.sh`
+    - `packaging/linux/telegram-username-collector.wrapper.sh`
+    - `packaging/linux/sitectl.wrapper.sh`
+    - `packaging/linux/telegram-username-collector.desktop`
+    - `resources/icons/telegram-username-collector.svg`
+  - added user-facing install doc `docs/LINUX_PRODUCT_INSTALL_RU.md`
+  - updated `README.md` and `docs/INSTALL_OTHER_DEVICES_RU.md` for Ubuntu `.deb`, `--doctor`, desktop shortcut, and XDG runtime paths
+- Verify:
+  - `python3 -m unittest discover -s tests -p 'test_*.py'` -> `299 tests OK`
+  - `python3 -m webcontrol --help` -> OK
+  - `python3 -m webcontrol browser --help` -> OK
+  - `python3 -m scripts.telegram_username_collector_launcher --doctor` -> OK
+  - live GTK smoke on Linux:
+    - `DISPLAY=:0 python3 scripts/telegram_members_export_gui.py` -> window opened
+    - `DISPLAY=:0 xwininfo -root -tree | rg "Telegram Username Collector"` -> window confirmed
+  - `bash scripts/build_linux_deb.sh` -> built `dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`
+  - `dpkg-deb --contents dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb` -> package contains `/usr/bin/telegram-username-collector`, `/usr/bin/sitectl`, desktop file, icon sizes, and bundled extension zip; internal repo tests/handoff files are excluded from payload
+  - `git diff --check` -> OK
+- Practical conclusion:
+  - the repo now has a real Linux-first desktop product build, not only a repo checkout flow
+  - the main remaining release gap moved from code/packaging into clean Ubuntu installed-mode evidence
+  - Windows smoke is still relevant, but now secondary to proving the `.deb` install path end-to-end
+
 ## 2026-05-11 (Windows Smoke Handoff Narrowing + Corrected Desktop Prompt)
 
 - Code changes:

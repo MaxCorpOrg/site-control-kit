@@ -12,6 +12,38 @@ Repo-root entrypoint для любого агента: `AGENT_START_HERE.md`.
 
 ## Сделано
 
+### Обновление 2026-05-11 (Linux Productization v1: `.deb` + Doctor + Desktop Shortcut)
+- Репозиторий переведён из режима `repo checkout + scripts` в Linux-first product baseline:
+  - добавлен build script [scripts/build_linux_deb.sh](../scripts/build_linux_deb.sh);
+  - добавлены Linux packaging assets:
+    - `packaging/linux/telegram-username-collector.wrapper.sh`
+    - `packaging/linux/sitectl.wrapper.sh`
+    - `packaging/linux/telegram-username-collector.desktop`
+    - `resources/icons/telegram-username-collector.svg`;
+  - появился product/runtime helper `scripts/telegram_product_runtime.py`;
+  - launcher `telegram-username-collector` теперь поддерживает:
+    - `--doctor`
+    - `--create-desktop-shortcut`;
+  - GUI получил отдельную product/setup панель с runtime dirs, hub URL, token copy и extension actions;
+  - installed mode больше не должен писать artifact index в `/opt/...`: product path уводит его в XDG reports/runtime;
+  - добавлена user-facing doc [docs/LINUX_PRODUCT_INSTALL_RU.md](LINUX_PRODUCT_INSTALL_RU.md), а `README.md` и `docs/INSTALL_OTHER_DEVICES_RU.md` теперь уже описывают Ubuntu `.deb` путь.
+- Verify:
+  - `python3 -m unittest discover -s tests -p 'test_*.py'` -> `299 tests OK`
+  - `python3 -m webcontrol --help` -> OK
+  - `python3 -m webcontrol browser --help` -> OK
+  - `python3 -m scripts.telegram_username_collector_launcher --doctor` -> OK
+  - live GTK smoke:
+    - `DISPLAY=:0 python3 scripts/telegram_members_export_gui.py` -> окно реально поднялось
+    - `DISPLAY=:0 xwininfo -root -tree | rg "Telegram Username Collector"` подтвердил живое окно
+  - packaging:
+    - `bash scripts/build_linux_deb.sh` -> собран `dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`
+    - `dpkg-deb --contents ...` подтвердил launcher-ы, desktop entry, icon sizes `64/128/256`, bundled extension zip и отсутствие internal handoff/tests в app payload
+  - `git diff --check` -> OK
+- Практический вывод:
+  - кодовая часть Linux productization для v1 уже landed;
+  - основной remaining gap теперь не в build script, а в отсутствии clean Ubuntu install smoke с реальным Applications menu и XDG runtime evidence;
+  - Windows smoke остаётся вторичным compatibility-pass, а не главным блокером этого цикла.
+
 ### Обновление 2026-05-11 (Windows Smoke Handoff Narrowing + Corrected Desktop Prompt)
 - Выполнен documentation/handoff pass без новых runtime/browser/Telegram code changes:
   - добавлен отдельный Windows runbook [docs/WINDOWS_SMOKE_HANDOFF_RU.md](WINDOWS_SMOKE_HANDOFF_RU.md);
