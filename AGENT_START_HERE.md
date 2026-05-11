@@ -29,6 +29,45 @@
 - Цель не менялась: собирать именно peer-bound Telegram `@username` и двигаться к `100`
 
 ## Где Мы Закончили Работу
+- На 2026-05-11 выполнено завершение рабочего дня по проекту без новой разработки:
+  - обновлены project docs и agent handoff docs;
+  - создан checkpoint `docs/checkpoints/CHECKPOINT_2026-05-11.md`;
+  - копия checkpoint сохранена на рабочий стол: `/home/max/Рабочий стол/CHECKPOINT_2026-05-11.md`;
+  - добавлены защитные `.gitignore` правила для `.env`, `.codex/`, `TG_CONTACT/`, `node_modules/`;
+  - при финальном package payload scan найдено, что новый checkpoint попадал в `.deb`, поэтому `scripts/build_linux_deb.sh` дополнительно исключает `AGENTS.md`, `NEXT_STEPS.md`, `docs/checkpoints`;
+  - после пересборки `dpkg-deb --contents` подтвердил, что agent/checkpoint/test/local artifacts отсутствуют в product payload.
+- На 2026-05-11 выполнен `Clean Ubuntu .deb Smoke Attempt` после публикации `main`:
+  - текущая машина: `Ubuntu 24.04.4 LTS`, GNOME/X11, `Python 3.12.3`, но это не подтверждённая clean VM;
+  - `sudo -n true` и `sudo -n apt install -y ...telegram-username-collector_0.1.0_amd64.deb` -> `sudo: a password is required`, поэтому настоящий system install / Applications menu smoke на этой машине не закрыт;
+  - fresh clone из GitHub создан в `/home/max/site-control-kit-product-smoke-20260511-164357`;
+  - clone evidence:
+    - `git rev-parse HEAD` -> `3412ccd26d5ebcd3710a50b8f6c0b5b9696a6447`
+    - `git status --short --branch` -> `## main...origin/main`
+  - build evidence из fresh clone:
+    - `bash scripts/build_linux_deb.sh` -> собран `/home/max/site-control-kit-product-smoke-20260511-164357/dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`
+    - размер `.deb`: `52M`
+    - `dpkg-deb --info` -> `Package: telegram-username-collector`, `Version: 0.1.0`, `Architecture: amd64`, depends: `python3, python3-gi, gir1.2-gtk-4.0, libgtk-4-1, xdg-utils, zip`
+    - `dpkg-deb --contents` подтвердил `/usr/bin/telegram-username-collector`, `/usr/bin/sitectl`, desktop entry, icon sizes `64/128/256`, SVG icon и bundled extension zip;
+    - forbidden payload absent: `AGENT_START_HERE`, `CODEX_STATE`, `docs/agent_handoff_ru`, `/tests/`, `TG_CONTACT`, `.codex`, `artifacts/telegram_exports`;
+  - из-за отсутствия `sudo` выполнен безопасный simulated installed-mode через `dpkg-deb -x`:
+    - package extract root: `/tmp/sitectl-deb-extract-20260511-164732`
+    - temp XDG root: `/tmp/sitectl-deb-xdg-20260511-164732`
+    - `--doctor` -> `mode=installed`, `overall_status=warning`, `token_present=1`, `gtk_runtime=ok`, `extension_zip_ready=1`, `hub_reachable=0`
+    - warning допустим в этом smoke, потому что hub не запускался;
+    - XDG dirs созданы в temp root: `config/site-control-kit`, `data/site-control-kit`, `data/site-control-kit/telegram_workspace`, `data/site-control-kit/reports`, `state/site-control-kit/logs`;
+    - в extracted `/opt/telegram-username-collector` не найдено пользовательских runtime-файлов `generated_token.txt`, `runtime_events.jsonl`, `state.json`;
+    - `--create-desktop-shortcut` с temp `HOME` создал `/tmp/sitectl-deb-xdg-20260511-164732/home/Desktop/Telegram Username Collector.desktop`;
+    - direct GUI smoke из extracted package payload на `DISPLAY=:0` подтвердил окно `Telegram Username Collector` через `xwininfo`, stderr без traceback, процесс закрыт.
+  - practical verdict:
+    - fresh clone build + payload + simulated installed-mode runtime/shortcut/GUI smoke: `PASS with warning hub_reachable=0`;
+    - настоящий clean Ubuntu installed-mode release gate всё ещё открыт, потому что не выполнены `sudo apt install`, system `/usr/bin` launchers, real `/opt/...`, real user XDG dirs и Applications menu / `gtk-launch` после system install.
+  - следующий шаг:
+    - на готовой чистой Ubuntu 24.04 VM с доступным `sudo` выполнить именно system install:
+      - `sudo apt install ./dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`
+      - `telegram-username-collector --doctor`
+      - `telegram-username-collector --create-desktop-shortcut`
+      - `gtk-launch telegram-username-collector`
+      - проверить реальные `~/.config/site-control-kit`, `~/.local/share/site-control-kit`, `~/.local/state/site-control-kit/logs` и отсутствие runtime-файлов в `/opt/telegram-username-collector`.
 - На 2026-05-11 сохранён `Linux Productization v1: .deb + Doctor + Desktop Shortcut`:
   - в этом цикле repo уже переведён из состояния "dev checkout only" в состояние "есть собираемый Linux desktop product":
     - добавлен `scripts/build_linux_deb.sh`;

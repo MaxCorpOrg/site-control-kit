@@ -8,6 +8,21 @@
 - Расширение браузера (Manifest V3) для выполнения команд в реальных вкладках.
 - Подробная документация для пользователя и ИИ-агентов сопровождения.
 
+## Текущий Релизный Статус
+
+Последняя опубликованная продуктовая точка: `main` на commit `3412ccd26d5ebcd3710a50b8f6c0b5b9696a6447`.
+
+Что уже подтверждено:
+- Linux-first `.deb` пакет для `Telegram Username Collector` собирается из fresh GitHub clone.
+- Payload пакета содержит launchers, desktop entry, icons и companion extension zip.
+- Simulated installed-mode через `dpkg-deb -x` подтверждает `mode=installed`, XDG runtime paths, desktop shortcut и GTK GUI startup.
+
+Что ещё не закрыто:
+- clean Ubuntu 24.04 VM smoke с настоящим `sudo apt install`;
+- проверка реальных `/usr/bin`, `/opt/telegram-username-collector`, пользовательских XDG-каталогов и запуска из Applications menu.
+
+Подробный checkpoint: [docs/checkpoints/CHECKPOINT_2026-05-11.md](docs/checkpoints/CHECKPOINT_2026-05-11.md).
+
 ## Быстрый Вход В Браузерный Контур
 
 Кратчайший поддерживаемый сценарий: [BROWSER_QUICKSTART.md](BROWSER_QUICKSTART.md)

@@ -82,6 +82,44 @@ find /home/max/telegram_contact_batches/chat_-1002465948544/chains -maxdepth 2 -
 - Telegram export работает;
 - batch/safe/quarantine слои работают.
 
+Новый самый верхний handoff-факт на 2026-05-11 теперь такой:
+- выполнено end-of-day closure без новой разработки;
+- checkpoint создан в `docs/checkpoints/CHECKPOINT_2026-05-11.md` и скопирован в `/home/max/Рабочий стол/CHECKPOINT_2026-05-11.md`;
+- обновлены `README.md`, `docs/ARCHITECTURE.md`, `AGENTS.md`, `NEXT_STEPS.md`, `CHANGELOG.md`, repo-root handoff и текущий backlog;
+- `.gitignore` защищает `.env`, `.codex/`, `TG_CONTACT/`, `node_modules/`;
+- `scripts/build_linux_deb.sh` исключает agent/checkpoint/next-step docs из `.deb`;
+- verify closure:
+  - `./scripts/verify.sh` -> `299 tests OK`, CLI help OK
+  - `python3 -m compileall webcontrol scripts tests` -> OK
+  - `python3 -m scripts.telegram_username_collector_launcher --doctor` -> OK with expected `hub_reachable=0`
+  - `bash scripts/build_linux_deb.sh` -> OK
+  - `dpkg-deb --info` / `dpkg-deb --contents` -> OK
+  - `git diff --check` -> OK
+
+Предыдущий верхний handoff-факт на 2026-05-11:
+- выполнен `Clean Ubuntu .deb Smoke Attempt` после push `main`;
+- current host: `Ubuntu 24.04.4 LTS`, GNOME/X11, `Python 3.12.3`, но это не подтверждённая clean VM;
+- `sudo -n true` и `sudo -n apt install ...telegram-username-collector_0.1.0_amd64.deb` вернули `sudo: a password is required`, поэтому настоящий system install smoke ещё не закрыт;
+- fresh clone path: `/home/max/site-control-kit-product-smoke-20260511-164357`;
+- fresh clone evidence:
+  - `HEAD` -> `3412ccd26d5ebcd3710a50b8f6c0b5b9696a6447`
+  - `git status --short --branch` -> `## main...origin/main`
+- build/payload evidence:
+  - `bash scripts/build_linux_deb.sh` -> собран `.deb` размером `52M`
+  - `dpkg-deb --info` подтвердил package `telegram-username-collector`, version `0.1.0`, arch `amd64`, GTK/system deps
+  - `dpkg-deb --contents` подтвердил `/usr/bin/telegram-username-collector`, `/usr/bin/sitectl`, desktop entry, icons и `site-control-bridge-extension.zip`
+  - forbidden payload absent: handoff files, tests, `.codex`, `TG_CONTACT`, `artifacts/telegram_exports`
+- безопасный simulated installed-mode:
+  - extract root: `/tmp/sitectl-deb-extract-20260511-164732`
+  - temp XDG root: `/tmp/sitectl-deb-xdg-20260511-164732`
+  - `--doctor` -> `mode=installed`, `overall_status=warning`, `token_present=1`, `gtk_runtime=ok`, `extension_zip_ready=1`, `hub_reachable=0`
+  - temp XDG dirs созданы, user runtime files не появились в extracted `/opt/...`
+  - `--create-desktop-shortcut` с temp `HOME` создал desktop shortcut
+  - direct GUI smoke из extracted package payload на `DISPLAY=:0` открыл окно `Telegram Username Collector`, stderr без traceback, process закрыт
+- practical verdict:
+  - fresh clone build + payload + simulated installed-mode runtime/shortcut/GUI: `PASS with warning hub_reachable=0`
+  - full release gate всё ещё открыт: нужен clean Ubuntu 24.04 VM run с реальным `sudo apt install`, `/usr/bin`, `/opt`, user XDG dirs и Applications menu / `gtk-launch`.
+
 Новый самый верхний handoff-факт на 2026-05-11 теперь уже такой:
 - сохранён `Linux Productization v1: .deb + Doctor + Desktop Shortcut`;
 - в репозитории теперь уже есть не только repo-flow, но и продуктовый Linux build path:

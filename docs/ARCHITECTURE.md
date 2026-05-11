@@ -34,6 +34,21 @@
 - убрать лишние ручные аргументы;
 - дать агенту и пользователю короткий путь к живому браузеру.
 
+### 4. Linux Product Mode
+Содержит:
+- `.deb` build path для `Telegram Username Collector`;
+- системные launchers `/usr/bin/telegram-username-collector` и `/usr/bin/sitectl`;
+- установленное приложение в `/opt/telegram-username-collector`;
+- desktop entry и иконки для меню приложений;
+- companion browser extension zip внутри установленного app payload.
+
+Ключевой принцип:
+- код приложения ставится в системное место;
+- пользовательские данные не пишутся в `/opt`;
+- token/config живут в `${XDG_CONFIG_HOME:-~/.config}/site-control-kit`;
+- workspace/reports/state живут в `${XDG_DATA_HOME:-~/.local/share}/site-control-kit`;
+- logs живут в `${XDG_STATE_HOME:-~/.local/state}/site-control-kit/logs`.
+
 ## Схема Потока
 
 ```text
@@ -170,6 +185,14 @@ tab-level API   content.js -> DOM страницы
   - `setInterval`
   - `chrome.alarms`
 - Очередь и история не живут в расширении, а сохраняются на стороне хаба.
+
+## Product Runtime
+
+`telegram-username-collector` имеет два режима:
+- `repo` — запуск из checkout, runtime по правилам `webcontrol.settings`;
+- `installed` — запуск из `.deb`, runtime через XDG-пути пользователя.
+
+`telegram-username-collector --doctor` печатает resolved paths, GTK status, helper python, extension zip readiness и hub reachability. `hub_reachable=0` сам по себе является warning, а не blocker, если smoke не запускал хаб.
 
 ## Ограничения
 - `chrome://*` и похожие системные страницы не доступны для content script.

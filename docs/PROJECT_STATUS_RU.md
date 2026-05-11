@@ -12,6 +12,58 @@ Repo-root entrypoint для любого агента: `AGENT_START_HERE.md`.
 
 ## Сделано
 
+### Обновление 2026-05-11 (End-of-Day Closure Checkpoint)
+- Новая разработка не начиналась; выполнено закрытие рабочего дня по проекту.
+- Обновлены project docs и handoff docs:
+  - `README.md`
+  - `docs/ARCHITECTURE.md`
+  - `AGENTS.md`
+  - `NEXT_STEPS.md`
+  - `CHANGELOG.md`
+  - `AGENT_START_HERE.md`
+  - `CODEX_STATE.md`
+  - `docs/agent_handoff_ru/00_START_HERE.md`
+  - `docs/agent_handoff_ru/09_CURRENT_BACKLOG_AND_NEXT_STEPS.md`
+- Создан checkpoint:
+  - repo: `docs/checkpoints/CHECKPOINT_2026-05-11.md`
+  - desktop copy: `/home/max/Рабочий стол/CHECKPOINT_2026-05-11.md`
+- Package hygiene:
+  - `.gitignore` дополнен правилами для `.env`, `.codex/`, `TG_CONTACT/`, `node_modules/`;
+  - `scripts/build_linux_deb.sh` дополнительно исключает agent/checkpoint/next-step docs из `.deb`;
+  - повторный `dpkg-deb --contents` подтвердил отсутствие forbidden payload.
+- Verify:
+  - `./scripts/verify.sh` -> `299 tests OK`, CLI help OK;
+  - `python3 -m compileall webcontrol scripts tests` -> OK;
+  - `python3 -m scripts.telegram_username_collector_launcher --doctor` -> OK, ожидаемый warning из-за `hub_reachable=0`;
+  - `bash scripts/build_linux_deb.sh` -> OK;
+  - `dpkg-deb --info` / `dpkg-deb --contents` -> OK;
+  - `git diff --check` -> OK.
+
+### Обновление 2026-05-11 (Clean Ubuntu `.deb` Smoke Attempt после push)
+- Выполнен безопасный release smoke из fresh GitHub clone, но не полный clean VM install:
+  - текущая среда: `Ubuntu 24.04.4 LTS`, GNOME/X11, `Python 3.12.3`;
+  - среда не подтверждена как clean VM;
+  - `sudo` без пароля недоступен: `sudo -n true` и `sudo -n apt install ...` вернули `sudo: a password is required`.
+- Fresh clone/build:
+  - clone path: `/home/max/site-control-kit-product-smoke-20260511-164357`;
+  - `HEAD`: `3412ccd26d5ebcd3710a50b8f6c0b5b9696a6447`;
+  - `git status --short --branch`: `## main...origin/main`;
+  - `bash scripts/build_linux_deb.sh` собрал `.deb` размером `52M`;
+  - `dpkg-deb --info` подтвердил package/version/arch/deps;
+  - `dpkg-deb --contents` подтвердил launchers, desktop entry, icons и bundled extension zip;
+  - forbidden payload отсутствует: handoff files, tests, `.codex`, `TG_CONTACT`, `artifacts/telegram_exports`.
+- Simulated installed-mode без system install:
+  - `.deb` распакован в `/tmp/sitectl-deb-extract-20260511-164732`;
+  - temp XDG root: `/tmp/sitectl-deb-xdg-20260511-164732`;
+  - `telegram-username-collector --doctor` из extracted payload показал `mode=installed`, `overall_status=warning`, `token_present=1`, `gtk_runtime=ok`, `extension_zip_ready=1`, `hub_reachable=0`;
+  - `hub_reachable=0` в этом проходе ожидаем, потому что hub не запускался;
+  - XDG runtime dirs созданы в temp root, пользовательские runtime-файлы не появились в extracted `/opt/...`;
+  - `--create-desktop-shortcut` с temp `HOME` создал desktop shortcut;
+  - прямой GUI launch из extracted payload открыл окно `Telegram Username Collector` на `DISPLAY=:0`, подтверждено через `xwininfo`, без traceback.
+- Практический вывод:
+  - build/payload/simulated installed-mode smoke: `PASS with warning hub_reachable=0`;
+  - полный release gate ещё открыт: нужен настоящий `sudo apt install` на clean Ubuntu 24.04 VM и проверка real `/usr/bin`, `/opt`, XDG dirs и Applications menu / `gtk-launch`.
+
 ### Обновление 2026-05-11 (Linux Productization v1: `.deb` + Doctor + Desktop Shortcut)
 - Репозиторий переведён из режима `repo checkout + scripts` в Linux-first product baseline:
   - добавлен build script [scripts/build_linux_deb.sh](../scripts/build_linux_deb.sh);

@@ -1,5 +1,56 @@
 # CODEX_STATE
 
+## 2026-05-11 (End-of-Day Closure Checkpoint)
+
+- Scope:
+  - no new Telegram feature work was started
+  - closure focused on docs, checkpoint, safety ignores, verification, commit/push readiness
+- Docs/checkpoint:
+  - updated `README.md`, `docs/ARCHITECTURE.md`, `AGENTS.md`, `NEXT_STEPS.md`, `CHANGELOG.md`
+  - created `docs/checkpoints/CHECKPOINT_2026-05-11.md`
+  - copied checkpoint to `/home/max/Рабочий стол/CHECKPOINT_2026-05-11.md`
+- Package hygiene:
+  - added `.gitignore` protection for `.env`, `.codex/`, `TG_CONTACT/`, and `node_modules/`
+  - payload scan initially showed `docs/checkpoints/CHECKPOINT_2026-05-11.md` inside the `.deb`
+  - `scripts/build_linux_deb.sh` now excludes agent/checkpoint/next-step docs from product payload
+  - repeated `dpkg-deb --contents` confirmed forbidden payload absent
+- Verify:
+  - `./scripts/verify.sh` -> `299 tests OK`, CLI help OK
+  - `python3 -m compileall webcontrol scripts tests` -> OK
+  - `python3 -m scripts.telegram_username_collector_launcher --doctor` -> OK with expected `overall_status=warning` because `hub_reachable=0`
+  - `bash scripts/build_linux_deb.sh` -> built `.deb`
+  - `dpkg-deb --info` and `dpkg-deb --contents` -> OK after package hygiene fix
+  - `git diff --check` -> OK
+- Remaining:
+  - clean Ubuntu 24.04 VM `sudo apt install` smoke remains the next release gate
+
+## 2026-05-11 (Clean Ubuntu .deb Smoke Attempt After Push)
+
+- Smoke environment:
+  - current host is `Ubuntu 24.04.4 LTS`, GNOME/X11, `Python 3.12.3`, but not confirmed as a clean VM
+  - `sudo -n true` and `sudo -n apt install -y ...telegram-username-collector_0.1.0_amd64.deb` -> `sudo: a password is required`
+  - therefore real system install, `/usr/bin` command execution, real `/opt/...` installed payload, and Applications menu smoke remain unverified on a clean VM
+- Fresh clone/build evidence:
+  - fresh clone path: `/home/max/site-control-kit-product-smoke-20260511-164357`
+  - `git rev-parse HEAD` -> `3412ccd26d5ebcd3710a50b8f6c0b5b9696a6447`
+  - `git status --short --branch` -> `## main...origin/main`
+  - `bash scripts/build_linux_deb.sh` -> built `/home/max/site-control-kit-product-smoke-20260511-164357/dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`
+  - package size: `52M`
+  - `dpkg-deb --info` -> package `telegram-username-collector`, version `0.1.0`, arch `amd64`, depends on `python3, python3-gi, gir1.2-gtk-4.0, libgtk-4-1, xdg-utils, zip`
+  - `dpkg-deb --contents` -> payload contains `/usr/bin/telegram-username-collector`, `/usr/bin/sitectl`, desktop file, PNG/SVG icons, and `site-control-bridge-extension.zip`
+  - forbidden payload absent: repo handoff files, tests, `.codex`, `TG_CONTACT`, and `artifacts/telegram_exports`
+- Safe simulated installed-mode evidence without system install:
+  - package extracted to `/tmp/sitectl-deb-extract-20260511-164732`
+  - temp XDG root: `/tmp/sitectl-deb-xdg-20260511-164732`
+  - `--doctor` from extracted payload -> `mode=installed`, `overall_status=warning`, `token_present=1`, `gtk_runtime=ok`, `extension_zip_ready=1`, `hub_reachable=0`
+  - temp XDG dirs were created for config, data, reports, workspace, and logs
+  - extracted `/opt/telegram-username-collector` contains no user runtime files named `generated_token.txt`, `runtime_events.jsonl`, or `state.json`
+  - `--create-desktop-shortcut` with temp `HOME` created `/tmp/sitectl-deb-xdg-20260511-164732/home/Desktop/Telegram Username Collector.desktop`
+  - direct GUI launch from extracted package payload on `DISPLAY=:0` opened a real `Telegram Username Collector` window, confirmed with `xwininfo`; stderr had no traceback and the process was closed
+- Practical conclusion:
+  - fresh GitHub clone build, payload inspection, simulated installed-mode doctor, temp shortcut, and direct GUI smoke are green with the expected `hub_reachable=0` warning
+  - the actual release gate is still a real `sudo apt install` on a clean Ubuntu 24.04 VM, followed by real command/menu/XDG checks
+
 ## 2026-05-11 (Linux Productization v1: .deb + Doctor + Desktop Shortcut)
 
 - Code changes:

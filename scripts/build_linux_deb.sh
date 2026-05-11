@@ -80,13 +80,16 @@ rsync -a \
   --exclude '__pycache__' \
   --exclude '*.pyc' \
   --exclude 'AGENT_START_HERE.md' \
+  --exclude 'AGENTS.md' \
   --exclude 'CODEX_STATE.md' \
   --exclude 'AUTOPILOT.yaml' \
+  --exclude 'NEXT_STEPS.md' \
   --exclude 'dist' \
   --exclude 'var' \
   --exclude 'TG_CONTACT' \
   --exclude 'artifacts' \
   --exclude 'docs/agent_handoff_ru' \
+  --exclude 'docs/checkpoints' \
   --exclude 'packaging' \
   --exclude 'tests' \
   "$ROOT_DIR/" "$APP_ROOT/"
