@@ -163,6 +163,5 @@ runuser -u sitectl -- env DISPLAY=:99 HOME=/home/sitectl telegram-username-colle
 
 - Product regression on `45c25e4` is fixed.
 - New baseline installed-mode core path on `maxcorp-server` is green.
-- Remaining open item is acceptance-level only:
-  - decide whether the lack of a standard GNOME Applications menu check is acceptable
-  - or run one last smoke on a normal Ubuntu GUI desktop before publish
+- The later standard GNOME/App-menu acceptance is recorded separately in:
+  - `docs/checkpoints/CHECKPOINT_2026-05-12_GNOME_ACCEPTANCE_45c25e4.md`

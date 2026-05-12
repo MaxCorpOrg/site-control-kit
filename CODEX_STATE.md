@@ -1,6 +1,6 @@
 # CODEX_STATE
 
-## 2026-05-12 (Re-baseline `origin/main` Live Smoke + Installed-Mode Fix)
+## 2026-05-12 (Re-baseline `origin/main` Live Smoke + Installed-Mode Fix + GNOME Acceptance)
 
 - Scope:
   - local doc-only commit `77ecd4e` with the old Linux gate closure remains reference-only history
@@ -44,12 +44,24 @@
     - `gtk-launch telegram-username-collector` opened a real window confirmed by `xwininfo`
     - user XDG config/data/state roots were created under the temp home
     - no `generated_token.txt`, `state.json`, `runtime_events.jsonl`, or `runtime_errors.jsonl` were found under `/opt/telegram-username-collector`
-- Remaining caveat:
-  - `maxcorp-server` uses `Xvfb :99 + fluxbox + x11vnc`, not a standard GNOME desktop session
-  - `gtk-launch` and the live window are verified, but the normal Applications menu path is still unconfirmed on a standard Ubuntu desktop shell
+- Final GNOME acceptance on the current Ubuntu desktop host:
+  - package reinstall:
+    - `sudo apt install --reinstall -y /home/max/site-control-kit-rebaseline-20260512/dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`
+  - important nuance:
+    - installed-mode checks must be run from `/tmp`, not from the repo root, otherwise the local checkout shadows the installed `/opt/...` code path
+  - current host installed-mode proof from `/tmp`:
+    - `telegram-username-collector --doctor` -> `mode=installed`, `overall_status=warning`, `project_root=/opt/telegram-username-collector/app`, `runtime_root=/home/max/.local/share/site-control-kit`, `gtk_runtime=ok`, `extension_zip_ready=1`, `hub_reachable=0`
+    - `telegram-username-collector --create-desktop-shortcut` -> `/home/max/Рабочий стол/Telegram Username Collector.desktop`
+    - `gtk-launch telegram-username-collector` opened a real window; log: `/tmp/tgcollector-gnome-postreinstall-20260512-103941.log`
+    - the normal Ubuntu Applications menu launch was confirmed manually by the user reply `открылось`
+    - XDG dirs exist under `~/.config/site-control-kit`, `~/.local/share/site-control-kit`, `~/.local/state/site-control-kit/logs`
+    - no `generated_token.txt`, `state.json`, `runtime_events.jsonl`, or `runtime_errors.jsonl` exist under `/opt/telegram-username-collector`
+- Practical conclusion:
+  - the new Linux installed-mode gate for baseline `45c25e4` is closed
+  - the earlier `maxcorp-server` GUI/menu caveat is resolved by the standard Ubuntu GNOME host run
+  - the only remaining warning on the current host is `hub_reachable=0` because the hub was not started there
 - Next step:
-  - decide whether the `maxcorp-server` smoke is sufficient for publish
-  - if strict GUI/menu parity is still required, do one final run on a standard Ubuntu 24.04 GUI machine with a normal Applications menu before pushing `main`
+  - publish the rebaseline branch state without pulling the dirty original `/home/max/site-control-kit` worktree into the release operation
 
 ## 2026-05-11 (Local Windows Smoke Rerun On Existing Machine)
 

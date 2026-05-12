@@ -19,15 +19,17 @@
     - `gtk-launch` -> окно реально открывается
     - XDG dirs -> OK
     - leakage в `/opt/...` -> отсутствует
+  - финальный стандартный GNOME/App-menu proof после этого уже подтверждён на текущем Ubuntu host:
+    - fixed `.deb` переустановлен
+    - installed-mode команды подтверждены из `/tmp`, а не из repo root
+    - `--doctor` -> `mode=installed`, `overall_status=warning`, `project_root=/opt/telegram-username-collector/app`, `gtk_runtime=ok`, `extension_zip_ready=1`, `hub_reachable=0`
+    - shortcut -> `/home/max/Рабочий стол/Telegram Username Collector.desktop`
+    - `gtk-launch` -> окно реально поднялось
+    - запуск через обычное Applications menu подтверждён пользователем ответом `открылось`
 - Новый ближайший следующий шаг теперь такой:
-  - досинхронизировать docs/handoff/checkpoint под bugfix + live rerun;
-  - решить, достаточно ли `maxcorp-server` smoke для publish;
-  - если нужен строгий стандартный desktop proof, сделать один финальный run на обычной Ubuntu 24.04 GUI машине:
-    - `telegram-username-collector --doctor`
-    - `telegram-username-collector --create-desktop-shortcut`
-    - `gtk-launch telegram-username-collector`
-    - запуск из обычного Applications menu
-  - после этого fast-forward-нуть итог в `main` и запушить без force.
+  - публиковать итог `rebaseline-origin-main-20260512` в `origin/main` без затрагивания грязного исходного worktree `/home/max/site-control-kit`;
+  - не возвращать старый Linux gate и regression `/opt/.../.site-control-kit` в текущий backlog;
+  - новый Telegram feature-cycle открывать только по отдельной новой задаче.
 - Что до этого не делать:
   - не начинать новый Telegram feature-cycle;
   - не считать старый Linux gate текущим blocker-ом;

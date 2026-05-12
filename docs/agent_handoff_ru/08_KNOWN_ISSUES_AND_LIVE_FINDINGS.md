@@ -17,11 +17,18 @@
   - `--create-desktop-shortcut` -> OK
   - `gtk-launch telegram-username-collector` -> окно реально поднялось, `xwininfo` его видит
   - runtime leakage в `/opt/...` не найден;
+- после этого стандартный Ubuntu GNOME/App-menu proof тоже подтверждён:
+  - fixed `.deb` переустановлен на текущем Ubuntu GNOME/X11 host;
+  - installed-mode проверки подтверждены из `/tmp`, чтобы локальный checkout не затенял `/opt/...`;
+  - `telegram-username-collector --doctor` -> `mode=installed`, `overall_status=warning`, `project_root=/opt/telegram-username-collector/app`, `gtk_runtime=ok`, `extension_zip_ready=1`, `hub_reachable=0`
+  - shortcut создан в `/home/max/Рабочий стол/Telegram Username Collector.desktop`
+  - `gtk-launch telegram-username-collector` -> окно реально поднялось
+  - запуск через обычное Ubuntu Applications menu подтверждён пользователем ответом `открылось`
+  - XDG dirs и отсутствие leakage в `/opt/...` подтверждены
 - practical finding:
-  - открытый риск теперь уже не кодовый bug, а acceptance caveat среды;
-  - `maxcorp-server` это `Xvfb :99 + fluxbox + x11vnc`, не обычный GNOME desktop;
-  - если нужен именно стандартный Applications menu proof, его ещё надо сделать на обычной Ubuntu GUI машине;
-  - если `gtk-launch + live window + XDG/no-leakage` достаточно, новый baseline уже близок к publish-ready.
+  - открытого Linux installed-mode blocker-а больше нет;
+  - `maxcorp-server` остаётся историей о найденном regression и его live fix, а не текущим acceptance blocker-ом;
+  - новый baseline publish-ready по installed-mode и GNOME/App-menu path.
 
 ## Самый Новый Local Windows Smoke Rerun
 Новый самый свежий факт на 2026-05-11 уже не про новый repo blocker, а про повторный live rerun текущей Windows-машины:

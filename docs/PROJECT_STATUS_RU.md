@@ -12,7 +12,7 @@ Repo-root entrypoint для любого агента: `AGENT_START_HERE.md`.
 
 ## Сделано
 
-### Обновление 2026-05-12 (Re-baseline `origin/main` before push)
+### Обновление 2026-05-12 (Re-baseline `origin/main` + финальный GNOME acceptance)
 - Локальный doc-only commit `77ecd4e` с закрытием старого Linux gate сохранён как reference-only и не должен пушиться напрямую.
 - Создан отдельный интеграционный worktree:
   - `/home/max/site-control-kit-rebaseline-20260512`
@@ -49,10 +49,19 @@ Repo-root entrypoint для любого агента: `AGENT_START_HERE.md`.
     - `gtk-launch telegram-username-collector` реально поднял окно, подтверждённое `xwininfo`
     - XDG dirs созданы в temp-home
     - runtime leakage в `/opt/telegram-username-collector` не найден
-- Что остаётся:
-  - `maxcorp-server` использует `Xvfb :99 + fluxbox + x11vnc`, а не стандартный GNOME desktop;
-  - `gtk-launch` и живое окно уже подтверждены, но обычный Applications menu path на стандартном Ubuntu desktop всё ещё не подтверждён;
-  - перед publish нужно либо принять этот caveat, либо сделать один финальный run на обычной Ubuntu GUI машине.
+- Дополнительный стандартный GNOME proof на текущем Ubuntu host:
+  - fixed `.deb` переустановлен командой `sudo apt install --reinstall -y /home/max/site-control-kit-rebaseline-20260512/dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`;
+  - важный operational nuance: installed-mode команды нужно запускать из `/tmp`, иначе локальный checkout в repo root может затенять установленный `/opt/...` код;
+  - `cd /tmp && telegram-username-collector --doctor` подтвердил `mode=installed`, `overall_status=warning`, `project_root=/opt/telegram-username-collector/app`, `gtk_runtime=ok`, `extension_zip_ready=1`, `hub_reachable=0`;
+  - `cd /tmp && telegram-username-collector --create-desktop-shortcut` создал `/home/max/Рабочий стол/Telegram Username Collector.desktop`;
+  - `cd /tmp && gtk-launch telegram-username-collector` реально поднял окно, подтверждающий лог: `/tmp/tgcollector-gnome-postreinstall-20260512-103941.log`;
+  - запуск через обычное Ubuntu Applications menu подтверждён пользователем ответом `открылось`;
+  - XDG dirs под `~/.config/site-control-kit`, `~/.local/share/site-control-kit`, `~/.local/state/site-control-kit/logs` существуют;
+  - runtime leakage в `/opt/telegram-username-collector` не найден.
+- Практический вывод:
+  - release gate нового Linux baseline на `45c25e4` закрыт;
+  - `maxcorp-server` остаётся важным live-smoke host для core-path, но больше не является acceptance caveat;
+  - publish blocker по GNOME/App-menu path снят.
 
 ### Обновление 2026-05-11 (Local Windows Smoke Rerun On Existing Machine)
 - На текущей Windows-машине повторно пройден exact narrow smoke для `telegram-username-collector` без новых code changes.

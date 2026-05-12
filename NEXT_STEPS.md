@@ -49,10 +49,12 @@
 
 ## Что осталось
 
-- Досинхронизировать handoff/docs под fix + maxcorp-server smoke.
-- Решить, достаточно ли `maxcorp-server` smoke для publish.
-- Если нужен строгий стандартный desktop proof, сделать ещё один короткий run на обычной Ubuntu 24.04 GUI машине с нормальным Applications menu.
-- После этого fast-forward-нуть итог в `main` и запушить без force.
+- Новый Linux installed-mode gate на `45c25e4` уже закрыт.
+- Стандартный GNOME/App-menu proof уже подтверждён на текущем Ubuntu GNOME/X11 host после переустановки fixed `.deb`.
+- Старый `maxcorp-server` caveat больше не считать открытым blocker-ом.
+- Следующий рабочий шаг теперь уже организационный:
+  - публиковать состояние `rebaseline-origin-main-20260512` в `origin/main` без затрагивания грязного исходного worktree `/home/max/site-control-kit`
+  - не возвращать старый `b740d66` gate и bug `/opt/.../.site-control-kit` в backlog
 
 ## Следующий узкий контур
 
@@ -62,16 +64,12 @@ git -C /home/max/site-control-kit-rebaseline-20260512 diff --check
 python3 -m unittest discover -s /home/max/site-control-kit-rebaseline-20260512/tests -p 'test_*.py'
 ```
 
-Если нужен финальный standard-desktop proof, повторить только это на clean Ubuntu GUI host:
-- `telegram-username-collector --doctor`
-- `telegram-username-collector --create-desktop-shortcut`
-- `gtk-launch telegram-username-collector`
-- запуск из обычного Applications menu
+Только если потребуется повторить proof уже после публикации, запускать installed-mode команды не из repo root, а из `/tmp`, чтобы локальный checkout не затенял установленный `/opt/...` код.
 
 ## Что не перепутать
 
 - Старый Linux gate больше не считать open blocker.
 - Regression с `/opt/.../.site-control-kit` уже исправлен, не возвращать его в backlog как открытый баг.
-- Единственный оставшийся вопрос сейчас не кодовый, а acceptance-level: нужен ли ещё один обычный GNOME/App-menu run сверх уже зелёного `maxcorp-server` smoke.
-- Не начинать новый Telegram feature-cycle до решения по новому baseline.
+- GNOME/App-menu acceptance уже закрыт на текущем Ubuntu host.
+- Не начинать новый Telegram feature-cycle без отдельной новой задачи пользователя.
 - Не коммитить `.codex/`, `TG_CONTACT/`, `.site-control-kit/`, `dist/`, логи, токены и `artifacts/telegram_exports/INDEX.md`.

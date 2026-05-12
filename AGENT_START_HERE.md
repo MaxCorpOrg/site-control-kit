@@ -25,8 +25,8 @@
 ## Что Это За Ветка
 - Репозиторий: `site-control-kit`
 - Ветка: `main`
-- Активная тема: re-baseline `origin/main` с live smoke и bugfix для `45c25e4`
-- Ближайшая цель: закрыть последний GUI/menu caveat нового Linux baseline и затем решать publish `main`
+- Активная тема: re-baseline `origin/main` с installed-mode fix и финальным GNOME acceptance для `45c25e4`
+- Ближайший контекст: новый Linux installed-mode gate уже закрыт; не возвращать старый `b740d66` gate и regression с `/opt/.../.site-control-kit` в активный backlog
 
 ## Где Мы Закончили Работу
 - На 2026-05-12 `Re-baseline origin/main before publish` уже продвинут до live rerun:
@@ -61,10 +61,26 @@
     - `--create-desktop-shortcut` создал `/tmp/tgcollector-home-20260512-080828/Desktop/Telegram Username Collector.desktop`
     - `gtk-launch telegram-username-collector` реально поднял окно, `xwininfo` увидел `Telegram Username Collector`
     - runtime leakage в `/opt/telegram-username-collector` не найден;
-  - remaining caveat:
-    - `maxcorp-server` это `Xvfb :99 + fluxbox + x11vnc`, а не обычная GNOME desktop VM;
-    - `gtk-launch` и окно подтверждены, но стандартный Applications menu path на таком host не верифицируется;
-    - до финального publish осталось либо принять этот caveat, либо сделать один последний run на обычной Ubuntu GUI/Applications menu машине.
+  - финальный GNOME acceptance после этого тоже подтверждён на обычном Ubuntu GNOME/X11 host:
+    - пакет переустановлен с `/home/max/site-control-kit-rebaseline-20260512/dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`
+    - важный нюанс: installed-mode проверки нужно запускать из `/tmp`, а не из repo root, иначе локальный checkout затеняет установленный `/opt/...` код
+    - `cd /tmp && telegram-username-collector --doctor` дал:
+      - `mode=installed`
+      - `overall_status=warning`
+      - `project_root=/opt/telegram-username-collector/app`
+      - `runtime_root=/home/max/.local/share/site-control-kit`
+      - `gtk_runtime=ok`
+      - `extension_zip_ready=1`
+      - `hub_reachable=0`
+    - `cd /tmp && telegram-username-collector --create-desktop-shortcut` создал `/home/max/Рабочий стол/Telegram Username Collector.desktop`
+    - `cd /tmp && gtk-launch telegram-username-collector` реально поднял окно; подтверждающий лог: `/tmp/tgcollector-gnome-postreinstall-20260512-103941.log`
+    - запуск через обычное Ubuntu Applications menu подтверждён пользователем ответом `открылось`
+    - user XDG dirs подтверждены в `~/.config/site-control-kit`, `~/.local/share/site-control-kit`, `~/.local/state/site-control-kit/logs`
+    - runtime leakage в `/opt/telegram-username-collector` не найден
+    - этот host уже не pristine, но именно он дал стандартный GNOME/App-menu proof, которого не было на `maxcorp-server`
+  - combined verdict:
+    - новый Linux installed-mode gate для baseline `45c25e4` закрыт
+    - publish blocker по GUI/menu path больше не открыт
 - Исторический Linux факт, который нельзя потерять при re-baseline:
   - старый installed-mode gate на `b740d66` закрыт со статусом `PASS with warning`;
   - transcript install-run: `/tmp/tgcollector-smoke-logs/install-and-smoke-20260512-091934.log`;

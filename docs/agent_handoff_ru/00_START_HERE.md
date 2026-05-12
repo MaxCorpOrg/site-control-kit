@@ -88,9 +88,18 @@ find /home/max/telegram_contact_batches/chat_-1002465948544/chains -maxdepth 2 -
   - `gtk-launch` -> реальное окно поднялось
   - XDG dirs -> OK
   - runtime leakage в `/opt/...` -> нет
-- remaining caveat:
-  - `maxcorp-server` это `Xvfb :99 + fluxbox + x11vnc`, а не обычная GNOME desktop машина;
-  - если нужен именно стандартный Applications menu proof, нужен ещё один короткий run на обычной Ubuntu GUI машине.
+- стандартный GNOME/App-menu proof после этого тоже уже сделан на текущем Ubuntu host:
+  - fixed `.deb` переустановлен;
+  - важный нюанс: installed-mode проверки запускать из `/tmp`, а не из repo root;
+  - `cd /tmp && telegram-username-collector --doctor` -> `mode=installed`, `overall_status=warning`, `project_root=/opt/telegram-username-collector/app`, `gtk_runtime=ok`, `extension_zip_ready=1`, `hub_reachable=0`
+  - `--create-desktop-shortcut` -> `/home/max/Рабочий стол/Telegram Username Collector.desktop`
+  - `gtk-launch` -> живое окно поднялось
+  - запуск через обычное Ubuntu Applications menu подтверждён пользователем ответом `открылось`
+  - XDG dirs -> OK
+  - runtime leakage в `/opt/...` -> нет
+- practical verdict:
+  - новый Linux installed-mode gate на `45c25e4` уже закрыт;
+  - `maxcorp-server` caveat по обычному GNOME menu path больше не открыт.
 
 Верхний handoff-факт на 2026-05-10 уже такой:
 - работа велась из fresh checkout `C:\site-control-kit-win-smoke` на `main` commit `3c03277720714ff13745e659923019a3ac2f7a4d`;
