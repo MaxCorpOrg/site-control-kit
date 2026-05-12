@@ -71,6 +71,14 @@ ARTIFACT_HISTORY_LABELS = {
     "execution_record": "Execution record",
     "screenshot": "Screenshot",
 }
+SESSION_ARTIFACT_SHORTCUT_LABELS = {
+    "session_run": "Session run",
+    "run_dir": "Run dir",
+    "plan_json": "Session plan",
+    "runtime_config": "Runtime config",
+    "state_path": "Session state",
+    "screenshot": "Screenshot",
+}
 SESSION_MESSAGE_PREVIEW_LIMIT = 2
 SESSION_RUN_MATCH_TOLERANCE = timedelta(seconds=2)
 SESSION_RUN_PREFIX_RE = re.compile(r"^(?P<prefix>\d{8}T\d{6}Z)")
@@ -331,11 +339,17 @@ def _session_artifact_result(
     *,
     run_match_strategy: str = "",
     unresolved: list[str] | None = None,
+    artifact_provenance: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     return {
         "artifact_paths": _normalize_artifact_paths(artifact_paths),
         "run_match_strategy": str(run_match_strategy or "").strip(),
         "unresolved": [str(item).strip() for item in unresolved or [] if str(item).strip()],
+        "artifact_provenance": {
+            str(key): str(value)
+            for key, value in (artifact_provenance or {}).items()
+            if str(key).strip() and str(value).strip()
+        },
     }
 
 
@@ -351,31 +365,59 @@ def _resolve_session_artifacts(
         raw_artifacts = _normalize_artifact_paths(job.get("artifact_paths"))
 
     resolved: dict[str, str] = {}
+    provenance: dict[str, str] = {}
     unresolved: list[str] = []
     run_match_strategy = ""
 
     state_path_default, runs_dir_default = _session_runtime_defaults()
     context = _job_context(job)
 
-    state_path = _existing_path(raw_artifacts.get("state_path")) or _existing_path(context.get("last_session_state_path")) or (
-        state_path_default if state_path_default.exists() else None
-    )
+    state_path_source = ""
+    state_path = _existing_path(raw_artifacts.get("state_path"))
+    if state_path is not None:
+        state_path_source = "stored"
+    if state_path is None:
+        state_path = _existing_path(context.get("last_session_state_path"))
+        if state_path is not None:
+            state_path_source = "context"
+    if state_path is None and state_path_default.exists():
+        state_path = state_path_default
+        state_path_source = "fallback"
     if state_path is not None:
         resolved["state_path"] = str(state_path)
+        provenance["state_path"] = state_path_source
 
-    runs_dir = _existing_path(raw_artifacts.get("runs_dir")) or _existing_path(context.get("last_session_runs_dir")) or (
-        runs_dir_default if runs_dir_default.exists() else None
-    )
+    runs_dir_source = ""
+    runs_dir = _existing_path(raw_artifacts.get("runs_dir"))
+    if runs_dir is not None:
+        runs_dir_source = "stored"
+    if runs_dir is None:
+        runs_dir = _existing_path(context.get("last_session_runs_dir"))
+        if runs_dir is not None:
+            runs_dir_source = "context"
+    if runs_dir is None and runs_dir_default.exists():
+        runs_dir = runs_dir_default
+        runs_dir_source = "fallback"
     if runs_dir is not None:
         resolved["runs_dir"] = str(runs_dir)
+        provenance["runs_dir"] = runs_dir_source
 
-    runtime_config = _existing_path(raw_artifacts.get("runtime_config")) or _session_runtime_config_path(job, step=step)
+    runtime_config_source = ""
+    runtime_config = _existing_path(raw_artifacts.get("runtime_config"))
+    if runtime_config is not None:
+        runtime_config_source = "stored"
+    if runtime_config is None:
+        runtime_config = _session_runtime_config_path(job, step=step)
+        if runtime_config is not None:
+            runtime_config_source = "resolved"
     if runtime_config is not None:
         resolved["runtime_config"] = str(runtime_config)
+        provenance["runtime_config"] = runtime_config_source
     elif str(target.get("step_kind") or target.get("workflow_kind") or "").strip() == "session_run":
         unresolved.append("runtime_config")
 
     run_dir_candidates: list[Path] = []
+    run_dir_candidate_source = ""
     for key in ("session_run", "path", "run_dir"):
         candidate = _existing_path(raw_artifacts.get(key))
         if candidate is None:
@@ -383,11 +425,14 @@ def _resolve_session_artifacts(
         run_dir = candidate.parent if candidate.is_file() else candidate
         if run_dir not in run_dir_candidates:
             run_dir_candidates.append(run_dir)
+            run_dir_candidate_source = "stored"
     if len(run_dir_candidates) == 1:
         resolved_run_dir = run_dir_candidates[0]
         run_match_strategy = "existing_artifact"
+        run_dir_source = run_dir_candidate_source or "stored"
     else:
         resolved_run_dir = None
+        run_dir_source = ""
         if len(run_dir_candidates) > 1:
             unresolved.append("ambiguous_existing_run_dir")
 
@@ -402,6 +447,7 @@ def _resolve_session_artifacts(
             if len(matches) == 1:
                 resolved_run_dir = matches[0]
                 run_match_strategy = strategy
+                run_dir_source = "resolved"
                 break
             if len(matches) > 1:
                 unresolved.append(f"ambiguous_{strategy}")
@@ -417,24 +463,34 @@ def _resolve_session_artifacts(
             if len(matches) == 1:
                 resolved_run_dir = matches[0]
                 run_match_strategy = strategy
+                run_dir_source = "resolved"
                 break
             if len(matches) > 1:
                 unresolved.append(f"ambiguous_{strategy}")
 
     if resolved_run_dir is None:
         unresolved.append("run_dir")
-        return _session_artifact_result(resolved, run_match_strategy=run_match_strategy, unresolved=unresolved)
+        return _session_artifact_result(
+            resolved,
+            run_match_strategy=run_match_strategy,
+            unresolved=unresolved,
+            artifact_provenance=provenance,
+        )
 
     resolved["run_dir"] = str(resolved_run_dir)
+    provenance["run_dir"] = run_dir_source or "resolved"
     run_json = resolved_run_dir / "run.json"
     if run_json.exists():
         resolved["session_run"] = str(run_json)
         resolved["path"] = str(run_json)
+        provenance["session_run"] = provenance["run_dir"]
+        provenance["path"] = provenance["run_dir"]
     else:
         unresolved.append("session_run")
     plan_json = resolved_run_dir / "plan.json"
     if plan_json.exists():
         resolved["plan_json"] = str(plan_json)
+        provenance["plan_json"] = provenance["run_dir"]
     else:
         unresolved.append("plan_json")
     screenshots = sorted(
@@ -444,7 +500,13 @@ def _resolve_session_artifacts(
     )
     if screenshots:
         resolved["screenshot_path"] = str(screenshots[0])
-    return _session_artifact_result(resolved, run_match_strategy=run_match_strategy, unresolved=unresolved)
+        provenance["screenshot_path"] = provenance["run_dir"]
+    return _session_artifact_result(
+        resolved,
+        run_match_strategy=run_match_strategy,
+        unresolved=unresolved,
+        artifact_provenance=provenance,
+    )
 
 
 def _invite_run_prefix(value: Any) -> str:
@@ -1189,22 +1251,49 @@ def get_job(job_id: str, index_path: str | Path = DEFAULT_JOB_INDEX_PATH) -> dic
     return None
 
 
-def workflow_artifact_index(job_id: str, index_path: str | Path = DEFAULT_JOB_INDEX_PATH) -> dict[str, str]:
-    job = get_job(job_id, index_path=index_path)
-    if job is None:
-        raise KeyError(f"unknown job_id: {job_id}")
-    cache: dict[str, Any] = {}
+def _workflow_artifact_details_from_job(
+    job: dict[str, Any],
+    *,
+    cache: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    resolve_cache = cache if isinstance(cache, dict) else {}
     artifacts = dict(job.get("artifact_paths") or {})
+    provenance = {str(key): "stored" for key in artifacts if str(key).strip()}
+    unresolved: list[str] = []
     if str(job.get("workflow_kind") or "") == "session_run":
-        artifacts.update(_resolve_session_artifacts(job, cache=cache)["artifact_paths"])
+        resolved = _resolve_session_artifacts(job, cache=resolve_cache)
+        artifacts.update(resolved["artifact_paths"])
+        provenance.update(resolved.get("artifact_provenance") or {})
+        unresolved.extend(str(item) for item in resolved.get("unresolved") or [] if str(item).strip())
     for step in job.get("steps") or []:
         if not isinstance(step, dict):
             continue
         step_artifacts = _normalize_artifact_paths(step.get("artifact_paths"))
+        step_provenance = {str(key): "stored" for key in step_artifacts if str(key).strip()}
         if str(step.get("step_kind") or "") == "session_run":
-            step_artifacts.update(_resolve_session_artifacts(job, step=step, cache=cache)["artifact_paths"])
+            resolved = _resolve_session_artifacts(job, step=step, cache=resolve_cache)
+            step_artifacts.update(resolved["artifact_paths"])
+            step_provenance.update(resolved.get("artifact_provenance") or {})
+            unresolved.extend(str(item) for item in resolved.get("unresolved") or [] if str(item).strip())
         artifacts.update(step_artifacts)
-    return artifacts
+        provenance.update(step_provenance)
+    return {
+        "artifact_paths": artifacts,
+        "artifact_provenance": provenance,
+        "unresolved": sorted(set(unresolved)),
+    }
+
+
+def workflow_artifact_details(job_id: str, index_path: str | Path = DEFAULT_JOB_INDEX_PATH) -> dict[str, Any]:
+    job = get_job(job_id, index_path=index_path)
+    if job is None:
+        raise KeyError(f"unknown job_id: {job_id}")
+    return _workflow_artifact_details_from_job(job)
+
+
+def workflow_artifact_index(job_id: str, index_path: str | Path = DEFAULT_JOB_INDEX_PATH) -> dict[str, str]:
+    details = workflow_artifact_details(job_id, index_path=index_path)
+    return dict(details.get("artifact_paths") or {})
 
 
 def _job_timeline(job: dict[str, Any], *, limit: int = DEFAULT_TIMELINE_LIMIT) -> list[dict[str, Any]]:
@@ -1421,17 +1510,20 @@ def _workflow_bucket_snapshot(
     )
     anchor_job = active_job or last_job or recoverable_job
     artifact_index = (
-        workflow_artifact_index(str(anchor_job.get("job_id") or ""), index_path=index_path)
+        workflow_artifact_details(str(anchor_job.get("job_id") or ""), index_path=index_path)
         if isinstance(anchor_job, dict)
         else {}
     )
+    artifact_paths = dict(artifact_index.get("artifact_paths") or {}) if isinstance(artifact_index, dict) else {}
     payload = {
         "workflow_kind": workflow_kind,
         "active_job": active_job,
         "last_job": last_job,
         "recent_jobs": workflow_jobs[:limit],
         "timeline": _job_timeline(anchor_job or {}, limit=timeline_limit),
-        "artifact_index": artifact_index,
+        "artifact_index": artifact_paths,
+        "artifact_provenance": dict(artifact_index.get("artifact_provenance") or {}) if isinstance(artifact_index, dict) else {},
+        "artifact_unresolved": list(artifact_index.get("unresolved") or []) if isinstance(artifact_index, dict) else [],
         "recoverable_job": recoverable_job,
         "resume_decision": resume_decision,
         "resume_hint": str(resume_decision.get("hint") or ""),
@@ -1615,6 +1707,56 @@ def _artifact_candidates_from_index(artifact_index: dict[str, str], artifact_kin
     return candidates
 
 
+def _session_artifact_shortcuts(artifact_index: dict[str, str]) -> dict[str, str]:
+    shortcuts: dict[str, str] = {}
+    for artifact_kind in SESSION_ARTIFACT_SHORTCUT_LABELS:
+        if artifact_kind in {"run_dir", "runs_dir"}:
+            raw_value = str(artifact_index.get(artifact_kind) or "").strip()
+            if raw_value:
+                shortcuts[artifact_kind] = raw_value
+            continue
+        candidates = _artifact_candidates_from_index(artifact_index, artifact_kind)
+        if candidates:
+            shortcuts[artifact_kind] = str(candidates[0])
+    return shortcuts
+
+
+def _workflow_artifact_shortcuts(artifact_index: dict[str, str]) -> dict[str, str]:
+    shortcuts: dict[str, str] = {}
+    for raw_key in ("job_dir", "run_dir", "runs_dir"):
+        raw_value = str(artifact_index.get(raw_key) or "").strip()
+        if raw_value:
+            shortcuts[raw_key] = raw_value
+    for artifact_kind in ARTIFACT_HISTORY_LABELS:
+        candidates = _artifact_candidates_from_index(artifact_index, artifact_kind)
+        if candidates:
+            shortcuts[artifact_kind] = str(candidates[0])
+    return shortcuts
+
+
+def _artifact_status(
+    shortcuts: dict[str, str],
+    *,
+    required: tuple[str, ...],
+    unresolved: list[str] | None = None,
+) -> dict[str, Any]:
+    available = [key for key in required if str(shortcuts.get(key) or "").strip()]
+    missing = [key for key in required if key not in available]
+    unresolved_clean = [str(item).strip() for item in unresolved or [] if str(item).strip()]
+    if not available:
+        status = "missing"
+    elif missing or unresolved_clean:
+        status = "partial"
+    else:
+        status = "complete"
+    return {
+        "status": status,
+        "available": available,
+        "missing": missing,
+        "unresolved": unresolved_clean,
+    }
+
+
 def _safe_message_preview(value: Any, *, limit: int = 80) -> str:
     text = " ".join(str(value or "").split())
     if len(text) <= limit:
@@ -1776,6 +1918,7 @@ def _session_progress_summary_from_jobs(
     last_job = session_jobs[0] if session_jobs else None
     anchor_job = active_job or last_job
     if anchor_job is None:
+        eta_reason = "no_session_workflow"
         return {
             "status": str(snapshot.get("status") or "missing"),
             "history_source": str(snapshot.get("history_source") or "missing"),
@@ -1787,12 +1930,15 @@ def _session_progress_summary_from_jobs(
             "messages_sent_total": _safe_int(snapshot.get("messages_sent_total")),
             "rate_per_minute": None,
             "eta_seconds": None,
+            "eta_available": False,
+            "eta_reason": eta_reason,
             "eta_mode": "unknown",
-            "current_target_label": "",
-            "current_template_preview": "",
+            "current_target_label": _session_current_target_label(None, snapshot),
+            "current_template_preview": _session_current_template_preview(None, snapshot),
             "run_mode": "idle",
             "continuous": False,
             "workflow_job_id": "",
+            "next_action_text": "Подготовить и запустить session_run workflow.",
         }
 
     context = _job_context(anchor_job)
@@ -1827,19 +1973,30 @@ def _session_progress_summary_from_jobs(
         remaining_in_run = None
         eta_seconds = None
         eta_mode = "continuous"
+        eta_available = False
+        eta_reason = "continuous_session"
     elif selected_target > 0:
         remaining_in_run = max(selected_target - processed_count, 0)
         if remaining_in_run <= 0:
             eta_seconds = 0
             eta_mode = "bounded"
+            eta_available = True
+            eta_reason = "bounded_target_complete"
         elif rate_per_minute and rate_per_minute > 0:
             eta_seconds = max(int(round((float(remaining_in_run) * 60.0) / float(rate_per_minute))), 0)
             eta_mode = "bounded"
+            eta_available = True
+            eta_reason = "bounded_target"
         else:
             eta_seconds = None
+            eta_mode = "bounded"
+            eta_available = False
+            eta_reason = "insufficient_rate"
     else:
         remaining_in_run = None
         eta_seconds = None
+        eta_available = False
+        eta_reason = "no_bounded_target"
 
     return {
         "status": _job_status(anchor_job) or str(snapshot.get("status") or "ready"),
@@ -1854,12 +2011,15 @@ def _session_progress_summary_from_jobs(
         "total_message_limit": total_message_limit,
         "rate_per_minute": rate_per_minute,
         "eta_seconds": eta_seconds,
+        "eta_available": eta_available,
+        "eta_reason": eta_reason,
         "eta_mode": eta_mode,
         "current_target_label": _session_current_target_label(anchor_job, snapshot),
         "current_template_preview": _session_current_template_preview(anchor_job, snapshot),
         "run_mode": "continuous" if continuous else "bounded",
         "continuous": continuous,
         "workflow_job_id": str(anchor_job.get("job_id") or ""),
+        "next_action_text": "Ждать завершения session_run workflow." if active_job else "Запустить новый session_run workflow.",
     }
 
 
@@ -1889,12 +2049,15 @@ def _session_snapshot_from_jobs(jobs: list[dict[str, Any]]) -> dict[str, Any]:
                 "messages_sent_total": 0,
                 "rate_per_minute": None,
                 "eta_seconds": None,
+                "eta_available": False,
+                "eta_reason": "missing_history",
                 "eta_mode": "unknown",
                 "current_target_label": "",
                 "current_template_preview": "",
                 "run_mode": "idle",
                 "continuous": False,
                 "workflow_job_id": "",
+                "next_action_text": "Подготовить и запустить session_run workflow.",
             },
         }
     if not records:
@@ -2247,6 +2410,88 @@ def repair_invite_artifacts(
     }
 
 
+def _repair_report_would_change(report: dict[str, Any]) -> bool:
+    return bool(report.get("repaired_jobs") or report.get("repaired_steps"))
+
+
+def _repair_report_counts(report: dict[str, Any]) -> dict[str, int]:
+    return {
+        "matched_jobs": len(report.get("matched_jobs") or []),
+        "matched_steps": len(report.get("matched_steps") or []),
+        "repaired_jobs": len(report.get("repaired_jobs") or []),
+        "repaired_steps": len(report.get("repaired_steps") or []),
+        "unresolved": len(report.get("unresolved") or []),
+    }
+
+
+def _tagged_unresolved(source: str, report: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for item in report.get("unresolved") or []:
+        if not isinstance(item, dict):
+            continue
+        row = dict(item)
+        row["source"] = source
+        rows.append(row)
+    return rows
+
+
+def repair_historical_artifacts(
+    *,
+    job_id: str | None = None,
+    profile_name: str | None = None,
+    profile_dir: str | Path | None = None,
+    apply: bool = False,
+    index_path: str | Path = DEFAULT_JOB_INDEX_PATH,
+) -> dict[str, Any]:
+    session_report = repair_session_artifacts(
+        job_id=job_id,
+        profile_name=profile_name,
+        profile_dir=profile_dir,
+        apply=apply,
+        index_path=index_path,
+    )
+    invite_report = repair_invite_artifacts(
+        job_id=job_id,
+        profile_name=profile_name,
+        profile_dir=profile_dir,
+        apply=apply,
+        index_path=index_path,
+    )
+    session_counts = _repair_report_counts(session_report)
+    invite_counts = _repair_report_counts(invite_report)
+    would_change = _repair_report_would_change(session_report) or _repair_report_would_change(invite_report)
+    changed = bool(session_report.get("changed") or invite_report.get("changed"))
+    unresolved = _tagged_unresolved("session", session_report) + _tagged_unresolved("invite", invite_report)
+    matched_jobs = sorted(
+        {
+            str(item)
+            for item in (session_report.get("matched_jobs") or []) + (invite_report.get("matched_jobs") or [])
+            if str(item).strip()
+        }
+    )
+    return {
+        "status": "completed",
+        "apply": bool(apply),
+        "changed": changed,
+        "would_change": would_change,
+        "matched_jobs": matched_jobs,
+        "repair_counts": {
+            "session": session_counts,
+            "invite": invite_counts,
+            "total": {
+                "matched_jobs": len(matched_jobs),
+                "matched_steps": session_counts["matched_steps"] + invite_counts["matched_steps"],
+                "repaired_jobs": session_counts["repaired_jobs"] + invite_counts["repaired_jobs"],
+                "repaired_steps": session_counts["repaired_steps"] + invite_counts["repaired_steps"],
+                "unresolved": session_counts["unresolved"] + invite_counts["unresolved"],
+            },
+        },
+        "session_report": session_report,
+        "invite_report": invite_report,
+        "unresolved": unresolved,
+    }
+
+
 def _resolved_artifact_shortcuts(
     artifact_index: dict[str, str],
     *,
@@ -2284,10 +2529,47 @@ def _resolved_artifact_shortcuts(
             candidates.extend(_artifact_candidates_from_index(source, artifact_kind))
         if candidates:
             shortcuts[artifact_kind] = str(candidates[0])
+    session_artifacts = _bucket_artifacts("session_run")
+    for key, value in _session_artifact_shortcuts(session_artifacts).items():
+        shortcuts.setdefault(key, value)
     return shortcuts
 
 
-def _artifact_center_rows(shortcuts: dict[str, str]) -> list[dict[str, Any]]:
+def _provenance_for_path(
+    artifact_index: dict[str, str],
+    artifact_provenance: dict[str, str],
+    path: str,
+) -> str:
+    normalized_path = str(path or "").strip()
+    if not normalized_path:
+        return ""
+    for key, value in artifact_index.items():
+        if str(value or "").strip() == normalized_path:
+            provenance = str(artifact_provenance.get(key) or "").strip()
+            if provenance:
+                return provenance
+    return ""
+
+
+def _artifact_shortcut_provenance(
+    shortcuts: dict[str, str],
+    *,
+    artifact_index: dict[str, str],
+    artifact_provenance: dict[str, str],
+) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for artifact_kind, path in shortcuts.items():
+        provenance = str(artifact_provenance.get(artifact_kind) or "").strip()
+        if not provenance:
+            provenance = _provenance_for_path(artifact_index, artifact_provenance, str(path))
+        if not provenance and artifact_kind in {"session_run", "screenshot"}:
+            provenance = "fallback"
+        if provenance:
+            result[artifact_kind] = provenance
+    return result
+
+
+def _artifact_center_rows(shortcuts: dict[str, str], provenance: dict[str, str] | None = None) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for artifact_kind, label in ARTIFACT_CENTER_LABELS.items():
         path = str(shortcuts.get(artifact_kind) or "").strip()
@@ -2297,6 +2579,7 @@ def _artifact_center_rows(shortcuts: dict[str, str]) -> list[dict[str, Any]]:
                 "label": label,
                 "path": path,
                 "available": bool(path),
+                "provenance": str((provenance or {}).get(artifact_kind) or ""),
             }
         )
     return rows
@@ -2311,12 +2594,21 @@ def _profile_artifact_history_from_jobs(
     rows: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
     for job in jobs:
-        artifact_index = workflow_artifact_index(str(job.get("job_id") or ""), index_path=index_path)
+        details = workflow_artifact_details(str(job.get("job_id") or ""), index_path=index_path)
+        artifact_index = dict(details.get("artifact_paths") or {})
+        artifact_provenance = {
+            str(key): str(value)
+            for key, value in (details.get("artifact_provenance") or {}).items()
+            if str(key).strip() and str(value).strip()
+        }
         for artifact_kind, label in ARTIFACT_HISTORY_LABELS.items():
             candidates = _artifact_candidates_from_index(artifact_index, artifact_kind)
             if not candidates:
                 continue
             path = str(candidates[0])
+            provenance = str(artifact_provenance.get(artifact_kind) or "").strip()
+            if not provenance:
+                provenance = _provenance_for_path(artifact_index, artifact_provenance, path)
             dedupe_key = (artifact_kind, path)
             if dedupe_key in seen:
                 continue
@@ -2331,6 +2623,7 @@ def _profile_artifact_history_from_jobs(
                     "status": _job_status(job),
                     "summary": str(job.get("summary") or "").strip(),
                     "updated_at": _job_timestamp(job),
+                    "provenance": provenance,
                 }
             )
             if len(rows) >= max(limit, 1):
@@ -2338,21 +2631,25 @@ def _profile_artifact_history_from_jobs(
     return rows
 
 
-def _profile_artifact_index_from_jobs(
+def _profile_artifact_details_from_jobs(
     jobs: list[dict[str, Any]],
     *,
     workflow_buckets: dict[str, dict[str, Any]],
     index_path: str | Path,
-) -> dict[str, str]:
+) -> dict[str, Any]:
     artifact_index: dict[str, str] = {}
+    artifact_provenance: dict[str, str] = {}
 
     def _merge_job_artifacts(job: dict[str, Any] | None, *, overwrite: bool) -> None:
         if not isinstance(job, dict) or not job:
             return
-        payload = workflow_artifact_index(str(job.get("job_id") or ""), index_path=index_path)
-        for key, value in payload.items():
+        payload = workflow_artifact_details(str(job.get("job_id") or ""), index_path=index_path)
+        artifact_paths = dict(payload.get("artifact_paths") or {})
+        provenance = dict(payload.get("artifact_provenance") or {})
+        for key, value in artifact_paths.items():
             if overwrite or key not in artifact_index:
                 artifact_index[key] = value
+                artifact_provenance[key] = str(provenance.get(key) or "stored")
 
     active_job = next((item for item in jobs if str(item.get("status") or "") == "running"), None)
     last_success = next(
@@ -2372,12 +2669,31 @@ def _profile_artifact_index_from_jobs(
         bucket_artifacts = bucket.get("artifact_index") if isinstance(bucket, dict) else None
         if not isinstance(bucket_artifacts, dict):
             continue
+        bucket_provenance = bucket.get("artifact_provenance") if isinstance(bucket.get("artifact_provenance"), dict) else {}
         for key, value in bucket_artifacts.items():
             normalized_key = str(key).strip()
             normalized_value = str(value).strip()
             if normalized_key and normalized_value and normalized_key not in artifact_index:
                 artifact_index[normalized_key] = normalized_value
-    return artifact_index
+                artifact_provenance[normalized_key] = str(bucket_provenance.get(normalized_key) or "stored")
+    return {
+        "artifact_paths": artifact_index,
+        "artifact_provenance": artifact_provenance,
+    }
+
+
+def _profile_artifact_index_from_jobs(
+    jobs: list[dict[str, Any]],
+    *,
+    workflow_buckets: dict[str, dict[str, Any]],
+    index_path: str | Path,
+) -> dict[str, str]:
+    details = _profile_artifact_details_from_jobs(
+        jobs,
+        workflow_buckets=workflow_buckets,
+        index_path=index_path,
+    )
+    return dict(details.get("artifact_paths") or {})
 
 
 def _combined_phase_label(phase: str) -> str:
@@ -2427,6 +2743,14 @@ def _combined_progress_summary(
     elif phase in {"session_running", "stopped"} and isinstance(session_snapshot.get("progress_summary"), dict):
         child_progress = dict(session_snapshot.get("progress_summary") or {})
         child_history_source = str(child_progress.get("history_source") or "session")
+    child_eta_mode = str(child_progress.get("eta_mode") or "")
+    child_eta_seconds = child_progress.get("eta_seconds")
+    child_eta_available = bool(child_progress.get("eta_available")) or (
+        child_eta_mode == "bounded" and child_eta_seconds is not None
+    )
+    session_run_mode = str((session_snapshot.get("progress_summary") or {}).get("run_mode") or "")
+    continuous_blocker = phase == "session_running" and session_run_mode == "continuous"
+    recoverable = bool((bucket.get("recoverable_job") if isinstance(bucket.get("recoverable_job"), dict) else None))
     return {
         "status": str((active_job or {}).get("status") or state.get("job_status") or state.get("last_status") or "idle"),
         "phase": phase,
@@ -2437,13 +2761,30 @@ def _combined_progress_summary(
         "next_step_label": "добавление контактов" if next_step_code == "1" else "сессия и сообщения",
         "elapsed_seconds": elapsed_seconds,
         "waiting_reason": waiting_reason,
-        "recoverable": bool((bucket.get("recoverable_job") if isinstance(bucket.get("recoverable_job"), dict) else None)),
+        "recoverable": recoverable,
+        "recoverable_hint": str(resume_decision.get("hint") or ""),
         "child_history_source": child_history_source,
+        "child_progress": child_progress,
+        "child_status": str(child_progress.get("status") or ""),
+        "child_processed_count": _safe_int(child_progress.get("processed_count")),
+        "child_selected_target": _safe_int(child_progress.get("selected_target")),
+        "child_remaining_in_run": child_progress.get("remaining_in_run"),
+        "child_rate_per_minute": child_progress.get("rate_per_minute"),
+        "child_eta_seconds": child_eta_seconds if child_eta_available else None,
+        "child_eta_available": child_eta_available,
+        "child_eta_mode": child_eta_mode,
         "invite_pending_total": _safe_int(invite_snapshot.get("pending_total")),
         "invite_failed_total": _safe_int(invite_snapshot.get("failed_total")),
         "invite_added_total": _safe_int(invite_snapshot.get("added_total")),
         "session_eta_mode": str((session_snapshot.get("progress_summary") or {}).get("eta_mode") or ""),
-        "session_run_mode": str((session_snapshot.get("progress_summary") or {}).get("run_mode") or ""),
+        "session_run_mode": session_run_mode,
+        "continuous_blocker": continuous_blocker,
+        "pattern_advancement_blocked": continuous_blocker,
+        "pattern_advancement_blocker": (
+            "Непрерывный session_run выполняется до ручного Стопа; следующий шаг pattern не продвинется автоматически."
+            if continuous_blocker
+            else ""
+        ),
         "workflow_job_id": str(state.get("workflow_job_id") or ""),
     }
 
@@ -2550,8 +2891,30 @@ def profile_workspace_snapshot(
     session_snapshot = _session_snapshot_from_jobs(jobs)
     session_bucket = workflow_buckets.get("session_run") if isinstance(workflow_buckets.get("session_run"), dict) else None
     if isinstance(session_bucket, dict):
-        session_bucket["progress_summary"] = dict(session_snapshot.get("progress_summary") or {})
+        session_artifacts = (
+            session_bucket.get("artifact_index")
+            if isinstance(session_bucket.get("artifact_index"), dict)
+            else {}
+        )
+        session_shortcuts = _session_artifact_shortcuts(
+            {str(key): str(value) for key, value in session_artifacts.items()}
+        )
+        session_artifact_status = _artifact_status(
+            session_shortcuts,
+            required=("session_run", "plan_json", "runtime_config", "state_path"),
+            unresolved=list(session_bucket.get("artifact_unresolved") or []),
+        )
+        session_progress = dict(session_snapshot.get("progress_summary") or {})
+        session_progress["next_action_text"] = str(session_bucket.get("next_operator_action") or session_progress.get("next_action_text") or "")
+        session_progress["artifact_status"] = session_artifact_status
+        session_progress["artifact_shortcuts"] = dict(session_shortcuts)
+        session_progress["artifact_provenance"] = dict(session_bucket.get("artifact_provenance") or {})
+        session_snapshot["progress_summary"] = session_progress
+        session_bucket["progress_summary"] = dict(session_progress)
         session_bucket["session_snapshot"] = dict(session_snapshot)
+        session_bucket["artifact_shortcuts"] = dict(session_shortcuts)
+        session_bucket["artifact_status"] = session_artifact_status
+    invite_bucket = workflow_buckets.get("invite_batch") if isinstance(workflow_buckets.get("invite_batch"), dict) else {}
     combined_state = combined_state_from_jobs(
         profile_name=profile_name,
         profile_dir=profile_dir,
@@ -2559,26 +2922,50 @@ def profile_workspace_snapshot(
     ) or {}
     combined_bucket = workflow_buckets.get("combined_pattern") if isinstance(workflow_buckets.get("combined_pattern"), dict) else None
     if isinstance(combined_bucket, dict):
+        combined_artifacts = (
+            combined_bucket.get("artifact_index")
+            if isinstance(combined_bucket.get("artifact_index"), dict)
+            else {}
+        )
+        combined_shortcuts = _workflow_artifact_shortcuts(
+            {str(key): str(value) for key, value in combined_artifacts.items()}
+        )
         combined_bucket["combined_state"] = dict(combined_state)
         combined_bucket["progress_summary"] = _combined_progress_summary(
             bucket=combined_bucket,
             state=combined_state,
             session_snapshot=session_snapshot,
         )
+        combined_bucket["parent_artifact_shortcuts"] = dict(combined_shortcuts)
+        combined_bucket["artifact_shortcuts"] = dict(combined_shortcuts)
+        combined_bucket["child_artifact_shortcuts"] = {
+            "invite_batch": dict(invite_bucket.get("artifact_index") or {}),
+            "session_run": dict((session_bucket or {}).get("artifact_shortcuts") or {}),
+        }
+        combined_bucket["child_artifact_provenance"] = {
+            "invite_batch": dict(invite_bucket.get("artifact_provenance") or {}),
+            "session_run": dict((session_bucket or {}).get("artifact_provenance") or {}),
+        }
     resume_decision = _workflow_resume_decision(
         active_job=active_workflow,
         recoverable_job=recoverable_workflow,
         last_job=recent_jobs[0] if recent_jobs else None,
     )
-    invite_bucket = workflow_buckets.get("invite_batch") if isinstance(workflow_buckets.get("invite_batch"), dict) else {}
-    artifact_index = _profile_artifact_index_from_jobs(
+    artifact_details = _profile_artifact_details_from_jobs(
         jobs,
         workflow_buckets=workflow_buckets,
         index_path=index_path,
     )
+    artifact_index = dict(artifact_details.get("artifact_paths") or {})
+    artifact_index_provenance = dict(artifact_details.get("artifact_provenance") or {})
     artifact_shortcuts = _resolved_artifact_shortcuts(
         artifact_index,
         workflow_buckets=workflow_buckets,
+    )
+    artifact_provenance = _artifact_shortcut_provenance(
+        artifact_shortcuts,
+        artifact_index=artifact_index,
+        artifact_provenance=artifact_index_provenance,
     )
     artifact_history = _profile_artifact_history_from_jobs(
         jobs,
@@ -2591,6 +2978,16 @@ def profile_workspace_snapshot(
     except Exception as exc:
         profile_status = {"status": "error", "error": str(exc), "running": False, "windows": []}
     capabilities = platform_capabilities()
+    display_session = capabilities.get("display_session") if isinstance(capabilities.get("display_session"), dict) else {}
+    window_automation = capabilities.get("window_automation") if isinstance(capabilities.get("window_automation"), dict) else {}
+    capability_warnings: list[str] = []
+    for raw_items in (display_session.get("warnings"), window_automation.get("warnings")):
+        if not isinstance(raw_items, list):
+            continue
+        for item in raw_items:
+            text = str(item or "").strip()
+            if text and text not in capability_warnings:
+                capability_warnings.append(text)
     health = {
         "platform_id": current_platform_id(),
         "profile_running": bool(profile_status.get("running")),
@@ -2606,6 +3003,13 @@ def profile_workspace_snapshot(
         "accessibility_available": bool((capabilities.get("accessibility") or {}).get("available")),
         "session_runtime_reachable": session_repo_binary().exists(),
         "panel_backend_status": "ready",
+        "session_type": str(profile_status.get("session_type") or display_session.get("session_type") or ""),
+        "display": str(profile_status.get("display") or display_session.get("display") or ""),
+        "wayland_display": str(profile_status.get("wayland_display") or display_session.get("wayland_display") or ""),
+        "display_backend": str(profile_status.get("display_backend") or "auto"),
+        "attach_proof_mode": str(profile_status.get("attach_proof_mode") or ""),
+        "capability_warnings": capability_warnings,
+        "window_automation_warning": " | ".join(str(item) for item in window_automation.get("warnings") or [] if str(item or "").strip()),
     }
     if str(resume_decision.get("kind") or "") == "running":
         next_operator_action = "Ждать завершения активного workflow."
@@ -2638,7 +3042,9 @@ def profile_workspace_snapshot(
         "combined_state": combined_state,
         "artifact_index": artifact_index,
         "artifact_shortcuts": artifact_shortcuts,
-        "artifact_center": _artifact_center_rows(artifact_shortcuts),
+        "artifact_provenance": artifact_provenance,
+        "artifact_index_provenance": artifact_index_provenance,
+        "artifact_center": _artifact_center_rows(artifact_shortcuts, artifact_provenance),
         "artifact_history": artifact_history,
         "workflow_buckets": workflow_buckets,
     }

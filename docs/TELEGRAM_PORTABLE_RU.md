@@ -42,13 +42,22 @@
 Команда:
 - берёт уже существующий portable-профиль;
 - запускает его повторно;
-- если этот же профиль уже запущен, не плодит второй процесс и возвращает `already_running`.
+- если этот же профиль уже запущен, не плодит второй процесс и возвращает `already_running`;
+- поддерживает `--display-backend x11`, чтобы на `Wayland` форсировать `QT_QPA_PLATFORM=xcb`;
+- сохраняет выбранный backend в `portable-profile.json` как `launch_preferences.display_backend`, чтобы следующий relaunch был воспроизводимым.
 
 ### `status`
 Команда:
 - показывает, запущен ли portable-профиль;
 - возвращает `pid`, X11-окна, путь к `TelegramForcePortable/tdata`;
-- читает `portable-profile.json`, если профиль уже принят в управление.
+- читает `portable-profile.json`, если профиль уже принят в управление;
+- теперь дополнительно возвращает:
+  - `session_type`
+  - `display`
+  - `wayland_display`
+  - `display_backend`
+  - `attach_proof_mode`
+  - Wayland-warning о том, что наличие X11 primitives само по себе не является safe attach.
 
 ### `adopt`
 Команда:
@@ -66,7 +75,8 @@
 Команда:
 - открывает `tg://...` URI через конкретный portable-профиль;
 - используется executor-слоем для открытия DM одного пользователя;
-- поддерживает `--dry-run`.
+- поддерживает `--dry-run`;
+- тоже умеет `--display-backend x11`, если нужно послать URI через XWayland-backed launch path.
 
 ### `type-text`
 Команда:
@@ -159,6 +169,14 @@ python3 scripts/telegram_portable.py launch \
   --profile-name "ak"
 ```
 
+### Повторный запуск на Wayland через XWayland-backed path
+
+```bash
+python3 scripts/telegram_portable.py launch \
+  --profile-dir "/home/max/site-control-kit/runtime/telegram/profiles/TelegramPortable-AK5" \
+  --display-backend x11
+```
+
 ### Принять существующий профиль в управление
 
 ```bash
@@ -192,6 +210,11 @@ python3 scripts/telegram_portable.py open-uri \
   --profile-dir "/home/max/TelegramPortableAK" \
   --uri "tg://resolve?domain=alice_123" \
   --dry-run
+
+python3 scripts/telegram_portable.py open-uri \
+  --profile-dir "/home/max/site-control-kit/runtime/telegram/profiles/TelegramPortable-AK5" \
+  --display-backend x11 \
+  --uri "tg://resolve?domain=telegram"
 
 python3 scripts/telegram_portable.py type-text \
   --profile-dir "/home/max/TelegramPortableAK" \

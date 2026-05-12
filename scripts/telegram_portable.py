@@ -32,10 +32,28 @@ DEFAULT_RUNTIME_CACHE_DIR = telegram_desktop_cache_root()
 PROFILE_PREFIX = "TelegramPortable-"
 LEGACY_PROFILE_PREFIX_RE = re.compile(r"^TelegramPortable[-_]?", re.I)
 LOG_EVENT_RE = re.compile(r"^\[(?P<timestamp>[^\]]+)\]\s+(?P<kind>[^:]+):\s*(?P<message>.*)$")
+DISPLAY_BACKEND_CHOICES = {"auto", "x11"}
 
 
 def now_utc() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _normalize_display_backend(value: str | None) -> str:
+    normalized = str(value or "").strip().lower()
+    if not normalized:
+        return ""
+    if normalized not in DISPLAY_BACKEND_CHOICES:
+        raise ValueError(f"unsupported display backend: {value}")
+    return normalized
+
+
+def _display_session_snapshot() -> dict[str, str]:
+    return {
+        "session_type": str(os.environ.get("XDG_SESSION_TYPE") or "").strip().lower() or "unknown",
+        "display": str(os.environ.get("DISPLAY") or "").strip(),
+        "wayland_display": str(os.environ.get("WAYLAND_DISPLAY") or "").strip(),
+    }
 
 
 def _print_json(payload: dict[str, Any]) -> None:
@@ -298,6 +316,58 @@ def read_profile_metadata(target_dir: Path) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def _metadata_launch_preferences(metadata: dict[str, Any]) -> dict[str, Any]:
+    prefs = metadata.get("launch_preferences")
+    return prefs if isinstance(prefs, dict) else {}
+
+
+def _stored_display_backend(target_dir: Path) -> str:
+    try:
+        metadata = read_profile_metadata(target_dir)
+    except Exception:
+        metadata = {}
+    prefs = _metadata_launch_preferences(metadata)
+    stored = _normalize_display_backend(str(prefs.get("display_backend") or ""))
+    return stored or "auto"
+
+
+def _effective_display_backend(target_dir: Path, requested_backend: str | None = None) -> str:
+    requested = _normalize_display_backend(requested_backend)
+    if requested:
+        return requested
+    return _stored_display_backend(target_dir)
+
+
+def _save_display_backend_preference(target_dir: Path, display_backend: str) -> Path:
+    metadata = read_profile_metadata(target_dir)
+    if not metadata:
+        try:
+            profile_name = _profile_name_from_dir(target_dir)
+        except ValueError:
+            profile_name = target_dir.name
+        metadata = {
+            "status": "launch_preferences_only",
+            "profile_name": profile_name,
+            "profile_dir": str(target_dir),
+            "binary_path": str(target_dir / "Telegram"),
+            "portable_dir": str(target_dir / "TelegramForcePortable"),
+            "tdata_dir": str(target_dir / "TelegramForcePortable" / "tdata"),
+        }
+    prefs = _metadata_launch_preferences(metadata)
+    prefs["display_backend"] = display_backend
+    metadata["launch_preferences"] = prefs
+    return write_profile_metadata(target_dir, metadata)
+
+
+def _launch_env(display_backend: str) -> tuple[dict[str, str], dict[str, str]]:
+    env = dict(os.environ)
+    overrides: dict[str, str] = {}
+    if display_backend == "x11":
+        overrides["QT_QPA_PLATFORM"] = "xcb"
+    env.update(overrides)
+    return env, overrides
+
+
 def _wmctrl_windows_by_pid() -> dict[int, list[dict[str, Any]]]:
     try:
         proc = subprocess.run(["wmctrl", "-l", "-G", "-p"], check=False, capture_output=True, text=True)
@@ -449,6 +519,11 @@ def profile_status(target_dir: Path) -> dict[str, Any]:
     windows = [window for pid in pids for window in windows_by_pid.get(pid, [])]
     metadata = read_profile_metadata(target_dir)
     attach = _attach_status_payload(target_dir, pids=pids, windows=windows)
+    session = _display_session_snapshot()
+    display_backend = _stored_display_backend(target_dir)
+    warnings: list[str] = []
+    if session["session_type"] == "wayland":
+        warnings.append("Wayland detected: X11 primitives alone do not prove a profile-owned visible Telegram window.")
     try:
         profile_name = str(metadata.get("profile_name") or "").strip() or _profile_name_from_dir(target_dir)
     except ValueError:
@@ -463,12 +538,19 @@ def profile_status(target_dir: Path) -> dict[str, Any]:
         "metadata_path": str(_metadata_path(target_dir)),
         "metadata_exists": bool(_metadata_path(target_dir).is_file()),
         "account": metadata.get("account") if isinstance(metadata.get("account"), dict) else {},
+        "launch_preferences": _metadata_launch_preferences(metadata),
         "running": bool(pids),
         "pids": pids,
         "windows": windows,
         "attach_status": str(attach.get("attach_status") or ""),
         "attach_message": str(attach.get("attach_message") or ""),
         "attach_candidates": [item for item in attach.get("attach_candidates") or [] if isinstance(item, dict)],
+        "session_type": session["session_type"],
+        "display": session["display"],
+        "wayland_display": session["wayland_display"],
+        "display_backend": display_backend,
+        "attach_proof_mode": "x11_window_confirmation",
+        "warnings": warnings,
         "log_path": str(target_dir / "portable-launch.log"),
         "telegram_log_path": str(_telegram_log_path(target_dir)),
     }
@@ -611,20 +693,26 @@ def adopt_profile(
     return status
 
 
-def launch_portable(target_dir: Path) -> dict[str, Any]:
+def launch_portable(target_dir: Path, *, requested_display_backend: str | None = None) -> dict[str, Any]:
     binary_path = target_dir / "Telegram"
     if not binary_path.is_file():
         raise FileNotFoundError(f"Telegram binary not found: {binary_path}")
 
     log_path = target_dir / "portable-launch.log"
+    display_backend = _effective_display_backend(target_dir, requested_display_backend)
+    _, env_overrides = _launch_env(display_backend)
     existing_pids = find_running_pids(binary_path)
     if existing_pids:
         return {
             "status": "already_running",
             "pids": existing_pids,
             "log_path": str(log_path),
+            "display_backend": display_backend,
+            "env_overrides": env_overrides,
         }
 
+    _save_display_backend_preference(target_dir, display_backend)
+    env, env_overrides = _launch_env(display_backend)
     with log_path.open("ab") as log_fh:
         process = subprocess.Popen(
             [str(binary_path)],
@@ -632,16 +720,25 @@ def launch_portable(target_dir: Path) -> dict[str, Any]:
             stdout=log_fh,
             stderr=subprocess.STDOUT,
             start_new_session=True,
+            env=env,
         )
 
     return {
         "status": "started",
         "pid": int(process.pid),
         "log_path": str(log_path),
+        "display_backend": display_backend,
+        "env_overrides": env_overrides,
     }
 
 
-def open_portable_uri(target_dir: Path, uri: str, *, dry_run: bool = False) -> dict[str, Any]:
+def open_portable_uri(
+    target_dir: Path,
+    uri: str,
+    *,
+    requested_display_backend: str | None = None,
+    dry_run: bool = False,
+) -> dict[str, Any]:
     target_dir = target_dir.expanduser().resolve()
     binary_path = target_dir / "Telegram"
     if not binary_path.is_file():
@@ -650,8 +747,17 @@ def open_portable_uri(target_dir: Path, uri: str, *, dry_run: bool = False) -> d
     if not uri:
         raise ValueError("uri is required")
     command = [str(binary_path), uri]
+    display_backend = _effective_display_backend(target_dir, requested_display_backend)
+    env, env_overrides = _launch_env(display_backend)
     if dry_run:
-        return {"status": "dry_run", "command": command, "cwd": str(target_dir)}
+        return {
+            "status": "dry_run",
+            "command": command,
+            "cwd": str(target_dir),
+            "display_backend": display_backend,
+            "env_overrides": env_overrides,
+        }
+    _save_display_backend_preference(target_dir, display_backend)
     with (target_dir / "portable-launch.log").open("ab") as log_fh:
         process = subprocess.Popen(
             command,
@@ -659,8 +765,15 @@ def open_portable_uri(target_dir: Path, uri: str, *, dry_run: bool = False) -> d
             stdout=log_fh,
             stderr=subprocess.STDOUT,
             start_new_session=True,
+            env=env,
         )
-    return {"status": "opened", "pid": int(process.pid), "command": command}
+    return {
+        "status": "opened",
+        "pid": int(process.pid),
+        "command": command,
+        "display_backend": display_backend,
+        "env_overrides": env_overrides,
+    }
 
 
 def _focus_x11_window(window_id: str) -> bool:
@@ -1881,6 +1994,9 @@ def import_zip(
             "source": str(runtime_info["source"]),
         },
     }
+    existing_launch_preferences = _metadata_launch_preferences(existing_metadata)
+    if existing_launch_preferences:
+        metadata["launch_preferences"] = existing_launch_preferences
     existing_account = (
         existing_metadata.get("account")
         if isinstance(existing_metadata.get("account"), dict)
@@ -1941,7 +2057,7 @@ def command_launch(args: argparse.Namespace) -> int:
         "profile_name": sanitize_profile_name(args.profile_name or target_dir.name),
         "profile_dir": str(target_dir),
         "binary_path": str(target_dir / "Telegram"),
-        "launch": launch_portable(target_dir),
+        "launch": launch_portable(target_dir, requested_display_backend=getattr(args, "display_backend", None)),
     }
     _print_json(payload)
     return 0
@@ -1949,7 +2065,14 @@ def command_launch(args: argparse.Namespace) -> int:
 
 def command_open_uri(args: argparse.Namespace) -> int:
     target_dir = _profile_dir_from_args(args)
-    _print_json(open_portable_uri(target_dir, args.uri, dry_run=bool(args.dry_run)))
+    _print_json(
+        open_portable_uri(
+            target_dir,
+            args.uri,
+            requested_display_backend=getattr(args, "display_backend", None),
+            dry_run=bool(args.dry_run),
+        )
+    )
     return 0
 
 
@@ -2131,6 +2254,11 @@ def build_parser() -> argparse.ArgumentParser:
     launch_parser.add_argument("--profile-name")
     launch_parser.add_argument("--profile-dir", help="Explicit portable profile directory. Useful for adopted legacy profiles.")
     launch_parser.add_argument("--output-root", default=str(DEFAULT_OUTPUT_ROOT))
+    launch_parser.add_argument(
+        "--display-backend",
+        choices=sorted(DISPLAY_BACKEND_CHOICES),
+        help="Optional launch backend preference. Use x11 to force QT_QPA_PLATFORM=xcb on Wayland.",
+    )
     launch_parser.set_defaults(func=command_launch)
 
     status_parser = subparsers.add_parser("status", help="Show status for a Telegram portable profile.")
@@ -2166,6 +2294,11 @@ def build_parser() -> argparse.ArgumentParser:
     open_uri_parser.add_argument("--profile-dir", help="Explicit portable profile directory.")
     open_uri_parser.add_argument("--output-root", default=str(DEFAULT_OUTPUT_ROOT))
     open_uri_parser.add_argument("--uri", required=True)
+    open_uri_parser.add_argument(
+        "--display-backend",
+        choices=sorted(DISPLAY_BACKEND_CHOICES),
+        help="Optional launch backend preference. Use x11 to force QT_QPA_PLATFORM=xcb on Wayland.",
+    )
     open_uri_parser.add_argument("--dry-run", action="store_true")
     open_uri_parser.set_defaults(func=command_open_uri)
 

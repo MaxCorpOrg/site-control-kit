@@ -463,6 +463,74 @@ def build_profile_manager_selected_text(
     return "\n".join(lines)
 
 
+def format_seconds_hms(value: Any) -> str:
+    try:
+        total_seconds = max(int(float(value)), 0)
+    except (TypeError, ValueError):
+        total_seconds = 0
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+
+def _rate_text(value: Any) -> str:
+    try:
+        rate = float(value)
+    except (TypeError, ValueError):
+        return "н/д"
+    return f"{rate:.2f}/мин"
+
+
+def _artifact_line(label: str, key: str, artifacts: dict[str, Any], provenance: dict[str, Any]) -> str:
+    value = str(artifacts.get(key) or "").strip()
+    source = str(provenance.get(key) or "").strip()
+    source_suffix = f" · source: {source}" if source else ""
+    return f"- {label}: {display_path(value) if value else 'пока нет'}{source_suffix}"
+
+
+def format_session_artifact_shortcuts(
+    artifacts: dict[str, Any] | None,
+    provenance: dict[str, Any] | None = None,
+) -> str:
+    payload = artifacts if isinstance(artifacts, dict) else {}
+    source = provenance if isinstance(provenance, dict) else {}
+    lines = ["Session artifacts"]
+    lines.append(_artifact_line("run.json", "session_run", payload, source))
+    lines.append(_artifact_line("run dir", "run_dir", payload, source))
+    lines.append(_artifact_line("plan.json", "plan_json", payload, source))
+    lines.append(_artifact_line("runtime config", "runtime_config", payload, source))
+    lines.append(_artifact_line("state file", "state_path", payload, source))
+    lines.append(_artifact_line("screenshot", "screenshot", payload, source))
+    return "\n".join(lines)
+
+
+def format_session_progress_summary(progress: dict[str, Any] | None) -> str:
+    payload = progress if isinstance(progress, dict) else {}
+    if not payload:
+        return ""
+    eta_mode = str(payload.get("eta_mode") or "unknown")
+    eta_available = bool(payload.get("eta_available"))
+    eta_text = format_seconds_hms(payload.get("eta_seconds")) if eta_available else f"н/д ({payload.get('eta_reason') or eta_mode})"
+    artifact_status = payload.get("artifact_status") if isinstance(payload.get("artifact_status"), dict) else {}
+    missing_artifacts = ", ".join(str(item) for item in artifact_status.get("missing") or [] if str(item).strip())
+    lines = [
+        "Session progress",
+        f"Статус: {payload.get('status') or '-'} · фаза: {payload.get('current_phase') or '-'}",
+        f"Обработано сообщений: {payload.get('processed_count') or 0}/{payload.get('selected_target') or 0}",
+        f"Осталось в запуске: {payload.get('remaining_in_run') if payload.get('remaining_in_run') is not None else '-'}",
+        f"Скорость: {_rate_text(payload.get('rate_per_minute'))}",
+        f"ETA: {eta_text}",
+        f"Текущий адресат: {payload.get('current_target_label') or 'не выбран'}",
+        f"Текущий шаблон: {payload.get('current_template_preview') or 'не выбран'}",
+        f"Режим: {payload.get('run_mode') or '-'}",
+        f"Следующее действие: {payload.get('next_action_text') or 'не определено'}",
+        f"Артефакты: {artifact_status.get('status') or 'unknown'}",
+    ]
+    if missing_artifacts:
+        lines.append(f"Не хватает: {missing_artifacts}")
+    return "\n".join(lines)
+
+
 def build_session_dashboard_text(
     bucket: dict[str, Any] | None,
     snapshot: dict[str, Any],
@@ -471,11 +539,24 @@ def build_session_dashboard_text(
     operator_action_formatter: Callable[[dict[str, Any] | None], str],
     operator_summary_formatter: Callable[..., str],
     history_formatter: Callable[[dict[str, Any]], str],
+    progress_formatter: Callable[[dict[str, Any] | None], str] | None = None,
+    artifact_formatter: Callable[[dict[str, Any] | None, dict[str, Any] | None], str] | None = None,
 ) -> dict[str, str]:
+    payload = bucket if isinstance(bucket, dict) else {}
+    progress_text = progress_formatter(payload.get("progress_summary")) if progress_formatter else ""
+    artifact_text = (
+        artifact_formatter(payload.get("artifact_shortcuts"), payload.get("artifact_provenance"))
+        if artifact_formatter
+        else ""
+    )
+    summary_parts = [
+        operator_action_formatter(bucket),
+        progress_text,
+        operator_summary_formatter(snapshot, **preview_context),
+        artifact_text,
+    ]
     return {
-        "summary": operator_action_formatter(bucket)
-        + "\n\n"
-        + operator_summary_formatter(snapshot, **preview_context),
+        "summary": "\n\n".join(part for part in summary_parts if str(part or "").strip()),
         "history": history_formatter(snapshot),
     }
 
@@ -586,6 +667,74 @@ def resolve_combined_contact_preview(
     }
 
 
+def format_combined_progress_summary(progress: dict[str, Any] | None) -> str:
+    payload = progress if isinstance(progress, dict) else {}
+    if not payload:
+        return ""
+    child_progress = payload.get("child_progress") if isinstance(payload.get("child_progress"), dict) else {}
+    child_eta = (
+        format_seconds_hms(payload.get("child_eta_seconds"))
+        if payload.get("child_eta_available") and payload.get("child_eta_seconds") is not None
+        else "н/д"
+    )
+    lines = [
+        "Combined progress",
+        f"Parent: {payload.get('status') or '-'} · {payload.get('phase_label') or payload.get('phase') or '-'}",
+        f"Текущий шаг: {payload.get('current_step_label') or '-'}",
+        f"Следующий шаг: {payload.get('next_step_label') or '-'}",
+        f"Recoverable: {'да' if payload.get('recoverable') else 'нет'} · {payload.get('recoverable_hint') or '-'}",
+        f"Child source: {payload.get('child_history_source') or '-'}",
+        f"Child status: {payload.get('child_status') or child_progress.get('status') or '-'}",
+        f"Child processed: {payload.get('child_processed_count') or 0}/{payload.get('child_selected_target') or 0}",
+        f"Child remaining: {payload.get('child_remaining_in_run') if payload.get('child_remaining_in_run') is not None else '-'}",
+        f"Child ETA: {child_eta}",
+        f"Invite queue: осталось {payload.get('invite_pending_total') or 0}, добавлено {payload.get('invite_added_total') or 0}, ошибок {payload.get('invite_failed_total') or 0}",
+    ]
+    blocker = str(payload.get("pattern_advancement_blocker") or "").strip()
+    if blocker:
+        lines.append(f"Pattern blocker: {blocker}")
+    waiting = str(payload.get("waiting_reason") or "").strip()
+    if waiting:
+        lines.append(f"Waiting reason: {waiting}")
+    return "\n".join(lines)
+
+
+def format_combined_artifact_shortcuts(
+    parent_artifacts: dict[str, Any] | None,
+    child_artifacts: dict[str, Any] | None = None,
+    provenance: dict[str, Any] | None = None,
+) -> str:
+    parent = parent_artifacts if isinstance(parent_artifacts, dict) else {}
+    children = child_artifacts if isinstance(child_artifacts, dict) else {}
+    source = provenance if isinstance(provenance, dict) else {}
+    lines = ["Combined artifacts", "Parent workflow"]
+    for key, label in (
+        ("job_dir", "job dir"),
+        ("run_dir", "run dir"),
+        ("progress_json", "invite progress"),
+        ("batch_json", "batch json"),
+        ("session_run", "session run"),
+        ("plan_json", "session plan"),
+        ("runtime_config", "runtime config"),
+        ("state_path", "state file"),
+        ("execution_record", "execution record"),
+        ("screenshot", "screenshot"),
+    ):
+        if key in parent or key in {"session_run", "plan_json", "runtime_config", "state_path"}:
+            lines.append(_artifact_line(label, key, parent, source))
+    invite_child = children.get("invite_batch") if isinstance(children.get("invite_batch"), dict) else {}
+    session_child = children.get("session_run") if isinstance(children.get("session_run"), dict) else {}
+    if invite_child:
+        lines.extend(["", "Child invite"])
+        for key, label in (("progress_json", "progress"), ("batch_json", "batch"), ("execution_record", "execution")):
+            lines.append(_artifact_line(label, key, invite_child, {}))
+    if session_child:
+        lines.extend(["", "Child session"])
+        for key, label in (("session_run", "run.json"), ("plan_json", "plan.json"), ("runtime_config", "runtime config"), ("state_path", "state")):
+            lines.append(_artifact_line(label, key, session_child, {}))
+    return "\n".join(lines)
+
+
 def build_combined_dashboard_texts(
     *,
     action_block: str,
@@ -603,14 +752,32 @@ def build_combined_dashboard_texts(
     invite_preview_formatter: Callable[[dict[str, Any]], str],
     session_snapshot_formatter: Callable[[dict[str, Any]], str],
     targets_summary_text: str,
+    progress_summary: dict[str, Any] | None = None,
+    progress_formatter: Callable[[dict[str, Any] | None], str] | None = None,
+    parent_artifacts: dict[str, Any] | None = None,
+    child_artifacts: dict[str, Any] | None = None,
+    artifact_provenance: dict[str, Any] | None = None,
+    artifact_formatter: Callable[[dict[str, Any] | None, dict[str, Any] | None, dict[str, Any] | None], str] | None = None,
 ) -> dict[str, str]:
-    state_text = action_block + "\n\n" + combined_state_formatter(
-        state,
-        profile_label=profile_label,
-        invite_snapshot=invite_snapshot,
-        session_snapshot=session_snapshot,
-        **preview_context,
-    )
+    state_parts = [
+        action_block,
+        combined_state_formatter(
+            state,
+            profile_label=profile_label,
+            invite_snapshot=invite_snapshot,
+            session_snapshot=session_snapshot,
+            **preview_context,
+        ),
+    ]
+    if progress_formatter:
+        progress_text = progress_formatter(progress_summary)
+        if progress_text:
+            state_parts.append(progress_text)
+    if artifact_formatter:
+        artifact_text = artifact_formatter(parent_artifacts, child_artifacts, artifact_provenance)
+        if artifact_text:
+            state_parts.append(artifact_text)
+    state_text = "\n\n".join(part for part in state_parts if str(part or "").strip())
     if invite_snapshot is None:
         if input_path:
             if preview_error:

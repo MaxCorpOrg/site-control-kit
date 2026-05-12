@@ -3,7 +3,7 @@ from __future__ import annotations
 import sys
 from typing import Any
 
-from .base import PlatformAdapter, gui_capability
+from .base import PlatformAdapter, capability_warnings, gui_capability
 from .linux import LinuxPlatformAdapter
 from .macos import MacOSPlatformAdapter
 from .windows import WindowsPlatformAdapter
@@ -45,8 +45,13 @@ def platform_capabilities(platform_id: str | None = None) -> dict[str, Any]:
     return adapter.capabilities()
 
 
+def platform_capability_warnings(platform_id: str | None = None) -> list[str]:
+    return capability_warnings(platform_capabilities(platform_id))
+
+
 def platform_doctor_report(platform_id: str | None = None) -> dict[str, Any]:
     adapter = get_platform_adapter(platform_id)
     report = adapter.doctor()
     report["current_platform_id"] = current_platform_id()
+    report["warnings"] = capability_warnings(report["capabilities"])
     return report

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import io
+import os
 import tempfile
 import threading
 import unittest
@@ -35,6 +36,7 @@ from tool_platform.jobs import (
     profile_history_groups,
     profile_id_for,
     profile_workspace_snapshot,
+    repair_historical_artifacts,
     repair_invite_artifacts,
     repair_session_artifacts,
     start_job,
@@ -93,6 +95,7 @@ from tool_platform.workflows import (
     default_combined_workflow_context,
     migrate_legacy_combined_state,
     plan_workflow,
+    profile_health,
     resume_workflow,
     run_workflow,
     stop_workflow_job,
@@ -1705,8 +1708,24 @@ class ToolPlatformCatalogTests(unittest.TestCase):
         self.assertEqual(workspace["artifact_shortcuts"]["batch_json"], str(invite_batch_json))
         self.assertEqual(workspace["artifact_shortcuts"]["execution_record"], str(execution_record))
         self.assertEqual(workspace["artifact_shortcuts"]["screenshot"], str(screenshot))
+        self.assertEqual(workspace["artifact_provenance"]["session_run"], "stored")
         self.assertTrue(any(item["artifact_kind"] == "session_run" and item["available"] for item in workspace["artifact_center"]))
-        self.assertTrue(any(item["artifact_kind"] == "plan_json" and item["path"] == str(run_dir / "plan.json") for item in workspace["artifact_history"]))
+        self.assertTrue(
+            any(
+                item["artifact_kind"] == "session_run" and item["provenance"] == "stored"
+                for item in workspace["artifact_center"]
+            )
+        )
+        self.assertTrue(
+            any(
+                item["artifact_kind"] == "plan_json"
+                and item["path"] == str(run_dir / "plan.json")
+                and item["provenance"] == "stored"
+                for item in workspace["artifact_history"]
+            )
+        )
+        child_provenance = workspace["workflow_buckets"]["combined_pattern"]["child_artifact_provenance"]
+        self.assertEqual(child_provenance["session_run"]["session_run"], "stored")
         history_text = format_profile_workspace_history(
             {"profile_name": "AK", "profile_dir": "/home/max/TelegramPortableAK"},
             workspace,
@@ -1809,6 +1828,13 @@ class ToolPlatformCatalogTests(unittest.TestCase):
 
         self.assertEqual(workspace["artifact_shortcuts"]["session_run"], str(run_json))
         self.assertEqual(workspace["artifact_shortcuts"]["screenshot"], str(screenshot))
+        self.assertEqual(workspace["artifact_provenance"]["session_run"], "fallback")
+        self.assertTrue(
+            any(
+                item["artifact_kind"] == "session_run" and item["provenance"] == "fallback"
+                for item in workspace["artifact_center"]
+            )
+        )
 
     def test_profile_workspace_snapshot_builds_session_snapshot_from_unified_jobs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -1926,8 +1952,8 @@ class ToolPlatformCatalogTests(unittest.TestCase):
                 index_path=index_path,
             )
             payload = json.loads(index_path.read_text(encoding="utf-8"))
-            payload["jobs"][0]["started_at"] = "2026-05-08T09:00:00Z"
-            payload["jobs"][0]["updated_at"] = "2026-05-08T09:00:30Z"
+            payload["jobs"][0]["started_at"] = "2020-05-08T09:00:00Z"
+            payload["jobs"][0]["updated_at"] = "2020-05-08T09:00:30Z"
             index_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
             with mock.patch(
@@ -1958,6 +1984,209 @@ class ToolPlatformCatalogTests(unittest.TestCase):
         self.assertEqual(progress["current_target_label"], "@alice_test")
         self.assertEqual(progress["current_template_preview"], "Привет!")
         self.assertEqual(progress["run_mode"], "bounded")
+        self.assertEqual(progress["eta_mode"], "bounded")
+        self.assertIn(progress["eta_reason"], {"bounded_target", "insufficient_rate"})
+
+    def test_profile_workspace_snapshot_exposes_session_artifacts_and_provenance(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            index_path = root / "jobs" / "index.json"
+            state_path = root / "session_state.json"
+            runs_dir = root / "runs"
+            run_dir = runs_dir / "20260504T080201Z-e8f2e87d"
+            runtime_config = root / "runtime_config.json"
+            run_dir.mkdir(parents=True)
+            state_path.write_text(
+                json.dumps(
+                    {
+                        "messages_sent_total": 4,
+                        "message_cursor": 1,
+                        "message_target_cursor": 0,
+                        "history": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            runtime_config.write_text("{}", encoding="utf-8")
+            run_json = run_dir / "run.json"
+            run_json.write_text(
+                json.dumps(
+                    {
+                        "run_id": run_dir.name,
+                        "status": "completed",
+                        "visits": [{"username": "@alice_test"}],
+                        "sent_count": 1,
+                        "plan": {"message_target_username": "@alice_test"},
+                        "messages": [{"index": 1, "text": "Привет", "sent": True, "send_mode": "auto"}],
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            (run_dir / "plan.json").write_text("{}", encoding="utf-8")
+            (run_dir / "after.png").write_text("png", encoding="utf-8")
+            start_job(
+                tool_id="telegram_session_runner",
+                workflow_kind="session_run",
+                profile_name="AK",
+                profile_dir="/home/max/TelegramPortableAK",
+                phase="stopped",
+                status="completed",
+                summary="Session done",
+                artifact_paths={
+                    "state_path": str(state_path),
+                    "runs_dir": str(runs_dir),
+                    "runtime_config": str(runtime_config),
+                    "session_run": str(run_json),
+                },
+                context={
+                    "message_settings": {
+                        "messages_per_cycle": 1,
+                        "message_targets": [{"label": "@alice_test"}],
+                        "message_templates": ["Привет"],
+                    }
+                },
+                index_path=index_path,
+            )
+
+            with mock.patch(
+                "tool_platform.telegram_gui_helpers.session_history_snapshot",
+                return_value={
+                    "status": "ready",
+                    "state_file": str(state_path),
+                    "runs_dir": str(runs_dir),
+                    "messages_sent_total": 4,
+                    "message_cursor": 1,
+                    "message_target_cursor": 0,
+                    "history": [],
+                    "latest_runs": [],
+                    "last_run": {},
+                },
+            ):
+                workspace = profile_workspace_snapshot(
+                    profile_name="AK",
+                    profile_dir="/home/max/TelegramPortableAK",
+                    index_path=index_path,
+                )
+
+        bucket = workspace["workflow_buckets"]["session_run"]
+        shortcuts = bucket["artifact_shortcuts"]
+        self.assertEqual(shortcuts["session_run"], str(run_json))
+        self.assertEqual(shortcuts["run_dir"], str(run_dir))
+        self.assertEqual(shortcuts["plan_json"], str(run_dir / "plan.json"))
+        self.assertEqual(shortcuts["runtime_config"], str(runtime_config))
+        self.assertEqual(shortcuts["state_path"], str(state_path))
+        self.assertEqual(shortcuts["screenshot"], str(run_dir / "after.png"))
+        self.assertEqual(bucket["artifact_provenance"]["session_run"], "stored")
+        self.assertEqual(bucket["progress_summary"]["artifact_status"]["status"], "complete")
+        self.assertEqual(workspace["artifact_shortcuts"]["plan_json"], str(run_dir / "plan.json"))
+        self.assertEqual(workspace["artifact_shortcuts"]["runtime_config"], str(runtime_config))
+        self.assertEqual(workspace["artifact_shortcuts"]["state_path"], str(state_path))
+
+    def test_profile_workspace_snapshot_uses_session_history_for_idle_progress_preview(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            index_path = root / "jobs" / "index.json"
+            state_path = root / "session_state.json"
+            runs_dir = root / "runs"
+            with mock.patch(
+                "tool_platform.telegram_gui_helpers.session_history_snapshot",
+                return_value={
+                    "status": "ready",
+                    "state_file": str(state_path),
+                    "runs_dir": str(runs_dir),
+                    "messages_sent_total": 9,
+                    "message_cursor": 12,
+                    "message_target_cursor": 11,
+                    "history": [],
+                    "latest_runs": [],
+                    "last_run": {
+                        "run_id": "last-run",
+                        "message_target_username": "@history_target",
+                        "sent_preview": ["Исторический шаблон"],
+                        "draft_preview": [],
+                    },
+                },
+            ):
+                workspace = profile_workspace_snapshot(
+                    profile_name="AK",
+                    profile_dir="/home/max/TelegramPortableAK",
+                    index_path=index_path,
+                )
+
+        progress = workspace["workflow_buckets"]["session_run"]["progress_summary"]
+        self.assertEqual(progress["current_target_label"], "@history_target")
+        self.assertEqual(progress["current_template_preview"], "Исторический шаблон")
+        self.assertEqual(progress["next_action_text"], "Подготовить и запустить session_run workflow.")
+
+    def test_profile_workspace_snapshot_marks_continuous_session_eta_and_combined_blocker(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            index_path = root / "jobs" / "index.json"
+            start_job(
+                tool_id="telegram_session_runner",
+                workflow_kind="session_run",
+                profile_name="AK",
+                profile_dir="/home/max/TelegramPortableAK",
+                phase="session_running",
+                status="running",
+                summary="Session continuous",
+                context={
+                    "continuous_session": True,
+                    "session_baseline_sent_total": 1,
+                    "message_settings": {
+                        "messages_per_cycle": 2,
+                        "message_targets": [{"label": "@alice_test"}],
+                        "message_templates": ["Привет"],
+                    },
+                },
+                index_path=index_path,
+            )
+            start_job(
+                tool_id="telegram_combined_flow",
+                workflow_kind="combined_pattern",
+                profile_name="AK",
+                profile_dir="/home/max/TelegramPortableAK",
+                phase="session_running",
+                status="running",
+                summary="Combined running",
+                context={
+                    "phase": "session_running",
+                    "step_pattern": "12",
+                    "step_cursor": 1,
+                    "continuous_session": True,
+                },
+                index_path=index_path,
+            )
+
+            with mock.patch(
+                "tool_platform.telegram_gui_helpers.session_history_snapshot",
+                return_value={
+                    "status": "ready",
+                    "state_file": str(root / "session_state.json"),
+                    "runs_dir": str(root / "runs"),
+                    "messages_sent_total": 2,
+                    "message_cursor": 0,
+                    "message_target_cursor": 0,
+                    "history": [],
+                    "latest_runs": [],
+                    "last_run": {},
+                },
+            ):
+                workspace = profile_workspace_snapshot(
+                    profile_name="AK",
+                    profile_dir="/home/max/TelegramPortableAK",
+                    index_path=index_path,
+                )
+
+        session_progress = workspace["workflow_buckets"]["session_run"]["progress_summary"]
+        self.assertEqual(session_progress["eta_mode"], "continuous")
+        self.assertFalse(session_progress["eta_available"])
+        self.assertEqual(session_progress["eta_reason"], "continuous_session")
+        combined_progress = workspace["workflow_buckets"]["combined_pattern"]["progress_summary"]
+        self.assertEqual(combined_progress["child_progress"]["run_mode"], "continuous")
+        self.assertTrue(combined_progress["pattern_advancement_blocked"])
+        self.assertIn("ручного Стопа", combined_progress["pattern_advancement_blocker"])
 
     def test_repair_session_artifacts_apply_backfills_standalone_parent_from_latest_step(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -2305,6 +2534,153 @@ class ToolPlatformCatalogTests(unittest.TestCase):
         self.assertEqual(repaired_job["context"]["invite_job_dir"], str(canonical_job_dir))
         self.assertEqual(repaired_job["steps"][0]["artifact_paths"]["batch_json"], str(batch_json))
 
+    def test_repair_historical_artifacts_dry_run_combines_session_and_invite_without_mutating(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            index_path = root / "jobs" / "index.json"
+            legacy_root = root / "legacy-invite-jobs"
+            canonical_root = root / "runtime" / "telegram" / "invite_jobs"
+            legacy_job_dir = legacy_root / "contact_add__AK__sample"
+            canonical_job_dir = canonical_root / legacy_job_dir.name
+            invite_run_dir = canonical_job_dir / "executions" / "20260508T090500Z"
+            invite_run_dir.mkdir(parents=True)
+            (canonical_job_dir / "invite_state.json").write_text("{}", encoding="utf-8")
+            invite_batch_json = invite_run_dir / "batch_contact_add.json"
+            invite_batch_json.write_text("{}", encoding="utf-8")
+
+            session_runs_dir = root / "session-runs"
+            session_run_dir = session_runs_dir / "20260508T090600Z-abcdef12"
+            session_run_dir.mkdir(parents=True)
+            session_run_json = session_run_dir / "run.json"
+            session_run_json.write_text(
+                json.dumps(
+                    {
+                        "run_id": session_run_dir.name,
+                        "status": "completed",
+                        "visits": [],
+                        "sent_count": 0,
+                        "plan": {"message_target_username": "@alice_test"},
+                        "messages": [],
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            (session_run_dir / "plan.json").write_text("{}", encoding="utf-8")
+            session_state_path = root / "session_state.json"
+            session_state_path.write_text("{}", encoding="utf-8")
+            runtime_root = root / "runtime-configs"
+            runtime_root.mkdir()
+            runtime_config = runtime_root / "20260508T090500Z-combined-11111111.json"
+            runtime_config.write_text("{}", encoding="utf-8")
+
+            started = start_job(
+                tool_id="telegram_combined_flow",
+                workflow_kind="combined_pattern",
+                profile_name="AK",
+                profile_dir="/home/max/TelegramPortableAK",
+                phase="stopped",
+                status="completed",
+                summary="Combined legacy done",
+                artifact_paths={"job_dir": str(legacy_job_dir)},
+                context={
+                    "invite_job_dir": str(legacy_job_dir),
+                    "last_runtime_config_path": str(runtime_config),
+                    "last_session_state_path": str(session_state_path),
+                    "last_session_runs_dir": str(session_runs_dir),
+                },
+                steps=[
+                    {
+                        "step_id": "combined-invite",
+                        "step_index": 0,
+                        "step_code": "1",
+                        "step_kind": "invite_batch",
+                        "status": "completed",
+                        "summary": "Invite step done",
+                        "started_at": "2026-05-08T09:05:00Z",
+                        "completed_at": "2026-05-08T09:05:10Z",
+                    },
+                    {
+                        "step_id": "combined-session",
+                        "step_index": 1,
+                        "step_code": "2",
+                        "step_kind": "session_run",
+                        "status": "completed",
+                        "summary": "Session step done",
+                        "started_at": "2026-05-08T09:06:00Z",
+                        "completed_at": "2026-05-08T09:06:10Z",
+                    },
+                ],
+                index_path=index_path,
+            )
+
+            with mock.patch("tool_platform.telegram_gui_helpers.LEGACY_INVITE_JOBS_ROOT", legacy_root), mock.patch(
+                "tool_platform.telegram_gui_helpers.DEFAULT_INVITE_OUTPUT_ROOT",
+                canonical_root,
+            ), mock.patch("tool_platform.jobs._session_runtime_config_root", return_value=runtime_root):
+                report = repair_historical_artifacts(job_id=started["job_id"], apply=False, index_path=index_path)
+                preview_job = get_job(started["job_id"], index_path=index_path)
+
+        assert preview_job is not None
+        self.assertFalse(report["changed"])
+        self.assertTrue(report["would_change"])
+        self.assertEqual(report["repair_counts"]["total"]["matched_jobs"], 1)
+        self.assertGreaterEqual(report["repair_counts"]["session"]["repaired_steps"], 1)
+        self.assertGreaterEqual(report["repair_counts"]["invite"]["repaired_steps"], 1)
+        self.assertTrue(report["session_report"]["repaired_steps"])
+        self.assertTrue(report["invite_report"]["repaired_steps"])
+        self.assertEqual(preview_job["artifact_paths"]["job_dir"], str(legacy_job_dir))
+        self.assertEqual(preview_job["steps"][0]["artifact_paths"], {})
+        self.assertEqual(preview_job["steps"][1]["artifact_paths"], {})
+        self.assertEqual(report["session_report"]["repaired_steps"][0]["artifact_paths"]["session_run"], str(session_run_json))
+        self.assertEqual(report["invite_report"]["repaired_steps"][0]["artifact_paths"]["batch_json"], str(invite_batch_json))
+
+    def test_repair_historical_artifacts_keeps_ambiguous_session_unresolved(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            index_path = root / "jobs" / "index.json"
+            runs_dir = root / "runs"
+            runs_dir.mkdir()
+            for suffix in ("aaa11111", "bbb22222"):
+                run_dir = runs_dir / f"20260504T111811Z-{suffix}"
+                run_dir.mkdir()
+                (run_dir / "run.json").write_text("{}", encoding="utf-8")
+            state_path = root / "session_state.json"
+            state_path.write_text("{}", encoding="utf-8")
+
+            started = start_job(
+                tool_id="telegram_session_runner",
+                workflow_kind="session_run",
+                profile_name="AK",
+                profile_dir="/home/max/TelegramPortableAK",
+                phase="stopped",
+                status="completed",
+                summary="Ambiguous session",
+                context={
+                    "last_session_state_path": str(state_path),
+                    "last_session_runs_dir": str(runs_dir),
+                },
+                steps=[
+                    {
+                        "step_id": "ambiguous-step",
+                        "step_index": 0,
+                        "step_code": "2",
+                        "step_kind": "session_run",
+                        "status": "completed",
+                        "summary": "Ambiguous run",
+                        "started_at": "2026-05-04T11:18:11Z",
+                        "completed_at": "2026-05-04T11:18:12Z",
+                    }
+                ],
+                index_path=index_path,
+            )
+
+            report = repair_historical_artifacts(job_id=started["job_id"], apply=False, index_path=index_path)
+
+        self.assertFalse(report["would_change"])
+        self.assertGreaterEqual(report["repair_counts"]["total"]["unresolved"], 1)
+        self.assertTrue(any(item["source"] == "session" for item in report["unresolved"]))
+
     def test_profile_history_groups_preserve_unified_step_order(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             index_path = Path(tmp_dir) / "jobs" / "index.json"
@@ -2447,6 +2823,44 @@ class ToolPlatformCatalogTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         repair_mock.assert_called_once_with(job_id="job-2", profile_name=None, profile_dir=None, apply=True)
         self.assertEqual(payload["matched_jobs"], ["job-2"])
+
+    def test_cli_repair_historical_artifacts_supports_filters_and_apply_flag(self) -> None:
+        stdout = io.StringIO()
+        with mock.patch(
+            "tool_platform.cli.repair_historical_artifacts",
+            return_value={
+                "status": "completed",
+                "apply": True,
+                "would_change": True,
+                "matched_jobs": ["job-3"],
+                "repair_counts": {},
+                "session_report": {},
+                "invite_report": {},
+                "unresolved": [],
+            },
+        ) as repair_mock, redirect_stdout(stdout):
+            exit_code = cli_main(
+                [
+                    "repair-historical-artifacts",
+                    "--job-id",
+                    "job-3",
+                    "--profile-name",
+                    "AK",
+                    "--profile-dir",
+                    "/home/max/TelegramPortableAK",
+                    "--apply",
+                ]
+            )
+
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 0)
+        repair_mock.assert_called_once_with(
+            job_id="job-3",
+            profile_name="AK",
+            profile_dir="/home/max/TelegramPortableAK",
+            apply=True,
+        )
+        self.assertTrue(payload["would_change"])
 
     def test_job_steps_and_artifact_index_accumulate_child_history(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -3168,13 +3582,14 @@ class ToolPlatformCatalogTests(unittest.TestCase):
         ), mock.patch(
             "tool_platform.gui.build_combined_dashboard_texts",
             return_value={"state_text": "state", "contact_text": "contact", "session_text": "session", "targets_text": "targets"},
-        ):
+        ) as build_mock:
             ToolPlatformPanel._refresh_combined_dashboard(panel)
 
         self.assertEqual(panel.combined_input_path_var.get(), "/tmp/users.txt")
         self.assertEqual(panel.combined_job_dir_var.get(), "/tmp/invite-job")
         self.assertEqual(panel.session_config_path_var.get(), "/tmp/session.json")
         self.assertEqual(panel.combined_step_pattern_var.get(), "21")
+        self.assertEqual(build_mock.call_args.kwargs["progress_summary"]["current_step_label"], "сессия и сообщения")
 
     def test_refresh_session_dashboard_uses_workspace_session_snapshot(self) -> None:
         panel = object.__new__(ToolPlatformPanel)
@@ -3683,6 +4098,88 @@ class ToolPlatformCatalogTests(unittest.TestCase):
         self.assertEqual(report["current_platform_id"], current_platform_id())
         self.assertIn("capabilities", report)
         self.assertIn("gui", report["capabilities"])
+
+    def test_platform_doctor_report_wayland_warnings(self) -> None:
+        with mock.patch.dict(
+            os.environ,
+            {"XDG_SESSION_TYPE": "wayland", "WAYLAND_DISPLAY": "wayland-0", "DISPLAY": ":0"},
+            clear=False,
+        ):
+            report = platform_doctor_report("linux")
+
+        self.assertIn("warnings", report)
+        self.assertIn("Wayland detected", report["warnings"])
+        self.assertEqual(report["capabilities"]["display_session"]["session_type"], "wayland")
+        self.assertEqual(report["capabilities"]["window_automation"]["wayland_display"], "wayland-0")
+
+    @mock.patch("tool_platform.workflows.profile_workspace_snapshot")
+    @mock.patch("tool_platform.workflows.get_profile_status")
+    @mock.patch("tool_platform.workflows.get_profile_lock", return_value=None)
+    @mock.patch("tool_platform.workflows.list_jobs", return_value=[])
+    @mock.patch("tool_platform.workflows.platform_capabilities")
+    @mock.patch("tool_platform.workflows.platform_doctor_report")
+    def test_profile_health_includes_workspace_health_and_wayland_diagnostics(
+        self,
+        doctor_mock,
+        capabilities_mock,
+        _jobs_mock,
+        _lock_mock,
+        status_mock,
+        workspace_mock,
+    ) -> None:
+        doctor_mock.return_value = {
+            "platform_id": "linux",
+            "capabilities": {},
+            "warnings": ["Wayland detected"],
+        }
+        capabilities_mock.return_value = {
+            "display_session": {
+                "available": True,
+                "detail": "DISPLAY/WAYLAND_DISPLAY",
+                "session_type": "wayland",
+                "display": ":0",
+                "wayland_display": "wayland-0",
+                "warnings": ["Wayland detected"],
+            },
+            "window_automation": {
+                "available": True,
+                "detail": "wmctrl + python3-xlib",
+                "warnings": [
+                    "Wayland detected",
+                    "X11 primitives available",
+                    "safe attach still requires profile-owned X11 window confirmation",
+                ],
+            },
+        }
+        status_mock.return_value = {
+            "running": False,
+            "attach_status": "no_process",
+            "attach_message": "",
+            "attach_candidates": [],
+            "session_type": "wayland",
+            "display": ":0",
+            "wayland_display": "wayland-0",
+            "display_backend": "x11",
+            "attach_proof_mode": "x11_window_confirmation",
+        }
+        workspace_mock.return_value = {
+            "last_successful_job": None,
+            "artifact_index": {},
+            "workflow_buckets": {},
+            "health": {
+                "session_type": "wayland",
+                "display_backend": "x11",
+                "attach_proof_mode": "x11_window_confirmation",
+                "capability_warnings": ["Wayland detected"],
+            },
+        }
+
+        payload = profile_health(profile_name="AK5", profile_dir="/tmp/TelegramPortable-AK5")
+
+        self.assertEqual(payload["profile_status"]["session_type"], "wayland")
+        self.assertEqual(payload["workspace_health"]["display_backend"], "x11")
+        self.assertEqual(payload["workspace_health"]["attach_proof_mode"], "x11_window_confirmation")
+        self.assertIn("Wayland detected", payload["doctor"]["warnings"])
 
 
 if __name__ == "__main__":

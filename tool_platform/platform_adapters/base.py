@@ -67,8 +67,36 @@ def gui_capability() -> dict[str, Any]:
     }
 
 
-def home_display_capability() -> dict[str, Any]:
+def display_session_snapshot() -> dict[str, Any]:
     return {
-        "available": bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")),
-        "detail": "DISPLAY/WAYLAND_DISPLAY",
+        "session_type": str(os.environ.get("XDG_SESSION_TYPE") or "").strip().lower() or "unknown",
+        "display": str(os.environ.get("DISPLAY") or "").strip(),
+        "wayland_display": str(os.environ.get("WAYLAND_DISPLAY") or "").strip(),
     }
+
+
+def home_display_capability() -> dict[str, Any]:
+    session = display_session_snapshot()
+    return {
+        "available": bool(session["display"] or session["wayland_display"]),
+        "detail": "DISPLAY/WAYLAND_DISPLAY",
+        "session_type": session["session_type"],
+        "display": session["display"],
+        "wayland_display": session["wayland_display"],
+        "warnings": ["Wayland detected"] if session["session_type"] == "wayland" else [],
+    }
+
+
+def capability_warnings(capabilities: dict[str, Any]) -> list[str]:
+    warnings: list[str] = []
+    for value in capabilities.values():
+        if not isinstance(value, dict):
+            continue
+        raw_items = value.get("warnings")
+        if not isinstance(raw_items, list):
+            continue
+        for item in raw_items:
+            text = str(item or "").strip()
+            if text and text not in warnings:
+                warnings.append(text)
+    return warnings

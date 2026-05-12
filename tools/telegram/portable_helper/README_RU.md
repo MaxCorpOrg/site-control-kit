@@ -23,6 +23,7 @@ cd /home/max/site-control-kit/tools/telegram/portable_helper
 - импортировать `tdata.zip` в Linux portable profile;
 - принимать существующий профиль через `adopt`;
 - показывать `status` и `list`;
+- поднимать профиль через `--display-backend x11`, если на `Wayland` нужен XWayland-backed attach path;
 - открывать `tg://` URI;
 - печатать текст и key chords;
 - делать window click/screenshot;
@@ -38,4 +39,3 @@ tool_manifest.json
 ```
 
 То есть helper можно использовать и отдельно, и через общую панель.
-

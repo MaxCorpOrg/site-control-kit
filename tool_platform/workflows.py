@@ -1245,6 +1245,7 @@ def profile_health(
         "last_successful_job": workspace.get("last_successful_job"),
         "artifact_index": workspace.get("artifact_index"),
         "workflow_buckets": workspace.get("workflow_buckets"),
+        "workspace_health": workspace.get("health"),
         "doctor": doctor,
         "capabilities": capabilities,
     }

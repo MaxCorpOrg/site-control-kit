@@ -651,11 +651,30 @@
     - `new = 1416`
     - latest successful workflow:
       - `20260508T130734Z-ce7451e9`
-  - следующим шагом идти уже не в ещё один blind invite-only tranche, а в session/combined parity:
-    - live progress summary для `session_run`;
-    - parent/child progress summary для `combined_pattern`;
-    - current target / template / phase / next step;
-    - bounded ETA только там, где она реально вычислима;
+  - session/combined parity tranche на `2026-05-12` уже закрыт до invite-grade readback:
+    - `session_run.progress_summary` отдаёт operator action, ETA availability/reason, artifact status, current target и template preview;
+    - idle/ready session readback берёт next target/template из session state/history fallback;
+    - `session_run.artifact_shortcuts` включает `session_run`, `run_dir`, `plan_json`, `runtime_config`, `state_path`, `screenshot`;
+    - `combined_pattern.progress_summary` отдаёт parent/child progress, next step, recoverable hint, child status/counts и bounded ETA;
+    - continuous mode явно блокирует pattern advancement до ручного Stop;
+    - `gui.py` больше не принимает readback-решения внутри session/combined refresh, а рендерит готовый workspace snapshot через `telegram_gui_helpers.py`;
+  - следующим шагом идти уже не в повтор session/combined readback, а в historical backfill/provenance и дальнейший GUI thinning;
+  - historical backfill/provenance dry-run tranche на `2026-05-12` уже закрыт как report-only:
+    - добавлены `repair_historical_artifacts(...)` и `tool-platform repair-historical-artifacts`;
+    - default режим безопасный preview, `--apply` не запускался;
+    - repair JSON отдаёт `would_change`, `repair_counts`, `session_report`, `invite_report`, `unresolved`;
+    - `profile_workspace_snapshot` отдаёт root-level `artifact_provenance`, `artifact_index_provenance`, `artifact_center[*].provenance`, `artifact_history[*].provenance`, `combined_pattern.child_artifact_provenance`;
+    - dry-run на живом AK historical index:
+      - `apply = false`
+      - `changed = false`
+      - `would_change = true`
+      - total: `matched_jobs = 26`, `matched_steps = 39`, `repaired_jobs = 21`, `repaired_steps = 30`, `unresolved = 14`
+    - проверки:
+      - `tests.test_tool_platform` → `104 OK`
+      - full discover → `293 OK`
+      - `git diff --check` → OK
+      - AK5 profile-health → `running = false`, `attach_status = no_process`, `display_backend = x11`;
+  - следующим шагом идти уже не в новый repair-readback tranche, а в controlled historical apply только по явному операторскому запросу или в deeper GUI thinning/docs as product;
   - параллельно продолжать deeper thinning `gui.py` и `telegram_gui_helpers.py`, чтобы они оставались thin render/form-state layer над `tool_platform/jobs.py` и `tool_platform/workflows.py`;
   - убирать из GUI оставшиеся formatting/open-policy ветки там, где уже хватает workspace snapshot;
   - после этого уже отдельно доводить remaining historical backfill и doc normalization вокруг нового `runtime/telegram`, а не возвращаться к legacy spread layout;
@@ -665,6 +684,56 @@
   - усилить quick-open/source hints для `plan.json`, `runtime_config` и `state_path`, а не только для `run.json`;
   - при желании показывать provenance для legacy artifacts: stored path или resolved-on-readback path;
 - параллельно продолжать следующий tranche cross-platform adapters из `docs/TELEGRAM_SUPERTOOL_ROADMAP_RU.md`, не пытаясь сразу вытянуть full Telegram Desktop parity на Windows/macOS.
+- отдельный свежий operator checkpoint на `2026-05-10` связан не с `AK3`, а с новым portable-профилем `AK5`:
+  - source:
+    - `/home/max/site-control-kit/telegram_ak/5/tdata`
+  - canonical project-local profile:
+    - `/home/max/site-control-kit/runtime/telegram/profiles/TelegramPortable-AK5`
+  - профиль уже создан и metadata записана:
+    - `profile_name = AK5`
+    - `account.label = AK5`
+  - на `2026-05-11` tranche `AK5 Wayland Attach Recovery` уже доведён до полезного результата:
+    - preflight перед recovery был честный:
+      - `running = false`
+      - `attach_status = no_process`
+      - `session_type = wayland`
+      - `display = :0`
+      - `wayland_display = wayland-0`
+      - `display_backend = auto`
+    - portable helper теперь умеет:
+      - `launch --display-backend auto|x11`
+      - `open-uri --display-backend auto|x11`
+      - сохранять выбранный backend в `portable-profile.json`
+      - отдавать Wayland-aware `status/profile-health/doctor/capabilities`
+    - bounded recovery на этой машине подтверждён через:
+      - `python3 scripts/telegram_portable.py launch --profile-dir /home/max/site-control-kit/runtime/telegram/profiles/TelegramPortable-AK5 --display-backend x11`
+    - итог после запуска:
+      - `display_backend = x11`
+      - `running = true`
+      - `attach_status = exact_window`
+      - `window_id = 0x0140002e`
+      - `title = Telegram`
+    - `wmctrl -lx` подтвердил окно:
+      - `0x0140002e  3 Telegram.TelegramDesktop  GIGA Telegram`
+    - дополнительный reveal через `open-uri` уже не потребовался: safe attach появился сразу после `launch --display-backend x11`
+  - диагностические пути для `AK5`:
+    - profile dir:
+      - `/home/max/site-control-kit/runtime/telegram/profiles/TelegramPortable-AK5`
+    - launch log:
+      - `/home/max/site-control-kit/runtime/telegram/profiles/TelegramPortable-AK5/portable-launch.log`
+    - telegram log:
+      - `/home/max/site-control-kit/runtime/telegram/profiles/TelegramPortable-AK5/TelegramForcePortable/log.txt`
+    - bounded recovery bundle:
+      - `/tmp/telegram-ak5-wayland-recovery-J72H7a`
+  - важное правило:
+    - не ослаблять attach gating;
+    - на этой `Wayland`-машине для повторного запуска `AK5` использовать сохранённый `display_backend = x11` или явно `--display-backend x11`;
+    - live workflow разрешать только пока `attach_status in {exact_window, title_match}`.
+  - следующий шаг по этому operator checkpoint уже не про attach и не про baseline session/combined readback:
+    - optional controlled historical `repair-historical-artifacts --apply` только по явному решению оператора,
+    - deeper thinning `gui.py` / `telegram_gui_helpers.py`,
+    - docs as product,
+    - optional live smoke для session/combined только при safe attach и без ослабления gating.
 
 Как работать:
 - сначала восстанови контекст по этим файлам, потом меняй код;

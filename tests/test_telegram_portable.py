@@ -4,6 +4,7 @@ import contextlib
 import importlib.util
 import io
 import json
+import os
 import sys
 import tarfile
 import tempfile
@@ -256,6 +257,32 @@ class TelegramPortableTests(unittest.TestCase):
         self.assertEqual(payload["attach_status"], "exact_window")
         self.assertEqual(payload["attach_candidates"][0]["window_id"], "0x11")
 
+    def test_status_reports_wayland_fields_and_stored_backend(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            profile_dir = Path(tmpdir) / "TelegramPortableAK"
+            profile_dir.mkdir(parents=True, exist_ok=True)
+            (profile_dir / "Telegram").write_text("#!/usr/bin/env bash\nsleep 60\n", encoding="utf-8")
+            (profile_dir / "portable-profile.json").write_text(
+                json.dumps({"launch_preferences": {"display_backend": "x11"}}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+
+            with mock.patch.dict(
+                os.environ,
+                {"XDG_SESSION_TYPE": "wayland", "WAYLAND_DISPLAY": "wayland-0", "DISPLAY": ":0"},
+                clear=False,
+            ):
+                with mock.patch.object(self.mod, "find_running_pids", return_value=[]):
+                    with mock.patch.object(self.mod, "_wmctrl_windows_by_pid", return_value={}):
+                        payload = self.mod.profile_status(profile_dir)
+
+        self.assertEqual(payload["session_type"], "wayland")
+        self.assertEqual(payload["display"], ":0")
+        self.assertEqual(payload["wayland_display"], "wayland-0")
+        self.assertEqual(payload["display_backend"], "x11")
+        self.assertEqual(payload["attach_proof_mode"], "x11_window_confirmation")
+        self.assertTrue(payload["warnings"])
+
     def test_wmctrl_windows_by_pid_reads_geometry_and_title(self) -> None:
         output = "0x0460002e 0 10413 2746 506 1110 642 GIGA Жиротоп Shop\n"
 
@@ -290,6 +317,67 @@ class TelegramPortableTests(unittest.TestCase):
 
             self.assertEqual(payload["status"], "dry_run")
             self.assertEqual(payload["command"], [str(profile_dir / "Telegram"), "tg://resolve?domain=alice_123"])
+            self.assertEqual(payload["display_backend"], "auto")
+
+    def test_open_uri_x11_dry_run_reports_backend_override(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            profile_dir = Path(tmpdir) / "TelegramPortableAK"
+            profile_dir.mkdir(parents=True, exist_ok=True)
+            (profile_dir / "Telegram").write_text("#!/usr/bin/env bash\nsleep 60\n", encoding="utf-8")
+
+            payload = self._call_json(
+                self.mod.command_open_uri,
+                Namespace(
+                    profile_name=None,
+                    profile_dir=str(profile_dir),
+                    output_root=str(Path(tmpdir)),
+                    uri="tg://resolve?domain=alice_123",
+                    display_backend="x11",
+                    dry_run=True,
+                ),
+            )
+
+            self.assertEqual(payload["status"], "dry_run")
+            self.assertEqual(payload["display_backend"], "x11")
+            self.assertEqual(payload["env_overrides"]["QT_QPA_PLATFORM"], "xcb")
+
+    def test_launch_command_x11_persists_backend_and_sets_env(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            profile_dir = tmp / "TelegramPortableAK"
+            profile_dir.mkdir(parents=True, exist_ok=True)
+            (profile_dir / "Telegram").write_text("#!/usr/bin/env bash\nsleep 60\n", encoding="utf-8")
+            (profile_dir / "portable-profile.json").write_text(
+                json.dumps({"profile_name": "AK"}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+
+            popen_calls: list[dict[str, object]] = []
+
+            class _Process:
+                pid = 9911
+
+            def _fake_popen(*args, **kwargs):
+                popen_calls.append(kwargs)
+                return _Process()
+
+            with mock.patch.object(self.mod, "find_running_pids", return_value=[]):
+                with mock.patch.object(self.mod.subprocess, "Popen", side_effect=_fake_popen):
+                    payload = self._call_json(
+                        self.mod.command_launch,
+                        Namespace(
+                            profile_name=None,
+                            profile_dir=str(profile_dir),
+                            output_root=str(tmp),
+                            display_backend="x11",
+                        ),
+                    )
+
+            metadata = json.loads((profile_dir / "portable-profile.json").read_text(encoding="utf-8"))
+            self.assertEqual(payload["launch"]["status"], "started")
+            self.assertEqual(payload["launch"]["display_backend"], "x11")
+            self.assertEqual(metadata["launch_preferences"]["display_backend"], "x11")
+            self.assertEqual(popen_calls[0]["env"]["QT_QPA_PLATFORM"], "xcb")
 
     def test_log_diagnose_surfaces_peer_errors(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
