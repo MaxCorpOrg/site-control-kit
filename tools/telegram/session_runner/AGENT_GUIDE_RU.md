@@ -7,13 +7,12 @@
 1. `/home/max/site-control-kit/AGENTS.md`
 2. `/home/max/site-control-kit/docs/PROJECT_STATUS_RU.md`
 3. `/home/max/site-control-kit/tools/telegram/session_runner/README_RU.md`
-4. `/home/max/telegram-portable-session-tool/AGENTS.md`
-5. `/home/max/telegram-portable-session-tool/README_RU.md`
+4. `/home/max/site-control-kit/telegram_portable_session_tool/`
 
 ## Как Думать Об Этом Слое
 
 - `tools/telegram/session_runner/` в `site-control-kit` — это видимая оболочка и registry entry.
-- Реальный CLI и runtime лежат в `/home/max/telegram-portable-session-tool`.
+- Реальный CLI и runtime теперь встроены в package `telegram_portable_session_tool`.
 - `tool_manifest.json` и `bin/telegram-session-runner` должны оставаться тонкими и предсказуемыми.
 
 ## Что Здесь Можно Менять
@@ -25,6 +24,6 @@
 
 ## Что Здесь Не Нужно Делать
 
-- не дублировать runtime-код session-runner в wrapper-слое без отдельного решения;
+- не дублировать runtime-код session-runner в wrapper-слое;
 - не переносить сюда low-level Desktop primitives из `scripts/telegram_portable.py`;
-- не расходиться с standalone repo по operator contract без явной синхронизации.
+- не расходиться с embedded package по operator contract без явной синхронизации.

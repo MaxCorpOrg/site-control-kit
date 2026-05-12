@@ -7,7 +7,7 @@ if [[ -z "$TOKEN" ]]; then
   exit 1
 fi
 
-OUTPUT="${2:-/home/max/Загрузки/Telegram Desktop/3.md}"
+OUTPUT="${2:-${HOME}/Загрузки/Telegram Desktop/3.md}"
 GROUP_URL="${3:-https://web.telegram.org/k/#-2181640359}"
 CHAT_STEPS="${4:-20}"
 CHAT_DEEP_LIMIT="${5:-10}"
@@ -16,7 +16,7 @@ CHAT_MAX_RUNTIME="${7:-180}"
 CHAT_DEEP_MODE="${8:-mention}"
 CHAT_MIN_MEMBERS="${9:-0}"
 
-ROOT="/home/max/site-control-kit"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 HUB_URL="http://127.0.0.1:8765"
 STARTED_HUB=0
 

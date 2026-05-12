@@ -19,8 +19,8 @@
     },
     {
       "doc_id": "standalone_readme",
-      "label": "Standalone README",
-      "path": "/home/max/telegram-portable-session-tool/README_RU.md"
+      "label": "Embedded Session Runner README",
+      "path": "README_RU.md"
     }
   ],
   "actions": [
@@ -42,7 +42,7 @@
         "./bin/telegram-session-runner",
         "sync-preview",
         "--config",
-        "/home/max/site-control-kit/runtime/telegram/session/configs/session.example.json"
+        "examples/session.example.json"
       ],
       "workdir": "."
     }
@@ -73,7 +73,7 @@
     "wrapper"
   ],
   "artifacts": {
-    "standalone_repo": "/home/max/telegram-portable-session-tool",
-    "default_runs_dir": "/home/max/site-control-kit/runtime/telegram/session/runs"
+    "embedded_package": "telegram_portable_session_tool",
+    "default_runs_dir": "runtime/telegram/session/runs"
   }
 }

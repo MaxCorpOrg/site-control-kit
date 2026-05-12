@@ -734,6 +734,41 @@
     - deeper thinning `gui.py` / `telegram_gui_helpers.py`,
     - docs as product,
     - optional live smoke для session/combined только при safe attach и без ослабления gating.
+- production release tranche на `2026-05-12` уже начал перевод Telegram Control Center из dev-runner в installable app:
+  - baseline перед релизом:
+    - `a025806` — `Зафиксировать AK5 и historical readback baseline`
+  - product target:
+    - Linux first-class `.deb` с live workflow;
+    - Windows installer/exe GUI, но Telegram live lanes пока degraded до отдельного Windows adapter tranche;
+  - добавлены:
+    - `tool_platform/control_center.py`
+    - `tool_platform/release.py`
+    - `telegram-control-center --release-self-test`
+    - production env overrides `SITE_CONTROL_KIT_*_DIR`
+    - embedded package `telegram_portable_session_tool/`
+    - `packaging/linux/build_deb.sh`
+    - `packaging/windows/build_windows_installer.sh`
+    - `docs/PRODUCTION_RELEASE_RU.md`
+  - Linux artifact уже собран:
+    - `packaging/dist/linux/telegram-control-center_0.1.0_all.deb`
+    - final sha256 считать после последней сборки, не зашивать внутрь packaged docs
+  - rootless clean-install smoke уже прошёл через `dpkg-deb -x`:
+    - release tree scan OK;
+    - extracted `telegram-control-center --release-self-test` OK;
+    - config/data/logs/cache создаются вне repo tree;
+    - embedded session-runner найден внутри extracted app root.
+  - staged uninstall smoke прошёл на temp-root layout:
+    - удалены app tree, command, desktop entry и icon entries;
+    - реальный rootful `apt remove` всё ещё надо проверить на disposable VM перед external release.
+  - финальные проверки release pass:
+    - `py_compile` / `bash -n` / `desktop-file-validate` / `git diff --check` OK;
+    - targeted tests: `141 OK`;
+    - full unittest discover: `294 OK`;
+    - `tool-platform-panel` стартует как GUI и удерживается до `timeout 10s`;
+    - `AK5 profile-health`: `running=false`, `attach_status=no_process`, `display_backend=x11`, live workflow не запускался.
+  - Windows artifact на этой машине ещё не собран:
+    - `./packaging/windows/build_windows_installer.sh 0.1.0 --check-tools` показывает missing `wine`, `winepath`;
+    - следующий агент не должен писать, что Windows installer готов, пока не будет Wine/Inno или Windows runner smoke.
 
 Как работать:
 - сначала восстанови контекст по этим файлам, потом меняй код;

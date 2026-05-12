@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="/home/max/site-control-kit"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 EXPORT_SCRIPT="${ROOT_DIR}/scripts/export_telegram_members_non_pii.py"
 PROFILE_HELPER="${ROOT_DIR}/scripts/telegram_profiles.py"
 HUB_URL="http://127.0.0.1:8765"

@@ -4,9 +4,9 @@
 
 Этот слой нужен, чтобы Telegram Desktop random-walk и controlled auto-send были видны в общем Telegram-хабе рядом с `invite_manager`, `portable_helper` и `export`.
 
-Сам runtime-код сейчас по-прежнему живёт в отдельном репозитории:
+Runtime-код теперь встроен в `site-control-kit` как package:
 
-- `/home/max/telegram-portable-session-tool`
+- `telegram_portable_session_tool/`
 
 Но для оператора и агента вход теперь идёт через эту папку:
 
@@ -28,11 +28,11 @@ cd /home/max/site-control-kit/tools/telegram/session_runner
 
 ./bin/telegram-session-runner --help
 ./bin/telegram-session-runner sync-preview \
-  --config /home/max/telegram-portable-session-tool/examples/session.example.json
+  --config examples/session.example.json
 ```
 
 ## Важная Граница
 
-Это visible wrapper, а не копия runtime-кода.
+Это visible wrapper над embedded package.
 
-Если standalone repo переедет или будет встроен позже прямо в `site-control-kit`, здесь нужно будет обновить только wrapper и manifest, а не все operator entrypoints поверх него.
+Release package включает runtime-код без приватных `runs`, `.state`, `.git` и пользовательских конфигов.

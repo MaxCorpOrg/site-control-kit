@@ -20,6 +20,12 @@ dependencies = []
 
 [project.scripts]
 sitectl = "webcontrol.cli:main"
+tool-platform = "tool_platform.cli:main"
+telegram-control-center = "tool_platform.control_center:main"
 
-[tool.setuptools]
-packages = ["webcontrol"]
+[tool.setuptools.packages.find]
+include = [
+  "webcontrol*",
+  "tool_platform*",
+  "telegram_portable_session_tool*"
+]

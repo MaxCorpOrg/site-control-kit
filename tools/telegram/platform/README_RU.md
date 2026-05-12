@@ -14,7 +14,7 @@
 - `telegram_invite_manager` из текущего репозитория;
 - `telegram_portable_helper` как low-level embedded helper;
 - `telegram_export` как embedded export pipeline;
-- `telegram_session_runner` как wrapper вокруг `/home/max/telegram-portable-session-tool`.
+- `telegram_session_runner` как wrapper вокруг embedded package `telegram_portable_session_tool`.
 
 Все workflow продолжают жить как отдельные единицы.
 Панель поверх них специально упрощена под три основные операторские кнопки:

@@ -11,3 +11,10 @@ __pycache__/
 state.json
 *.log
 dist/
+build/
+.build/
+/release/
+packaging/build/
+packaging/dist/
+*.egg-info/
+*.spec.tmp

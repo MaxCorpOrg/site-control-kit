@@ -68,6 +68,6 @@
     "embedded"
   ],
   "artifacts": {
-    "default_output_root": "/home/max/telegram_contact_batches"
+    "default_output_root": "~/telegram_contact_batches"
   }
 }

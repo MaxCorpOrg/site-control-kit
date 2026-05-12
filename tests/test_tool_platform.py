@@ -50,6 +50,8 @@ from tool_platform.locks import (
     release_profile_lock,
 )
 from tool_platform.platform_adapters import current_platform_id, platform_doctor_report
+from tool_platform.release import release_self_test
+from tool_platform.telegram_runtime import repo_root
 from tool_platform.telegram_gui_helpers import (
     DEFAULT_PANEL_STATE_ROOT,
     active_profile_conflict,
@@ -1282,7 +1284,7 @@ class ToolPlatformCatalogTests(unittest.TestCase):
     def test_session_plan_command_targets_standalone_cli(self) -> None:
         spec = session_plan_command(config_path="/tmp/runtime.json", state_file="/tmp/state.json")
         self.assertEqual(spec.argv[:4], ["python3", "-m", "telegram_portable_session_tool.cli", "plan-session"])
-        self.assertEqual(spec.cwd, Path("/home/max/telegram-portable-session-tool"))
+        self.assertEqual(spec.cwd, repo_root())
 
     def test_session_run_command_adds_execute_and_auto_send_flags(self) -> None:
         spec = session_run_command(
@@ -1297,6 +1299,26 @@ class ToolPlatformCatalogTests(unittest.TestCase):
         self.assertIn("--launch-if-needed", spec.argv)
         self.assertIn("--auto-send", spec.argv)
         self.assertIn("--continuous", spec.argv)
+
+    def test_release_self_test_uses_production_env_roots(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            env = {
+                "SITE_CONTROL_KIT_RUNTIME_MODE": "production",
+                "SITE_CONTROL_KIT_CONFIG_DIR": str(root / "config"),
+                "SITE_CONTROL_KIT_DATA_DIR": str(root / "data"),
+                "SITE_CONTROL_KIT_LOG_DIR": str(root / "logs"),
+                "SITE_CONTROL_KIT_CACHE_DIR": str(root / "cache"),
+            }
+            with mock.patch.dict(os.environ, env, clear=False):
+                payload = release_self_test(create_dirs=True)
+
+        self.assertTrue(payload["ok"])
+        self.assertTrue(payload["production_mode"])
+        self.assertEqual(payload["paths"]["config_root"]["path"], str(root / "config"))
+        self.assertEqual(payload["paths"]["runtime_root"]["path"], str(root / "data" / "telegram"))
+        self.assertEqual(payload["paths"]["logs_root"]["path"], str(root / "logs" / "telegram"))
+        self.assertEqual(payload["paths"]["cache_root"]["path"], str(root / "cache" / "telegram"))
 
     def test_agent_state_roundtrip_uses_persistent_defaults(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

@@ -4052,7 +4052,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--output",
-        default="/home/max/Загрузки/Telegram Desktop/MadCoreChat_members_non_pii.md",
+        default=str(Path.home() / "Загрузки" / "Telegram Desktop" / "MadCoreChat_members_non_pii.md"),
         help="Путь к выходному .md файлу",
     )
     parser.add_argument(

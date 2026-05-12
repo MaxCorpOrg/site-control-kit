@@ -61,6 +61,6 @@
     "embedded"
   ],
   "artifacts": {
-    "profiles_root_default": "/home/max"
+    "profiles_root_default": "runtime/telegram/profiles"
   }
 }

@@ -19,7 +19,7 @@
 
 Не использовать его напрямую для задач Telegram Web, browser DOM automation или export flows.
 Для invite-flow helper используется только как низкоуровневый actor через `telegram_invite_executor.py`, чтобы state/consent/status оставались в общем invite-контуре.
-Отдельный standalone consumer этого helper уже вынесен в `/home/max/telegram-portable-session-tool`, а внутри `site-control-kit` виден через `tools/telegram/session_runner/`.
+Session-runner consumer этого helper теперь встроен в `site-control-kit` как `telegram_portable_session_tool`, а operator-facing wrapper виден через `tools/telegram/session_runner/`.
 Внутри самого `site-control-kit` видимый operator entrypoint для этого слоя теперь собран в `tools/telegram/portable_helper/`.
 
 ## Файлы Инструмента

@@ -80,6 +80,6 @@
     "site-control-kit"
   ],
   "artifacts": {
-    "job_root": "/home/max/site-control-kit/runtime/telegram/invite_jobs"
+    "job_root": "runtime/telegram/invite_jobs"
   }
 }

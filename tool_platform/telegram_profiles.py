@@ -17,6 +17,7 @@ from .telegram_runtime import (
     is_project_local_profile_dir,
     preferred_read_path,
     profiles_root,
+    repo_root,
     state_root,
 )
 
@@ -26,7 +27,7 @@ DEFAULT_TELEGRAM_PROFILE_STATE_ROOT = state_root()
 DEFAULT_HIDDEN_PROFILES_STATE_PATH = hidden_profiles_state_path()
 LEGACY_OUTPUT_ROOT = LEGACY_PROFILES_ROOT
 LEGACY_HIDDEN_PROFILES_STATE_PATH = LEGACY_STATE_ROOT / "profiles" / "hidden_profiles.json"
-PORTABLE_SCRIPT_PATH = Path(__file__).resolve().parent.parent / "scripts" / "telegram_portable.py"
+PORTABLE_SCRIPT_PATH = repo_root() / "scripts" / "telegram_portable.py"
 LIVE_ATTACH_READY_STATUSES = {"exact_window", "title_match"}
 PROFILE_PREFIX = "TelegramPortable-"
 LEGACY_PROFILE_PREFIX_RE = re.compile(r"^TelegramPortable[-_]?", re.I)

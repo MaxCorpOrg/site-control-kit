@@ -274,7 +274,7 @@ cd /home/max/site-control-kit/tools/telegram/invite_manager
 - `telegram_invite_manager` из текущего репозитория;
 - `telegram_portable_helper` из текущего репозитория;
 - `telegram_export` из текущего репозитория;
-- `telegram_session_runner` как visible wrapper вокруг `/home/max/telegram-portable-session-tool`.
+- `telegram_session_runner` как visible wrapper вокруг embedded package `telegram_portable_session_tool`.
 
 Быстрый вход:
 
@@ -592,6 +592,7 @@ sitectl send --type navigate --client-id client-... --url https://example.com --
 
 ## Документация
 - [CHANGES_RU.md](docs/CHANGES_RU.md) — полный перечень реализованных изменений.
+- [PRODUCTION_RELEASE_RU.md](docs/PRODUCTION_RELEASE_RU.md) — установка Telegram Control Center, `.deb`/Windows installer и release checklist.
 - [ARCHITECTURE.md](docs/ARCHITECTURE.md) — архитектура и жизненный цикл команд.
 - [API.md](docs/API.md) — API и контракт команд.
 - [EXTENSION.md](docs/EXTENSION.md) — внутренняя логика расширения.
@@ -606,6 +607,7 @@ sitectl send --type navigate --client-id client-... --url https://example.com --
 webcontrol/         # Python: сервер, очередь, CLI
 extension/          # Расширение браузера (MV3)
 scripts/            # Вспомогательные скрипты запуска/упаковки/экспорта
+packaging/          # Production packaging: Linux .deb, Windows installer, release checks
 docs/               # Полная документация
 examples/           # Примеры payload-команд
 tests/              # Автотесты

@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+APP_ROOT="${SITE_CONTROL_KIT_APP_ROOT:-/opt/site-control-kit/app}"
+export SITE_CONTROL_KIT_RUNTIME_MODE="${SITE_CONTROL_KIT_RUNTIME_MODE:-production}"
+export SITE_CONTROL_KIT_APP_ROOT="$APP_ROOT"
+export PYTHONPATH="${APP_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
+
+exec python3 -m tool_platform.control_center "$@"

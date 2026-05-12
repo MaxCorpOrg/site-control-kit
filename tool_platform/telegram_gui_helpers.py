@@ -18,6 +18,7 @@ from .telegram_runtime import (
     invite_jobs_root,
     panel_log_path,
     preferred_read_path,
+    repo_root,
     runtime_config_root,
     session_configs_root,
     session_repo_example_config,
@@ -35,8 +36,8 @@ from .workflows import (
 )
 
 
-DEFAULT_INVITE_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "telegram_invite_manager.py"
-DEFAULT_INVITE_EXECUTOR_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "telegram_invite_executor.py"
+DEFAULT_INVITE_SCRIPT = repo_root() / "scripts" / "telegram_invite_manager.py"
+DEFAULT_INVITE_EXECUTOR_SCRIPT = repo_root() / "scripts" / "telegram_invite_executor.py"
 DEFAULT_INVITE_OUTPUT_ROOT = invite_jobs_root()
 DEFAULT_SESSION_REPO = session_repo_root()
 DEFAULT_SESSION_CONFIG = session_configs_root() / "session.example.json"
@@ -1610,6 +1611,8 @@ def build_session_runtime_config(
     session_overrides: dict[str, Any] | None = None,
 ) -> Path:
     payload = load_session_config_payload(base_config_path)
+    payload["site_control_kit_root"] = str(repo_root())
+    payload["python_bin"] = "python3"
     payload["portable_profile_dir"] = portable_profile_dir or str(
         payload.get("portable_profile_dir") or ""
     )

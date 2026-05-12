@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+DESKTOP_DIR="$(xdg-user-dir DESKTOP 2>/dev/null || true)"
+if [[ -z "${DESKTOP_DIR}" ]]; then
+  DESKTOP_DIR="${HOME}/Desktop"
+fi
+mkdir -p "${DESKTOP_DIR}"
+install -m 0644 /usr/share/applications/telegram-control-center.desktop \
+  "${DESKTOP_DIR}/telegram-control-center.desktop"
+chmod +x "${DESKTOP_DIR}/telegram-control-center.desktop"
+echo "Desktop shortcut installed: ${DESKTOP_DIR}/telegram-control-center.desktop"

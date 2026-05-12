@@ -8,9 +8,9 @@
 - `invite_manager/` — consent-based invite и add-contact flow;
 - `portable_helper/` — low-level Telegram Desktop portable helper;
 - `export/` — Telegram export pipeline и batch/chain entrypoints;
-- `session_runner/` — visible wrapper для Telegram Desktop session-runner.
+- `session_runner/` — visible wrapper для embedded Telegram Desktop session-runner.
 
-Отдельный внешний репозиторий `/home/max/telegram-portable-session-tool` не копируется сюда как код, но теперь виден через локальную папку `session_runner/` и подключается в `platform/registry/tools.json` как visible wrapper.
+Session-runner runtime теперь встроен в `telegram_portable_session_tool/`, а локальная папка `session_runner/` остаётся operator-facing wrapper/manifest слоем.
 
 ## Быстрый Вход
 
@@ -61,7 +61,7 @@ cd /home/max/site-control-kit/tools/telegram
 ### `session_runner/`
 - random walk по уже существующим группам и контактам Telegram Desktop;
 - controlled auto-send только по явному allowlist-у;
-- thin wrapper вокруг `/home/max/telegram-portable-session-tool`.
+- thin wrapper вокруг embedded package `telegram_portable_session_tool`.
 
 ## Главная Идея
 

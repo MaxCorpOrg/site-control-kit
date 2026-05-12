@@ -2264,28 +2264,94 @@
     - `PYTHONPATH="$PWD" python3 -m unittest discover -s tests -p 'test_*.py'` → `293 OK`
     - `git diff --check` → OK
     - `tool-platform profile-health --profile-name AK5 --profile-dir ...` → OK, `running = false`, `attach_status = no_process`, `display_backend = x11`, live workflow не запускался
+- Tranche `Production Release Linux-First + Windows Installer` начат и доведён до Linux package acceptance:
+  - перед релизным слоем текущий AK5/session/historical WIP стабилизирован и зафиксирован отдельным baseline commit:
+    - `a025806` `Зафиксировать AK5 и historical readback baseline`
+  - добавлен production entrypoint:
+    - `tool_platform/control_center.py`
+    - console command: `telegram-control-center`
+    - GUI flag: `--release-self-test`
+  - runtime paths теперь поддерживают production layout и env overrides:
+    - `SITE_CONTROL_KIT_RUNTIME_MODE=production`
+    - `SITE_CONTROL_KIT_APP_ROOT`
+    - `SITE_CONTROL_KIT_CONFIG_DIR`
+    - `SITE_CONTROL_KIT_DATA_DIR`
+    - `SITE_CONTROL_KIT_LOG_DIR`
+    - `SITE_CONTROL_KIT_CACHE_DIR`
+  - Linux production defaults:
+    - config: `~/.config/site-control-kit`
+    - data: `~/.local/share/site-control-kit`
+    - logs: `~/.local/state/site-control-kit/logs`
+    - cache: `~/.cache/site-control-kit`
+  - session-runner теперь встроен в `site-control-kit` как package:
+    - `telegram_portable_session_tool/`
+    - wrapper `tools/telegram/session_runner/bin/telegram-session-runner` больше не зависит от `/home/max/telegram-portable-session-tool`
+    - release package не включает private `.git`, `runs`, `.state`, user configs
+  - добавлен Linux packaging:
+    - `packaging/linux/build_deb.sh`
+    - `.desktop` launcher
+    - SVG icon
+    - helper для user desktop shortcut
+    - Debian maintainer scripts
+  - собран Linux artifact:
+    - `packaging/dist/linux/telegram-control-center_0.1.0_all.deb`
+    - final sha256 считать после последней сборки, не зашивать внутрь packaged docs
+  - rootless clean-install smoke через `dpkg-deb -x` прошёл:
+    - release tree scan: OK
+    - `telegram-control-center --release-self-test`: OK
+    - registry найден внутри extracted app root
+    - embedded session-runner найден внутри extracted app root
+    - config/data/logs/cache создаются вне repo tree
+  - staged uninstall smoke прошёл:
+    - temp-root install layout удаляет `/opt/site-control-kit`, `/usr/bin/telegram-control-center`, `.desktop` и icon entries
+    - user data policy остаётся preserve-by-default для реального `apt remove`
+  - финальные проверки release pass:
+    - `python3 -m py_compile ...` → OK
+    - `bash -n ...` для packaging/session wrappers → OK
+    - `desktop-file-validate packaging/linux/telegram-control-center.desktop` → OK
+    - `PYTHONPATH="$PWD" python3 -m unittest tests.test_tool_platform tests.test_telegram_portable` → `141 OK`
+    - `PYTHONPATH="$PWD" python3 -m unittest discover -s tests -p 'test_*.py'` → `294 OK`
+    - `git diff --check` → OK
+    - `timeout 10s ./tools/telegram/platform/bin/tool-platform-panel` → expected timeout после успешного GUI start
+    - `tool-platform capabilities/doctor/profile-health --profile-name AK5 ...` → OK, Wayland warning сохранён, `AK5 running=false / attach_status=no_process / display_backend=x11`
+  - добавлен Windows packaging pipeline:
+    - `packaging/windows/TelegramControlCenter.spec`
+    - `packaging/windows/TelegramControlCenter.iss`
+    - `packaging/windows/make_icon.py`
+    - `packaging/windows/build_windows_installer.sh`
+  - Windows artifact на этой Linux-машине не собран, потому что toolchain отсутствует:
+    - `./packaging/windows/build_windows_installer.sh 0.1.0 --check-tools` → missing `wine`, `winepath`
+    - это считается честным blocked status, не успешным Windows release artifact
+  - release docs добавлены:
+    - `docs/PRODUCTION_RELEASE_RU.md`
+  - важный product contract:
+    - Linux — first-class live target
+    - Windows v1 — installer/exe GUI target с degraded Telegram live lanes до отдельного Windows adapter tranche
+    - attach gating не ослаблять
 
 ## Следующий Приоритет
-1. Если оператор явно попросит, сделать отдельный controlled historical apply:
-   - сначала повторить `tool-platform repair-historical-artifacts --profile-name AK --profile-dir /home/max/TelegramPortableAK`;
-   - только после проверки preview запускать `--apply`;
-   - сразу после apply проверить `profile-health` и зафиксировать changed counts в handoff.
-2. Продолжить deeper thinning `gui.py` и `telegram_gui_helpers.py`:
-   - выносить из GUI оставшиеся formatting/open-policy ветки вокруг workspace/session/combined dashboards;
-   - держать `gui.py` thin client-слоем для form-state, operator input и render, а не местом, где принимаются readback-решения.
-3. Для docs as product:
-   - синхронизировать новые operator/runbook docs с template/examples/handoff;
-   - дочистить оставшиеся legacy absolute paths в operator-facing текстах.
-4. Для Session/Combined при желании сделать отдельный live smoke только после safe attach:
-   - `AK5` использовать через сохранённый `display_backend = x11`;
-   - live workflow разрешать только пока `attach_status in {exact_window, title_match}`;
-   - не расширять attach policy ради smoke.
-5. Для cross-platform core: продолжать adapter-first расширение Windows/macOS через `doctor/capabilities/launch/open-uri/focus/screenshot`, не пытаясь сразу вытянуть full Telegram Desktop parity.
+1. Закрыть Windows artifact на машине/runner с Wine + Windows Python + Inno Setup:
+   - `./packaging/windows/build_windows_installer.sh 0.1.0 --check-tools`
+   - `./packaging/windows/build_windows_installer.sh 0.1.0`
+   - затем clean install/uninstall smoke и checksum.
+2. Если нужен настоящий Windows Telegram live workflow, делать отдельный adapter tranche:
+   - launch/open-uri/focus/click/type/screenshot;
+   - portable profile lifecycle;
+   - safe attach proof для Windows;
+   - без ослабления текущего Linux attach gating.
+3. Для Linux release при следующем проходе можно сделать rootful install/uninstall smoke на disposable VM:
+   - `sudo apt install ./packaging/dist/linux/telegram-control-center_0.1.0_all.deb`
+   - запуск из меню приложений;
+   - `telegram-control-center --release-self-test`
+   - `sudo apt remove telegram-control-center`.
+4. Historical `repair-historical-artifacts --apply` по-прежнему запускать только по явному операторскому решению после fresh preview.
+5. После release tranche возвращаться к deeper thinning `gui.py` / `telegram_gui_helpers.py` и docs normalization.
 
 ## Контрольная Точка
 - Git checkpoint:
   - ветка: `codex/telegram-client-hardening`
-  - commit: `241a903` `Усилить timeline и artifact center Telegram панели`
+  - baseline commit: `a025806` `Зафиксировать AK5 и historical readback baseline`
+  - previous functional checkpoint: `241a903` `Усилить timeline и artifact center Telegram панели`
 - Human handoff:
   - `/home/max/site-control-kit/docs/PROJECT_STATUS_RU.md`
   - `/home/max/site-control-kit/tools/telegram/NEXT_CHAT_AGENT_PROMPT_RU.md`

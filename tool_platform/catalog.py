@@ -6,10 +6,11 @@ from pathlib import Path
 from typing import Any
 
 from .platform_adapters import current_platform_id, get_platform_adapter
+from .telegram_runtime import repo_root
 
 
 DEFAULT_REGISTRY_PATH = (
-    Path(__file__).resolve().parent.parent
+    repo_root()
     / "tools"
     / "telegram"
     / "platform"

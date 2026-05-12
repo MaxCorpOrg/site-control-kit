@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "tool_name": "Telegram Portable Session Tool",
+  "site_control_kit_root": "",
+  "portable_profile_dir": "",
+  "python_bin": "python3",
+  "session": {
+    "visit_mode": "current_profile_sidebar",
+    "random_walk_visits_per_run": 6,
+    "view_min_seconds": 3,
+    "view_max_seconds": 9,
+    "sidebar_x_ratio": 0.14,
+    "sidebar_y_min_ratio": 0.18,
+    "sidebar_y_max_ratio": 0.82,
+    "message_input_x_ratio": 0.55,
+    "message_input_y_ratio": 0.975,
+    "message_open_delay_seconds": 1.0,
+    "message_focus_delay_seconds": 0.4,
+    "message_send_delay_seconds": 0.2,
+    "message_send_button_x_ratio": 0.962,
+    "message_send_button_y_ratio": 0.94,
+    "message_send_strategy": "send_button_then_return",
+    "max_group_views_per_run": 0,
+    "max_contact_views_per_run": 0
+  },
+  "message_policy": {
+    "target_mode": "rotating_contacts",
+    "drafts_per_run": 1,
+    "auto_send": false,
+    "total_message_limit": 0,
+    "templates": [
+      "Добрый день!"
+    ],
+    "message_targets": [
+      {
+        "target_id": "example_contact",
+        "label": "Example Contact",
+        "handle": "@example_contact",
+        "kind": "contact"
+      }
+    ]
+  },
+  "sync_sources": [],
+  "groups": [],
+  "contacts": []
+}

@@ -26,8 +26,8 @@
 - `tools/telegram/agent_pack/` — это agent-layer: defaults, runbook, verification matrix и persistent next-step layer;
 - `scripts/telegram_*` — это backend entrypoints и runtime logic;
 - `tool_platform/*.py` — registry/panel backend, а не Telegram business logic;
-- `tools/telegram/session_runner/` — это видимая оболочка для `/home/max/telegram-portable-session-tool`;
-- внешний `/home/max/telegram-portable-session-tool` остаётся отдельным runtime repo.
+- `tools/telegram/session_runner/` — это видимая оболочка для embedded package `telegram_portable_session_tool`;
+- release package включает session-runner code, но не включает private runs/state/configs.
 
 ## Правило Расширения
 

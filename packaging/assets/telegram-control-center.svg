@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="Telegram Control Center">
+  <defs>
+    <linearGradient id="sky" x1="32" x2="224" y1="28" y2="228" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#3fd5ff"/>
+      <stop offset="1" stop-color="#0f5cc7"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="66" x2="190" y1="74" y2="190" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#d9f4ff"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="56" fill="#071b33"/>
+  <circle cx="128" cy="128" r="104" fill="url(#sky)"/>
+  <path d="M202 70 54 128c-10 4-9 18 2 21l38 11 14 41c4 12 19 14 26 4l23-32 38 28c10 7 24 1 26-11l21-103c2-11-9-20-20-17Z" fill="#fff" opacity=".96"/>
+  <path d="M105 157 197 86l-72 83-4 35-16-47Z" fill="#0e67c8"/>
+  <rect x="58" y="58" width="140" height="140" rx="26" fill="none" stroke="url(#panel)" stroke-width="10" opacity=".95"/>
+  <path d="M82 94h92M82 128h50M82 162h74" stroke="#07315f" stroke-width="12" stroke-linecap="round" opacity=".92"/>
+</svg>

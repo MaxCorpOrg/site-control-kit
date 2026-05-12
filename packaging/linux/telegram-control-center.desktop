@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Telegram Control Center
+Name[ru]=Центр управления Telegram
+Comment=Local Telegram operator control center
+Comment[ru]=Локальная панель управления Telegram workflow
+Exec=telegram-control-center
+Icon=telegram-control-center
+Terminal=false
+Categories=Utility;
+StartupNotify=true

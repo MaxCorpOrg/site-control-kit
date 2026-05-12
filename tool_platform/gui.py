@@ -74,6 +74,7 @@ from .jobs import (
 )
 from .locks import acquire_profile_lock, get_profile_lock, release_profile_lock
 from .platform_adapters import current_platform_id, platform_doctor_report
+from .release import print_release_self_test
 from .telegram_profiles import (
     DEFAULT_OUTPUT_ROOT,
     adopt_existing_profile,
@@ -5267,7 +5268,14 @@ def main(argv: list[str] | None = None) -> int:
         default=str(DEFAULT_REGISTRY_PATH),
         help="Path to tool registry JSON.",
     )
+    parser.add_argument(
+        "--release-self-test",
+        action="store_true",
+        help="Run production packaging self-test and exit.",
+    )
     args = parser.parse_args(argv)
+    if args.release_self_test:
+        return print_release_self_test()
     if tk is None:
         parser.exit(
             1,
