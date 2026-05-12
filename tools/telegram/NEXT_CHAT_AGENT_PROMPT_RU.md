@@ -770,6 +770,10 @@
     - CLI launch через `telegram-control-center` удерживался до `timeout 10s`;
     - menu launch поднимал `python3 -m tool_platform.control_center`;
     - direct desktop launch подтверждён оператором.
+  - важная release-truth для следующего агента:
+    - `Telegram Control Center` собирается из `site-control-kit`, но операторский `.deb` ставится отдельно от репозитория;
+    - полный checkout `site-control-kit` нужен для build/dev/maintainer work, а не для повседневного запуска установленного GUI;
+    - production app живёт в `/opt/site-control-kit/app`, а пользовательский runtime идёт в XDG-папки.
   - rootless clean-install smoke уже прошёл через `dpkg-deb -x`:
     - release tree scan OK;
     - extracted `telegram-control-center --release-self-test` OK;

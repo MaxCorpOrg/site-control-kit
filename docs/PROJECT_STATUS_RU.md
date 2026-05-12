@@ -2315,6 +2315,9 @@
     - `/usr/bin/telegram-control-center`, menu `.desktop`, icon и `/opt/site-control-kit/app` были на месте
     - `telegram-control-center --release-self-test` → OK, `production_mode = true`, `repo_root = /opt/site-control-kit/app`
     - XDG runtime dirs указывали в домашний каталог пользователя, а не в repo
+    - product truth дополнительно зафиксирован в docs:
+      - операторский `.deb` можно ставить отдельно от исходного репозитория `site-control-kit`
+      - полный checkout repo нужен только для build/dev/maintainer work
     - CLI launch через `telegram-control-center` удерживался до `timeout 10s` без traceback
     - menu launch поднимал `python3 -m tool_platform.control_center`
     - direct desktop launch был подтверждён оператором; файл ярлыка:
@@ -2366,10 +2369,12 @@
     - это считается честным blocked status, не успешным Windows release artifact
   - release docs добавлены:
     - `docs/PRODUCTION_RELEASE_RU.md`
+    - `docs/TELEGRAM_CONTROL_CENTER_OPERATOR_RU.md` обновлён с явным разделением standalone production install и repo/dev mode
   - важный product contract:
     - Linux — first-class live target
     - Windows v1 — installer/exe GUI target с degraded Telegram live lanes до отдельного Windows adapter tranche
     - attach gating не ослаблять
+    - `Telegram Control Center` собирается из `site-control-kit`, но ставится как отдельное приложение; репозиторий не требуется обычному оператору на целевой машине
 
 ## Следующий Приоритет
 1. Закрыть Windows artifact на машине/runner с Wine + Windows Python + Inno Setup:

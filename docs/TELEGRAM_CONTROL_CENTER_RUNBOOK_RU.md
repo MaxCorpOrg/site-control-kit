@@ -8,6 +8,11 @@
 - live диагностики `profile-health`;
 - работы с unified jobs и runtime root.
 
+Важно:
+- этот runbook описывает maintainer/repo mode, когда работа идёт из checkout `site-control-kit`;
+- standalone операторская установка `.deb` может жить отдельно от репозитория;
+- для operator-facing standalone install смотреть `docs/TELEGRAM_CONTROL_CENTER_OPERATOR_RU.md` и `docs/PRODUCTION_RELEASE_RU.md`.
+
 ## Канонические Пути
 
 Runtime root:

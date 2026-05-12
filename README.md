@@ -270,6 +270,15 @@ cd /home/max/site-control-kit/tools/telegram/invite_manager
 - сохранять инструменты отдельными единицами;
 - подключать их в одну простую Telegram-панель управления.
 
+Как продукт это теперь отдельное приложение:
+- `Telegram Control Center` собирается из репозитория `site-control-kit`, но для обычного оператора может устанавливаться отдельно через `.deb`;
+- для запуска установленного приложения полный checkout репозитория не нужен;
+- сам репозиторий нужен для разработки, сборки, отладки и выпуска новых версий.
+
+Подробный production/install контур:
+- [docs/PRODUCTION_RELEASE_RU.md](docs/PRODUCTION_RELEASE_RU.md)
+- [docs/TELEGRAM_CONTROL_CENTER_OPERATOR_RU.md](docs/TELEGRAM_CONTROL_CENTER_OPERATOR_RU.md)
+
 Сейчас в registry уже подключены:
 - `telegram_invite_manager` из текущего репозитория;
 - `telegram_portable_helper` из текущего репозитория;

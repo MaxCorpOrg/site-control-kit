@@ -4,6 +4,20 @@
 
 Этот документ фиксирует релизный контур для `Telegram Control Center`.
 
+## Как Это Устанавливается По Отношению К `site-control-kit`
+
+- `Telegram Control Center` собирается из репозитория `site-control-kit`, но устанавливается как отдельное операторское приложение.
+- Для обычного пользователя не нужен полный checkout репозитория: достаточно получить готовый `.deb` и установить его на целевую Linux-машину.
+- После установки приложение живёт отдельно от исходников:
+  - app bundle: `/opt/site-control-kit/app`
+  - запуск: `telegram-control-center`
+  - пользовательские config/data/logs/cache: XDG-папки в домашнем каталоге
+- Полный репозиторий `site-control-kit` нужен только для:
+  - разработки;
+  - локальной отладки;
+  - сборки `.deb` и Windows installer;
+  - выпуска новых версий и maintainer-проверок.
+
 ## Release Matrix
 
 - Linux — основной production target: `.deb`, меню приложений, иконка, double-click launcher и полный live workflow при строгом attach gating.
@@ -25,6 +39,8 @@
 - `tdata`, portable profiles, logs, job history, user secrets.
 
 ## Linux Install
+
+Если `.deb` уже перенесён на другую машину, репозиторий там не обязателен: можно устанавливать пакет напрямую как обычное приложение.
 
 Сборка:
 
@@ -66,6 +82,8 @@ sudo apt remove telegram-control-center
 Если после acceptance нужно вернуть приложение на машину, просто повторно установите тот же `.deb`.
 
 ## Runtime Folders
+
+Это production layout установленного приложения, а не dev-репозитория.
 
 Linux production defaults:
 
@@ -127,6 +145,7 @@ Windows packaging из Linux требует Wine toolchain:
 - Accepted artifact sha256 at Linux closeout: `1bb7315ccb2a03e5261604327e380a82cd77f51f0d3fa4500b5fd516c65f1f60`
 - Rootless clean install smoke: OK через `dpkg-deb -x`, release tree scan и `telegram-control-center --release-self-test`.
 - Rootful install acceptance: OK для `0.1.1`; self-test идёт из `/opt/site-control-kit/app`, XDG paths указывают в домашний каталог пользователя.
+- Product contract explicitly confirmed: операторский `.deb` можно ставить отдельно от исходного репозитория; repo нужен только для build/dev/maintainer work.
 - CLI/menu launch acceptance: OK; empty-state crash закрыт.
 - Rootful uninstall acceptance: OK; `apt remove` убирает system payload и сохраняет пользовательские XDG data.
 - User desktop shortcut remains a user-owned file across uninstall and may require обычный desktop trust policy среды.

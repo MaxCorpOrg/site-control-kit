@@ -8,9 +8,36 @@
 - где импортировать, скрывать и удалять аккаунты;
 - как продолжать `invite`, `session` и `combined` workflow.
 
+Важный product contract:
+- `Telegram Control Center` собирается из репозитория `site-control-kit`, но для оператора может устанавливаться отдельно как `.deb`;
+- для обычного запуска полный checkout репозитория не нужен;
+- репозиторий нужен только для разработки, сборки, отладки и maintainer-команд.
+
 ## Где Всё Лежит
 
-Канонический runtime root теперь один:
+Есть два поддерживаемых layout-режима: standalone production install и repo/dev mode.
+
+### Standalone Production Install (`.deb`)
+
+Установленное приложение живёт здесь:
+
+- app bundle: `/opt/site-control-kit/app`
+- запуск: `telegram-control-center`
+
+Пользовательский runtime живёт в XDG-папках:
+
+- profiles / invite jobs / session / unified state:
+  - `~/.local/share/site-control-kit/telegram/`
+- runtime configs:
+  - `~/.config/site-control-kit/telegram/runtime_configs/`
+- panel log:
+  - `~/.local/state/site-control-kit/logs/telegram/panel/telegram-control-center-panel.log`
+- cache:
+  - `~/.cache/site-control-kit/telegram/`
+
+### Repo / Dev Mode
+
+Если панель запускается прямо из исходников, runtime root остаётся project-local:
 
 `/home/max/site-control-kit/runtime/telegram`
 
@@ -27,6 +54,14 @@
 
 ## Как Запустить
 
+Standalone production install:
+
+```bash
+telegram-control-center
+```
+
+Repo/dev mode:
+
 Из корня репозитория:
 
 ```bash
@@ -34,7 +69,7 @@ cd /home/max/site-control-kit
 ./tools/telegram/platform/bin/tool-platform-panel
 ```
 
-CLI-health для выбранного профиля:
+CLI-health для выбранного профиля в repo/dev mode:
 
 ```bash
 ./tools/telegram/platform/bin/tool-platform profile-health --profile-name AK3 --profile-dir /home/max/site-control-kit/runtime/telegram/profiles/TelegramPortable-AK3
@@ -65,6 +100,7 @@ CLI-health для выбранного профиля:
 Важно:
 - внешние профили больше не считаются нормальной постоянной базой хранения;
 - рабочий steady-state storage всегда должен быть внутри `runtime/telegram/profiles/`.
+- для standalone production install это означает тот же Telegram runtime внутри `~/.local/share/site-control-kit/telegram/profiles/`.
 
 ## Invite: Добавить Контакты Из TXT
 
