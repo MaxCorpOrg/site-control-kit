@@ -1,5 +1,28 @@
 # Known Issues And Live Findings
 
+## Самый Новый Publish Baseline Finding
+Новый самый свежий факт на 2026-05-12 уже не про старый Linux blocker, а про найденный и уже исправленный regression нового baseline:
+- старый Linux installed-mode gate на `b740d66` уже закрыт со статусом `PASS with warning`;
+- closing transcript: `/tmp/tgcollector-smoke-logs/install-and-smoke-20260512-091934.log`;
+- актуальный `origin/main` подтверждён на `45c25e4fc5641a807a809f173ac0cfeaed798934`;
+- diff `b740d66..45c25e4` действительно включает product/runtime/test changes;
+- первый live smoke нового baseline на `maxcorp-server` поймал реальный installed-mode bug:
+  - `PermissionError: [Errno 13] Permission denied: '/opt/telegram-username-collector/app/.site-control-kit'`;
+- bugfix уже landed:
+  - `webcontrol/settings.py` больше не пишет installed-mode local config в `/opt/.../.site-control-kit`;
+  - Linux wrappers экспортируют `SITECTL_LOCAL_CONFIG_PATH`;
+  - regression покрыт новыми unit tests;
+- live rerun после fix уже зелёный по core-path:
+  - `telegram-username-collector --doctor` -> `mode=installed`, `overall_status=ok`, `gtk_runtime=ok`, `extension_zip_ready=1`, `hub_reachable=1`
+  - `--create-desktop-shortcut` -> OK
+  - `gtk-launch telegram-username-collector` -> окно реально поднялось, `xwininfo` его видит
+  - runtime leakage в `/opt/...` не найден;
+- practical finding:
+  - открытый риск теперь уже не кодовый bug, а acceptance caveat среды;
+  - `maxcorp-server` это `Xvfb :99 + fluxbox + x11vnc`, не обычный GNOME desktop;
+  - если нужен именно стандартный Applications menu proof, его ещё надо сделать на обычной Ubuntu GUI машине;
+  - если `gtk-launch + live window + XDG/no-leakage` достаточно, новый baseline уже близок к publish-ready.
+
 ## Самый Новый Local Windows Smoke Rerun
 Новый самый свежий факт на 2026-05-11 уже не про новый repo blocker, а про повторный live rerun текущей Windows-машины:
 - rerun делался в `C:\site-control-kit-win-smoke` на `Windows 10 Pro`, `PowerShell 5.1.26100.8115`, `Python 3.14.0`;

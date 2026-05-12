@@ -17,8 +17,11 @@ DEFAULT_CONFIG_RELATIVE = Path("config/default.yaml")
 DEFAULT_ENV_FILENAME = ".env"
 LOCAL_STATE_DIRNAME = ".site-control-kit"
 LOCAL_CONFIG_FILENAME = "local.yaml"
+LOCAL_CONFIG_PATH_ENV = "SITECTL_LOCAL_CONFIG_PATH"
 LEGACY_HOME_DIRNAME = ".site-control-kit"
 LEGACY_INSECURE_TOKEN = "local-bridge-quickstart-2026"
+PRODUCT_MODE_ENV = "SITECTL_PRODUCT_MODE"
+INSTALLED_PRODUCT_MODE = "installed"
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,12 +97,11 @@ def venv_python_path(venv_dir: Path) -> Path:
 def load_runtime_settings(*, project_root: Path | None = None, mutate: bool = False) -> RuntimeSettings:
     root = (project_root or PROJECT_ROOT).expanduser().resolve()
     env_file_path = root / DEFAULT_ENV_FILENAME
-    local_state_dir = root / LOCAL_STATE_DIRNAME
-    local_config_path = local_state_dir / LOCAL_CONFIG_FILENAME
     config_default_path = root / DEFAULT_CONFIG_RELATIVE
-    legacy_home_root = _resolve_legacy_home_root(root)
 
     _apply_env_defaults(env_file_path)
+    local_state_dir, local_config_path = _resolve_local_config_paths(root)
+    legacy_home_root = _resolve_legacy_home_root(root)
 
     if mutate:
         local_state_dir.mkdir(parents=True, exist_ok=True)
@@ -392,19 +394,50 @@ def _parse_env_file(path: Path) -> dict[str, str]:
     return rows
 
 
-def _resolve_legacy_home_root(project_root: Path) -> Path:
+def _is_installed_product_mode() -> bool:
+    return str(os.getenv(PRODUCT_MODE_ENV, "") or "").strip().lower() == INSTALLED_PRODUCT_MODE
+
+
+def _resolve_local_config_paths(project_root: Path) -> tuple[Path, Path]:
+    explicit_local_config = str(os.getenv(LOCAL_CONFIG_PATH_ENV, "") or "").strip()
+    if explicit_local_config:
+        local_config_path = _resolve_root_value(explicit_local_config, base=project_root)
+        return local_config_path.parent, local_config_path
+    if _is_installed_product_mode():
+        config_root = _resolve_installed_user_config_root(project_root)
+        return config_root, config_root / LOCAL_CONFIG_FILENAME
+    local_state_dir = project_root / LOCAL_STATE_DIRNAME
+    return local_state_dir, local_state_dir / LOCAL_CONFIG_FILENAME
+
+
+def _resolve_installed_user_config_root(project_root: Path) -> Path:
+    raw_xdg = str(os.getenv("XDG_CONFIG_HOME", "") or "").strip()
+    if raw_xdg:
+        return Path(raw_xdg).expanduser().resolve() / "site-control-kit"
+    raw_appdata = str(os.getenv("APPDATA", "") or "").strip()
+    if raw_appdata:
+        return Path(raw_appdata).expanduser().resolve() / "site-control-kit"
+    home_dir = _resolve_home_dir(project_root)
+    return home_dir / ".config" / "site-control-kit"
+
+
+def _resolve_home_dir(project_root: Path) -> Path:
     for env_name in ("HOME", "USERPROFILE"):
         raw = str(os.getenv(env_name, "") or "").strip()
         if raw:
-            return Path(raw).expanduser() / LEGACY_HOME_DIRNAME
+            return Path(raw).expanduser().resolve()
     home_drive = str(os.getenv("HOMEDRIVE", "") or "").strip()
     home_path = str(os.getenv("HOMEPATH", "") or "").strip()
     if home_drive and home_path:
-        return Path(f"{home_drive}{home_path}").expanduser() / LEGACY_HOME_DIRNAME
+        return Path(f"{home_drive}{home_path}").expanduser().resolve()
     try:
-        return Path.home() / LEGACY_HOME_DIRNAME
+        return Path.home().resolve()
     except RuntimeError:
-        return project_root / "_home_unavailable" / LEGACY_HOME_DIRNAME
+        return project_root.resolve()
+
+
+def _resolve_legacy_home_root(project_root: Path) -> Path:
+    return _resolve_home_dir(project_root) / LEGACY_HOME_DIRNAME
 
 
 def _load_yaml_mapping(path: Path, *, required: bool) -> dict[str, Any]:
@@ -489,6 +522,8 @@ def _runtime_override_present() -> bool:
             "SITECTL_RUNTIME_ERRORS_LOG",
             "SITECTL_BROWSER_PROFILE",
             "SITECTL_FIREFOX_PROFILE",
+            "SITECTL_TOKEN_FILE",
+            LOCAL_CONFIG_PATH_ENV,
             "TELEGRAM_WORKSPACE_ROOT",
             "TELEGRAM_USERS_REGISTRY_FILE",
             "TELEGRAM_API_ACCOUNTS_FILE",

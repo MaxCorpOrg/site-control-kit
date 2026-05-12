@@ -149,6 +149,39 @@ class RuntimeSettingsTests(unittest.TestCase):
         self.assertEqual(token, "")
         self.assertEqual(source, "missing")
 
+    def test_installed_mode_uses_user_config_root_for_local_state(self) -> None:
+        root = self._make_project()
+        fake_home = Path(tempfile.mkdtemp())
+        with mock.patch.dict(
+            os.environ,
+            {
+                "HOME": str(fake_home),
+                mod.PRODUCT_MODE_ENV: mod.INSTALLED_PRODUCT_MODE,
+                mod.LOCAL_CONFIG_PATH_ENV: str(fake_home / ".config" / "site-control-kit" / "local.yaml"),
+                "SITECTL_RUNTIME_ROOT": str(fake_home / ".local" / "share" / "site-control-kit"),
+                "SITECTL_STATE_FILE": str(fake_home / ".local" / "share" / "site-control-kit" / "state" / "state.json"),
+                "SITECTL_LOG_DIR": str(fake_home / ".local" / "state" / "site-control-kit" / "logs"),
+                "SITECTL_REPORTS_ROOT": str(fake_home / ".local" / "share" / "site-control-kit" / "reports"),
+                "SITECTL_RUNTIME_EVENTS_LOG": str(fake_home / ".local" / "state" / "site-control-kit" / "logs" / "runtime_events.jsonl"),
+                "SITECTL_RUNTIME_ERRORS_LOG": str(fake_home / ".local" / "state" / "site-control-kit" / "logs" / "runtime_errors.jsonl"),
+                "SITECTL_BROWSER_PROFILE": str(fake_home / ".local" / "share" / "site-control-kit" / "browser-profile"),
+                "SITECTL_FIREFOX_PROFILE": str(fake_home / ".local" / "share" / "site-control-kit" / "firefox-profile"),
+                "SITECTL_TOKEN_FILE": str(fake_home / ".config" / "site-control-kit" / "generated_token.txt"),
+                "TELEGRAM_WORKSPACE_ROOT": str(fake_home / ".local" / "share" / "site-control-kit" / "telegram_workspace"),
+                "TELEGRAM_USERS_REGISTRY_FILE": str(fake_home / ".local" / "share" / "site-control-kit" / "telegram_workspace" / "registry" / "users.json"),
+                "TELEGRAM_API_ACCOUNTS_FILE": str(fake_home / ".local" / "share" / "site-control-kit" / "telegram_workspace" / "registry" / "api_accounts.json"),
+                "TELEGRAM_MANAGED_HELPER_ROOT": str(fake_home / ".local" / "share" / "site-control-kit" / "telegram_workspace" / "managed_helper"),
+                "TELEGRAM_DEFAULT_OUTPUT_DIR": str(fake_home / ".local" / "share" / "site-control-kit" / "reports" / "telegram_exports"),
+            },
+            clear=True,
+        ):
+            settings = mod.load_runtime_settings(project_root=root, mutate=True)
+
+        self.assertEqual(settings.local_state_dir, fake_home / ".config" / "site-control-kit")
+        self.assertEqual(settings.local_config_path, fake_home / ".config" / "site-control-kit" / "local.yaml")
+        self.assertTrue(settings.local_state_dir.is_dir())
+        self.assertFalse((root / ".site-control-kit").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -25,10 +25,50 @@
 ## Что Это За Ветка
 - Репозиторий: `site-control-kit`
 - Ветка: `main`
-- Активная тема: Linux productization + Windows smoke release confidence
-- Ближайшая цель: держать release-confidence baseline и не начинать новый Telegram feature-cycle без отдельного решения
+- Активная тема: re-baseline `origin/main` с live smoke и bugfix для `45c25e4`
+- Ближайшая цель: закрыть последний GUI/menu caveat нового Linux baseline и затем решать publish `main`
 
 ## Где Мы Закончили Работу
+- На 2026-05-12 `Re-baseline origin/main before publish` уже продвинут до live rerun:
+  - локальный commit `77ecd4e` сохранён как reference-only closure старого Linux gate на `b740d66` и не должен пушиться напрямую;
+  - создан отдельный worktree `/home/max/site-control-kit-rebaseline-20260512` на ветке `rebaseline-origin-main-20260512` от `origin/main`;
+  - `origin/main` подтверждён на `45c25e4fc5641a807a809f173ac0cfeaed798934`, и это уже не docs-only drift поверх `b740d66`;
+  - diff `b740d66..45c25e4` включает product/runtime/test changes, включая `scripts/telegram_product_runtime.py`, `webcontrol/settings.py`, `requirements.txt`, `pyproject.toml`, bootstrap/wrapper и GUI-related paths;
+  - на `maxcorp-server` впервые пойман реальный installed-mode regression нового baseline:
+    - команда: `runuser -u sitectl -- env DISPLAY=:99 HOME=/home/sitectl telegram-username-collector --doctor`
+    - failure: `PermissionError: [Errno 13] Permission denied: '/opt/telegram-username-collector/app/.site-control-kit'`
+    - это был product bug, а не средовой шум;
+  - bugfix уже внесён:
+    - `webcontrol/settings.py` теперь уводит installed-mode local config из `/opt/.../.site-control-kit` в user/XDG config root;
+    - Linux wrappers теперь явно экспортируют `SITECTL_LOCAL_CONFIG_PATH`;
+    - добавлены regression tests в `tests/test_settings.py` и `tests/test_telegram_product_runtime.py`;
+  - локальный verify после fix:
+    - `python3 -m unittest discover -s tests -p 'test_*.py'` -> `305 tests OK`
+    - `git diff --check` -> OK;
+  - live rerun на `maxcorp-server` после fix:
+    - source root: `/tmp/site-control-kit-rebaseline-live-20260512-100713`
+    - rebuilt package: `/tmp/site-control-kit-rebaseline-live-20260512-100713/dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`
+    - reinstall/smoke log: `/tmp/tgcollector-smoke-logs/reinstall-and-smoke-20260512-080828.log`
+    - temp smoke home: `/tmp/tgcollector-home-20260512-080828`
+    - `telegram-username-collector --doctor` теперь даёт:
+      - `mode=installed`
+      - `overall_status=ok`
+      - `runtime_root=/tmp/tgcollector-home-20260512-080828/.local/share/site-control-kit`
+      - `token_file=/tmp/tgcollector-home-20260512-080828/.config/site-control-kit/generated_token.txt`
+      - `gtk_runtime=ok`
+      - `extension_zip_ready=1`
+      - `hub_reachable=1`
+    - `--create-desktop-shortcut` создал `/tmp/tgcollector-home-20260512-080828/Desktop/Telegram Username Collector.desktop`
+    - `gtk-launch telegram-username-collector` реально поднял окно, `xwininfo` увидел `Telegram Username Collector`
+    - runtime leakage в `/opt/telegram-username-collector` не найден;
+  - remaining caveat:
+    - `maxcorp-server` это `Xvfb :99 + fluxbox + x11vnc`, а не обычная GNOME desktop VM;
+    - `gtk-launch` и окно подтверждены, но стандартный Applications menu path на таком host не верифицируется;
+    - до финального publish осталось либо принять этот caveat, либо сделать один последний run на обычной Ubuntu GUI/Applications menu машине.
+- Исторический Linux факт, который нельзя потерять при re-baseline:
+  - старый installed-mode gate на `b740d66` закрыт со статусом `PASS with warning`;
+  - transcript install-run: `/tmp/tgcollector-smoke-logs/install-and-smoke-20260512-091934.log`;
+  - единственный warning: `hub_reachable=0`.
 - На 2026-05-11 сохранён `Local Windows Smoke Rerun On Existing Machine`:
   - проход делался в `C:\site-control-kit-win-smoke` на `Windows 10 Pro`, `PowerShell 5.1.26100.8115`, `Python 3.14.0`;
   - новых repo-code changes в этом rerun не добавлялось; это был узкий повторный прогон существующего Windows smoke;

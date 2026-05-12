@@ -1,5 +1,39 @@
 # Current Backlog And Next Steps
 
+## Обновление 2026-05-12 (Re-baseline `origin/main` Before Push)
+- Текущий publish target уже не `b740d66`, а `origin/main` на `45c25e4fc5641a807a809f173ac0cfeaed798934`.
+- Что уже закрыто:
+  - старый Linux installed-mode gate на `b740d66` закрыт со статусом `PASS with warning`;
+  - closing transcript: `/tmp/tgcollector-smoke-logs/install-and-smoke-20260512-091934.log`.
+- Что важно не перепутать:
+  - локальный commit `77ecd4e` не публиковать напрямую;
+  - `b740d66..45c25e4` не является docs-only drift;
+  - текущая машина уже не pristine host, потому что пакет установлен.
+- Что уже случилось на новом baseline:
+  - первый live smoke на `maxcorp-server` нашёл regression:
+    - `PermissionError: [Errno 13] Permission denied: '/opt/telegram-username-collector/app/.site-control-kit'`
+  - fix уже внесён в `webcontrol/settings.py`, Linux wrappers и regression tests;
+  - live rerun после fix уже зелёный по core-path:
+    - `--doctor` -> `mode=installed`, `overall_status=ok`, `hub_reachable=1`
+    - desktop shortcut -> OK
+    - `gtk-launch` -> окно реально открывается
+    - XDG dirs -> OK
+    - leakage в `/opt/...` -> отсутствует
+- Новый ближайший следующий шаг теперь такой:
+  - досинхронизировать docs/handoff/checkpoint под bugfix + live rerun;
+  - решить, достаточно ли `maxcorp-server` smoke для publish;
+  - если нужен строгий стандартный desktop proof, сделать один финальный run на обычной Ubuntu 24.04 GUI машине:
+    - `telegram-username-collector --doctor`
+    - `telegram-username-collector --create-desktop-shortcut`
+    - `gtk-launch telegram-username-collector`
+    - запуск из обычного Applications menu
+  - после этого fast-forward-нуть итог в `main` и запушить без force.
+- Что до этого не делать:
+  - не начинать новый Telegram feature-cycle;
+  - не считать старый Linux gate текущим blocker-ом;
+  - не возвращать regression с `/opt/.../.site-control-kit` в backlog как открытый баг;
+  - не тащить в commit `.codex/`, `TG_CONTACT/`, `.site-control-kit/`, `dist/`, токены, логи и `artifacts/telegram_exports/INDEX.md`.
+
 ## Обновление 2026-05-11 (Local Windows Smoke Rerun On Existing Machine)
 - Текущий rerun уже закрыт зелёно без новых code changes:
   - `scripts\start_hub.cmd`

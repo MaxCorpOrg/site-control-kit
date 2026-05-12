@@ -74,6 +74,24 @@ find /home/max/telegram_contact_batches/chat_-1002465948544/chains -maxdepth 2 -
 - какой следующий технический приоритет уже очевиден.
 
 ## Что Сейчас Самое Важное
+Новый publish-control факт на 2026-05-12 уже такой:
+- старый Linux installed-mode gate на `b740d66` исторически закрыт со статусом `PASS with warning`;
+- closing transcript: `/tmp/tgcollector-smoke-logs/install-and-smoke-20260512-091934.log`;
+- локальный doc-only commit `77ecd4e` с этим closure не публиковать напрямую;
+- актуальный `origin/main` уже ушёл на `45c25e4fc5641a807a809f173ac0cfeaed798934`;
+- первый live smoke этого baseline на `maxcorp-server` поймал реальный regression:
+  - `PermissionError: [Errno 13] Permission denied: '/opt/telegram-username-collector/app/.site-control-kit'`;
+- regression уже исправлен в текущем rebaseline-worktree;
+- live rerun после fix уже подтвердил:
+  - `--doctor` -> `mode=installed`, `overall_status=ok`, `hub_reachable=1`
+  - desktop shortcut -> OK
+  - `gtk-launch` -> реальное окно поднялось
+  - XDG dirs -> OK
+  - runtime leakage в `/opt/...` -> нет
+- remaining caveat:
+  - `maxcorp-server` это `Xvfb :99 + fluxbox + x11vnc`, а не обычная GNOME desktop машина;
+  - если нужен именно стандартный Applications menu proof, нужен ещё один короткий run на обычной Ubuntu GUI машине.
+
 Верхний handoff-факт на 2026-05-10 уже такой:
 - работа велась из fresh checkout `C:\site-control-kit-win-smoke` на `main` commit `3c03277720714ff13745e659923019a3ac2f7a4d`;
 - реальный Windows code/runtime pass сделан на Windows `11 10.0.26200` / `PowerShell 5.1.26100.8115` / `Python 3.14.0`;
@@ -120,7 +138,41 @@ find /home/max/telegram_contact_batches/chat_-1002465948544/chains -maxdepth 2 -
 - Telegram export работает;
 - batch/safe/quarantine слои работают.
 
-Новый самый верхний handoff-факт на 2026-05-11 теперь такой:
+Новый самый верхний handoff-факт на 2026-05-12 теперь такой:
+- старый Linux installed-mode gate на `b740d66` закрыт со статусом `PASS with warning`;
+- checkpoint `docs/checkpoints/CHECKPOINT_2026-05-12.md` обновлён под финальный install-run;
+- fresh GitHub clone по-прежнему остаётся отдельным новым baseline:
+  - path: `/home/max/site-control-kit-product-smoke-20260512-085548`
+  - `HEAD` -> `45c25e4fc5641a807a809f173ac0cfeaed798934`
+  - этот `main` уже не doc-only drift поверх `b740d66`, а новый runtime/product/test state;
+- закрывающий install-run выполнен на baseline clone:
+  - path: `/home/max/site-control-kit-product-smoke-local-20260512-085840`
+  - `HEAD` -> `b740d6603787da701687a4fae421f7c68c94f9a8`
+  - built `.deb` size `52M`
+  - transcript: `/tmp/tgcollector-smoke-logs/install-and-smoke-20260512-091934.log`
+- installed-mode evidence:
+  - `dpkg -s telegram-username-collector` -> `install ok installed`
+  - `/usr/bin/telegram-username-collector`, `/usr/bin/sitectl` существуют
+  - `/opt/telegram-username-collector/{app,venv}` существуют
+  - `telegram-username-collector --doctor` ->
+    - `mode=installed`
+    - `overall_status=warning`
+    - `gtk_runtime=ok`
+    - `extension_zip_ready=1`
+    - `hub_reachable=0`
+  - desktop shortcut создан: `/home/max/Рабочий стол/Telegram Username Collector.desktop`
+  - XDG runtime dirs созданы в пользовательском профиле
+  - runtime-файлы не протекли в `/opt/telegram-username-collector`
+  - GUI подтверждён пользователем и через `gtk-launch`, и через меню приложений
+- transcript nuance:
+  - `COMMAND_EXIT_CODE=127` в transcript вызван не продуктом, а отсутствием `rg` в той shell-сессии для финальной `xwininfo` проверки
+  - сам `gtk-launch` не считать failed
+- practical verdict:
+  - status: `PASS with warning`
+  - единственный warning: `hub_reachable=0`
+  - следующий шаг теперь уже не закрытие старого gate, а отдельный re-baseline GitHub `main` на `45c25e4`.
+
+Предыдущий верхний handoff-факт на 2026-05-11 теперь такой:
 - выполнено end-of-day closure без новой разработки;
 - checkpoint создан в `docs/checkpoints/CHECKPOINT_2026-05-11.md` и скопирован в `/home/max/Рабочий стол/CHECKPOINT_2026-05-11.md`;
 - обновлены `README.md`, `docs/ARCHITECTURE.md`, `AGENTS.md`, `NEXT_STEPS.md`, `CHANGELOG.md`, repo-root handoff и текущий backlog;

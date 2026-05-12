@@ -1,6 +1,6 @@
 # Project Status RU
 
-Последнее обновление: 2026-05-11
+Последнее обновление: 2026-05-12
 
 Этот файл нужен как точка входа для любого нового чата и любого нового агента.
 Перед новой задачей его нужно прочитать целиком.
@@ -11,6 +11,48 @@ Repo-root entrypoint для любого агента: `AGENT_START_HERE.md`.
 Читать его нужно по номерам файлов, начиная с `00_START_HERE.md`.
 
 ## Сделано
+
+### Обновление 2026-05-12 (Re-baseline `origin/main` before push)
+- Локальный doc-only commit `77ecd4e` с закрытием старого Linux gate сохранён как reference-only и не должен пушиться напрямую.
+- Создан отдельный интеграционный worktree:
+  - `/home/max/site-control-kit-rebaseline-20260512`
+  - ветка `rebaseline-origin-main-20260512`
+- Подтверждено, что актуальный `origin/main` уже ушёл на:
+  - `45c25e4fc5641a807a809f173ac0cfeaed798934`
+- Практический вывод по baseline drift:
+  - `b740d66..45c25e4` не является docs-only diff;
+  - новый baseline включает product/runtime/test changes, включая `scripts/telegram_product_runtime.py`, `webcontrol/settings.py`, `requirements.txt`, `pyproject.toml`, bootstrap/wrapper и GUI-related paths;
+  - поэтому новый `origin/main` потребовал собственный installed-mode smoke и уже дал реальный product regression.
+- Исторический Linux факт, который уже закрыт:
+  - старый installed-mode gate на `b740d66` имеет статус `PASS with warning`;
+  - closing transcript: `/tmp/tgcollector-smoke-logs/install-and-smoke-20260512-091934.log`;
+  - единственный warning: `hub_reachable=0`.
+- Реальный live fail на новом baseline:
+  - host: `maxcorp-server`
+  - команда: `runuser -u sitectl -- env DISPLAY=:99 HOME=/home/sitectl telegram-username-collector --doctor`
+  - failure: `PermissionError: [Errno 13] Permission denied: '/opt/telegram-username-collector/app/.site-control-kit'`
+- Что исправлено:
+  - `webcontrol/settings.py` теперь уводит installed-mode local config в user/XDG config root;
+  - Linux wrappers теперь экспортируют `SITECTL_LOCAL_CONFIG_PATH`;
+  - regression покрыт новыми тестами в `tests/test_settings.py` и `tests/test_telegram_product_runtime.py`.
+- Verify после fix:
+  - локально:
+    - `python3 -m unittest discover -s tests -p 'test_*.py'` -> `305 tests OK`
+    - `git diff --check` -> OK
+  - live rerun на `maxcorp-server`:
+    - source root: `/tmp/site-control-kit-rebaseline-live-20260512-100713`
+    - rebuilt `.deb`: `/tmp/site-control-kit-rebaseline-live-20260512-100713/dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`
+    - smoke log: `/tmp/tgcollector-smoke-logs/reinstall-and-smoke-20260512-080828.log`
+    - temp home: `/tmp/tgcollector-home-20260512-080828`
+    - `telegram-username-collector --doctor` -> `mode=installed`, `overall_status=ok`, `gtk_runtime=ok`, `extension_zip_ready=1`, `hub_reachable=1`
+    - `--create-desktop-shortcut` создал desktop file в temp-home
+    - `gtk-launch telegram-username-collector` реально поднял окно, подтверждённое `xwininfo`
+    - XDG dirs созданы в temp-home
+    - runtime leakage в `/opt/telegram-username-collector` не найден
+- Что остаётся:
+  - `maxcorp-server` использует `Xvfb :99 + fluxbox + x11vnc`, а не стандартный GNOME desktop;
+  - `gtk-launch` и живое окно уже подтверждены, но обычный Applications menu path на стандартном Ubuntu desktop всё ещё не подтверждён;
+  - перед publish нужно либо принять этот caveat, либо сделать один финальный run на обычной Ubuntu GUI машине.
 
 ### Обновление 2026-05-11 (Local Windows Smoke Rerun On Existing Machine)
 - На текущей Windows-машине повторно пройден exact narrow smoke для `telegram-username-collector` без новых code changes.

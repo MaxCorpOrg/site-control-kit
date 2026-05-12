@@ -1,5 +1,56 @@
 # CODEX_STATE
 
+## 2026-05-12 (Re-baseline `origin/main` Live Smoke + Installed-Mode Fix)
+
+- Scope:
+  - local doc-only commit `77ecd4e` with the old Linux gate closure remains reference-only history
+  - integration continues on top of the real remote baseline `45c25e4fc5641a807a809f173ac0cfeaed798934`
+  - the cycle found and fixed a real installed-mode regression in the newer baseline
+- Git control:
+  - current integration worktree: `/home/max/site-control-kit-rebaseline-20260512`
+  - current integration branch: `rebaseline-origin-main-20260512`
+  - `origin/main` was fetched and confirmed at `45c25e4fc5641a807a809f173ac0cfeaed798934`
+  - `77ecd4e` must not be pushed directly because it sits on top of the old baseline `b740d66`
+- Historical Linux gate that is already closed:
+  - old installed-mode gate on `b740d6603787da701687a4fae421f7c68c94f9a8` is `PASS with warning`
+  - transcript: `/tmp/tgcollector-smoke-logs/install-and-smoke-20260512-091934.log`
+  - only warning there was `hub_reachable=0`
+- New baseline live failure that was fixed:
+  - remote smoke host: `maxcorp-server` (`Ubuntu 24.04.4 LTS`)
+  - initial blocking command:
+    - `runuser -u sitectl -- env DISPLAY=:99 HOME=/home/sitectl telegram-username-collector --doctor`
+  - failure:
+    - `PermissionError: [Errno 13] Permission denied: '/opt/telegram-username-collector/app/.site-control-kit'`
+  - root cause:
+    - installed-mode still tried to create local state under `/opt/.../.site-control-kit` before honoring user/XDG path overrides
+- Code changes:
+  - `webcontrol/settings.py` now resolves installed-mode local config into user/XDG config space instead of `/opt/.../.site-control-kit`
+  - Linux wrappers now export `SITECTL_LOCAL_CONFIG_PATH`
+  - regression tests were added in `tests/test_settings.py` and `tests/test_telegram_product_runtime.py`
+- Verify:
+  - local:
+    - `python3 -m unittest tests/test_settings.py tests/test_telegram_product_runtime.py` -> OK
+    - `python3 -m unittest discover -s tests -p 'test_*.py'` -> `305 tests OK`
+    - `git diff --check` -> OK
+  - remote live rerun after fix:
+    - source root: `/tmp/site-control-kit-rebaseline-live-20260512-100713`
+    - rebuilt `.deb`: `/tmp/site-control-kit-rebaseline-live-20260512-100713/dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`
+    - reinstall/smoke log: `/tmp/tgcollector-smoke-logs/reinstall-and-smoke-20260512-080828.log`
+    - temp smoke home: `/tmp/tgcollector-home-20260512-080828`
+    - `dpkg -s telegram-username-collector` -> `install ok installed`
+    - `/usr/bin/telegram-username-collector`, `/usr/bin/sitectl`, `/opt/telegram-username-collector/{app,venv}` exist
+    - `telegram-username-collector --doctor` -> `mode=installed`, `overall_status=ok`, `gtk_runtime=ok`, `extension_zip_ready=1`, `hub_reachable=1`
+    - desktop shortcut created: `/tmp/tgcollector-home-20260512-080828/Desktop/Telegram Username Collector.desktop`
+    - `gtk-launch telegram-username-collector` opened a real window confirmed by `xwininfo`
+    - user XDG config/data/state roots were created under the temp home
+    - no `generated_token.txt`, `state.json`, `runtime_events.jsonl`, or `runtime_errors.jsonl` were found under `/opt/telegram-username-collector`
+- Remaining caveat:
+  - `maxcorp-server` uses `Xvfb :99 + fluxbox + x11vnc`, not a standard GNOME desktop session
+  - `gtk-launch` and the live window are verified, but the normal Applications menu path is still unconfirmed on a standard Ubuntu desktop shell
+- Next step:
+  - decide whether the `maxcorp-server` smoke is sufficient for publish
+  - if strict GUI/menu parity is still required, do one final run on a standard Ubuntu 24.04 GUI machine with a normal Applications menu before pushing `main`
+
 ## 2026-05-11 (Local Windows Smoke Rerun On Existing Machine)
 
 - Environment:

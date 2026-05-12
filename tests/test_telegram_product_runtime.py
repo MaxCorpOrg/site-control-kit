@@ -92,6 +92,50 @@ class ProductRuntimeTests(unittest.TestCase):
         self.assertTrue(report.token_file.exists())
         self.assertEqual(report.overall_status, "warning")
 
+    def test_gather_doctor_report_installed_mode_uses_user_config_not_project_root(self) -> None:
+        root = self._make_project()
+        fake_home = Path(tempfile.mkdtemp())
+        helper_python = root / "helper" / "python"
+        helper_python.parent.mkdir(parents=True, exist_ok=True)
+        helper_python.write_text("#!/bin/sh\n", encoding="utf-8")
+        helper_python.chmod(0o755)
+        with mock.patch.dict(
+            os.environ,
+            {
+                mod.PRODUCT_MODE_ENV: mod.INSTALLED_PRODUCT_MODE,
+                "HOME": str(fake_home),
+                "XDG_CONFIG_HOME": str(fake_home / ".config"),
+                "XDG_DATA_HOME": str(fake_home / ".local" / "share"),
+                "XDG_STATE_HOME": str(fake_home / ".local" / "state"),
+                "SITECTL_RUNTIME_ROOT": str(fake_home / ".local" / "share" / "site-control-kit"),
+                "SITECTL_STATE_FILE": str(fake_home / ".local" / "share" / "site-control-kit" / "state" / "state.json"),
+                "SITECTL_REPORTS_ROOT": str(fake_home / ".local" / "share" / "site-control-kit" / "reports"),
+                "SITECTL_LOG_DIR": str(fake_home / ".local" / "state" / "site-control-kit" / "logs"),
+                "SITECTL_RUNTIME_EVENTS_LOG": str(fake_home / ".local" / "state" / "site-control-kit" / "logs" / "runtime_events.jsonl"),
+                "SITECTL_RUNTIME_ERRORS_LOG": str(fake_home / ".local" / "state" / "site-control-kit" / "logs" / "runtime_errors.jsonl"),
+                "SITECTL_BROWSER_PROFILE": str(fake_home / ".local" / "share" / "site-control-kit" / "browser-profile"),
+                "SITECTL_FIREFOX_PROFILE": str(fake_home / ".local" / "share" / "site-control-kit" / "firefox-profile"),
+                "SITECTL_TOKEN_FILE": str(fake_home / ".config" / "site-control-kit" / "generated_token.txt"),
+                "SITECTL_LOCAL_CONFIG_PATH": str(fake_home / ".config" / "site-control-kit" / "local.yaml"),
+                "TELEGRAM_WORKSPACE_ROOT": str(fake_home / ".local" / "share" / "site-control-kit" / "telegram_workspace"),
+                "TELEGRAM_USERS_REGISTRY_FILE": str(fake_home / ".local" / "share" / "site-control-kit" / "telegram_workspace" / "registry" / "users.json"),
+                "TELEGRAM_API_ACCOUNTS_FILE": str(fake_home / ".local" / "share" / "site-control-kit" / "telegram_workspace" / "registry" / "api_accounts.json"),
+                "TELEGRAM_MANAGED_HELPER_ROOT": str(fake_home / ".local" / "share" / "site-control-kit" / "telegram_workspace" / "managed_helper"),
+                "TELEGRAM_DEFAULT_OUTPUT_DIR": str(fake_home / ".local" / "share" / "site-control-kit" / "reports" / "telegram_exports"),
+                "TELEGRAM_API_COLLECTOR_PYTHON": str(helper_python),
+            },
+            clear=True,
+        ):
+            with (
+                mock.patch.object(mod, "_gtk_runtime_status", return_value="ok"),
+                mock.patch.object(mod, "_hub_reachable", return_value=False),
+            ):
+                report = mod.gather_doctor_report(project_root=root, mutate=True)
+
+        self.assertTrue(report.token_file.exists())
+        self.assertTrue((fake_home / ".config" / "site-control-kit").is_dir())
+        self.assertFalse((root / ".site-control-kit").exists())
+
 
 if __name__ == "__main__":
     unittest.main()
