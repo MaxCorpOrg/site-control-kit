@@ -2377,19 +2377,34 @@
     - `Telegram Control Center` собирается из `site-control-kit`, но ставится как отдельное приложение; репозиторий не требуется обычному оператору на целевой машине
 
 ## Следующий Приоритет
-1. Закрыть Windows artifact на машине/runner с Wine + Windows Python + Inno Setup:
+
+### Must
+1. Если product scope остаётся `Linux-first + Windows installer`, закрыть Windows artifact на машине или runner с Wine + Windows Python + Inno Setup:
    - `./packaging/windows/build_windows_installer.sh 0.1.1 --check-tools`
    - `./packaging/windows/build_windows_installer.sh 0.1.1`
    - затем clean install/uninstall smoke и checksum.
-2. Если оператору снова нужна локальная Linux install state, это уже не product tranche, а operator housekeeping:
+2. Если оператору снова нужна локальная Linux install state на этой машине, это уже не product tranche, а обязательный operator housekeeping:
    - `sudo apt install ./packaging/dist/linux/telegram-control-center_0.1.1_all.deb`
-3. Если нужен настоящий Windows Telegram live workflow, делать отдельный adapter tranche:
+3. Для любого следующего live-pass сохранить текущие safety invariants:
+   - attach gating не ослаблять;
+   - `AK5` и другие спорные профили не использовать live без `attach_status in {exact_window, title_match}`;
+   - historical `repair-historical-artifacts --apply` не запускать без fresh preview и явного решения оператора.
+
+### Should
+1. Если нужен настоящий Windows Telegram live workflow, делать отдельный adapter tranche:
    - launch/open-uri/focus/click/type/screenshot;
    - portable profile lifecycle;
    - safe attach proof для Windows;
    - без ослабления текущего Linux attach gating.
-4. Historical `repair-historical-artifacts --apply` по-прежнему запускать только по явному операторскому решению после fresh preview.
-5. После release tranche возвращаться к deeper thinning `gui.py` / `telegram_gui_helpers.py` и docs normalization.
+2. После release tranche возвращаться к deeper thinning `gui.py` / `telegram_gui_helpers.py`.
+3. Продолжать docs normalization и выравнивание operator/maintainer narrative вокруг standalone install, XDG runtime и canonical production paths.
+
+### Optional
+1. Вернуться к `AK5` Wayland/x11 как к отдельной диагностической задаче только если снова нужен именно этот профиль:
+   - попробовать добить воспроизводимый safe reveal/open path;
+   - либо оставить окончательно как `created + launchable + visible window not confirmed`.
+2. Дополировать templates/examples/release notes, если нужен более продуктовый handoff для другого оператора или другой машины.
+3. По отдельному операторскому решению провести controlled historical `--apply` pass после preview-only проверки.
 
 ## Контрольная Точка
 - Git checkpoint:
