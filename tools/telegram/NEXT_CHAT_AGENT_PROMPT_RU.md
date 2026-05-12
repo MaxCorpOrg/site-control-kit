@@ -764,22 +764,35 @@
     - targeted tests `141 OK`, full discover `294 OK`.
   - desktop shortcut уже создан:
     - `/home/max/Рабочий стол/telegram-control-center.desktop`
-  - чтобы заменить сломанную установленную `0.1.0`, оператору нужно вручную выполнить:
-    - `sudo apt install ./packaging/dist/linux/telegram-control-center_0.1.1_all.deb`
+  - rootful acceptance для `0.1.1` уже закрыт:
+    - `dpkg -s telegram-control-center` подтвердил `Version: 0.1.1`;
+    - `telegram-control-center --release-self-test` был OK из `/opt/site-control-kit/app`;
+    - CLI launch через `telegram-control-center` удерживался до `timeout 10s`;
+    - menu launch поднимал `python3 -m tool_platform.control_center`;
+    - direct desktop launch подтверждён оператором.
   - rootless clean-install smoke уже прошёл через `dpkg-deb -x`:
     - release tree scan OK;
     - extracted `telegram-control-center --release-self-test` OK;
     - config/data/logs/cache создаются вне repo tree;
     - embedded session-runner найден внутри extracted app root.
-  - staged uninstall smoke прошёл на temp-root layout:
-    - удалены app tree, command, desktop entry и icon entries;
-    - реальный rootful `apt remove` всё ещё надо проверить на disposable VM перед external release.
+  - rootful uninstall acceptance тоже закрыт:
+    - `sudo apt remove telegram-control-center` выполнен;
+    - `dpkg -s telegram-control-center` теперь `deinstall ok config-files`;
+    - `dpkg -L telegram-control-center` больше не показывает установленных файлов;
+    - системные install-path удалены, XDG user data сохранены.
+  - важная operator truth:
+    - Linux release closeout закрыт;
+    - на этой машине локальная установленная копия сейчас снята именно из-за acceptance-прохода;
+    - если GUI снова нужен локально, оператору надо вручную выполнить:
+      - `sudo apt install ./packaging/dist/linux/telegram-control-center_0.1.1_all.deb`
   - финальные проверки release pass:
     - `py_compile` / `bash -n` / `desktop-file-validate` / `git diff --check` OK;
     - targeted tests: `141 OK`;
     - full unittest discover: `294 OK`;
     - `tool-platform-panel` стартует как GUI и удерживается до `timeout 10s`;
     - `AK5 profile-health`: `running=false`, `attach_status=no_process`, `display_backend=x11`, live workflow не запускался.
+    - final Linux artifact sha256:
+      - `1bb7315ccb2a03e5261604327e380a82cd77f51f0d3fa4500b5fd516c65f1f60`
   - Windows artifact на этой машине ещё не собран:
     - `./packaging/windows/build_windows_installer.sh 0.1.1 --check-tools` показывает missing `wine`, `winepath`;
     - следующий агент не должен писать, что Windows installer готов, пока не будет Wine/Inno или Windows runner smoke.

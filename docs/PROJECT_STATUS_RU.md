@@ -2264,7 +2264,7 @@
     - `PYTHONPATH="$PWD" python3 -m unittest discover -s tests -p 'test_*.py'` → `293 OK`
     - `git diff --check` → OK
     - `tool-platform profile-health --profile-name AK5 --profile-dir ...` → OK, `running = false`, `attach_status = no_process`, `display_backend = x11`, live workflow не запускался
-- Tranche `Production Release Linux-First + Windows Installer` начат и доведён до Linux package acceptance:
+- Tranche `Production Release Linux-First + Windows Installer` закрыт по Linux-first rootful acceptance:
   - перед релизным слоем текущий AK5/session/historical WIP стабилизирован и зафиксирован отдельным baseline commit:
     - `a025806` `Зафиксировать AK5 и historical readback baseline`
   - добавлен production entrypoint:
@@ -2310,8 +2310,15 @@
     - rootless release tree scan + `--release-self-test` → OK
     - operator desktop shortcut создан helper-командой:
       - `/home/max/Рабочий стол/telegram-control-center.desktop`
-    - `0.1.1` ещё нужно поставить rootfully вручную из обычного терминала:
-      - `sudo apt install ./packaging/dist/linux/telegram-control-center_0.1.1_all.deb`
+  - rootful install/update acceptance для `0.1.1` закрыт:
+    - `dpkg -s telegram-control-center` подтвердил `Version: 0.1.1`
+    - `/usr/bin/telegram-control-center`, menu `.desktop`, icon и `/opt/site-control-kit/app` были на месте
+    - `telegram-control-center --release-self-test` → OK, `production_mode = true`, `repo_root = /opt/site-control-kit/app`
+    - XDG runtime dirs указывали в домашний каталог пользователя, а не в repo
+    - CLI launch через `telegram-control-center` удерживался до `timeout 10s` без traceback
+    - menu launch поднимал `python3 -m tool_platform.control_center`
+    - direct desktop launch был подтверждён оператором; файл ярлыка:
+      - `/home/max/Рабочий стол/telegram-control-center.desktop`
   - rootless clean-install smoke через `dpkg-deb -x` прошёл:
     - release tree scan: OK
     - `telegram-control-center --release-self-test`: OK
@@ -2321,6 +2328,23 @@
   - staged uninstall smoke прошёл:
     - temp-root install layout удаляет `/opt/site-control-kit`, `/usr/bin/telegram-control-center`, `.desktop` и icon entries
     - user data policy остаётся preserve-by-default для реального `apt remove`
+  - rootful uninstall acceptance для `0.1.1` закрыт:
+    - `sudo apt remove telegram-control-center` выполнен на этой машине
+    - `dpkg -s telegram-control-center` теперь показывает `deinstall ok config-files`
+    - `dpkg -L telegram-control-center` → `Package 'telegram-control-center' does not contain any files (!)`
+    - системные пути отсутствуют:
+      - `/usr/bin/telegram-control-center`
+      - `/usr/share/applications/telegram-control-center.desktop`
+      - `/usr/share/icons/hicolor/scalable/apps/telegram-control-center.svg`
+      - `/opt/site-control-kit/app`
+    - пользовательские XDG пути сохранены и это считается ожидаемым поведением:
+      - `~/.config/site-control-kit`
+      - `~/.local/share/site-control-kit`
+      - `~/.local/state/site-control-kit/logs`
+      - `~/.cache/site-control-kit`
+    - user desktop shortcut тоже сохранён как пользовательский файл:
+      - `/home/max/Рабочий стол/telegram-control-center.desktop`
+    - итог: Linux release closeout завершён, но локальная установленная копия сейчас снята именно из-за acceptance-прохода
   - финальные проверки release pass:
     - `python3 -m py_compile ...` → OK
     - `bash -n ...` для packaging/session wrappers → OK
@@ -2330,6 +2354,8 @@
     - `git diff --check` → OK
     - `timeout 10s ./tools/telegram/platform/bin/tool-platform-panel` → expected timeout после успешного GUI start
     - `tool-platform capabilities/doctor/profile-health --profile-name AK5 ...` → OK, Wayland warning сохранён, `AK5 running=false / attach_status=no_process / display_backend=x11`
+    - финальный Linux artifact sha256:
+      - `1bb7315ccb2a03e5261604327e380a82cd77f51f0d3fa4500b5fd516c65f1f60`
   - добавлен Windows packaging pipeline:
     - `packaging/windows/TelegramControlCenter.spec`
     - `packaging/windows/TelegramControlCenter.iss`
@@ -2350,16 +2376,13 @@
    - `./packaging/windows/build_windows_installer.sh 0.1.1 --check-tools`
    - `./packaging/windows/build_windows_installer.sh 0.1.1`
    - затем clean install/uninstall smoke и checksum.
-2. Если нужен настоящий Windows Telegram live workflow, делать отдельный adapter tranche:
+2. Если оператору снова нужна локальная Linux install state, это уже не product tranche, а operator housekeeping:
+   - `sudo apt install ./packaging/dist/linux/telegram-control-center_0.1.1_all.deb`
+3. Если нужен настоящий Windows Telegram live workflow, делать отдельный adapter tranche:
    - launch/open-uri/focus/click/type/screenshot;
    - portable profile lifecycle;
    - safe attach proof для Windows;
    - без ослабления текущего Linux attach gating.
-3. Для Linux release при следующем проходе можно сделать rootful install/uninstall smoke на disposable VM:
-   - `sudo apt install ./packaging/dist/linux/telegram-control-center_0.1.1_all.deb`
-   - запуск из меню приложений;
-   - `telegram-control-center --release-self-test`
-   - `sudo apt remove telegram-control-center`.
 4. Historical `repair-historical-artifacts --apply` по-прежнему запускать только по явному операторскому решению после fresh preview.
 5. После release tranche возвращаться к deeper thinning `gui.py` / `telegram_gui_helpers.py` и docs normalization.
 

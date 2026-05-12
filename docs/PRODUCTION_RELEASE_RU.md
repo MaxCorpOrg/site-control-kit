@@ -63,6 +63,7 @@ sudo apt remove telegram-control-center
 ```
 
 Пользовательские data/config/logs при обычном удалении не удаляются.
+Если после acceptance нужно вернуть приложение на машину, просто повторно установите тот же `.deb`.
 
 ## Runtime Folders
 
@@ -123,9 +124,12 @@ Windows packaging из Linux требует Wine toolchain:
 ## Текущая Release Evidence
 
 - Linux artifact: `packaging/dist/linux/telegram-control-center_0.1.1_all.deb`
-- sha256: считать после финальной сборки командой `sha256sum packaging/dist/linux/telegram-control-center_0.1.1_all.deb`.
+- Accepted artifact sha256 at Linux closeout: `1bb7315ccb2a03e5261604327e380a82cd77f51f0d3fa4500b5fd516c65f1f60`
 - Rootless clean install smoke: OK через `dpkg-deb -x`, release tree scan и `telegram-control-center --release-self-test`.
-- Staged uninstall smoke: OK на temp-root layout; реальный `apt remove` нужно повторить на disposable VM/rootful окружении.
+- Rootful install acceptance: OK для `0.1.1`; self-test идёт из `/opt/site-control-kit/app`, XDG paths указывают в домашний каталог пользователя.
+- CLI/menu launch acceptance: OK; empty-state crash закрыт.
+- Rootful uninstall acceptance: OK; `apt remove` убирает system payload и сохраняет пользовательские XDG data.
+- User desktop shortcut remains a user-owned file across uninstall and may require обычный desktop trust policy среды.
 - Windows installer: not built on this Linux host, blocked by missing `wine`/`winepath`.
 
 ## Security Checklist

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "current_priority": "Production release tranche: Linux-first .deb, production runtime folders, embedded session-runner, release self-test и Windows installer pipeline; Windows live lanes остаются degraded до отдельного adapter tranche.",
+  "current_priority": "Linux rootful release closeout для Telegram Control Center уже закрыт; следующий product priority — Windows installer artifact на Wine/Inno-capable runner, а локальная Linux reinstall state теперь только operator housekeeping.",
   "active_risks": [
     "AK5 на этой Wayland-машине теперь воспроизводимо поднимается через x11 backend (`QT_QPA_PLATFORM=xcb`), но attach gating остаётся строгим: live-safe только при `exact_window` или `title_match`, а preference `display_backend = x11` нельзя терять.",
     "Historical invite/session/combined backfill теперь имеет единый dry-run/report CLI, но живой `--apply` намеренно не запускался и остаётся отдельным операторским решением.",
@@ -9,6 +9,7 @@
     "gui.py стал тоньше, но часть formatting/open-policy и readback/UI-связывания всё ещё полезно дальше выносить поверх jobs.py/workflows.py, чтобы GUI оставался чистым thin client.",
     "Session-runner code теперь встроен как embedded package для production release; private runs/state/configs не должны попадать в git или release artifacts.",
     "Windows installer pipeline добавлен, но на Linux-сборщике нужен Wine/Inno toolchain; без него Windows artifact честно остаётся not-built.",
+    "Локальная установленная Linux-копия на этой машине сейчас снята после rootful uninstall acceptance; если GUI снова нужен локально, оператор должен вручную переустановить `0.1.1`.",
     "Operator entry docs уже добавлены, но templates, examples и часть historical handoff всё ещё требуют дальнейшей нормализации под canonical runtime/telegram.",
     "Project-local AK3 иногда может приходить в состояние running_without_window после старого orphaned процесса; безопасный способ восстановления уже подтверждён как relaunch профиля, а не ослабление attach gating.",
     "Wayland-сессия у оператора усложняет attach-диагностику для новых portable-профилей: X11/AT-SPI сами по себе могут не подтвердить окно, даже когда приложение живо в desktop session.",
@@ -42,6 +43,9 @@
     "session_combined_panel_smoke": "timeout 10s ./tools/telegram/platform/bin/tool-platform-panel",
     "historical_backfill_dry_run": "./tools/telegram/platform/bin/tool-platform repair-historical-artifacts --profile-name AK --profile-dir ~/TelegramPortableAK",
     "linux_deb": "packaging/dist/linux/telegram-control-center_0.1.1_all.deb",
+    "linux_rootful_install_acceptance": "dpkg -s telegram-control-center -> Version 0.1.1, self-test OK from /opt/site-control-kit/app",
+    "linux_rootful_uninstall_acceptance": "dpkg -s telegram-control-center -> deinstall ok config-files; dpkg -L -> no installed files",
+    "linux_desktop_shortcut": "/home/max/Рабочий стол/telegram-control-center.desktop",
     "production_release_doc": "docs/PRODUCTION_RELEASE_RU.md",
     "release_self_test": "telegram-control-center --release-self-test",
     "release_clean_install_smoke": "dpkg-deb -x + packaging/release/check_release_tree.py + extracted telegram-control-center --release-self-test",
@@ -55,5 +59,5 @@
     "ak3_post_refactor_smoke_result": "/tmp/telegram-ak3-post-refactor-smoke-vqh2kbgb/result.json",
     "ak3_product_grade_smoke_result": "/tmp/telegram-ak3-product-grade-smoke-1o3xssvd/result.json"
   },
-  "next_recommended_step": "Дальше закрыть Windows artifact на машине/runner с Wine + Inno или отдельным Windows runner; full Windows live Telegram automation делать отдельным adapter tranche."
+  "next_recommended_step": "Product-wise дальше закрыть Windows artifact на машине/runner с Wine + Inno; если локально снова нужен Linux GUI, оператору отдельно переустановить `packaging/dist/linux/telegram-control-center_0.1.1_all.deb`."
 }
