@@ -62,6 +62,7 @@ Repo-root entrypoint для любого агента: `AGENT_START_HERE.md`.
   - release gate нового Linux baseline на `45c25e4` закрыт;
   - `maxcorp-server` остаётся важным live-smoke host для core-path, но больше не является acceptance caveat;
   - publish blocker по GNOME/App-menu path снят.
+  - итог этого цикла опубликован в `origin/main` как `48abaf551e8997ad07bc6389719c7c1691766c3c`.
 
 ### Обновление 2026-05-11 (Local Windows Smoke Rerun On Existing Machine)
 - На текущей Windows-машине повторно пройден exact narrow smoke для `telegram-username-collector` без новых code changes.

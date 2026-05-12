@@ -25,8 +25,8 @@
 ## Что Это За Ветка
 - Репозиторий: `site-control-kit`
 - Ветка: `main`
-- Активная тема: re-baseline `origin/main` с installed-mode fix и финальным GNOME acceptance для `45c25e4`
-- Ближайший контекст: новый Linux installed-mode gate уже закрыт; не возвращать старый `b740d66` gate и regression с `/opt/.../.site-control-kit` в активный backlog
+- Активная тема: опубликованный re-baseline `origin/main` с installed-mode fix и финальным GNOME acceptance для `45c25e4`
+- Ближайший контекст: `origin/main` уже обновлён до `48abaf551e8997ad07bc6389719c7c1691766c3c`; не возвращать старый `b740d66` gate и regression с `/opt/.../.site-control-kit` в активный backlog
 
 ## Где Мы Закончили Работу
 - На 2026-05-12 `Re-baseline origin/main before publish` уже продвинут до live rerun:
@@ -81,6 +81,10 @@
   - combined verdict:
     - новый Linux installed-mode gate для baseline `45c25e4` закрыт
     - publish blocker по GUI/menu path больше не открыт
+  - publish:
+    - `origin/main` обновлён до `48abaf551e8997ad07bc6389719c7c1691766c3c`
+    - publish сделан из `/home/max/site-control-kit-rebaseline-20260512`
+    - исходный `/home/max/site-control-kit` намеренно не fast-forward-нут, потому что там остаётся локальный `M artifacts/telegram_exports/INDEX.md`
 - Исторический Linux факт, который нельзя потерять при re-baseline:
   - старый installed-mode gate на `b740d66` закрыт со статусом `PASS with warning`;
   - transcript install-run: `/tmp/tgcollector-smoke-logs/install-and-smoke-20260512-091934.log`;

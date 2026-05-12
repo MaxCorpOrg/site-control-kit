@@ -4,7 +4,7 @@
 
 ## Текущий baseline
 
-- Publish target: `origin/main` at `45c25e4fc5641a807a809f173ac0cfeaed798934`
+- Published `origin/main`: `48abaf551e8997ad07bc6389719c7c1691766c3c`
 - Reference-only closure commit: `77ecd4e52e27d42c242b0bed59c8ec2b3a6b2abf`
 - Текущая интеграционная ветка: `rebaseline-origin-main-20260512`
 - Текущий интеграционный worktree: `/home/max/site-control-kit-rebaseline-20260512`
@@ -49,27 +49,24 @@
 
 ## Что осталось
 
-- Новый Linux installed-mode gate на `45c25e4` уже закрыт.
-- Стандартный GNOME/App-menu proof уже подтверждён на текущем Ubuntu GNOME/X11 host после переустановки fixed `.deb`.
-- Старый `maxcorp-server` caveat больше не считать открытым blocker-ом.
-- Следующий рабочий шаг теперь уже организационный:
-  - публиковать состояние `rebaseline-origin-main-20260512` в `origin/main` без затрагивания грязного исходного worktree `/home/max/site-control-kit`
-  - не возвращать старый `b740d66` gate и bug `/opt/.../.site-control-kit` в backlog
+- Обязательных Linux release-blocker-ов больше нет.
+- Новый installed-mode gate на `45c25e4` закрыт и уже опубликован в `origin/main`.
+- Стандартный GNOME/App-menu proof подтверждён.
+- Следующий шаг теперь уже только по новой пользовательской задаче.
 
 ## Следующий узкий контур
 
 ```bash
-git -C /home/max/site-control-kit-rebaseline-20260512 status --short --branch
-git -C /home/max/site-control-kit-rebaseline-20260512 diff --check
-python3 -m unittest discover -s /home/max/site-control-kit-rebaseline-20260512/tests -p 'test_*.py'
+git -C /home/max/site-control-kit fetch origin main
+git -C /home/max/site-control-kit status --short --branch
 ```
 
-Только если потребуется повторить proof уже после публикации, запускать installed-mode команды не из repo root, а из `/tmp`, чтобы локальный checkout не затенял установленный `/opt/...` код.
+Только если потребуется повторить installed-mode proof уже после публикации, запускать команды не из repo root, а из `/tmp`, чтобы локальный checkout не затенял установленный `/opt/...` код.
 
 ## Что не перепутать
 
 - Старый Linux gate больше не считать open blocker.
 - Regression с `/opt/.../.site-control-kit` уже исправлен, не возвращать его в backlog как открытый баг.
 - GNOME/App-menu acceptance уже закрыт на текущем Ubuntu host.
-- Не начинать новый Telegram feature-cycle без отдельной новой задачи пользователя.
+- Исходный `/home/max/site-control-kit` всё ещё локально грязный из-за `artifacts/telegram_exports/INDEX.md`; не путать это с состоянием опубликованного `origin/main`.
 - Не коммитить `.codex/`, `TG_CONTACT/`, `.site-control-kit/`, `dist/`, логи, токены и `artifacts/telegram_exports/INDEX.md`.

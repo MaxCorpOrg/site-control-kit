@@ -1,6 +1,6 @@
 # CODEX_STATE
 
-## 2026-05-12 (Re-baseline `origin/main` Live Smoke + Installed-Mode Fix + GNOME Acceptance)
+## 2026-05-12 (Re-baseline `origin/main` Live Smoke + Installed-Mode Fix + GNOME Acceptance + Published Main)
 
 - Scope:
   - local doc-only commit `77ecd4e` with the old Linux gate closure remains reference-only history
@@ -11,6 +11,8 @@
   - current integration branch: `rebaseline-origin-main-20260512`
   - `origin/main` was fetched and confirmed at `45c25e4fc5641a807a809f173ac0cfeaed798934`
   - `77ecd4e` must not be pushed directly because it sits on top of the old baseline `b740d66`
+  - final published `origin/main` after this cycle:
+    - `48abaf551e8997ad07bc6389719c7c1691766c3c`
 - Historical Linux gate that is already closed:
   - old installed-mode gate on `b740d6603787da701687a4fae421f7c68c94f9a8` is `PASS with warning`
   - transcript: `/tmp/tgcollector-smoke-logs/install-and-smoke-20260512-091934.log`
@@ -60,8 +62,11 @@
   - the new Linux installed-mode gate for baseline `45c25e4` is closed
   - the earlier `maxcorp-server` GUI/menu caveat is resolved by the standard Ubuntu GNOME host run
   - the only remaining warning on the current host is `hub_reachable=0` because the hub was not started there
+- Publish result:
+  - the rebaseline branch state was published to `origin/main`
+  - the dirty original `/home/max/site-control-kit` worktree was intentionally left untouched because it still contains local `artifacts/telegram_exports/INDEX.md` noise
 - Next step:
-  - publish the rebaseline branch state without pulling the dirty original `/home/max/site-control-kit` worktree into the release operation
+  - no Linux installed-mode release blocker remains; continue only from the published `main` baseline unless a new task explicitly reopens this area
 
 ## 2026-05-11 (Local Windows Smoke Rerun On Existing Machine)
 

@@ -100,6 +100,8 @@ find /home/max/telegram_contact_batches/chat_-1002465948544/chains -maxdepth 2 -
 - practical verdict:
   - новый Linux installed-mode gate на `45c25e4` уже закрыт;
   - `maxcorp-server` caveat по обычному GNOME menu path больше не открыт.
+  - итог этого цикла уже опубликован в `origin/main` как `48abaf551e8997ad07bc6389719c7c1691766c3c`
+  - исходный `/home/max/site-control-kit` специально не fast-forward-нут из-за локального `M artifacts/telegram_exports/INDEX.md`
 
 Верхний handoff-факт на 2026-05-10 уже такой:
 - работа велась из fresh checkout `C:\site-control-kit-win-smoke` на `main` commit `3c03277720714ff13745e659923019a3ac2f7a4d`;

@@ -27,7 +27,7 @@
     - `gtk-launch` -> окно реально поднялось
     - запуск через обычное Applications menu подтверждён пользователем ответом `открылось`
 - Новый ближайший следующий шаг теперь такой:
-  - публиковать итог `rebaseline-origin-main-20260512` в `origin/main` без затрагивания грязного исходного worktree `/home/max/site-control-kit`;
+  - считать новый Linux installed-mode gate закрытым и уже опубликованным в `origin/main` (`48abaf551e8997ad07bc6389719c7c1691766c3c`);
   - не возвращать старый Linux gate и regression `/opt/.../.site-control-kit` в текущий backlog;
   - новый Telegram feature-cycle открывать только по отдельной новой задаче.
 - Что до этого не делать:
