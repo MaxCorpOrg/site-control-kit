@@ -1,7 +1,7 @@
 #define MyAppName "Telegram Control Center"
 #define MyAppVersion GetEnv("SITE_CONTROL_KIT_RELEASE_VERSION")
 #if MyAppVersion == ""
-#define MyAppVersion "0.1.0"
+#define MyAppVersion "0.1.1"
 #endif
 #define MyAppPublisher "Site Control Kit Contributors"
 #define MyAppExeName "TelegramControlCenter.exe"

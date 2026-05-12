@@ -35,7 +35,7 @@
 Установка на Ubuntu/Debian:
 
 ```bash
-sudo apt install ./packaging/dist/linux/telegram-control-center_0.1.0_all.deb
+sudo apt install ./packaging/dist/linux/telegram-control-center_0.1.1_all.deb
 ```
 
 Запуск:
@@ -93,13 +93,13 @@ Overrides:
 Windows packaging из Linux требует Wine toolchain:
 
 ```bash
-./packaging/windows/build_windows_installer.sh 0.1.0 --check-tools
-./packaging/windows/build_windows_installer.sh 0.1.0
+./packaging/windows/build_windows_installer.sh 0.1.1 --check-tools
+./packaging/windows/build_windows_installer.sh 0.1.1
 ```
 
 Ожидаемый результат:
 
-- `packaging/dist/windows/TelegramControlCenterSetup-0.1.0.exe`
+- `packaging/dist/windows/TelegramControlCenterSetup-0.1.1.exe`
 
 Если `wine` или Inno Setup compiler отсутствуют, build script завершится диагностическим кодом и не будет имитировать успешный installer.
 
@@ -122,8 +122,8 @@ Windows packaging из Linux требует Wine toolchain:
 
 ## Текущая Release Evidence
 
-- Linux artifact: `packaging/dist/linux/telegram-control-center_0.1.0_all.deb`
-- sha256: считать после финальной сборки командой `sha256sum packaging/dist/linux/telegram-control-center_0.1.0_all.deb`.
+- Linux artifact: `packaging/dist/linux/telegram-control-center_0.1.1_all.deb`
+- sha256: считать после финальной сборки командой `sha256sum packaging/dist/linux/telegram-control-center_0.1.1_all.deb`.
 - Rootless clean install smoke: OK через `dpkg-deb -x`, release tree scan и `telegram-control-center --release-self-test`.
 - Staged uninstall smoke: OK на temp-root layout; реальный `apt remove` нужно повторить на disposable VM/rootful окружении.
 - Windows installer: not built on this Linux host, blocked by missing `wine`/`winepath`.

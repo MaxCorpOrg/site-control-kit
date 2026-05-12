@@ -750,8 +750,22 @@
     - `packaging/windows/build_windows_installer.sh`
     - `docs/PRODUCTION_RELEASE_RU.md`
   - Linux artifact уже собран:
-    - `packaging/dist/linux/telegram-control-center_0.1.0_all.deb`
+    - `packaging/dist/linux/telegram-control-center_0.1.1_all.deb`
     - final sha256 считать после последней сборки, не зашивать внутрь packaged docs
+  - rootful install smoke `0.1.0` выявил production GUI launch bug:
+    - пакет установился и self-test был OK;
+    - GUI падал из-за dev cwd import leakage и empty profile dashboard crash;
+    - fix перенесён в `0.1.1`.
+  - `0.1.1` rootless acceptance:
+    - launcher изолирует `/opt/site-control-kit/app` через `cd` и чистый `PYTHONPATH`;
+    - invite/session dashboards показывают empty-state без выбранного профиля;
+    - extracted GUI smoke держится до `timeout 10s`;
+    - release tree scan + `--release-self-test` OK;
+    - targeted tests `141 OK`, full discover `294 OK`.
+  - desktop shortcut уже создан:
+    - `/home/max/Рабочий стол/telegram-control-center.desktop`
+  - чтобы заменить сломанную установленную `0.1.0`, оператору нужно вручную выполнить:
+    - `sudo apt install ./packaging/dist/linux/telegram-control-center_0.1.1_all.deb`
   - rootless clean-install smoke уже прошёл через `dpkg-deb -x`:
     - release tree scan OK;
     - extracted `telegram-control-center --release-self-test` OK;
@@ -767,7 +781,7 @@
     - `tool-platform-panel` стартует как GUI и удерживается до `timeout 10s`;
     - `AK5 profile-health`: `running=false`, `attach_status=no_process`, `display_backend=x11`, live workflow не запускался.
   - Windows artifact на этой машине ещё не собран:
-    - `./packaging/windows/build_windows_installer.sh 0.1.0 --check-tools` показывает missing `wine`, `winepath`;
+    - `./packaging/windows/build_windows_installer.sh 0.1.1 --check-tools` показывает missing `wine`, `winepath`;
     - следующий агент не должен писать, что Windows installer готов, пока не будет Wine/Inno или Windows runner smoke.
 
 Как работать:

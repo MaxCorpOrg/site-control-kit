@@ -4162,7 +4162,24 @@ if tk is not None:
                 self._load_session_targets(show_feedback=False)
 
         def _refresh_invite_dashboard(self) -> None:
-            bucket = self._selected_profile_workflow_bucket("invite_batch")
+            try:
+                bucket = self._selected_profile_workflow_bucket("invite_batch")
+            except ValueError as exc:
+                if "Telegram-профиль" not in str(exc):
+                    raise
+                self._set_readonly_text(
+                    self.invite_summary_text,
+                    "Добавление контактов\nСначала выбери Telegram-профиль сверху.",
+                )
+                self._set_readonly_text(self.invite_queue_text, "Очередь\nПрофиль не выбран.")
+                self._set_readonly_text(self.invite_added_text, "Добавленные\nПрофиль не выбран.")
+                self._set_readonly_text(self.invite_failed_text, "Ошибки\nПрофиль не выбран.")
+                self._set_readonly_text(
+                    self.invite_history_text,
+                    "История\nПосле выбора профиля здесь появятся invite_batch jobs.",
+                )
+                self.invite_preview_var.set("")
+                return
             action_block = format_invite_operator_action(bucket)
             job_dir_text = self.invite_job_dir_var.get().strip()
             preview_path = self.invite_input_path_var.get().strip()
@@ -4202,7 +4219,20 @@ if tk is not None:
             self.invite_preview_var.set(str(texts.get("preview") or ""))
 
         def _refresh_session_dashboard(self) -> None:
-            workspace = self._selected_profile_workspace(limit=8, timeline_limit=8)
+            try:
+                workspace = self._selected_profile_workspace(limit=8, timeline_limit=8)
+            except ValueError as exc:
+                if "Telegram-профиль" not in str(exc):
+                    raise
+                self._set_readonly_text(
+                    self.session_summary_text,
+                    "Сессии\nСначала выбери Telegram-профиль сверху.",
+                )
+                self._set_readonly_text(
+                    self.session_history_text,
+                    "История сессий\nПосле выбора профиля здесь появятся session_run прогресс и артефакты.",
+                )
+                return
             buckets = workspace.get("workflow_buckets") if isinstance(workspace.get("workflow_buckets"), dict) else {}
             bucket = buckets.get("session_run") if isinstance(buckets.get("session_run"), dict) else {}
             snapshot = workspace.get("session_snapshot") if isinstance(workspace.get("session_snapshot"), dict) else {"status": "missing"}

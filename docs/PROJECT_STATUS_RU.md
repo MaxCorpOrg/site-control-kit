@@ -2294,8 +2294,24 @@
     - helper для user desktop shortcut
     - Debian maintainer scripts
   - собран Linux artifact:
-    - `packaging/dist/linux/telegram-control-center_0.1.0_all.deb`
+    - `packaging/dist/linux/telegram-control-center_0.1.1_all.deb`
     - final sha256 считать после последней сборки, не зашивать внутрь packaged docs
+  - rootful install smoke выявил production-launch bug в `0.1.0`:
+    - `sudo apt install ./packaging/dist/linux/telegram-control-center_0.1.0_all.deb` → пакет установился (`install ok installed`)
+    - `/usr/bin/telegram-control-center`, menu `.desktop` и icon были на месте
+    - `telegram-control-center --release-self-test` из установленного пакета был OK
+    - запуск GUI из установленной команды падал, если команда вызвана из dev repo cwd: Python подхватывал source tree из текущей директории
+    - запуск GUI также падал на empty production profile set: invite/session dashboard требовали выбранный профиль вместо empty-state
+  - fix package `0.1.1`:
+    - Linux launcher теперь делает `cd /opt/site-control-kit/app` и не наследует dev `PYTHONPATH`
+    - session-runner wrapper тоже изолирован на embedded app root
+    - invite/session dashboards показывают empty-state без выбранного профиля, а не падают
+    - rootless extracted GUI smoke: `timeout 10s telegram-control-center` → expected timeout после успешного GUI start
+    - rootless release tree scan + `--release-self-test` → OK
+    - operator desktop shortcut создан helper-командой:
+      - `/home/max/Рабочий стол/telegram-control-center.desktop`
+    - `0.1.1` ещё нужно поставить rootfully вручную из обычного терминала:
+      - `sudo apt install ./packaging/dist/linux/telegram-control-center_0.1.1_all.deb`
   - rootless clean-install smoke через `dpkg-deb -x` прошёл:
     - release tree scan: OK
     - `telegram-control-center --release-self-test`: OK
@@ -2320,7 +2336,7 @@
     - `packaging/windows/make_icon.py`
     - `packaging/windows/build_windows_installer.sh`
   - Windows artifact на этой Linux-машине не собран, потому что toolchain отсутствует:
-    - `./packaging/windows/build_windows_installer.sh 0.1.0 --check-tools` → missing `wine`, `winepath`
+    - `./packaging/windows/build_windows_installer.sh 0.1.1 --check-tools` → missing `wine`, `winepath`
     - это считается честным blocked status, не успешным Windows release artifact
   - release docs добавлены:
     - `docs/PRODUCTION_RELEASE_RU.md`
@@ -2331,8 +2347,8 @@
 
 ## Следующий Приоритет
 1. Закрыть Windows artifact на машине/runner с Wine + Windows Python + Inno Setup:
-   - `./packaging/windows/build_windows_installer.sh 0.1.0 --check-tools`
-   - `./packaging/windows/build_windows_installer.sh 0.1.0`
+   - `./packaging/windows/build_windows_installer.sh 0.1.1 --check-tools`
+   - `./packaging/windows/build_windows_installer.sh 0.1.1`
    - затем clean install/uninstall smoke и checksum.
 2. Если нужен настоящий Windows Telegram live workflow, делать отдельный adapter tranche:
    - launch/open-uri/focus/click/type/screenshot;
@@ -2340,7 +2356,7 @@
    - safe attach proof для Windows;
    - без ослабления текущего Linux attach gating.
 3. Для Linux release при следующем проходе можно сделать rootful install/uninstall smoke на disposable VM:
-   - `sudo apt install ./packaging/dist/linux/telegram-control-center_0.1.0_all.deb`
+   - `sudo apt install ./packaging/dist/linux/telegram-control-center_0.1.1_all.deb`
    - запуск из меню приложений;
    - `telegram-control-center --release-self-test`
    - `sudo apt remove telegram-control-center`.
