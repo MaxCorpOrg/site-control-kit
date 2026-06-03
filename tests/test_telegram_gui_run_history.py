@@ -87,6 +87,32 @@ class RunHistoryServiceTests(unittest.TestCase):
         assert loaded is not None
         self.assertEqual(loaded.chat_ref, "-1001461811598")
         self.assertEqual(loaded.preset_key, "resume_last")
+        self.assertEqual(loaded.operation_kind, "usernames")
+
+    def test_save_and_load_last_session_public_phones(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            service = RunHistoryService(Path(td))
+            session = SessionResumeState(
+                account_key="registry:alice",
+                account_label="alice",
+                chat_ref="-1001461811598",
+                chat_title="BigpharmaMarket",
+                output_path=Path("/tmp/export_phones.md"),
+                surface_key="tdata",
+                surface_label="Telegram Desktop tdata",
+                surface_badge="Primary tdata",
+                preset_key="resume_last",
+                preset_label="Resume Last",
+                created_at="2026-05-04T10:10:00Z",
+                operation_kind="public_phones",
+            )
+            service.save_last_session(session)
+            loaded = service.load_last_session()
+
+        self.assertIsNotNone(loaded)
+        assert loaded is not None
+        self.assertEqual(loaded.operation_kind, "public_phones")
+        self.assertEqual(loaded.output_path, Path("/tmp/export_phones.md"))
 
     def test_save_and_load_pinned_chats(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -136,3 +162,44 @@ class RunHistoryServiceTests(unittest.TestCase):
         self.assertEqual(artifacts_path.name, "artifacts.json")
         self.assertIn("BigpharmaMarket", summary_text)
         self.assertIn("events_jsonl", artifacts_text)
+
+    def test_list_recent_roundtrips_public_phone_record(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            service = RunHistoryService(Path(td))
+            record = RunRecord(
+                run_id="run-phones-1",
+                created_at="2026-05-04T10:00:00Z",
+                surface_key="tdata",
+                surface_label="Telegram Desktop tdata",
+                surface_badge="Primary tdata",
+                preset_key="quick_check",
+                preset_label="Quick Check",
+                account_key="auto:slot-1",
+                account_label="Слот 1",
+                chat_ref="-1001",
+                chat_title="Cosmetology Chat",
+                output_path=Path("/tmp/export_phones.md"),
+                interrupted=False,
+                safe_count=0,
+                usernames_found=0,
+                history_messages_scanned=120,
+                artifacts=ArtifactBundle(
+                    markdown=Path("/tmp/export_phones.md"),
+                    usernames_txt=None,
+                    phones_txt=Path("/tmp/export_phones.txt"),
+                    phones_json=Path("/tmp/export_phones.json"),
+                    summary_json=Path("/tmp/summary.json"),
+                    artifacts_json=Path("/tmp/artifacts.json"),
+                    events_jsonl=Path("/tmp/events.jsonl"),
+                ),
+                operation_kind="public_phones",
+                phones_found=4,
+                status="done",
+            )
+            service.append_run(record)
+            recent = service.list_recent()
+
+        self.assertEqual(len(recent), 1)
+        self.assertEqual(recent[0].operation_kind, "public_phones")
+        self.assertEqual(recent[0].phones_found, 4)
+        self.assertEqual(recent[0].artifacts.phones_txt, Path("/tmp/export_phones.txt"))

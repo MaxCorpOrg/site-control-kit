@@ -21,7 +21,7 @@ class ProgressPanel(Gtk.Box):
         self.summary_label.set_xalign(0)
         self.summary_label.set_wrap(True)
         self.summary_label.add_css_class("card-title")
-        self.summary_meta_label = Gtk.Label(label="Сообщений: 0 | @username: 0")
+        self.summary_meta_label = Gtk.Label(label="Сообщений: 0 | Результатов: 0")
         self.summary_meta_label.set_xalign(0)
         self.summary_meta_label.set_wrap(True)
         self.summary_meta_label.add_css_class("meta")
@@ -33,7 +33,7 @@ class ProgressPanel(Gtk.Box):
         self.progress_bar.set_text("Ожидание")
         self.progress_bar.set_fraction(0.0)
         self.progress_status_label = Gtk.Label(label="Прогресс появится после старта экспорта")
-        self.progress_meta_label = Gtk.Label(label="Сообщений: 0 | @username: 0")
+        self.progress_meta_label = Gtk.Label(label="Сообщений: 0 | Результатов: 0")
         self.progress_hint_label = Gtk.Label(
             label="Долгие чаты сканируются по истории. Кнопка остановки активируется во время сбора."
         )
@@ -221,7 +221,8 @@ class HistoryPanel(Gtk.Box):
             self.resume_label.set_label("Resume Last недоступен")
             return
         self.resume_label.set_label(
-            f"Resume Last: {session.chat_title or session.chat_ref} -> {session.output_path} ({session.surface_badge})"
+            f"Resume Last: {session.chat_title or session.chat_ref} -> {session.output_path} "
+            f"({session.surface_badge}, {session.operation_kind})"
         )
 
     def set_runs(self, runs: list[RunRecord], *, filter_key: str = "all") -> None:
@@ -244,7 +245,7 @@ class HistoryPanel(Gtk.Box):
             summary = run.summary()
             meta = Gtk.Label(
                 label=(
-                    f"{run.created_at} | status={summary.status or 'done'} | @{run.usernames_found} | "
+                    f"{run.created_at} | status={summary.status or 'done'} | {summary.metric_summary()} | "
                     f"safe {run.safe_count} | {summary.duration_sec}s"
                 ),
             )

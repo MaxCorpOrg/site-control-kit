@@ -179,6 +179,7 @@ class TelegramGuiPortableProfilesTests(unittest.TestCase):
                 with (
                     patch.object(portable_profiles_service.subprocess, "Popen", side_effect=fake_popen),
                     patch.object(portable_profiles_service, "_pid_is_alive", side_effect=lambda pid: pid == fake_pid),
+                    patch.object(portable_profiles_service, "_window_title_for_pid", return_value=""),
                 ):
                     launched, already_running = backend.launch_portable_profile_dir(str(status.profile_dir))
                     second, second_running = backend.launch_portable_profile_dir(str(status.profile_dir))

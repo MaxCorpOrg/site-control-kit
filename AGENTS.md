@@ -136,9 +136,18 @@
 
 ## Telegram Артефакты
 - Для Telegram-export не ограничивайтесь только `.md`-отчётом: рядом должны появляться `*_usernames.txt` и `*_usernames.json`.
+- Для `public_phones` рядом должны появляться `*_phones.txt` и `*_phones.json`; V1-источники только такие:
+  - `chat about`
+  - `pinned/history` text
+  - `public bio/about`
+  - не `user.phone`
 - Архивный каталог по умолчанию: `artifacts/telegram_exports`.
 - Индекс путей хранится в `artifacts/telegram_exports/INDEX.md`; если агент сделал новый живой прогон, в ответе нужно назвать эти пути явно.
 - Для текущего `tdata-history-authors` path полный history-run по умолчанию не должен обрываться искусственным timeout: `TELEGRAM_TDATA_EXPORT_TIMEOUT_SEC=0` трактуется как unlimited, а progress/stop UX считается основным способом контроля длинного скана.
+- Для прямого live-запуска `scripts/telegram_tdata_helper.py` не использовать голый системный `python3`, если нужен `tdata` path:
+  - используйте GUI-команду запуска с `TELEGRAM_API_COLLECTOR_PYTHON=/home/max/telegram-api-collector/.venv/bin/python`
+  - либо прямой helper-run через `/home/max/telegram-api-collector/.venv/bin/python`
+  - иначе helper может завершиться сообщением `Missing opentele dependency. Run this helper via the collector venv.`
 
 ## Правило `ё-моё`
 Для Telegram-контура используйте короткое operational mnemonic:

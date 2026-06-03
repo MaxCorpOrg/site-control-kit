@@ -165,6 +165,74 @@ class TelegramGuiBackendFeatureTests(unittest.TestCase):
             self.assertIn(f"Markdown: `{output_path}`", text)
             self.assertIn(f"Action log: `{Path(td) / 'actions.log'}`", text)
 
+    def test_record_run_updates_artifact_index_for_public_phones(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            backend = mod.TelegramGuiBackend(action_log_path=Path(td) / "actions.log")
+            account = mod.AccountOption(
+                key="registry:TG_CONTACT 4",
+                label="TG_CONTACT 4",
+                name="TG_CONTACT 4",
+                token="token",
+                profile_source=str(Path(td) / "profile"),
+                source_kind="registry",
+                sort_key=(0, "tg_contact_4", str(Path(td) / "profile")),
+            )
+            chat = mod.ChatOption(
+                title="Косметолог на Миллион",
+                subtitle="channel | @cosmetologna | resolved target",
+                url="@cosmetologna",
+                fragment="-1001506021345",
+                peer_id="-1001506021345",
+                active=False,
+                visible=True,
+                ordinal=-1,
+                source_kind="resolved",
+            )
+            output_path = Path(td) / "cosmetologna_phones.md"
+            result = mod.ExportResult(
+                output_path=output_path,
+                usernames_txt=None,
+                safe_count=0,
+                history_messages_scanned=400,
+                usernames_found=0,
+                interrupted=False,
+                safe_txt=None,
+                safe_md=None,
+                log_path=Path(td) / "export.log",
+                action_log_path=Path(td) / "actions.log",
+                operation_kind="public_phones",
+                phones_found=7,
+                phones_txt=Path(td) / "cosmetologna_phones.txt",
+                phones_json=Path(td) / "cosmetologna_phones.json",
+                surface_key="tdata",
+                surface_label="Telegram Desktop tdata",
+                surface_badge="Primary tdata",
+                preset_key="quick_check",
+                preset_label="Quick Check",
+                status="done",
+            )
+            index_path = Path(td) / "artifacts" / "telegram_exports" / "INDEX.md"
+
+            with (
+                patch.object(mod, "ARTIFACT_INDEX_PATH", index_path),
+                patch.object(backend.run_history, "ensure"),
+                patch.object(backend.run_history, "append_run"),
+                patch.object(backend.run_history, "save_last_session"),
+            ):
+                recorded = backend._record_run(
+                    account=account,
+                    chat=chat,
+                    result=result,
+                    preset_key="quick_check",
+                    preset_label="Quick Check",
+                )
+
+            text = index_path.read_text(encoding="utf-8")
+            self.assertEqual(recorded.operation_kind, "public_phones")
+            self.assertEqual(recorded.phones_found, 7)
+            self.assertIn(f"Phones TXT: `{Path(td) / 'cosmetologna_phones.txt'}`", text)
+            self.assertIn(f"Phones JSON: `{Path(td) / 'cosmetologna_phones.json'}`", text)
+
     def test_bridge_export_uses_env_token_and_masks_logs(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             backend = mod.TelegramGuiBackend(action_log_path=Path(td) / "actions.log")

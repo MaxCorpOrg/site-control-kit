@@ -76,6 +76,7 @@ class TelegramMembersExportGuiTests(unittest.TestCase):
     def test_export_timeout_default_is_unlimited(self) -> None:
         self.assertIsNone(mod.TDATA_EXPORT_TIMEOUT_SEC)
         self.assertIsNone(mod._tdata_helper_timeout_seconds("export-chat"))
+        self.assertIsNone(mod._tdata_helper_timeout_seconds("export-public-phones"))
 
     def test_preferred_output_dir_creates_missing_parent(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -133,6 +134,54 @@ class TelegramMembersExportGuiTests(unittest.TestCase):
         self.assertEqual(fake_window.progress_status_label.get_label(), "Сканирование остановилось с ошибкой")
         self.assertEqual(fake_window.progress_bar.fraction, 0.0)
         self.assertIn("166750", fake_window.progress_bar.text)
+
+    def test_render_progress_state_uses_public_phone_metric_label(self) -> None:
+        class FakeProgressBar:
+            def __init__(self) -> None:
+                self.fraction = None
+                self.text = ""
+                self.pulsed = False
+
+            def set_fraction(self, value: float) -> None:
+                self.fraction = value
+
+            def set_text(self, value: str) -> None:
+                self.text = value
+
+            def pulse(self) -> None:
+                self.pulsed = True
+
+        class FakeLabel:
+            def __init__(self) -> None:
+                self.value = ""
+
+            def set_label(self, value: str) -> None:
+                self.value = value
+
+            def get_label(self) -> str:
+                return self.value
+
+        state = mod.ExportProgressState(
+            chat_ref="@cosmetologna",
+            messages_scanned=250,
+            phones_found=7,
+            started_at=time.monotonic() - 40,
+            last_update_at=time.monotonic(),
+            operation_kind="public_phones",
+        )
+        fake_window = types.SimpleNamespace(
+            export_progress_state=state,
+            current_controller=None,
+            progress_bar=FakeProgressBar(),
+            progress_status_label=FakeLabel(),
+            progress_meta_label=FakeLabel(),
+            progress_hint_label=FakeLabel(),
+        )
+
+        mod.TelegramMembersExportWindow._render_progress_state(fake_window)
+
+        self.assertIn("7 открытые номера", fake_window.progress_bar.text)
+        self.assertIn("открытые номера: 7", fake_window.progress_meta_label.get_label())
 
     def test_finish_task_error_marks_export_progress_failed(self) -> None:
         class FakeButton:
@@ -521,6 +570,139 @@ class TelegramMembersExportGuiTests(unittest.TestCase):
         self.assertEqual(len(errors), 1)
         self.assertIn("known chat", errors[0])
         self.assertIn("live dialog list", errors[0])
+
+    def test_repeat_last_run_uses_saved_operation_kind(self) -> None:
+        session = mod.SessionResumeState(
+            account_key="registry:alice",
+            account_label="alice",
+            chat_ref="@cosmetologna",
+            chat_title="Cosmetology Chat",
+            output_path=Path("/tmp/export_phones.md"),
+            surface_key="tdata",
+            surface_label="Telegram Desktop tdata",
+            surface_badge="Primary tdata",
+            preset_key="resume_last",
+            preset_label="Resume Last",
+            created_at="2026-05-04T10:00:00Z",
+            operation_kind="public_phones",
+        )
+        preset_ids: list[str] = []
+        applied: list[bool] = []
+        reruns: list[str] = []
+        fake_window = types.SimpleNamespace(
+            last_session=session,
+            preset_combo=types.SimpleNamespace(set_active_id=lambda value: preset_ids.append(value)),
+            _apply_resume_last=lambda: applied.append(True),
+        )
+        with patch.object(mod.TelegramMembersExportWindow, "_run_export_operation", side_effect=lambda _self, value: reruns.append(value)):
+            mod.TelegramMembersExportWindow._repeat_last_run(fake_window)
+
+        self.assertEqual(preset_ids, ["resume_last"])
+        self.assertEqual(applied, [True])
+        self.assertEqual(reruns, ["public_phones"])
+
+    def test_resolve_suggested_chat_target_prefills_field_and_starts_resolution(self) -> None:
+        class FakeEntry:
+            def __init__(self) -> None:
+                self.value = ""
+
+            def set_text(self, value: str) -> None:
+                self.value = value
+
+            def get_text(self) -> str:
+                return self.value
+
+        class FakeLabel:
+            def __init__(self) -> None:
+                self.value = ""
+
+            def set_label(self, value: str) -> None:
+                self.value = value
+
+            def get_label(self) -> str:
+                return self.value
+
+        logs: list[str] = []
+        resolved: list[bool] = []
+        fake_window = types.SimpleNamespace(
+            chat_target_entry=FakeEntry(),
+            chat_title_label=FakeLabel(),
+            chat_url_label=FakeLabel(),
+            _append_log=lambda message: logs.append(message),
+            _resolve_chat_target=lambda: resolved.append(True),
+        )
+
+        mod.TelegramMembersExportWindow._resolve_suggested_chat_target(
+            fake_window,
+            "@cosmetologi_chat",
+            "Косметология",
+        )
+
+        self.assertEqual(fake_window.chat_target_entry.get_text(), "@cosmetologi_chat")
+        self.assertEqual(fake_window.chat_title_label.get_label(), "Косметология")
+        self.assertEqual(fake_window.chat_url_label.get_label(), "@cosmetologi_chat")
+        self.assertEqual(resolved, [True])
+        self.assertIn("Готовая цель: Косметология / @cosmetologi_chat", logs)
+
+    def test_run_export_operation_coerces_phone_output_path(self) -> None:
+        class FakeEntry:
+            def __init__(self, value: str) -> None:
+                self.value = value
+
+            def get_text(self) -> str:
+                return self.value
+
+            def set_text(self, value: str) -> None:
+                self.value = value
+
+        account = mod.AccountOption(
+            key="registry:alice",
+            label="alice",
+            name="alice",
+            token="token",
+            profile_source="/tmp/profile",
+            source_kind="registry",
+            sort_key=(0, "alice", "/tmp/profile"),
+        )
+        chat = mod.ChatOption(
+            title="Cosmetology Chat",
+            subtitle="group",
+            url="@cosmetologna",
+            fragment="@cosmetologna",
+            peer_id="-1001",
+            active=True,
+            visible=True,
+            ordinal=0,
+        )
+        target = mod.BrowserTarget(
+            client_id="tdata:test",
+            tab_id=0,
+            tab_title="Telegram Desktop",
+            tab_url="/tmp/tdata",
+        )
+        worker_runs: list[tuple[str, str]] = []
+        fake_window = types.SimpleNamespace(
+            _selected_account=lambda: account,
+            _selected_chat=lambda: chat,
+            output_entry=FakeEntry("/tmp/cosmetology.md"),
+            _selected_preset_key=lambda: "quick_check",
+            last_session=None,
+            connected_target=target,
+            backend=types.SimpleNamespace(
+                _is_tdata_target=lambda current: current is target,
+                run_export=lambda *args, **kwargs: worker_runs.append((str(args[3]), kwargs["operation_kind"])),
+            ),
+            _show_error=lambda text: (_ for _ in ()).throw(AssertionError(text)),
+            _begin_export_progress=lambda _chat, **kwargs: worker_runs.append(("progress", kwargs["operation_kind"])),
+            _queue_log=lambda _message: None,
+            _handle_export_finished=lambda _result: None,
+            _start_task=lambda **kwargs: kwargs["worker"](),
+        )
+
+        mod.TelegramMembersExportWindow._run_export_operation(fake_window, "public_phones")
+
+        self.assertEqual(fake_window.output_entry.get_text(), "/tmp/cosmetology_phones.md")
+        self.assertEqual(worker_runs, [("progress", "public_phones"), ("/tmp/cosmetology_phones.md", "public_phones")])
 
     def test_save_security_token_inline_reloads_same_profile(self) -> None:
         class FakeLabel:

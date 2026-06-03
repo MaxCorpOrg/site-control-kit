@@ -1,5 +1,69 @@
 # Known Issues And Live Findings
 
+## Самый Новый Stabilization Finding
+Новый самый свежий факт на 2026-06-03 уже не про очередной timeout, а про расхождение между обещанным scope и реальной helper-логикой:
+- `public_phones` V1 в docs/UI уже описывался как сбор из:
+  - `chat about`
+  - `pinned/history` text
+  - `public bio/about`
+- но фактический `scripts/telegram_tdata_helper.py` до этого реально собирал только `user about`;
+- fix уже landed:
+  - helper теперь действительно берёт все три открытых источника;
+  - output markdown в `scripts/export_telegram_members_non_pii.py` теперь не врёт про scope;
+  - regression закрыт тестами `tests/test_telegram_tdata_helper.py` и `tests/test_telegram_export_runtime.py`;
+- verify:
+  - `python3 -m unittest discover -s tests -p 'test_*.py'` -> `318 tests OK`, `2 skipped`
+  - `python3 -m webcontrol --help` -> OK
+  - `python3 -m webcontrol browser --help` -> OK
+  - `python3 -m scripts.telegram_username_collector_launcher --doctor` -> OK
+  - GTK window видим на `DISPLAY=:0`;
+- новый operational finding:
+  - direct helper-run через системный `python3` на этом host не подходит:
+    - `Missing opentele dependency. Run this helper via the collector venv.`
+  - live `public_phones` helper smoke надо запускать через:
+    - `/home/max/telegram-api-collector/.venv/bin/python`;
+- direct AK2 smoke уже сохранён:
+  - `/tmp/ak2_public_phones_smoke_20260603.json`
+  - `/tmp/ak2_public_phones_smoke_20260603.log`
+  - stats:
+    - `history_messages_scanned=50`
+    - `public_phones_kept=3`
+    - `chat_about_scanned=1`
+    - `pinned_messages_scanned=1`
+    - `user_about_scanned=31`;
+- practical finding:
+  - текущий remaining gap теперь снова operational-only:
+    - допройти 4-й full-history chat без manual stop
+    - прогнать 5-й chat
+    - подтвердить GUI run уже без старого workaround на list-timeout
+
+## Самый Новый AK2 Cosmetology Full-History Finding
+Новый самый свежий факт на 2026-06-02 уже не только про quick-check phone smoke, а про реальный long-run на `AK2 live 959756539365`:
+- путь был строго такой:
+  - `GTK GUI -> Primary tdata -> Сбор открытых номеров -> Full History`;
+- первый live-run поймал реальный runtime mismatch:
+  - `export-public-phones` использовал `TELEGRAM_TDATA_LIST_TIMEOUT_SEC`, а не export-timeout;
+  - symptom:
+    - `/home/max/Документы/ак2/живой_тест_номеров/ak2_cosmetology_public_phones_full_history_summary_20260602T110234Z.json`
+    - error: `tdata helper timed out after 30s: export-public-phones`;
+- fix уже landed:
+  - `scripts/telegram_gui/app.py`
+  - `scripts/telegram_gui/ui/window.py`
+  - `tests/test_telegram_members_export_gui.py`
+  - новый rule: все `export-*` helper-команды идут через export-timeout branch;
+- verify fix:
+  - `python3 -m py_compile scripts/telegram_gui/app.py scripts/telegram_gui/ui/window.py tests/test_telegram_members_export_gui.py` -> OK
+  - `python3 -m unittest tests.test_telegram_members_export_gui` -> `44 tests OK`, `2 skipped`;
+- повторный live-run с временным env-workaround `TELEGRAM_TDATA_LIST_TIMEOUT_SEC=21600` и `TELEGRAM_TDATA_PROGRESS_EVERY=100` уже дал:
+  - `Косметология` -> `done`, `phones_found=8`, `history_messages_scanned=1531`, run `20260602T110512Z`
+  - `КОСМЕТОЛОГИЯ ЧАТ` -> `done`, `phones_found=3`, `history_messages_scanned=1383`, run `20260602T111811Z`
+  - `ЧАТ КОСМЕТОЛОГОВ +1` -> `done`, `phones_found=2`, `history_messages_scanned=6238`, run `20260602T113010Z`
+  - `Форум Косметология | Дерматология` -> `partial`, `phones_found=2`, `history_messages_scanned=2211`, run `20260602T113456Z`
+  - `Косметологи Чат | Сообщество Профессионалов` ещё не запускался;
+- practical finding:
+  - current blocker теперь не auth и не GUI startup, а просто незавершённый batch после пользовательской остановки;
+  - следующий safe step: повторить 4-й чат без остановки и потом 5-й чат, затем отдельно подтвердить, что code-fix убирает необходимость в завышенном `TELEGRAM_TDATA_LIST_TIMEOUT_SEC`.
+
 ## Самый Новый Publish Baseline Finding
 Новый самый свежий факт на 2026-05-12 уже не про старый Linux blocker, а про найденный и уже исправленный regression нового baseline:
 - старый Linux installed-mode gate на `b740d66` уже закрыт со статусом `PASS with warning`;

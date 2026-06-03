@@ -29,10 +29,21 @@ except ImportError:
     MsgidDecreaseRetryError = None
 
 try:
-    from telethon.tl.functions.messages import CheckChatInviteRequest, ImportChatInviteRequest
+    from telethon.tl.functions.channels import GetFullChannelRequest
+except ImportError:
+    GetFullChannelRequest = None
+
+try:
+    from telethon.tl.functions.messages import CheckChatInviteRequest, GetFullChatRequest, ImportChatInviteRequest
 except ImportError:
     CheckChatInviteRequest = None
+    GetFullChatRequest = None
     ImportChatInviteRequest = None
+
+try:
+    from telethon.tl.functions.users import GetFullUserRequest
+except ImportError:
+    GetFullUserRequest = None
 
 
 class StopState:
@@ -49,6 +60,7 @@ class StopState:
 _SIGNAL_STOP_STATE = StopState()
 HISTORY_RETRY_LIMIT = 5
 HISTORY_RETRY_BASE_DELAY_SEC = 1.0
+PHONE_CANDIDATE_RE = re.compile(r"(?<![\w/])(?:\+?\d[\d()\-\s]{7,}\d)(?![\w/])")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -81,11 +93,127 @@ def build_parser() -> argparse.ArgumentParser:
     export_parser.add_argument("--history-limit", type=int, default=3000, help="Messages to scan from history (0 = all available).")
     export_parser.add_argument("--progress-every", type=int, default=250, help="Progress line every N scanned messages (0 = disable).")
     export_parser.add_argument("--include-bots", action="store_true", help="Include bot usernames in the result.")
+
+    phones_parser = subparsers.add_parser("export-public-phones", parents=[common], help="Collect public phones from one chat.")
+    phones_parser.add_argument("--chat-ref", required=True, help="Dialog reference returned by list-chats.")
+    phones_parser.add_argument("--history-limit", type=int, default=3000, help="Messages to scan from history (0 = all available).")
+    phones_parser.add_argument("--progress-every", type=int, default=250, help="Progress line every N scanned messages (0 = disable).")
     return parser
 
 
 def _compact(value: Any) -> str:
     return str(value or "").replace("\n", " ").replace("\r", " ").strip()
+
+
+def _message_text(message: Any) -> str:
+    for attr in ("message", "raw_text", "text"):
+        text = _compact(getattr(message, attr, None))
+        if text:
+            return text
+    return ""
+
+
+def _display_name(entity: Any) -> str:
+    parts = [
+        _compact(getattr(entity, "first_name", None)),
+        _compact(getattr(entity, "last_name", None)),
+    ]
+    full_name = " ".join(part for part in parts if part)
+    if full_name:
+        return full_name
+    return (
+        _compact(getattr(entity, "title", None))
+        or _compact(getattr(entity, "username", None))
+        or "—"
+    )
+
+
+def _entity_username(entity: Any) -> str:
+    return _normalize_username(getattr(entity, "username", None))
+
+
+def _normalize_phone(value: str | None) -> str:
+    text = _compact(value)
+    if not text:
+        return ""
+    has_plus = text.startswith("+")
+    digits = re.sub(r"\D+", "", text)
+    if len(digits) == 10:
+        return f"+7{digits}"
+    if len(digits) == 11 and digits.startswith(("7", "8")):
+        return f"+7{digits[1:]}"
+    if has_plus and 11 <= len(digits) <= 15:
+        return f"+{digits}"
+    return ""
+
+
+def _excerpt_around_match(text: str, start: int, end: int, *, max_chars: int = 120) -> str:
+    compact = _compact(text)
+    if not compact:
+        return ""
+    left = max(start - max_chars // 2, 0)
+    right = min(end + max_chars // 2, len(text))
+    excerpt = _compact(text[left:right])
+    if len(excerpt) <= max_chars:
+        return excerpt
+    return excerpt[: max_chars - 1].rstrip() + "…"
+
+
+def _extract_phone_candidates(text: str) -> list[dict[str, str]]:
+    compact = _compact(text)
+    if not compact:
+        return []
+    rows: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for match in PHONE_CANDIDATE_RE.finditer(text):
+        raw_value = _compact(match.group(0))
+        phone = _normalize_phone(raw_value)
+        if not phone or phone in seen:
+            continue
+        seen.add(phone)
+        rows.append(
+            {
+                "phone": phone,
+                "excerpt": _excerpt_around_match(text, match.start(), match.end()),
+            }
+        )
+    return rows
+
+
+def _row_score(row: dict[str, str]) -> tuple[int, int, int]:
+    return (
+        1 if str(row.get("username") or "").strip() not in {"", "—"} else 0,
+        1 if str(row.get("full_name") or "").strip() not in {"", "—"} else 0,
+        len(str(row.get("excerpt") or "").strip()),
+    )
+
+
+def _merge_phone_row(rows_by_phone: dict[str, dict[str, str]], row: dict[str, str]) -> None:
+    phone = str(row.get("phone") or "").strip()
+    if not phone:
+        return
+    current = rows_by_phone.get(phone)
+    if current is None or _row_score(row) > _row_score(current):
+        rows_by_phone[phone] = row
+
+
+def _build_phone_row(
+    *,
+    entity: Any,
+    phone: str,
+    source_kind: str,
+    source_ref: str,
+    excerpt: str,
+) -> dict[str, str]:
+    return {
+        "phone": phone,
+        "username": _entity_username(entity),
+        "full_name": _display_name(entity),
+        "peer_id": _peer_id(entity) or "—",
+        "source_kind": source_kind,
+        "source_ref": source_ref,
+        "excerpt": excerpt or "—",
+    }
 
 
 def _install_signal_handlers(stop_state: StopState) -> None:
@@ -420,6 +548,7 @@ def _emit_progress(
     *,
     messages_scanned: int,
     usernames_found: int,
+    phones_found: int = 0,
     stage: str = "",
     interrupted: bool = False,
     done: bool = False,
@@ -429,6 +558,7 @@ def _emit_progress(
         f"chat={chat_ref}",
         f"messages={int(messages_scanned)}",
         f"usernames={int(usernames_found)}",
+        f"phones={int(phones_found)}",
     ]
     if stage:
         parts.append(f"stage={stage}")
@@ -437,6 +567,54 @@ def _emit_progress(
     if done:
         parts.append("done=1")
     print(" ".join(parts), file=sys.stderr, flush=True)
+
+
+async def _get_full_user_about(client: Any, entity: Any) -> str:
+    if GetFullUserRequest is None or not _is_user_entity(entity):
+        return ""
+    try:
+        payload = await client(GetFullUserRequest(entity))
+    except Exception:
+        return ""
+    full_user = getattr(payload, "full_user", None)
+    return _compact(getattr(full_user, "about", None))
+
+
+async def _get_chat_full_info(client: Any, entity: Any) -> tuple[str, int]:
+    kind = _entity_class_name(entity)
+    try:
+        if "channel" in kind and GetFullChannelRequest is not None:
+            payload = await client(GetFullChannelRequest(entity))
+            full_chat = getattr(payload, "full_chat", None)
+            return (
+                _compact(getattr(full_chat, "about", None)),
+                int(getattr(full_chat, "pinned_msg_id", 0) or 0),
+            )
+        if "chat" in kind and GetFullChatRequest is not None:
+            payload = await client(GetFullChatRequest(int(getattr(entity, "id", 0) or 0)))
+            full_chat = getattr(payload, "full_chat", None)
+            return (
+                _compact(getattr(full_chat, "about", None)),
+                int(getattr(full_chat, "pinned_msg_id", 0) or 0),
+            )
+    except Exception:
+        return "", 0
+    return "", 0
+
+
+async def _get_message_by_id(client: Any, entity: Any, message_id: int) -> Any | None:
+    if int(message_id or 0) <= 0:
+        return None
+    getter = getattr(client, "get_messages", None)
+    if not callable(getter):
+        return None
+    try:
+        payload = await getter(entity, ids=int(message_id))
+    except Exception:
+        return None
+    if isinstance(payload, list):
+        return payload[0] if payload else None
+    return payload
 
 
 def _message_id(message: Any) -> int:
@@ -652,6 +830,145 @@ async def export_chat(
     return {"ok": True, "rows": rows, "usernames": usernames, "stats": stats, "interrupted": interrupted}
 
 
+async def export_public_phones(
+    *,
+    tdata_path: str,
+    session_path: str,
+    passcode: str | None,
+    chat_ref: str,
+    history_limit: int,
+    progress_every: int,
+    stop_state: Any | None = None,
+) -> dict[str, Any]:
+    client = await _open_client(tdata_path, session_path, passcode)
+    rows_by_phone: dict[str, dict[str, str]] = {}
+    sender_cache: dict[int, Any | None] = {}
+    user_about_scanned: set[str] = set()
+    interrupted = False
+    stats = {
+        "history_messages_scanned": 0,
+        "public_phones_kept": 0,
+        "chat_about_scanned": 0,
+        "user_about_scanned": 0,
+        "pinned_messages_scanned": 0,
+    }
+    try:
+        entity = await client.get_entity(int(chat_ref) if str(chat_ref).lstrip("-").isdigit() else chat_ref)
+        message_limit = None if history_limit <= 0 else history_limit
+        _emit_progress(chat_ref, messages_scanned=0, usernames_found=0, phones_found=len(rows_by_phone), stage="start")
+
+        async def _collect_user_about(sender: Any | None) -> None:
+            if sender is None or not _is_user_entity(sender):
+                return
+            peer_id = _peer_id(sender)
+            if not peer_id or peer_id in user_about_scanned:
+                return
+            user_about_scanned.add(peer_id)
+            stats["user_about_scanned"] += 1
+            about_text = await _get_full_user_about(client, sender)
+            for candidate in _extract_phone_candidates(about_text):
+                _merge_phone_row(
+                    rows_by_phone,
+                    _build_phone_row(
+                        entity=sender,
+                        phone=str(candidate["phone"]),
+                        source_kind="user_about",
+                        source_ref=f"user:{peer_id}",
+                        excerpt=str(candidate["excerpt"]),
+                    ),
+                )
+
+        chat_about_text, pinned_msg_id = await _get_chat_full_info(client, entity)
+        if chat_about_text:
+            stats["chat_about_scanned"] = 1
+            chat_source_ref = f"chat:{_peer_id(entity) or _compact(chat_ref) or 'unknown'}"
+            for candidate in _extract_phone_candidates(chat_about_text):
+                _merge_phone_row(
+                    rows_by_phone,
+                    _build_phone_row(
+                        entity=entity,
+                        phone=str(candidate["phone"]),
+                        source_kind="chat_about",
+                        source_ref=chat_source_ref,
+                        excerpt=str(candidate["excerpt"]),
+                    ),
+                )
+
+        pinned_message = await _get_message_by_id(client, entity, pinned_msg_id)
+        if pinned_message is not None:
+            stats["pinned_messages_scanned"] += 1
+            pinned_sender = await _resolve_message_sender(
+                client,
+                getattr(pinned_message, "sender_id", None),
+                getattr(pinned_message, "sender", None),
+                sender_cache,
+            )
+            pinned_owner = pinned_sender if pinned_sender is not None else entity
+            for candidate in _extract_phone_candidates(_message_text(pinned_message)):
+                _merge_phone_row(
+                    rows_by_phone,
+                    _build_phone_row(
+                        entity=pinned_owner,
+                        phone=str(candidate["phone"]),
+                        source_kind="message_text",
+                        source_ref=f"message:{_message_id(pinned_message) or int(pinned_msg_id)}",
+                        excerpt=str(candidate["excerpt"]),
+                    ),
+                )
+            await _collect_user_about(pinned_sender)
+
+        async for msg in _iter_history_messages_with_retry(
+            client,
+            entity,
+            chat_ref=chat_ref,
+            message_limit=message_limit,
+        ):
+            if _stop_requested(stop_state):
+                interrupted = True
+                break
+            stats["history_messages_scanned"] += 1
+            sender_id = getattr(msg, "sender_id", None)
+            sender = await _resolve_message_sender(client, sender_id, getattr(msg, "sender", None), sender_cache)
+            message_owner = sender if sender is not None else entity
+            for candidate in _extract_phone_candidates(_message_text(msg)):
+                _merge_phone_row(
+                    rows_by_phone,
+                    _build_phone_row(
+                        entity=message_owner,
+                        phone=str(candidate["phone"]),
+                        source_kind="message_text",
+                        source_ref=f"message:{_message_id(msg) or stats['history_messages_scanned']}",
+                        excerpt=str(candidate["excerpt"]),
+                    ),
+                )
+            await _collect_user_about(sender)
+            if progress_every > 0 and stats["history_messages_scanned"] % progress_every == 0:
+                _emit_progress(
+                    chat_ref,
+                    messages_scanned=stats["history_messages_scanned"],
+                    usernames_found=0,
+                    phones_found=len(rows_by_phone),
+                    stage="scan",
+                )
+        stats["public_phones_kept"] = len(rows_by_phone)
+        _emit_progress(
+            chat_ref,
+            messages_scanned=stats["history_messages_scanned"],
+            usernames_found=0,
+            phones_found=len(rows_by_phone),
+            interrupted=interrupted,
+            done=True,
+        )
+    finally:
+        await client.disconnect()
+
+    rows = list(rows_by_phone.values())
+    rows.sort(key=lambda item: (str(item.get("username") or "—") == "—", str(item.get("full_name") or "—").lower(), str(item.get("phone") or "")))
+    phones = [str(item.get("phone") or "").strip() for item in rows if str(item.get("phone") or "").strip()]
+    stats["interrupted"] = 1 if interrupted else 0
+    return {"ok": True, "rows": rows, "phones": phones, "stats": stats, "interrupted": interrupted}
+
+
 async def _async_main(args: argparse.Namespace) -> dict[str, Any]:
     session_path = str(Path(args.session).expanduser().resolve())
     tdata_path = str(Path(args.tdata).expanduser().resolve())
@@ -687,6 +1004,16 @@ async def _async_main(args: argparse.Namespace) -> dict[str, Any]:
             history_limit=int(args.history_limit),
             progress_every=int(args.progress_every),
             include_bots=bool(args.include_bots),
+            stop_state=_SIGNAL_STOP_STATE,
+        )
+    if args.command == "export-public-phones":
+        return await export_public_phones(
+            tdata_path=tdata_path,
+            session_path=session_path,
+            passcode=args.passcode,
+            chat_ref=str(args.chat_ref),
+            history_limit=int(args.history_limit),
+            progress_every=int(args.progress_every),
             stop_state=_SIGNAL_STOP_STATE,
         )
     raise SystemExit(f"Unsupported command: {args.command}")

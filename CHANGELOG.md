@@ -1,5 +1,32 @@
 # Changelog
 
+## 2026-06-03
+
+### Стабилизация `public_phones` И Подготовка К Следующему AK2 Тесту
+
+- Закрыт функциональный разрыв между docs/UI и helper-реализацией:
+  - `scripts/telegram_tdata_helper.py` теперь реально собирает открытые номера из `chat about`, `pinned/history` message text и `public bio/about`;
+  - раньше helper фактически брал только `user about`, хотя UI и handoff уже обещали больше.
+- В `scripts/export_telegram_members_non_pii.py` исправлен текст итогового markdown, чтобы он соответствовал фактическим источникам V1.
+- Расширены тесты:
+  - `tests/test_telegram_tdata_helper.py`
+  - `tests/test_telegram_export_runtime.py`
+- Проверки этого прохода:
+  - `python3 -m unittest discover -s tests -p 'test_*.py'` -> `318 tests OK`, `2 skipped`
+  - `python3 -m webcontrol --help` -> OK
+  - `python3 -m webcontrol browser --help` -> OK
+  - `python3 -m scripts.telegram_username_collector_launcher --doctor` -> OK
+  - GTK GUI видим на `DISPLAY=:0`
+  - direct live smoke через collector venv:
+    - `/tmp/ak2_public_phones_smoke_20260603.json`
+    - `/tmp/ak2_public_phones_smoke_20260603.log`
+    - `history_messages_scanned=50`
+    - `public_phones_kept=3`
+    - `chat_about_scanned=1`
+    - `pinned_messages_scanned=1`
+    - `user_about_scanned=31`
+- Handoff/docs синхронизированы под текущий `AK2 -> Primary tdata -> public_phones` baseline.
+
 ## 2026-05-11
 
 ### Windows Core Smoke And End-Of-Day Checkpoint

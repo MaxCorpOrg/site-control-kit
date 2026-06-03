@@ -59,6 +59,9 @@ from .models import (
     ProgressEvent,
     RunRecord,
     SessionResumeState,
+    normalize_operation_kind,
+    operation_metric_count,
+    operation_metric_label,
 )
 from .services.artifact_index import append_index_entry, build_artifact_bundle
 from .services.portable_profiles import PortableProfileRegistry, portable_profile_kind, portable_profile_label
@@ -663,6 +666,23 @@ def parse_key_value_output(stdout: str) -> dict[str, str]:
     return payload
 
 
+def operation_busy_status(operation_kind: str) -> str:
+    if normalize_operation_kind(operation_kind) == "public_phones":
+        return "Идёт сбор открытых номеров..."
+    return "Идёт сбор @username..."
+
+
+def operation_output_path(path: Path, operation_kind: str) -> Path:
+    candidate = path.expanduser()
+    suffix = candidate.suffix if candidate.suffix else ".md"
+    candidate = candidate.with_suffix(suffix)
+    if normalize_operation_kind(operation_kind) != "public_phones":
+        return candidate
+    if candidate.stem.endswith("_phones"):
+        return candidate
+    return candidate.with_name(f"{candidate.stem}_phones{candidate.suffix}")
+
+
 def parse_progress_line(message: str) -> dict[str, str] | None:
     text = str(message or "").strip()
     if not text.startswith("PROGRESS "):
@@ -692,6 +712,9 @@ def _latest_progress_summary(lines: list[str]) -> str:
             continue
         messages = _progress_int(payload, "messages")
         usernames = _progress_int(payload, "usernames")
+        phones = _progress_int(payload, "phones")
+        if phones > 0:
+            return f"{messages} сообщений, {phones} открытых номеров"
         return f"{messages} сообщений, {usernames} @username"
     return ""
 
@@ -1426,7 +1449,7 @@ def _selected_helper_python() -> tuple[str, Path] | None:
 
 
 def _tdata_helper_timeout_seconds(command: str) -> int | None:
-    return TDATA_EXPORT_TIMEOUT_SEC if command == "export-chat" else TDATA_LIST_TIMEOUT_SEC
+    return TDATA_EXPORT_TIMEOUT_SEC if str(command or "").startswith("export-") else TDATA_LIST_TIMEOUT_SEC
 
 
 def _preferred_output_dir(current_value: str | None = None) -> Path:

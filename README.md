@@ -8,20 +8,41 @@
 - Расширение браузера (Manifest V3) для выполнения команд в реальных вкладках.
 - Подробная документация для пользователя и ИИ-агентов сопровождения.
 
-## Текущий Релизный Статус
+## Текущий Статус Проекта
 
-Последняя опубликованная продуктовая точка: `main` на commit `3412ccd26d5ebcd3710a50b8f6c0b5b9696a6447`.
+Актуальная рабочая точка на 2026-06-03:
+- основной Telegram-операторский путь: `GTK GUI -> Primary tdata`;
+- в GUI есть два основных действия:
+  - `Собрать @username`
+  - `Сбор открытых номеров`;
+- `public_phones` V1 теперь реально собирает открытые номера из:
+  - `chat about`
+  - `pinned/history` message text
+  - `public bio/about`
+  - не из приватного `user.phone`.
 
 Что уже подтверждено:
-- Linux-first `.deb` пакет для `Telegram Username Collector` собирается из fresh GitHub clone.
-- Payload пакета содержит launchers, desktop entry, icons и companion extension zip.
-- Simulated installed-mode через `dpkg-deb -x` подтверждает `mode=installed`, XDG runtime paths, desktop shortcut и GTK GUI startup.
+- полный `unittest` suite: `318 tests OK`, `2 skipped`;
+- `python3 -m webcontrol --help` -> OK;
+- `python3 -m webcontrol browser --help` -> OK;
+- `python3 -m scripts.telegram_username_collector_launcher --doctor` -> OK;
+- GTK GUI видим на `DISPLAY=:0`;
+- узкий live smoke `export-public-phones` на AK2 через collector venv:
+  - `history_messages_scanned=50`
+  - `public_phones_kept=3`
+  - `chat_about_scanned=1`
+  - `pinned_messages_scanned=1`
+  - `user_about_scanned=31`
+  - артефакты: `/tmp/ak2_public_phones_smoke_20260603.{json,log,session}`.
 
-Что ещё не закрыто:
-- clean Ubuntu 24.04 VM smoke с настоящим `sudo apt install`;
-- проверка реальных `/usr/bin`, `/opt/telegram-username-collector`, пользовательских XDG-каталогов и запуска из Applications menu.
+Что осталось:
+- допройти через GUI `Full History` по незавершённым cosmetology-чатам:
+  - `Форум Косметология | Дерматология`
+  - `Косметологи Чат | Сообщество Профессионалов`;
+- отдельно подтвердить тот же проход без ручной остановки и без старого runtime workaround;
+- `public_phones` V1 по-прежнему доступен только для `Primary tdata`.
 
-Подробный checkpoint: [docs/checkpoints/CHECKPOINT_2026-05-11.md](docs/checkpoints/CHECKPOINT_2026-05-11.md).
+Подробный checkpoint: [docs/checkpoints/CHECKPOINT_2026-06-03_СТАБИЛИЗАЦИЯ_PUBLIC_PHONES.md](docs/checkpoints/CHECKPOINT_2026-06-03_СТАБИЛИЗАЦИЯ_PUBLIC_PHONES.md).
 
 ## Быстрый Вход В Браузерный Контур
 
@@ -34,6 +55,33 @@ start-hub.cmd
 browser.cmd status
 browser.cmd tabs
 browser.cmd open https://example.com
+```
+
+## Быстрый Вход В Telegram GUI
+
+Текущий операторский запуск:
+
+```bash
+cd /home/max/site-control-kit
+TELEGRAM_API_COLLECTOR_PYTHON=/home/max/telegram-api-collector/.venv/bin/python DISPLAY=:0 python3 scripts/telegram_members_export_gui.py
+```
+
+Что важно:
+- не менять `default_user` без явной причины;
+- для live `tdata` helper-path использовать collector venv, а не голый системный `python3`;
+- текущий живой профиль для оператора: `AK2 live 959756539365`;
+- текущий источник `tdata`: `/home/max/Документы/ак2/у/959756539365/tdata`.
+
+Прямой helper smoke для `public_phones`:
+
+```bash
+cd /home/max/site-control-kit
+/home/max/telegram-api-collector/.venv/bin/python scripts/telegram_tdata_helper.py export-public-phones \
+  --tdata "/home/max/Документы/ак2/у/959756539365/tdata" \
+  --session /tmp/ak2_public_phones_smoke.session \
+  --chat-ref @cosmetologi_chat \
+  --history-limit 50 \
+  --progress-every 25
 ```
 
 ## Для Агентов И Автоматизации
@@ -58,11 +106,15 @@ browser.cmd open https://example.com
 3. Проверить `browser.cmd tabs`.
 4. Только потом выполнять реальную задачу в браузере.
 
-## Текущий Статус
+## Важные Точки Входа
 
-- Linux-first product path уже упакован в `.deb`; детали в [docs/LINUX_PRODUCT_INSTALL_RU.md](docs/LINUX_PRODUCT_INSTALL_RU.md).
-- На текущей Windows-машине узкий smoke для `telegram-username-collector` повторно подтверждён в режиме `legacy-adopted`.
-- Последний end-of-day checkpoint: [docs/checkpoints/CHECKPOINT_2026-05-11.md](docs/checkpoints/CHECKPOINT_2026-05-11.md).
+- [AGENT_START_HERE.md](AGENT_START_HERE.md) — короткая repo-root точка продолжения.
+- [CODEX_STATE.md](CODEX_STATE.md) — последний handoff по факту.
+- [docs/PROJECT_STATUS_RU.md](docs/PROJECT_STATUS_RU.md) — сводка текущего состояния на русском.
+- `scripts/telegram_members_export_gui.py` — основной GTK GUI операторский вход.
+- `scripts/telegram_tdata_helper.py` — прямой `tdata` helper для `list/resolve/export`.
+- `scripts/export_telegram_members_non_pii.py` — sidecar/markdown export contract.
+- [NEXT_STEPS.md](NEXT_STEPS.md) — что делать следующим узким шагом.
 
 ## Основные сценарии
 - Открывать нужные URL во вкладках.

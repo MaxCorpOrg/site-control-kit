@@ -13,6 +13,15 @@ globals().update(
     }
 )
 
+SUGGESTED_CHAT_TARGETS: tuple[tuple[str, str], ...] = (
+    ("Косметология", "@cosmetologi_chat"),
+    ("КОСМЕТОЛОГИЯ ЧАТ", "@cosmetology_chat"),
+    ("ЧАТ КОСМЕТОЛОГОВ +1", "@cosmetology_help"),
+    ("Форум Косметология | Дерматология", "@chatkosmetologa"),
+    ("Косметологи Чат | Сообщество Профессионалов", "@kosmetologi_chat_ru"),
+)
+
+
 class TelegramMembersExportWindow(Gtk.ApplicationWindow):
     def __init__(self, app: Gtk.Application, backend: TelegramGuiBackend):
         super().__init__(application=app, title=WINDOW_TITLE)
@@ -340,8 +349,12 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
         box.append(self._meta_label("Откроется системный диалог: там выбираются и папка, и имя итогового файла."))
 
         actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        actions.append(self._button("Собрать @username", self._run_export, accent=True))
-        actions.append(self._button("Повторить последний запуск", self._repeat_last_run))
+        self.username_export_button = self._button("Собрать @username", self._run_export, accent=True)
+        self.public_phones_button = self._button("Сбор открытых номеров", self._run_public_phone_export)
+        self.repeat_last_button = self._button("Повторить последний запуск", self._repeat_last_run)
+        actions.append(self.username_export_button)
+        actions.append(self.public_phones_button)
+        actions.append(self.repeat_last_button)
         self.stop_button.connect("clicked", lambda *_args: self._request_stop())
         self.stop_button.add_css_class("subtle-button")
         self.stop_button.set_sensitive(False)
@@ -517,18 +530,46 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
         button.add_css_class("accent-button" if accent else "subtle-button")
         return button
 
+    def _refresh_export_actions(self) -> None:
+        busy = self.current_task is not None
+        username_enabled = not busy
+        phone_enabled = (
+            not busy
+            and self.connected_target is not None
+            and self.backend._is_tdata_target(self.connected_target)
+        )
+        repeat_enabled = not busy and self.last_session is not None
+
+        if hasattr(self, "username_export_button"):
+            self.username_export_button.set_sensitive(username_enabled)
+            self.username_export_button.set_tooltip_text(None if username_enabled else "Дождитесь завершения текущей операции.")
+        if hasattr(self, "public_phones_button"):
+            self.public_phones_button.set_sensitive(phone_enabled)
+            if phone_enabled:
+                tooltip = "Только публичные номера из bio/about профилей авторов чата."
+            elif busy:
+                tooltip = "Дождитесь завершения текущей операции."
+            elif self.connected_target is None:
+                tooltip = "V1 доступна только после подключения Primary tdata."
+            else:
+                tooltip = "V1 доступна только для Primary tdata."
+            self.public_phones_button.set_tooltip_text(tooltip)
+        if hasattr(self, "repeat_last_button"):
+            self.repeat_last_button.set_sensitive(repeat_enabled)
+            self.repeat_last_button.set_tooltip_text(None if repeat_enabled else "Нет сохранённого последнего запуска.")
+
     def _reset_progress_display(self) -> None:
         self.export_progress_state = None
         self.progress_bar.set_fraction(0.0)
         self.progress_bar.set_text("Ожидание")
         self.progress_status_label.set_label("Прогресс появится после старта экспорта")
-        self.progress_meta_label.set_label("Сообщений: 0 | @username: 0")
+        self.progress_meta_label.set_label("Сообщений: 0 | Результатов: 0")
         self.progress_hint_label.set_label(
             "Долгие чаты сканируются по истории. Кнопка остановки активируется во время сбора."
         )
         self.stop_button.set_sensitive(False)
 
-    def _begin_export_progress(self, chat: ChatOption) -> None:
+    def _begin_export_progress(self, chat: ChatOption, *, operation_kind: str = "usernames") -> None:
         now = time.monotonic()
         history_limit, _timeout_sec = self.backend.preset_limits(self._selected_preset_key())
         self.export_progress_state = ExportProgressState(
@@ -538,6 +579,7 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
             stage="start",
             failed=False,
             total_messages_hint=_positive_int(history_limit),
+            operation_kind=normalize_operation_kind(operation_kind),
         )
         self.stop_button.set_sensitive(True)
         self.run_stack.set_visible_child(self.progress_panel)
@@ -596,7 +638,14 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
 
     def _consume_progress_message(self, message: str) -> None:
         event = ProgressEvent.from_progress_line(parse_progress_line(message))
-        if not event.stage and not event.done and not event.interrupted and event.messages_scanned == 0 and event.usernames_found == 0:
+        if (
+            not event.stage
+            and not event.done
+            and not event.interrupted
+            and event.messages_scanned == 0
+            and event.usernames_found == 0
+            and event.phones_found == 0
+        ):
             return
         state = self.export_progress_state
         now = time.monotonic()
@@ -606,11 +655,15 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
                 started_at=now,
                 last_update_at=now,
                 total_messages_hint=_positive_int(self.backend.preset_limits(self._selected_preset_key())[0]),
+                operation_kind="public_phones" if event.phones_found > 0 and event.usernames_found == 0 else "usernames",
             )
             self.export_progress_state = state
         state.chat_ref = event.chat_ref or state.chat_ref
         state.messages_scanned = max(state.messages_scanned, event.messages_scanned)
         state.usernames_found = max(state.usernames_found, event.usernames_found)
+        state.phones_found = max(state.phones_found, event.phones_found)
+        if event.phones_found > 0 and event.usernames_found == 0:
+            state.operation_kind = "public_phones"
         state.last_update_at = now
         state.interrupted = event.interrupted
         state.done = event.done
@@ -626,6 +679,12 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
             return
         elapsed = max(int(time.monotonic() - state.started_at), 0)
         since_update = max(int(time.monotonic() - state.last_update_at), 0)
+        metric_label = operation_metric_label(state.operation_kind)
+        metric_count = operation_metric_count(
+            operation_kind=state.operation_kind,
+            usernames_found=state.usernames_found,
+            phones_found=state.phones_found,
+        )
         if state.total_messages_hint and state.messages_scanned > 0:
             fraction = min(state.messages_scanned / max(state.total_messages_hint, 1), 1.0)
             self.progress_bar.set_fraction(fraction)
@@ -635,7 +694,7 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
             self.progress_bar.set_fraction(0.0)
         else:
             self.progress_bar.set_fraction(1.0)
-        self.progress_bar.set_text(f"{state.messages_scanned} сообщений / {state.usernames_found} @username")
+        self.progress_bar.set_text(f"{state.messages_scanned} сообщений / {metric_count} {metric_label}")
 
         if state.done and state.interrupted:
             status = "Сбор остановлен пользователем"
@@ -657,7 +716,7 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
             else "Лимит истории: полный доступный чат"
         )
         self.progress_meta_label.set_label(
-            f"Сообщений: {state.messages_scanned} | @username: {state.usernames_found} | Время: {_format_duration(elapsed)} | {scope}"
+            f"Сообщений: {state.messages_scanned} | {metric_label}: {metric_count} | Время: {_format_duration(elapsed)} | {scope}"
         )
         self.progress_hint_label.set_label(
             f"Последнее обновление: {since_update}s назад. Чат: {state.chat_ref or '—'}."
@@ -666,7 +725,7 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
         if progress_panel is not None and hasattr(progress_panel, "set_summary"):
             progress_panel.set_summary(
                 status,
-                f"messages={state.messages_scanned} | safe-progress={state.usernames_found} | elapsed={_format_duration(elapsed)}",
+                f"messages={state.messages_scanned} | results={metric_count} {metric_label} | elapsed={_format_duration(elapsed)}",
             )
 
     def _tick_progress(self) -> bool:
@@ -880,6 +939,9 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
             self.connection_status.set_label("Primary ready")
         else:
             self.connection_status.set_label("Not connected")
+        refresh = getattr(self, "_refresh_export_actions", None)
+        if callable(refresh):
+            refresh()
 
     def _queue_deep_preflight(self, account: AccountOption) -> None:
         self._preflight_revision += 1
@@ -1402,10 +1464,13 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
         if self.recent_runs:
             last = self.recent_runs[0]
             self.last_run_label.set_label(
-                f"Последний запуск: {last.chat_title or last.chat_ref} | {last.summary().status} | safe {last.safe_count}"
+                f"Последний запуск: {last.chat_title or last.chat_ref} | {last.summary().status} | {last.summary().metric_summary()}"
             )
         else:
             self.last_run_label.set_label("Последний запуск ещё не выполнялся")
+        refresh = getattr(self, "_refresh_export_actions", None)
+        if callable(refresh):
+            refresh()
 
     def _on_preset_changed(self) -> None:
         if self._selected_preset_key() == "resume_last":
@@ -1450,6 +1515,17 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
             if child is None:
                 break
             self.quick_chat_box.remove(child)
+        if SUGGESTED_CHAT_TARGETS:
+            self.quick_chat_box.append(self._meta_label("Готовые чаты: косметология"))
+            for chat_title, chat_target in SUGGESTED_CHAT_TARGETS:
+                button = Gtk.Button(label=chat_title)
+                button.add_css_class("subtle-button")
+                button.set_tooltip_text(f"Быстро резолвить и открыть: {chat_target}")
+                button.connect(
+                    "clicked",
+                    lambda _btn, target=chat_target, title=chat_title: self._resolve_suggested_chat_target(target, title),
+                )
+                self.quick_chat_box.append(button)
         rows: list[tuple[str, str, str]] = []
         seen: set[tuple[str, str]] = set()
         for row in self.pinned_chats:
@@ -1467,8 +1543,10 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
             if len(rows) >= 6:
                 break
         if not rows:
-            self.quick_chat_box.append(self._meta_label("Быстрые чаты появятся после первых запусков или закрепления."))
+            if not SUGGESTED_CHAT_TARGETS:
+                self.quick_chat_box.append(self._meta_label("Быстрые чаты появятся после первых запусков или закрепления."))
             return
+        self.quick_chat_box.append(self._meta_label("Pinned / recent"))
         for account_key, chat_ref, chat_title in rows:
             button = Gtk.Button(label=chat_title or chat_ref)
             button.add_css_class("subtle-button")
@@ -1484,6 +1562,14 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
             return
         self.chat_title_label.set_label(chat_title or chat_ref)
         self.chat_url_label.set_label(chat_ref)
+
+    def _resolve_suggested_chat_target(self, chat_target: str, chat_title: str) -> None:
+        self.chat_target_entry.set_text(str(chat_target or "").strip())
+        if chat_title:
+            self.chat_title_label.set_label(chat_title)
+        self.chat_url_label.set_label(str(chat_target or "").strip())
+        self._append_log(f"Готовая цель: {chat_title or chat_target} / {chat_target}")
+        self._resolve_chat_target()
 
     def _merge_known_chat_rows(self, chats: list[ChatOption]) -> list[ChatOption]:
         merged = list(chats)
@@ -1592,6 +1678,9 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
         self.security_form_revealer.set_reveal_child(False)
         self._reset_progress_display()
         self._render_chat_rows()
+        refresh = getattr(self, "_refresh_export_actions", None)
+        if callable(refresh):
+            refresh()
         if account is None:
             return
         account_profile_key = _normalize_path_key(account.portable_profile_dir or account.profile_source)
@@ -1749,6 +1838,13 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
         chooser.present()
 
     def _run_export(self) -> None:
+        TelegramMembersExportWindow._run_export_operation(self, "usernames")
+
+    def _run_public_phone_export(self) -> None:
+        TelegramMembersExportWindow._run_export_operation(self, "public_phones")
+
+    def _run_export_operation(self, operation_kind: str = "usernames") -> None:
+        operation_kind = normalize_operation_kind(operation_kind)
         account = self._selected_account()
         chat = self._selected_chat()
         output_text = self.output_entry.get_text().strip()
@@ -1759,11 +1855,15 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
                 self.output_entry.set_text(output_text)
             if chat is None:
                 chat = self._resume_chat_option(self.last_session)
+            operation_kind = normalize_operation_kind(self.last_session.operation_kind or operation_kind)
         if account is None or chat is None:
             self._show_error("Выберите профиль и чат.")
             return
         if self.connected_target is None:
             self._show_error("Сначала подключите Telegram и загрузите список чатов.")
+            return
+        if operation_kind == "public_phones" and not self.backend._is_tdata_target(self.connected_target):
+            self._show_error("Сбор открытых номеров v1 доступен только для Primary tdata.")
             return
         if self.backend._is_tdata_target(self.connected_target) and getattr(chat, "source_kind", "live") == "known":
             self._show_error(
@@ -1774,9 +1874,10 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
         if not output_text:
             self._show_error("Выберите итоговый .md файл через системный диалог.")
             return
-        output_path = Path(output_text).expanduser()
+        output_path = operation_output_path(Path(output_text).expanduser(), operation_kind)
+        self.output_entry.set_text(str(output_path))
         controller = TaskController()
-        self._begin_export_progress(chat)
+        self._begin_export_progress(chat, operation_kind=operation_kind)
 
         def worker() -> ExportResult:
             return self.backend.run_export(
@@ -1787,11 +1888,12 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
                 emit=self._queue_log,
                 controller=controller,
                 preset_key=preset_key,
+                operation_kind=operation_kind,
             )
 
         self._start_task(
             task_name="export",
-            busy_status="Идёт сбор @username...",
+            busy_status=operation_busy_status(operation_kind),
             worker=worker,
             on_success=self._handle_export_finished,
             controller=controller,
@@ -1811,7 +1913,7 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
             return
         self.preset_combo.set_active_id(self.last_session.preset_key or "resume_last")
         self._apply_resume_last()
-        self._run_export()
+        TelegramMembersExportWindow._run_export_operation(self, self.last_session.operation_kind)
 
     def _open_last_artifacts(self) -> None:
         if self.last_export_result is not None:
@@ -1837,6 +1939,9 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
         self._append_log(f"Клиент готов: {target.client_id} / tab {target.tab_id}")
         self._refresh_preflight(schedule_deep=True)
         self._refresh_chats()
+        refresh = getattr(self, "_refresh_export_actions", None)
+        if callable(refresh):
+            refresh()
 
     def _handle_chats_loaded(self, payload: tuple[BrowserTarget, list[ChatOption]]) -> None:
         target, chats = payload
@@ -1869,6 +1974,9 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
         refresh = getattr(self, "_refresh_preflight", None)
         if callable(refresh):
             refresh()
+        refresh_actions = getattr(self, "_refresh_export_actions", None)
+        if callable(refresh_actions):
+            refresh_actions()
 
     def _handle_chat_opened(self, target: BrowserTarget) -> None:
         self.connected_target = target
@@ -1881,20 +1989,39 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
         else:
             self.hero_status.set_label("Чат открыт в Telegram")
         self._refresh_preflight()
+        refresh = getattr(self, "_refresh_export_actions", None)
+        if callable(refresh):
+            refresh()
 
     def _handle_export_finished(self, result: ExportResult) -> None:
         self.last_export_result = result
-        lines = [
-            f"Markdown: {result.output_path}",
-            f"Usernames TXT: {result.usernames_txt}",
-            f"History messages: {result.history_messages_scanned}",
-            f"@username найдено: {result.usernames_found}",
-            f"Safe usernames: {result.safe_count}",
-        ]
-        if result.safe_txt:
-            lines.append(f"Safe TXT: {result.safe_txt}")
-        if result.safe_md:
-            lines.append(f"Safe MD: {result.safe_md}")
+        operation_kind = normalize_operation_kind(result.operation_kind)
+        metric_summary = operation_metric_count(
+            operation_kind=operation_kind,
+            usernames_found=result.usernames_found,
+            phones_found=result.phones_found,
+        )
+        lines = [f"Markdown: {result.output_path}"]
+        if operation_kind == "public_phones":
+            if result.phones_txt:
+                lines.append(f"Phones TXT: {result.phones_txt}")
+            if result.phones_json:
+                lines.append(f"Phones JSON: {result.phones_json}")
+            lines.append(f"History messages: {result.history_messages_scanned}")
+            lines.append(f"Открытых номеров найдено: {result.phones_found}")
+        else:
+            lines.extend(
+                [
+                    f"Usernames TXT: {result.usernames_txt}",
+                    f"History messages: {result.history_messages_scanned}",
+                    f"@username найдено: {result.usernames_found}",
+                    f"Safe usernames: {result.safe_count}",
+                ]
+            )
+            if result.safe_txt:
+                lines.append(f"Safe TXT: {result.safe_txt}")
+            if result.safe_md:
+                lines.append(f"Safe MD: {result.safe_md}")
         lines.append(f"Run log: {result.log_path}")
         lines.append(f"Action log: {result.action_log_path}")
         if result.summary_path:
@@ -1910,7 +2037,7 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
         self.result_label.set_label("\n".join(lines))
         self.artifact_panel.set_artifacts(result.artifact_bundle(), summary="\n".join(lines))
         self.last_run_label.set_label(
-            f"Последний запуск: {result.output_path.name} | {result.status or ('partial' if result.interrupted else 'done')} | safe {result.safe_count}"
+            f"Последний запуск: {result.output_path.name} | {result.status or ('partial' if result.interrupted else 'done')} | {operation_metric_label(operation_kind)} {metric_summary}"
         )
         if result.interrupted:
             self.hero_status.set_label("Остановлено")
@@ -1925,6 +2052,8 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
                 self.export_progress_state.messages_scanned, result.history_messages_scanned
             )
             self.export_progress_state.usernames_found = max(self.export_progress_state.usernames_found, result.usernames_found)
+            self.export_progress_state.phones_found = max(self.export_progress_state.phones_found, result.phones_found)
+            self.export_progress_state.operation_kind = operation_kind
             self.export_progress_state.interrupted = result.interrupted
             self.export_progress_state.done = True
             self.export_progress_state.last_update_at = time.monotonic()
@@ -1932,6 +2061,9 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
         self._refresh_history_panel()
         self._refresh_quick_chats()
         self._refresh_preflight()
+        refresh = getattr(self, "_refresh_export_actions", None)
+        if callable(refresh):
+            refresh()
         self.run_stack.set_visible_child(self.artifact_panel)
 
     def _on_chat_selected(self) -> None:
@@ -1950,6 +2082,9 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
             refresh_sent = True
         if not refresh_sent:
             self._refresh_preflight()
+        refresh = getattr(self, "_refresh_export_actions", None)
+        if callable(refresh):
+            refresh()
 
     def _apply_chat_filter(self) -> None:
         query = self.search_entry.get_text().strip().lower()
@@ -2086,12 +2221,18 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
         self.current_controller = controller
         self.hero_status.set_label(busy_status)
         self._append_log(busy_status)
+        refresh = getattr(self, "_refresh_export_actions", None)
+        if callable(refresh):
+            refresh()
         self.ui_tasks.start(worker=worker, on_success=lambda result: self._finish_task_success(on_success, result), on_error=self._finish_task_error)
 
     def _finish_task_success(self, callback: Callable[[Any], None], result: Any) -> bool:
         self.current_task = None
         self.current_controller = None
         self.stop_button.set_sensitive(False)
+        refresh = getattr(self, "_refresh_export_actions", None)
+        if callable(refresh):
+            refresh()
         callback(result)
         self._finalize_pending_close()
         return False
@@ -2101,6 +2242,9 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
         self.current_task = None
         self.current_controller = None
         self.stop_button.set_sensitive(False)
+        refresh = getattr(self, "_refresh_export_actions", None)
+        if callable(refresh):
+            refresh()
         if isinstance(exc, TaskCancelled):
             self.hero_status.set_label("Остановлено")
             self._append_log(str(exc))
@@ -2384,6 +2528,23 @@ def parse_key_value_output(stdout: str) -> dict[str, str]:
     return payload
 
 
+def operation_busy_status(operation_kind: str) -> str:
+    if normalize_operation_kind(operation_kind) == "public_phones":
+        return "Идёт сбор открытых номеров..."
+    return "Идёт сбор @username..."
+
+
+def operation_output_path(path: Path, operation_kind: str) -> Path:
+    candidate = path.expanduser()
+    suffix = candidate.suffix if candidate.suffix else ".md"
+    candidate = candidate.with_suffix(suffix)
+    if normalize_operation_kind(operation_kind) != "public_phones":
+        return candidate
+    if candidate.stem.endswith("_phones"):
+        return candidate
+    return candidate.with_name(f"{candidate.stem}_phones{candidate.suffix}")
+
+
 def parse_progress_line(message: str) -> dict[str, str] | None:
     text = str(message or "").strip()
     if not text.startswith("PROGRESS "):
@@ -2413,6 +2574,9 @@ def _latest_progress_summary(lines: list[str]) -> str:
             continue
         messages = _progress_int(payload, "messages")
         usernames = _progress_int(payload, "usernames")
+        phones = _progress_int(payload, "phones")
+        if phones > 0:
+            return f"{messages} сообщений, {phones} открытых номеров"
         return f"{messages} сообщений, {usernames} @username"
     return ""
 
@@ -3147,7 +3311,7 @@ def _selected_helper_python() -> tuple[str, Path] | None:
 
 
 def _tdata_helper_timeout_seconds(command: str) -> int | None:
-    return TDATA_EXPORT_TIMEOUT_SEC if command == "export-chat" else TDATA_LIST_TIMEOUT_SEC
+    return TDATA_EXPORT_TIMEOUT_SEC if str(command or "").startswith("export-") else TDATA_LIST_TIMEOUT_SEC
 
 
 def _preferred_output_dir(current_value: str | None = None) -> Path:

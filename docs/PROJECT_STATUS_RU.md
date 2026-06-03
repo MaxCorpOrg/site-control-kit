@@ -1,6 +1,6 @@
 # Project Status RU
 
-Последнее обновление: 2026-05-12
+Последнее обновление: 2026-06-03
 
 Этот файл нужен как точка входа для любого нового чата и любого нового агента.
 Перед новой задачей его нужно прочитать целиком.
@@ -11,6 +11,139 @@ Repo-root entrypoint для любого агента: `AGENT_START_HERE.md`.
 Читать его нужно по номерам файлов, начиная с `00_START_HERE.md`.
 
 ## Сделано
+
+### Обновление 2026-06-03 (Стабилизация `public_phones` перед следующим AK2 тестом)
+- Выполнен полный стабилизационный проход по текущему dirty worktree, docs и runtime entrypoints.
+- Найден и закрыт важный functional gap:
+  - UI, handoff и docs уже говорили, что `public_phones` V1 умеет `chat about`, `pinned/history` text и `public bio/about`;
+  - фактический helper `scripts/telegram_tdata_helper.py` до этого реально собирал только `user about`.
+- Что исправлено:
+  - [scripts/telegram_tdata_helper.py](../scripts/telegram_tdata_helper.py) теперь действительно собирает номера из:
+    - `chat about`
+    - `pinned/history` message text
+    - `public bio/about`
+  - [scripts/export_telegram_members_non_pii.py](../scripts/export_telegram_members_non_pii.py) теперь пишет корректное пояснение в итоговый markdown;
+  - regression добавлен в:
+    - [tests/test_telegram_tdata_helper.py](../tests/test_telegram_tdata_helper.py)
+    - [tests/test_telegram_export_runtime.py](../tests/test_telegram_export_runtime.py)
+- Verify этого pass:
+  - `python3 -m unittest discover -s tests -p 'test_*.py'` -> `318 tests OK`, `2 skipped`
+  - `python3 -m webcontrol --help` -> OK
+  - `python3 -m webcontrol browser --help` -> OK
+  - `python3 -m scripts.telegram_username_collector_launcher --doctor` -> OK
+  - GTK GUI видим на `DISPLAY=:0`
+- Live smoke по текущему AK2 source:
+  - direct helper-run через обычный `python3` на этой машине не годится:
+    - `Missing opentele dependency. Run this helper via the collector venv.`
+  - direct helper-run через `/home/max/telegram-api-collector/.venv/bin/python` уже сохранён:
+    - `/tmp/ak2_public_phones_smoke_20260603.json`
+    - `/tmp/ak2_public_phones_smoke_20260603.log`
+    - `/tmp/ak2_public_phones_smoke_20260603.session`
+  - результат smoke:
+    - `history_messages_scanned=50`
+    - `public_phones_kept=3`
+    - `chat_about_scanned=1`
+    - `pinned_messages_scanned=1`
+    - `user_about_scanned=31`
+- Практический вывод:
+  - `public_phones` V1 теперь соответствует заявленным границам, а не только тексту в handoff;
+  - следующий шаг больше не refactor, а допройти незавершённые 4-й и 5-й cosmetology-чаты через GUI `Full History`.
+
+### Обновление 2026-06-02 (AK2 cosmetology full-history live checkpoint + timeout fix)
+- Выполнен живой GTK/operator проход `AK2 live 959756539365 -> Primary tdata -> Сбор открытых номеров -> Full History` по 5 cosmetology target.
+- Что важно:
+  - `default_user` не менялся;
+  - использовался только текущий GUI path, без возврата к старому bridge-heavy route;
+  - во время первого full-history run найден реальный runtime bug: `export-public-phones` использовал `TELEGRAM_TDATA_LIST_TIMEOUT_SEC`, поэтому падал через `30s` до первого meaningful progress.
+- Что исправлено:
+  - [scripts/telegram_gui/app.py](../scripts/telegram_gui/app.py) и [scripts/telegram_gui/ui/window.py](../scripts/telegram_gui/ui/window.py) теперь отправляют все `export-*` helper-команды в export-timeout branch;
+  - [tests/test_telegram_members_export_gui.py](../tests/test_telegram_members_export_gui.py) теперь отдельно держит это правилом.
+- Verify после фикса:
+  - `python3 -m py_compile scripts/telegram_gui/app.py scripts/telegram_gui/ui/window.py tests/test_telegram_members_export_gui.py` -> OK
+  - `python3 -m unittest tests.test_telegram_members_export_gui` -> `44 tests OK`, `2 skipped`
+- Артефакты неудачного первого запуска:
+  - `/home/max/Документы/ак2/живой_тест_номеров/ak2_cosmetology_public_phones_full_history_summary_20260602T110234Z.json`
+  - `/home/max/Документы/ак2/живой_тест_номеров/ak2_cosmetology_public_phones_full_history_summary_20260602T110234Z.md`
+  - `/home/max/.site-control-kit/telegram_workspace/logs/gui_ak2_cosmetology_full_history_phones_20260602T110234Z.log`
+  - failure text: `tdata helper timed out after 30s: export-public-phones`
+- Повторный live-run с временным env-workaround `TELEGRAM_TDATA_LIST_TIMEOUT_SEC=21600` и `TELEGRAM_TDATA_PROGRESS_EVERY=100` дал:
+  - `Косметология`:
+    - `status=done`
+    - `phones_found=8`
+    - `history_messages_scanned=1531`
+    - файлы:
+      - `/home/max/Документы/ак2/живой_тест_номеров/ak2_cosmetology_01_kosmetologi_chat_full_history_phones.md`
+      - `/home/max/Документы/ак2/живой_тест_номеров/ak2_cosmetology_01_kosmetologi_chat_full_history_phones.txt`
+      - `/home/max/Документы/ак2/живой_тест_номеров/ak2_cosmetology_01_kosmetologi_chat_full_history_phones.json`
+      - `/home/max/.site-control-kit/telegram_workspace/runs/20260602T110512Z/{summary.json,artifacts.json,events.jsonl}`
+      - `/home/max/.site-control-kit/telegram_workspace/logs/export_run_20260602T110512Z.log`
+  - `КОСМЕТОЛОГИЯ ЧАТ`:
+    - `status=done`
+    - `phones_found=3`
+    - `history_messages_scanned=1383`
+    - run: `20260602T111811Z`
+  - `ЧАТ КОСМЕТОЛОГОВ +1`:
+    - `status=done`
+    - `phones_found=2`
+    - `history_messages_scanned=6238`
+    - run: `20260602T113010Z`
+  - `Форум Косметология | Дерматология`:
+    - пользователь попросил остановить прогон
+    - итог сохранён как `status=partial`
+    - `phones_found=2`
+    - `history_messages_scanned=2211`
+    - run: `20260602T113456Z`
+    - partial artifacts сохранены:
+      - `/home/max/Документы/ак2/живой_тест_номеров/ak2_cosmetology_04_chatkosmetologa_full_history_phones.md`
+      - `/home/max/Документы/ак2/живой_тест_номеров/ak2_cosmetology_04_chatkosmetologa_full_history_phones.txt`
+      - `/home/max/Документы/ак2/живой_тест_номеров/ak2_cosmetology_04_chatkosmetologa_full_history_phones.json`
+  - `Косметологи Чат | Сообщество Профессионалов`:
+    - не запускался после остановки batch
+- Общая batch-сводка:
+  - `/home/max/Документы/ак2/живой_тест_номеров/ak2_cosmetology_public_phones_full_history_summary_20260602T110438Z.json`
+  - `/home/max/Документы/ак2/живой_тест_номеров/ak2_cosmetology_public_phones_full_history_summary_20260602T110438Z.md`
+  - shared action log:
+    - `/home/max/.site-control-kit/telegram_workspace/logs/gui_ak2_cosmetology_full_history_phones_20260602T110438Z.log`
+- Практический вывод:
+  - full-history `public_phones` path на реальном `AK2` уже подтверждён живыми артефактами, а не только quick-check smoke;
+  - следующий шаг теперь не новый refactor, а допройти 4-й чат без остановки и затем 5-й чат;
+  - после code-fix нужен отдельный короткий confirm-run, что искусственно большой `TELEGRAM_TDATA_LIST_TIMEOUT_SEC` больше не нужен.
+
+### Обновление 2026-06-02 (Отдельная кнопка `Сбор открытых номеров`)
+- Добавлен второй основной Telegram export action рядом с `Собрать @username`: `Сбор открытых номеров`.
+- Границы V1:
+  - работает только для `Primary tdata`;
+  - не использует bridge/CDP/web fallback;
+  - читает только открытые номера из `chat about`, pinned/history message text и public `bio/about`;
+  - не читает и не сохраняет приватное `user.phone`.
+- Что изменено:
+  - [scripts/telegram_tdata_helper.py](../scripts/telegram_tdata_helper.py) получил отдельную команду `export-public-phones`;
+  - [scripts/export_telegram_members_non_pii.py](../scripts/export_telegram_members_non_pii.py) теперь пишет `*_phones.md`, `*_phones.txt`, `*_phones.json`;
+  - [scripts/telegram_gui/backend.py](../scripts/telegram_gui/backend.py), [scripts/telegram_gui/models.py](../scripts/telegram_gui/models.py), [scripts/telegram_gui/ui/window.py](../scripts/telegram_gui/ui/window.py) и [scripts/telegram_gui/ui/panels.py](../scripts/telegram_gui/ui/panels.py) теперь различают `operation_kind=usernames|public_phones`, ведут phone-aware history/progress/repeat-last-run и не смешивают артефакты двух режимов;
+  - в phone TXT contract каждая строка теперь содержит `username`, `full_name`, `phone` в tab-separated виде.
+- Verify:
+  - targeted tests:
+    - `python3 -m unittest tests.test_telegram_tdata_helper tests.test_telegram_export_runtime tests.test_telegram_gui_run_history tests.test_telegram_gui_backend_features tests.test_telegram_members_export_gui` -> OK
+  - full suite:
+    - `PYTHONPATH="$PWD" python3 -m unittest discover -s tests -p 'test_*.py'` -> `317 tests OK`
+  - `git diff --check` -> OK
+- Live smoke:
+  - старый candidate `/home/max/telegram-api-collector/tdata_import/tdata` сейчас неавторизован;
+  - рабочий candidate найден в `/home/max/site-control-kit/TG_CONTACT/4/tdata-003/tdata`;
+  - интеграционный quick-check через новый backend route на чате `-1002465948544` создал:
+    - `/tmp/site-control-live-public-phones_phones.md`
+    - `/tmp/site-control-live-public-phones_phones.txt`
+    - `/tmp/site-control-live-public-phones_phones.json`
+    - `/home/max/.site-control-kit/telegram_workspace/runs/20260602T081357Z/summary.json`
+    - `/home/max/.site-control-kit/telegram_workspace/runs/20260602T081357Z/artifacts.json`
+    - `/home/max/.site-control-kit/telegram_workspace/runs/20260602T081357Z/events.jsonl`
+  - результат smoke: `status=done`, `phones_found=1`, `history_messages=400`.
+  - в этом же live smoke найден и сразу устранён false positive:
+    - `t.me/c/2465948544/...` ошибочно считался телефоном;
+    - после ужесточения regex повторный smoke `/tmp/site-control-live-public-phones-test-2_phones.json` дал `phones_found=0`.
+- Практический вывод:
+  - новый phone-flow уже не является только unit-level change set;
+  - remaining next step, если понадобится, это ручная GTK operator acceptance на том же `Primary tdata`, а не новый code refactor.
 
 ### Обновление 2026-05-12 (Re-baseline `origin/main` + финальный GNOME acceptance)
 - Локальный doc-only commit `77ecd4e` с закрытием старого Linux gate сохранён как reference-only и не должен пушиться напрямую.

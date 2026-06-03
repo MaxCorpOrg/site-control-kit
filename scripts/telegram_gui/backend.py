@@ -1884,11 +1884,13 @@ class TelegramGuiBackend:
         controller: TaskController | None = None,
         *,
         preset_key: str = "full_history",
+        operation_kind: str = "usernames",
     ) -> ExportResult:
         ACTION_LOG_DIR.mkdir(parents=True, exist_ok=True)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         started_at = datetime.now(timezone.utc)
         run_id = _utc_timestamp()
+        operation_kind = normalize_operation_kind(operation_kind)
         self._log_action(f"run_start output={output_path} chat={chat.url} client_id={target.client_id}")
         preset_key, preset_label = self._preset_choice(preset_key)
         adapter = self.adapter_for_target(target)
@@ -1901,22 +1903,42 @@ class TelegramGuiBackend:
             status="running",
             message=f"{preset_label} started",
             details={
+                "operation_kind": operation_kind,
                 "surface_key": adapter.key,
                 "surface_label": adapter.label,
                 "output_path": str(output_path),
             },
         )
         try:
-            result = adapter.run_export(
-                account,
-                target,
-                chat,
-                output_path,
-                emit,
-                controller=controller,
-                preset_key=preset_key,
-                preset_label=preset_label,
-            )
+            if operation_kind == "public_phones":
+                if not self._is_tdata_target(target):
+                    raise RuntimeError("Сбор открытых номеров v1 доступен только для Primary tdata.")
+                tdata_dir = self._tdata_dir_from_target(target)
+                if tdata_dir is None:
+                    raise RuntimeError("tdata target is invalid.")
+                result = self._run_public_phone_export_via_tdata(
+                    tdata_dir=tdata_dir,
+                    chat=chat,
+                    output_path=output_path,
+                    emit=emit,
+                    controller=controller,
+                    preset_key=preset_key,
+                    preset_label=preset_label,
+                    surface_key=adapter.key,
+                    surface_label=adapter.label,
+                    surface_badge=adapter.badge,
+                )
+            else:
+                result = adapter.run_export(
+                    account,
+                    target,
+                    chat,
+                    output_path,
+                    emit,
+                    controller=controller,
+                    preset_key=preset_key,
+                    preset_label=preset_label,
+                )
         except Exception as exc:
             self._log_action(f"run_failed error={type(exc).__name__} message={_compact_error_text(str(exc))}")
             self._record_failed_run(
@@ -1931,6 +1953,7 @@ class TelegramGuiBackend:
                 surface_badge=adapter.badge,
                 started_at=started_at,
                 failure_reason=_classify_failure_reason(str(exc)),
+                operation_kind=operation_kind,
             )
             self.runtime_logger.log_exception(
                 component="telegram_gui",
@@ -1942,6 +1965,7 @@ class TelegramGuiBackend:
                 chat_title=chat.title,
                 message=f"{preset_label} failed",
                 details={
+                    "operation_kind": operation_kind,
                     "surface_key": adapter.key,
                     "surface_label": adapter.label,
                     "output_path": str(output_path),
@@ -1952,9 +1976,15 @@ class TelegramGuiBackend:
         duration_sec = max(int((finished_at - started_at).total_seconds()), 0)
         if not result.started_at:
             result = ExportResult(
-                **{**result.__dict__, "started_at": started_at.isoformat(), "finished_at": finished_at.isoformat(), "duration_sec": duration_sec,
-                   "status": result.status or ("partial" if result.interrupted else "done"),
-                   "security_mode": result.security_mode or self.preflight_service.security_mode(account.token)[0]}
+                **{
+                    **result.__dict__,
+                    "started_at": started_at.isoformat(),
+                    "finished_at": finished_at.isoformat(),
+                    "duration_sec": duration_sec,
+                    "status": result.status or ("partial" if result.interrupted else "done"),
+                    "security_mode": result.security_mode or self.preflight_service.security_mode(account.token)[0],
+                    "operation_kind": normalize_operation_kind(result.operation_kind or operation_kind),
+                }
             )
         result = self._record_run(
             run_id=run_id,
@@ -1973,8 +2003,10 @@ class TelegramGuiBackend:
             status=result.status or ("partial" if result.interrupted else "done"),
             message=f"{preset_label} finished",
             details={
+                "operation_kind": result.operation_kind,
                 "history_messages_scanned": result.history_messages_scanned,
                 "usernames_found": result.usernames_found,
+                "phones_found": result.phones_found,
                 "safe_count": result.safe_count,
                 "interrupted": result.interrupted,
                 "output_path": str(result.output_path),
@@ -2001,9 +2033,11 @@ class TelegramGuiBackend:
         summary_path = self.run_history.run_summary_path(run_id)
         artifacts_path = self.run_history.run_artifacts_path(run_id)
         events_path = self.run_history.run_events_path(run_id)
+        operation_kind = normalize_operation_kind(result.operation_kind)
         result = ExportResult(
             **{
                 **result.__dict__,
+                "operation_kind": operation_kind,
                 "summary_path": summary_path,
                 "artifacts_path": artifacts_path,
                 "events_path": events_path,
@@ -2027,6 +2061,8 @@ class TelegramGuiBackend:
             safe_count=result.safe_count,
             usernames_found=result.usernames_found,
             history_messages_scanned=result.history_messages_scanned,
+            operation_kind=operation_kind,
+            phones_found=result.phones_found,
             status=result.status or ("partial" if result.interrupted else "done"),
             duration_sec=result.duration_sec,
             started_at=result.started_at,
@@ -2047,6 +2083,7 @@ class TelegramGuiBackend:
             preset_key=preset_key,
             preset_label=preset_label,
             created_at=created_at,
+            operation_kind=operation_kind,
             last_surface_reason=self._last_surface_reason,
             last_output_dir=result.output_path.parent,
             last_status=result.status or ("partial" if result.interrupted else "done"),
@@ -2082,6 +2119,7 @@ class TelegramGuiBackend:
         surface_badge: str,
         started_at: datetime,
         failure_reason: str,
+        operation_kind: str,
     ) -> None:
         finished_at = datetime.now(timezone.utc)
         created_at = run_id or _utc_timestamp()
@@ -2090,6 +2128,15 @@ class TelegramGuiBackend:
         summary_path = self.run_history.run_summary_path(run_id)
         artifacts_path = self.run_history.run_artifacts_path(run_id)
         events_path = self.run_history.run_events_path(run_id)
+        operation_kind = normalize_operation_kind(operation_kind)
+        usernames_txt = None
+        phones_txt = None
+        phones_json = None
+        if operation_kind == "public_phones":
+            phones_txt = output_path.with_suffix(".txt")
+            phones_json = output_path.with_suffix(".json")
+        else:
+            usernames_txt = output_path.with_name(f"{output_path.stem}_usernames.txt")
         record = RunRecord(
             run_id=run_id,
             created_at=created_at,
@@ -2107,6 +2154,8 @@ class TelegramGuiBackend:
             safe_count=0,
             usernames_found=0,
             history_messages_scanned=0,
+            operation_kind=operation_kind,
+            phones_found=0,
             status="failed",
             duration_sec=duration_sec,
             started_at=started_at.isoformat(),
@@ -2115,7 +2164,9 @@ class TelegramGuiBackend:
             failure_reason=failure_reason,
             artifacts=ArtifactBundle(
                 markdown=output_path,
-                usernames_txt=output_path.with_name(f"{output_path.stem}_usernames.txt"),
+                usernames_txt=usernames_txt,
+                phones_txt=phones_txt,
+                phones_json=phones_json,
                 summary_json=summary_path,
                 artifacts_json=artifacts_path,
                 events_jsonl=events_path,
@@ -2134,6 +2185,7 @@ class TelegramGuiBackend:
             level="error",
             message=f"{preset_label} failed",
             details={
+                "operation_kind": operation_kind,
                 "surface_key": surface_key,
                 "surface_label": surface_label,
                 "failure_reason": failure_reason,
@@ -2272,7 +2324,80 @@ class TelegramGuiBackend:
             safe_md=safe_md,
             log_path=run_log_path,
             action_log_path=self.action_log_path,
+            operation_kind="usernames",
+            phones_found=0,
             usernames_json=usernames_json if usernames_json.exists() else None,
+            surface_key=surface_key,
+            surface_label=surface_label,
+            surface_badge=surface_badge,
+            preset_key=preset_key,
+            preset_label=preset_label,
+            status="partial" if interrupted else "done",
+        )
+
+    def _run_public_phone_export_via_tdata(
+        self,
+        *,
+        tdata_dir: Path,
+        chat: ChatOption,
+        output_path: Path,
+        emit: Callable[[str], None],
+        controller: TaskController | None = None,
+        preset_key: str,
+        preset_label: str,
+        surface_key: str,
+        surface_label: str,
+        surface_badge: str,
+    ) -> ExportResult:
+        history_limit, timeout_sec = self.preset_limits(preset_key)
+        output_path = operation_output_path(output_path, "public_phones")
+        run_log_path = ACTION_LOG_DIR / f"export_run_{_utc_timestamp()}.log"
+        payload = self._run_tdata_helper(
+            "export-public-phones",
+            tdata_dir=tdata_dir,
+            extra_args=[
+                "--chat-ref",
+                chat.fragment,
+                "--history-limit",
+                history_limit,
+                "--progress-every",
+                TDATA_PROGRESS_EVERY,
+            ],
+            emit=emit,
+            timeout_sec=timeout_sec,
+            controller=controller,
+        )
+        rows = payload.get("rows") if isinstance(payload, dict) else []
+        phone_rows = rows if isinstance(rows, list) else []
+        export_mod._write_public_phones_markdown(output_path, phone_rows, chat.url or chat.fragment, "tdata-public-phones")
+        sidecars = export_mod._write_phone_sidecars(output_path, phone_rows, chat.url or chat.fragment, "tdata-public-phones")
+        self._write_run_log_json(run_log_path, payload)
+        stats = payload.get("stats") or {}
+        history_messages_scanned = int(stats.get("history_messages_scanned") or 0)
+        interrupted = bool(payload.get("interrupted")) or bool(stats.get("interrupted"))
+        emit("tdata source=public-phones")
+        emit(f"tdata history_messages={history_messages_scanned}")
+        emit(f"tdata phones={len(phone_rows)}")
+        if interrupted:
+            emit("tdata interrupted=1")
+        phones_txt = Path(str(sidecars.get("phones_txt") or output_path.with_suffix(".txt")))
+        phones_json = Path(str(sidecars.get("phones_json") or output_path.with_suffix(".json")))
+        self._log_action(f"run_success tdata_public_phones output={output_path} phones={len(phone_rows)}")
+        return ExportResult(
+            output_path=output_path,
+            usernames_txt=None,
+            safe_count=0,
+            history_messages_scanned=history_messages_scanned,
+            usernames_found=0,
+            interrupted=interrupted,
+            safe_txt=None,
+            safe_md=None,
+            log_path=run_log_path,
+            action_log_path=self.action_log_path,
+            operation_kind="public_phones",
+            phones_found=len(phone_rows),
+            phones_txt=phones_txt if phones_txt.exists() else None,
+            phones_json=phones_json if phones_json.exists() else None,
             surface_key=surface_key,
             surface_label=surface_label,
             surface_badge=surface_badge,
@@ -2320,6 +2445,7 @@ class TelegramGuiBackend:
                 emit_stderr=emit,
                 on_cancel_begin=(lambda: emit("Остановка сканирования: завершаем текущий проход...") if emit else None),
             )
+            payload: dict[str, Any] | None = None
             if run.forced_cancel:
                 raise TaskCancelled("Сканирование остановлено пользователем.")
             if run.timed_out:
@@ -2332,18 +2458,30 @@ class TelegramGuiBackend:
                         "Если нужен только короткий тестовый прогон, уменьшите TELEGRAM_TDATA_HISTORY_LIMIT."
                     )
                 raise RuntimeError(f"tdata helper timed out after {effective_timeout}s: {command}{suffix}")
+            if run.stdout.strip():
+                try:
+                    parsed = json.loads(run.stdout)
+                except json.JSONDecodeError:
+                    parsed = None
+                if isinstance(parsed, dict):
+                    payload = parsed
             if controller is not None and controller.cancel_requested and run.return_code != 0:
+                if payload is not None:
+                    return payload
                 raise TaskCancelled("Сканирование остановлено пользователем.")
             if run.return_code != 0:
                 message = (run.stderr or run.stdout).strip()
                 raise RuntimeError(message or f"tdata helper failed: {command}")
-            try:
-                payload = json.loads(run.stdout)
-            except json.JSONDecodeError as exc:
-                if controller is not None and controller.cancel_requested:
-                    raise TaskCancelled("Сканирование остановлено пользователем.") from exc
-                raise RuntimeError(f"tdata helper returned invalid JSON for {command}.") from exc
+            if payload is None:
+                try:
+                    payload = json.loads(run.stdout)
+                except json.JSONDecodeError as exc:
+                    if controller is not None and controller.cancel_requested:
+                        raise TaskCancelled("Сканирование остановлено пользователем.") from exc
+                    raise RuntimeError(f"tdata helper returned invalid JSON for {command}.") from exc
             if not isinstance(payload, dict):
+                if controller is not None and controller.cancel_requested:
+                    raise TaskCancelled("Сканирование остановлено пользователем.")
                 raise RuntimeError(f"tdata helper returned unexpected payload for {command}.")
             return payload
 
@@ -2432,6 +2570,8 @@ class TelegramGuiBackend:
             safe_md=safe_md,
             log_path=run_log_path,
             action_log_path=self.action_log_path,
+            operation_kind="usernames",
+            phones_found=0,
             usernames_json=usernames_json if usernames_json.exists() else None,
             surface_key=surface_key,
             surface_label=surface_label,
@@ -2525,6 +2665,8 @@ class TelegramGuiBackend:
             safe_md=safe_md,
             log_path=run_log_path,
             action_log_path=self.action_log_path,
+            operation_kind="usernames",
+            phones_found=0,
             usernames_json=usernames_json if usernames_json.exists() else None,
             surface_key=surface_key,
             surface_label=surface_label,

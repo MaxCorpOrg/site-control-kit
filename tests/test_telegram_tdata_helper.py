@@ -9,11 +9,20 @@ from scripts import telegram_tdata_helper as mod
 
 
 class FakeUser:
-    def __init__(self, peer_id: int, *, username: str | None, first_name: str = "User", bot: bool = False) -> None:
+    def __init__(
+        self,
+        peer_id: int,
+        *,
+        username: str | None,
+        first_name: str = "User",
+        last_name: str = "",
+        bot: bool = False,
+    ) -> None:
         self.id = peer_id
         self.peer_id = peer_id
         self.username = username
         self.first_name = first_name
+        self.last_name = last_name
         self.bot = bot
 
 
@@ -27,10 +36,18 @@ class FakeChannel:
 
 
 class FakeMessage:
-    def __init__(self, sender_id: int | None, sender: object | None, *, msg_id: int | None = None) -> None:
+    def __init__(
+        self,
+        sender_id: int | None,
+        sender: object | None,
+        *,
+        msg_id: int | None = None,
+        text: str = "",
+    ) -> None:
         self.sender_id = sender_id
         self.sender = sender
         self.id = msg_id if msg_id is not None else int(sender_id or 0)
+        self.message = text
 
 
 class FakeClient:
@@ -83,6 +100,21 @@ class TelegramTdataHelperTests(unittest.TestCase):
         self.assertEqual(mod._invite_hash_from_value("http://t.me/+6FMgmFJCh0I4M2Yy"), "6FMgmFJCh0I4M2Yy")
         self.assertEqual(mod._invite_hash_from_value("https://t.me/joinchat/AbC_123-x"), "AbC_123-x")
         self.assertEqual(mod._invite_hash_from_value("tg://join?invite=AbC_123-x"), "AbC_123-x")
+
+    def test_normalize_phone_supports_ru_and_international_formats(self) -> None:
+        self.assertEqual(mod._normalize_phone("8 (999) 123-45-67"), "+79991234567")
+        self.assertEqual(mod._normalize_phone("+49 30 12345678"), "+493012345678")
+        self.assertEqual(mod._normalize_phone("12345"), "")
+
+    def test_extract_phone_candidates_dedupes_same_number_inside_text(self) -> None:
+        rows = mod._extract_phone_candidates("Звоните +7 999 123-45-67 или 8 (999) 123-45-67")
+
+        self.assertEqual(rows, [{"phone": "+79991234567", "excerpt": "Звоните +7 999 123-45-67 или 8 (999) 123-45-67"}])
+
+    def test_extract_phone_candidates_skips_telegram_internal_links(self) -> None:
+        rows = mod._extract_phone_candidates("https://t.me/c/2465948544/198502. В закрепе их шоп")
+
+        self.assertEqual(rows, [])
 
     def test_public_chat_ref_from_value_supports_public_links_and_peer_ids(self) -> None:
         self.assertEqual(mod._public_chat_ref_from_value("https://t.me/cosmetologna"), "@cosmetologna")
@@ -393,6 +425,85 @@ class TelegramTdataHelperTests(unittest.TestCase):
             ["@first_user", "@second_user", "@third_user"],
         )
         self.assertEqual(fake_client.calls, [(None, 0), (None, 299)])
+        self.assertTrue(fake_client.disconnected)
+
+    def test_export_public_phones_collects_chat_about_message_text_and_user_about(self) -> None:
+        chat_entity = FakeChannel(-1002000, username="cosmetologna", title="Cosmetology Chat")
+        sender = FakeUser(11, username="doctor_a", first_name="Anna", last_name="Petrova")
+        sender.phone = "+78888888888"
+        fake_client = FakeClient(
+            messages=[
+                FakeMessage(
+                    11,
+                    sender,
+                    msg_id=201,
+                    text="Пишите в WhatsApp +7 999 123-45-67",
+                ),
+            ],
+            entity_by_id={11: sender},
+        )
+
+        async def fake_get_entity(ref: object) -> object:
+            if ref == "@cosmetologna":
+                return chat_entity
+            if isinstance(ref, int) and ref == 11:
+                return sender
+            return object()
+
+        async def fake_get_messages(_entity: object, ids: int) -> object:
+            self.assertEqual(ids, 101)
+            return FakeMessage(
+                11,
+                sender,
+                msg_id=101,
+                text="Pinned: +49 30 12345678",
+            )
+
+        fake_client.get_entity = fake_get_entity  # type: ignore[method-assign]
+        fake_client.get_messages = fake_get_messages  # type: ignore[method-assign]
+
+        async def fake_open_client(*_args, **_kwargs):
+            return fake_client
+
+        async def fake_user_about(_client: object, _entity: object) -> str:
+            return "Bio: 8 (912) 000-11-22"
+
+        with (
+            patch.object(mod, "_open_client", side_effect=fake_open_client),
+            patch.object(mod, "_get_chat_full_info", return_value=("Описание чата: 8 (888) 888-88-88", 101)),
+            patch.object(mod, "_get_full_user_about", side_effect=fake_user_about),
+        ):
+            payload = asyncio.run(
+                mod.export_public_phones(
+                    tdata_path="/tmp/tdata",
+                    session_path="/tmp/session",
+                    passcode=None,
+                    chat_ref="@cosmetologna",
+                    history_limit=0,
+                    progress_every=0,
+                )
+            )
+
+        self.assertTrue(payload["ok"])
+        self.assertEqual(
+            sorted(payload["phones"]),
+            sorted(["+79120001122", "+79991234567", "+78888888888", "+493012345678"]),
+        )
+        self.assertEqual(payload["stats"]["history_messages_scanned"], 1)
+        self.assertEqual(payload["stats"]["chat_about_scanned"], 1)
+        self.assertEqual(payload["stats"]["pinned_messages_scanned"], 1)
+        self.assertEqual(payload["stats"]["user_about_scanned"], 1)
+        self.assertEqual(payload["stats"]["public_phones_kept"], 4)
+        rows_by_phone = {row["phone"]: row for row in payload["rows"]}
+        self.assertEqual(rows_by_phone["+78888888888"]["source_kind"], "chat_about")
+        self.assertEqual(rows_by_phone["+78888888888"]["username"], "@cosmetologna")
+        self.assertEqual(rows_by_phone["+79991234567"]["source_kind"], "message_text")
+        self.assertEqual(rows_by_phone["+79991234567"]["source_ref"], "message:201")
+        self.assertEqual(rows_by_phone["+493012345678"]["source_kind"], "message_text")
+        self.assertEqual(rows_by_phone["+493012345678"]["source_ref"], "message:101")
+        self.assertEqual(rows_by_phone["+79120001122"]["source_kind"], "user_about")
+        self.assertEqual(rows_by_phone["+79120001122"]["username"], "@doctor_a")
+        self.assertEqual(rows_by_phone["+79120001122"]["full_name"], "Anna Petrova")
         self.assertTrue(fake_client.disconnected)
 
 

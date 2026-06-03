@@ -5055,6 +5055,76 @@ def _write_username_sidecars(
     }
 
 
+def _write_public_phones_markdown(
+    path: Path,
+    phone_rows: list[dict[str, str]],
+    group_url: str,
+    source_mode: str,
+) -> None:
+    ts = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    lines: list[str] = [
+        "# Открытые номера из Telegram",
+        "",
+        f"Источник: `{group_url}`",
+        f"Режим сбора: `{source_mode}`",
+        f"Дата выгрузки: {ts}",
+        f"Количество уникальных открытых номеров: **{len(phone_rows)}**",
+        "",
+        "| # | Nick | Имя / ФИО | Номер | Источник | Peer ID |",
+        "|---|---|---|---|---|---|",
+    ]
+    for index, item in enumerate(phone_rows, start=1):
+        username = str(item.get("username") or "—").replace("|", r"\|")
+        full_name = str(item.get("full_name") or "—").replace("|", r"\|")
+        phone = str(item.get("phone") or "—").replace("|", r"\|")
+        source_kind = str(item.get("source_kind") or "—").replace("|", r"\|")
+        peer_id = str(item.get("peer_id") or "—").replace("|", r"\|")
+        lines.append(f"| {index} | {username} | {full_name} | {phone} | {source_kind} | {peer_id} |")
+    lines.append("")
+    lines.append("Примечание: сохраняются только открытые номера из chat about, pinned/history текста и public bio/about.")
+    lines.append("Приватные phone-поля Telegram не читаются и не сохраняются.")
+    lines.append("")
+    path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def _write_phone_sidecars(
+    output_path: Path,
+    phone_rows: list[dict[str, str]],
+    group_url: str,
+    source_mode: str,
+) -> dict[str, Path]:
+    txt_path = output_path.with_suffix(".txt")
+    json_path = output_path.with_suffix(".json")
+
+    header = "username\tfull_name\tphone"
+    txt_lines = [header]
+    for row in phone_rows:
+        txt_lines.append(
+            "\t".join(
+                [
+                    str(row.get("username") or "—").strip() or "—",
+                    str(row.get("full_name") or "—").strip() or "—",
+                    str(row.get("phone") or "—").strip() or "—",
+                ]
+            )
+        )
+    txt_path.write_text("\n".join(txt_lines) + "\n", encoding="utf-8")
+
+    payload = {
+        "group_url": group_url,
+        "source_mode": source_mode,
+        "generated_at": dt.datetime.now().isoformat(timespec="seconds"),
+        "count": len(phone_rows),
+        "phones": [str(row.get("phone") or "—").strip() or "—" for row in phone_rows],
+        "rows": phone_rows,
+    }
+    json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return {
+        "phones_txt": txt_path,
+        "phones_json": json_path,
+    }
+
+
 def _archive_export_copy(
     *,
     archive_dir: Path,

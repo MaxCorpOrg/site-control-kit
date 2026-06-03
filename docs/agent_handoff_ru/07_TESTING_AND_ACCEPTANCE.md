@@ -57,3 +57,16 @@ bash -n <изменённые shell-файлы>
 - тест на helper-функцию;
 - тест на `main()` если есть CLI/script wrapper;
 - live smoke на реальном чате или хотя бы на реальном hub client.
+
+## Acceptance Для `public_phones` Flow
+Хорошая приёмка phone-flow изменения:
+- targeted tests закрывают helper/runtime/backend/UI/history;
+- полный `discover` остаётся зелёным;
+- есть реальные артефакты `*_phones.md`, `*_phones.txt`, `*_phones.json`;
+- есть хотя бы один live `Primary tdata` smoke с сохранёнными `summary.json`, `artifacts.json`, `events.jsonl`;
+- отдельно зафиксировано, что старый `tdata` candidate всё ещё авторизован или уже протух, чтобы следующий агент не путал их.
+- если запускается прямой helper, он идёт через collector venv, а не через голый системный `python3`:
+
+```bash
+/home/max/telegram-api-collector/.venv/bin/python scripts/telegram_tdata_helper.py export-public-phones ...
+```

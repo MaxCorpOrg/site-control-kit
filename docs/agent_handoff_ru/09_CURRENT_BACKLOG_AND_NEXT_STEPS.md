@@ -1,5 +1,78 @@
 # Current Backlog And Next Steps
 
+## Обновление 2026-06-03 (Stabilization pass перед продолжением AK2 batch)
+- Новый stabilization pass уже закрыл важное расхождение между docs и helper:
+  - `public_phones` helper теперь реально собирает не только `user about`, но и:
+    - `chat about`
+    - `pinned/history` text
+    - `public bio/about`
+- Что уже проверено:
+  - `python3 -m unittest discover -s tests -p 'test_*.py'` -> `318 tests OK`, `2 skipped`
+  - `python3 -m webcontrol --help` -> OK
+  - `python3 -m webcontrol browser --help` -> OK
+  - `python3 -m scripts.telegram_username_collector_launcher --doctor` -> OK
+  - GTK GUI видим на `DISPLAY=:0`
+  - direct AK2 helper smoke через collector venv сохранён:
+    - `/tmp/ak2_public_phones_smoke_20260603.json`
+    - `/tmp/ak2_public_phones_smoke_20260603.log`
+- Новый ближайший следующий шаг теперь такой:
+  - не трогать уже завершённые 1-3 cosmetology runs;
+  - через GUI повторить 4-й чат без ручной остановки;
+  - затем прогнать 5-й чат;
+  - после этого сделать короткий confirm-run без старого env-workaround и сохранить новые batch artifacts.
+- Что важно не перепутать:
+  - прямой helper-run через голый `python3` на этом host не подходит из-за `Missing opentele dependency...`;
+  - для live helper-run использовать `/home/max/telegram-api-collector/.venv/bin/python`;
+  - `default_user` не менять;
+  - не возвращаться к bridge/CDP/web path.
+
+## Обновление 2026-06-02 (AK2 cosmetology full-history checkpoint)
+- Новый live batch уже не hypothetical, а частично закрыт на реальном `AK2 live 959756539365`:
+  - `Косметология` -> `done`, `phones_found=8`, `history_messages_scanned=1531`
+  - `КОСМЕТОЛОГИЯ ЧАТ` -> `done`, `phones_found=3`, `history_messages_scanned=1383`
+  - `ЧАТ КОСМЕТОЛОГОВ +1` -> `done`, `phones_found=2`, `history_messages_scanned=6238`
+  - `Форум Косметология | Дерматология` -> `partial`, `phones_found=2`, `history_messages_scanned=2211`
+  - `Косметологи Чат | Сообщество Профессионалов` -> не запускался
+- Что уже выяснено:
+  - full-history `public_phones` раньше ошибочно жил на `TELEGRAM_TDATA_LIST_TIMEOUT_SEC`;
+  - code-fix уже внесён, и теперь все `export-*` helper-команды используют export-timeout branch;
+  - временный runtime-only workaround `TELEGRAM_TDATA_LIST_TIMEOUT_SEC=21600` был нужен только чтобы довести текущий live batch до checkpoint.
+- Новый ближайший следующий шаг теперь такой:
+  - повторить 4-й чат без ручной остановки;
+  - затем прогнать 5-й чат;
+  - после этого сделать короткий confirm-run без env-workaround и убедиться, что code-fix действительно убрал 30s timeout для `export-public-phones`.
+- Что важно не перепутать:
+  - `default_user` по-прежнему не менять;
+  - не возвращаться к bridge/CDP/web path;
+  - не трактовать `partial` run `20260602T113456Z` как code regression: это результат явной остановки по просьбе пользователя;
+  - точка входа для batch summary:
+    - `/home/max/Документы/ак2/живой_тест_номеров/ak2_cosmetology_public_phones_full_history_summary_20260602T110438Z.json`
+    - `/home/max/.site-control-kit/telegram_workspace/logs/gui_ak2_cosmetology_full_history_phones_20260602T110438Z.log`
+
+## Обновление 2026-06-02 (Public Phones Button For Primary tdata)
+- Новый phone feature-cycle уже не pending, а code-complete + verified:
+  - отдельная GUI-кнопка `Сбор открытых номеров` добавлена;
+  - helper route `export-public-phones` добавлен;
+  - progress/history/repeat-last-run понимают `operation_kind=public_phones`;
+  - phone artifacts пишутся отдельно: `*_phones.md`, `*_phones.txt`, `*_phones.json`.
+- Что уже проверено:
+  - targeted Telegram/UI tests -> OK;
+  - full suite `PYTHONPATH="$PWD" python3 -m unittest discover -s tests -p 'test_*.py'` -> `317 tests OK`;
+  - live backend smoke прошёл на `Primary tdata` candidate `/home/max/site-control-kit/TG_CONTACT/4/tdata-003/tdata` с артефактами:
+    - `/tmp/site-control-live-public-phones_phones.md`
+    - `/tmp/site-control-live-public-phones_phones.txt`
+    - `/tmp/site-control-live-public-phones_phones.json`
+    - `/home/max/.site-control-kit/telegram_workspace/runs/20260602T081357Z/{summary.json,artifacts.json,events.jsonl}`
+  - во время smoke найден false positive на `t.me/c/...`; он уже закрыт, repeat smoke `/tmp/site-control-live-public-phones-test-2_phones.json` даёт `phones_found=0`.
+- Новый ближайший следующий шаг теперь такой:
+  - если нужна операторская приёмка именно GUI, пройти ручной click-path в GTK окне на том же `Primary tdata`;
+  - если нужна product polish-фаза, можно отдельно добавить UI hint/preset для phone-mode, но это уже не blocker текущей функции.
+- Что важно не перепутать:
+  - phone-button V1 работает только для `Primary tdata`;
+  - не расширять её на bridge/CDP/web fallback без отдельной задачи;
+  - не смешивать phone artifacts с `@username` artifacts в одном файле;
+  - `/home/max/telegram-api-collector/tdata_import/tdata` сейчас не источник истины для live smoke: он уже неавторизован.
+
 ## Обновление 2026-05-12 (Re-baseline `origin/main` Before Push)
 - Текущий publish target уже не `b740d66`, а `origin/main` на `45c25e4fc5641a807a809f173ac0cfeaed798934`.
 - Что уже закрыто:

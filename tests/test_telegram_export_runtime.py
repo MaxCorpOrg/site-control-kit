@@ -685,6 +685,82 @@ class TelegramExportRuntimeTests(unittest.TestCase):
             self.assertEqual(payload["rows"][0]["peer_id"], "1")
             self.assertEqual(payload["rows"][1]["role"], "admin")
 
+    def test_write_phone_sidecars_writes_tsv_and_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            output_path = tmp_path / "export_phones.md"
+            phone_rows = [
+                {
+                    "phone": "+79991234567",
+                    "username": "@alice",
+                    "full_name": "Alice Example",
+                    "peer_id": "1",
+                    "source_kind": "message_text",
+                    "source_ref": "message:101",
+                    "excerpt": "Звоните +7 999 123-45-67",
+                },
+                {
+                    "phone": "+493012345678",
+                    "username": "—",
+                    "full_name": "Berlin Clinic",
+                    "peer_id": "-1001",
+                    "source_kind": "chat_about",
+                    "source_ref": "chat:-1001",
+                    "excerpt": "Contact +49 30 12345678",
+                },
+            ]
+
+            sidecars = self.mod._write_phone_sidecars(
+                output_path,
+                phone_rows,
+                "@cosmetologna",
+                "tdata-public-phones",
+            )
+
+            txt_body = sidecars["phones_txt"].read_text(encoding="utf-8")
+            self.assertEqual(
+                txt_body,
+                "username\tfull_name\tphone\n@alice\tAlice Example\t+79991234567\n—\tBerlin Clinic\t+493012345678\n",
+            )
+
+            payload = json.loads(sidecars["phones_json"].read_text(encoding="utf-8"))
+            self.assertEqual(payload["group_url"], "@cosmetologna")
+            self.assertEqual(payload["source_mode"], "tdata-public-phones")
+            self.assertEqual(payload["count"], 2)
+            self.assertEqual(payload["phones"], ["+79991234567", "+493012345678"])
+            self.assertEqual(payload["rows"][0]["source_ref"], "message:101")
+
+    def test_write_public_phones_markdown_renders_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            output_path = tmp_path / "export_phones.md"
+            phone_rows = [
+                {
+                    "phone": "+79991234567",
+                    "username": "@alice",
+                    "full_name": "Alice Example",
+                    "peer_id": "1",
+                    "source_kind": "message_text",
+                    "source_ref": "message:101",
+                    "excerpt": "Звоните +7 999 123-45-67",
+                }
+            ]
+
+            self.mod._write_public_phones_markdown(
+                output_path,
+                phone_rows,
+                "@cosmetologna",
+                "tdata-public-phones",
+            )
+
+            text = output_path.read_text(encoding="utf-8")
+            self.assertIn("# Открытые номера из Telegram", text)
+            self.assertIn("Количество уникальных открытых номеров: **1**", text)
+            self.assertIn("| 1 | @alice | Alice Example | +79991234567 | message_text | 1 |", text)
+            self.assertIn("сохраняются только открытые номера из chat about", text)
+            self.assertIn("pinned/history текста", text)
+            self.assertIn("public bio/about", text)
+
     def test_default_identity_history_path_uses_archive_state_dir(self) -> None:
         archive_dir = Path("/tmp/telegram-archive")
         path = self.mod._default_identity_history_path(
