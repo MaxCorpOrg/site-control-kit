@@ -12,6 +12,46 @@ Repo-root entrypoint для любого агента: `AGENT_START_HERE.md`.
 
 ## Сделано
 
+### Обновление 2026-06-03 (AK2: цель `30` уникальных открытых номеров закрыта)
+- Выполнен реальный live-run через текущий операторский путь:
+  - `GTK GUI -> Primary tdata -> Full History -> Сбор открытых номеров`
+  - профиль: `AK2 live 959756539365`
+  - `default_user` не менялся
+  - запуск шёл без старого env-workaround на `TELEGRAM_TDATA_LIST_TIMEOUT_SEC`
+- Полный rerun 4-го cosmetology-чата дал:
+  - чат: `Форум Косметология | Дерматология`
+  - target: `@chatkosmetologa`
+  - run: `20260603T095301Z`
+  - `status=done`
+  - `phones_found=25`
+  - `history_messages_scanned=7373`
+  - `surface_badge=Primary tdata`
+  - `duration_sec=1049`
+- Cumulative итог:
+  - baseline до rerun: `14` уникальных номеров
+  - rerun добавил `23` новых уникальных номера
+  - общий cumulative набор: `37` уникальных открытых номеров
+  - цель `30` закрыта и сохранена в aggregate-файлах
+- Новые артефакты:
+  - `/home/max/Документы/ак2/живой_тест_номеров/ak2_cosmetology_04_chatkosmetologa_rerun_20260603_phones.md`
+  - `/home/max/Документы/ак2/живой_тест_номеров/ak2_cosmetology_04_chatkosmetologa_rerun_20260603_phones.txt`
+  - `/home/max/Документы/ак2/живой_тест_номеров/ak2_cosmetology_04_chatkosmetologa_rerun_20260603_phones.json`
+  - `/home/max/Документы/ак2/живой_тест_номеров/ak2_cosmetology_public_phones_30_unique_progress_20260603.txt`
+  - `/home/max/Документы/ак2/живой_тест_номеров/ak2_cosmetology_public_phones_30_unique_progress_20260603.json`
+  - `/home/max/Документы/ак2/живой_тест_номеров/ak2_cosmetology_public_phones_30_unique_progress_20260603.md`
+  - `/home/max/Документы/ак2/живой_тест_номеров/ak2_cosmetology_public_phones_30_unique_session_20260603T095221Z.json`
+  - `/home/max/Документы/ак2/живой_тест_номеров/ak2_cosmetology_public_phones_30_unique_session_20260603T095221Z.md`
+  - `/home/max/.site-control-kit/telegram_workspace/logs/gui_ak2_cosmetology_30_unique_20260603T095221Z.log`
+  - `/home/max/.site-control-kit/telegram_workspace/logs/export_run_20260603T095301Z.log`
+  - `/home/max/.site-control-kit/telegram_workspace/runs/20260603T095301Z/{summary.json,artifacts.json,events.jsonl}`
+- Практический вывод:
+  - текущий operator goal уже закрыт без новых code changes;
+  - старый workaround с большим `TELEGRAM_TDATA_LIST_TIMEOUT_SEC` больше не обязателен для `export-public-phones`;
+  - если нужен следующий live-pass, он уже не про достижение `30`, а про дополнительное покрытие незапущенных target-ов:
+    - `@kosmetologi_chat_ru`
+    - `@cosmetologna`
+    - `@cosmochatrussia`
+
 ### Обновление 2026-06-03 (Стабилизация `public_phones` перед следующим AK2 тестом)
 - Выполнен полный стабилизационный проход по текущему dirty worktree, docs и runtime entrypoints.
 - Найден и закрыт важный functional gap:
@@ -47,7 +87,8 @@ Repo-root entrypoint для любого агента: `AGENT_START_HERE.md`.
     - `user_about_scanned=31`
 - Практический вывод:
   - `public_phones` V1 теперь соответствует заявленным границам, а не только тексту в handoff;
-  - следующий шаг больше не refactor, а допройти незавершённые 4-й и 5-й cosmetology-чаты через GUI `Full History`.
+  - следующий live-step уже не про recovery 4-го чата: он закрыт rerun'ом выше;
+  - если нужен новый проход, это уже дополнительное target coverage после достигнутой 30-номерной цели.
 
 ### Обновление 2026-06-02 (AK2 cosmetology full-history live checkpoint + timeout fix)
 - Выполнен живой GTK/operator проход `AK2 live 959756539365 -> Primary tdata -> Сбор открытых номеров -> Full History` по 5 cosmetology target.

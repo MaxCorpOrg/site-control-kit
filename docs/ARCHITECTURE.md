@@ -45,6 +45,19 @@
 - не допускать silent quickstart fallback для токена;
 - на Windows давать controlled fast-fail там, где production v1 сознательно Linux-only.
 
+### 5. Telegram GTK operator contour
+Содержит:
+- `scripts/telegram_members_export_gui.py` — основной GTK entrypoint;
+- `scripts/telegram_gui/ui/window.py` — операторское окно и orchestration;
+- `scripts/telegram_gui/backend.py` — routing между GUI и helper/runtime слоями;
+- `scripts/telegram_tdata_helper.py` — direct `Primary tdata` list/resolve/export path.
+
+Назначение:
+- держать текущий рабочий операторский путь в одном контуре:
+  - `GTK GUI -> Primary tdata`;
+- отделять `public_phones` от старого bridge/CDP/web fallback;
+- сохранять progress, stop-path и отдельные sidecar-артефакты для длинных history-run.
+
 ## Схема Потока
 
 ```text
@@ -138,6 +151,12 @@ Runtime теперь резолвится так:
 При этом:
 
 - canonical default runtime root — `./var/site-control-kit`;
+- для текущего Telegram operator flow long full-history export живёт на отдельном export-timeout path, а не на list-timeout;
+- фактический live baseline на 2026-06-03:
+  - `AK2 live 959756539365`
+  - `Primary tdata`
+  - `public_phones`
+  - цель `30` unique phones уже закрыта cumulative итогом `37`.
 - если на машине уже есть `%USERPROFILE%\.site-control-kit`, проект уходит в `legacy-adopted`, а repo-local `.site-control-kit/local.yaml` указывает на существующий runtime;
 - generated local token живёт в `.site-control-kit/generated_token.txt`, если явный `SITECTL_TOKEN` не задан.
 

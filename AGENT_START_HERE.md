@@ -29,6 +29,40 @@
 - Ближайший контекст: `origin/main` уже обновлён до `48abaf551e8997ad07bc6389719c7c1691766c3c`; не возвращать старый `b740d66` gate и regression с `/opt/.../.site-control-kit` в активный backlog
 
 ## Где Мы Закончили Работу
+- На 2026-06-03 закрыт live-goal `30 unique public phones` на текущем AK2 operator path без code changes и без env-workaround на list-timeout:
+  - путь был строго такой:
+    - `GTK GUI -> Primary tdata -> Full History -> Сбор открытых номеров`;
+  - профиль:
+    - `AK2 live 959756539365`;
+  - `default_user` не менялся;
+  - confirm-run шёл без искусственно большого `TELEGRAM_TDATA_LIST_TIMEOUT_SEC`;
+  - хватило одного полного rerun 4-го чата:
+    - `Форум Косметология | Дерматология`
+    - target `@chatkosmetologa`
+    - run `20260603T095301Z`
+    - `status=done`
+    - `phones_found=25`
+    - `history_messages_scanned=7373`
+    - `duration_sec=1049`;
+  - cumulative итог по baseline `1-4` + этому rerun:
+    - `37` уникальных открытых номеров;
+    - цель `30` достигнута и сохранена в aggregate-файлах;
+  - новые ключевые артефакты:
+    - `/home/max/Документы/ак2/живой_тест_номеров/ak2_cosmetology_04_chatkosmetologa_rerun_20260603_phones.md`
+    - `/home/max/Документы/ак2/живой_тест_номеров/ak2_cosmetology_04_chatkosmetologa_rerun_20260603_phones.txt`
+    - `/home/max/Документы/ак2/живой_тест_номеров/ak2_cosmetology_04_chatkosmetologa_rerun_20260603_phones.json`
+    - `/home/max/Документы/ак2/живой_тест_номеров/ak2_cosmetology_public_phones_30_unique_progress_20260603.txt`
+    - `/home/max/Документы/ак2/живой_тест_номеров/ak2_cosmetology_public_phones_30_unique_progress_20260603.json`
+    - `/home/max/Документы/ак2/живой_тест_номеров/ak2_cosmetology_public_phones_30_unique_progress_20260603.md`
+    - `/home/max/Документы/ак2/живой_тест_номеров/ak2_cosmetology_public_phones_30_unique_session_20260603T095221Z.json`
+    - `/home/max/Документы/ак2/живой_тест_номеров/ak2_cosmetology_public_phones_30_unique_session_20260603T095221Z.md`
+    - `/home/max/Документы/ак2/живой_тест_номеров/ak2_cosmetology_public_phones_30_unique_runner_20260603T095221Z.log`
+    - `/home/max/.site-control-kit/telegram_workspace/logs/gui_ak2_cosmetology_30_unique_20260603T095221Z.log`
+    - `/home/max/.site-control-kit/telegram_workspace/logs/export_run_20260603T095301Z.log`
+    - `/home/max/.site-control-kit/telegram_workspace/runs/20260603T095301Z/{summary.json,artifacts.json,events.jsonl}`;
+  - практический следующий шаг:
+    - если нужна именно полнота покрытия target-ов, продолжать уже после достигнутой 30-номерной цели с `@kosmetologi_chat_ru`, затем `@cosmetologna`, затем `@cosmochatrussia`;
+    - старый workaround с большим `TELEGRAM_TDATA_LIST_TIMEOUT_SEC` больше не считать обязательным для `export-public-phones`.
 - На 2026-06-03 выполнен стабилизационный pass по текущему `public_phones` baseline:
   - подтверждён реальный functional gap: helper `export-public-phones` фактически собирал только `user about`, хотя docs/UI уже обещали ещё `chat about` и `pinned/history` text;
   - fix внесён в `scripts/telegram_tdata_helper.py`:
@@ -53,9 +87,9 @@
       - `user_about_scanned=31`;
   - отдельный operational finding:
     - direct helper-run через голый `python3` на этой машине даёт `Missing opentele dependency. Run this helper via the collector venv.`;
-  - следующий практический шаг:
-    - через GTK GUI допройти 4-й cosmetology чат без ручной остановки и затем 5-й чат;
-    - отдельным confirm-run после этого зафиксировать, что старый workaround с завышенным `TELEGRAM_TDATA_LIST_TIMEOUT_SEC` больше не нужен.
+  - этот шаг уже закрыт live-run'ом выше:
+    - 4-й чат допройдён без ручной остановки;
+    - отдельный confirm-run уже подтвердил, что старый workaround с завышенным `TELEGRAM_TDATA_LIST_TIMEOUT_SEC` больше не обязателен.
 - На 2026-06-02 выполнен живой GTK/operator проход `AK2 live 959756539365 -> Primary tdata -> Сбор открытых номеров -> Full History` по 5 cosmetology-chat target:
   - `default_user` не менялся; запуск шёл через существующий GUI flow, не через старый bridge-heavy path;
   - первый live-run упёрся в реальный runtime gap:

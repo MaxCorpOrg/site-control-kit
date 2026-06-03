@@ -1,5 +1,34 @@
 # Current Backlog And Next Steps
 
+## Обновление 2026-06-03 (AK2 `30 unique public phones` goal closed)
+- Новый текущий статус:
+  - live-goal `30 unique public phones` уже закрыт;
+  - это достигнуто на одном полном rerun `@chatkosmetologa` без code changes и без env-workaround на list-timeout;
+  - итоговый cumulative total сейчас `37` unique phones.
+- Что уже сохранено:
+  - rerun output:
+    - `/home/max/Документы/ак2/живой_тест_номеров/ak2_cosmetology_04_chatkosmetologa_rerun_20260603_phones.md`
+    - `/home/max/Документы/ак2/живой_тест_номеров/ak2_cosmetology_04_chatkosmetologa_rerun_20260603_phones.txt`
+    - `/home/max/Документы/ак2/живой_тест_номеров/ak2_cosmetology_04_chatkosmetologa_rerun_20260603_phones.json`
+  - aggregate/session:
+    - `/home/max/Документы/ак2/живой_тест_номеров/ak2_cosmetology_public_phones_30_unique_progress_20260603.json`
+    - `/home/max/Документы/ак2/живой_тест_номеров/ak2_cosmetology_public_phones_30_unique_session_20260603T095221Z.json`
+  - logs:
+    - `/home/max/.site-control-kit/telegram_workspace/logs/gui_ak2_cosmetology_30_unique_20260603T095221Z.log`
+    - `/home/max/.site-control-kit/telegram_workspace/logs/export_run_20260603T095301Z.log`
+    - `/home/max/.site-control-kit/telegram_workspace/runs/20260603T095301Z/{summary.json,artifacts.json,events.jsonl}`
+- Новый ближайший следующий шаг теперь такой:
+  - если пользователь хочет просто больше номеров, продолжать тем же GUI flow уже с:
+    - `@kosmetologi_chat_ru`
+    - `@cosmetologna`
+    - `@cosmochatrussia`
+  - если нужен только confirm по timeout fix, он уже закрыт этим run.
+- Что важно не перепутать:
+  - не пытаться заново "доказывать 30": цель уже достигнута;
+  - не возвращать старый `TELEGRAM_TDATA_LIST_TIMEOUT_SEC` workaround как обязательный;
+  - `default_user` по-прежнему не менять;
+  - не уходить в bridge/CDP/web path.
+
 ## Обновление 2026-06-03 (Stabilization pass перед продолжением AK2 batch)
 - Новый stabilization pass уже закрыл важное расхождение между docs и helper:
   - `public_phones` helper теперь реально собирает не только `user about`, но и:
@@ -16,10 +45,9 @@
     - `/tmp/ak2_public_phones_smoke_20260603.json`
     - `/tmp/ak2_public_phones_smoke_20260603.log`
 - Новый ближайший следующий шаг теперь такой:
-  - не трогать уже завершённые 1-3 cosmetology runs;
-  - через GUI повторить 4-й чат без ручной остановки;
-  - затем прогнать 5-й чат;
-  - после этого сделать короткий confirm-run без старого env-workaround и сохранить новые batch artifacts.
+  - этот шаг уже закрыт run'ом выше для 4-го чата и confirm без env-workaround;
+  - не трогать уже завершённые 1-4 cosmetology runs;
+  - следующий optional pass начинать сразу с 5-го чата и далее по новым target-ам.
 - Что важно не перепутать:
   - прямой helper-run через голый `python3` на этом host не подходит из-за `Missing opentele dependency...`;
   - для live helper-run использовать `/home/max/telegram-api-collector/.venv/bin/python`;
@@ -38,9 +66,9 @@
   - code-fix уже внесён, и теперь все `export-*` helper-команды используют export-timeout branch;
   - временный runtime-only workaround `TELEGRAM_TDATA_LIST_TIMEOUT_SEC=21600` был нужен только чтобы довести текущий live batch до checkpoint.
 - Новый ближайший следующий шаг теперь такой:
-  - повторить 4-й чат без ручной остановки;
-  - затем прогнать 5-й чат;
-  - после этого сделать короткий confirm-run без env-workaround и убедиться, что code-fix действительно убрал 30s timeout для `export-public-phones`.
+  - 4-й чат уже закрыт rerun'ом в `done`;
+  - если нужен новый batch, начинать с 5-го чата;
+  - confirm-run без env-workaround уже состоялся и проблему `30s timeout` больше не считать открытой.
 - Что важно не перепутать:
   - `default_user` по-прежнему не менять;
   - не возвращаться к bridge/CDP/web path;

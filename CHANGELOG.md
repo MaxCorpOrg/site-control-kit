@@ -2,6 +2,22 @@
 
 ## 2026-06-03
 
+### AK2 Live Goal: `30` Unique Public Phones Closed
+
+- Через текущий операторский путь `GTK GUI -> Primary tdata -> Full History -> Сбор открытых номеров` закрыта live-цель `30` уникальных открытых номеров.
+- Использовался профиль `AK2 live 959756539365`; `default_user` не менялся.
+- Хватило одного полного rerun 4-го чата:
+  - `@chatkosmetologa`
+  - run `20260603T095301Z`
+  - `status=done`
+  - `phones_found=25`
+  - `history_messages_scanned=7373`
+  - `surface_badge=Primary tdata`
+- Cumulative результат по baseline `1-4` + новому rerun:
+  - `37` unique public phones
+  - aggregate-файлы сохранены в `/home/max/Документы/ак2/живой_тест_номеров/`
+- Этот run одновременно подтвердил, что для GUI `export-public-phones` больше не нужен старый workaround с завышенным `TELEGRAM_TDATA_LIST_TIMEOUT_SEC`.
+
 ### Стабилизация `public_phones` И Подготовка К Следующему AK2 Тесту
 
 - Закрыт функциональный разрыв между docs/UI и helper-реализацией:

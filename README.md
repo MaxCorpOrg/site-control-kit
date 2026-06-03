@@ -27,6 +27,12 @@
 - `python3 -m webcontrol browser --help` -> OK;
 - `python3 -m scripts.telegram_username_collector_launcher --doctor` -> OK;
 - GTK GUI видим на `DISPLAY=:0`;
+- live цель `30` уникальных открытых номеров уже закрыта на `AK2 live 959756539365`:
+  - rerun `@chatkosmetologa`
+  - `status=done`
+  - `phones_found=25`
+  - `history_messages_scanned=7373`
+  - cumulative total: `37` unique phones;
 - узкий live smoke `export-public-phones` на AK2 через collector venv:
   - `history_messages_scanned=50`
   - `public_phones_kept=3`
@@ -36,13 +42,15 @@
   - артефакты: `/tmp/ak2_public_phones_smoke_20260603.{json,log,session}`.
 
 Что осталось:
-- допройти через GUI `Full History` по незавершённым cosmetology-чатам:
-  - `Форум Косметология | Дерматология`
-  - `Косметологи Чат | Сообщество Профессионалов`;
-- отдельно подтвердить тот же проход без ручной остановки и без старого runtime workaround;
+- если нужен следующий live-pass, идти уже не за целью `30`, а за дополнительным покрытием target-ов:
+  - `@kosmetologi_chat_ru`
+  - `@cosmetologna`
+  - `@cosmochatrussia`;
 - `public_phones` V1 по-прежнему доступен только для `Primary tdata`.
 
-Подробный checkpoint: [docs/checkpoints/CHECKPOINT_2026-06-03_СТАБИЛИЗАЦИЯ_PUBLIC_PHONES.md](docs/checkpoints/CHECKPOINT_2026-06-03_СТАБИЛИЗАЦИЯ_PUBLIC_PHONES.md).
+Подробные checkpoints:
+- [docs/checkpoints/CHECKPOINT_2026-06-03_СТАБИЛИЗАЦИЯ_PUBLIC_PHONES.md](docs/checkpoints/CHECKPOINT_2026-06-03_СТАБИЛИЗАЦИЯ_PUBLIC_PHONES.md)
+- [docs/checkpoints/CHECKPOINT_2026-06-03_AK2_30_UNIQUE_PUBLIC_PHONES.md](docs/checkpoints/CHECKPOINT_2026-06-03_AK2_30_UNIQUE_PUBLIC_PHONES.md)
 
 ## Быстрый Вход В Браузерный Контур
 

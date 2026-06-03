@@ -1,5 +1,41 @@
 # Known Issues And Live Findings
 
+## Самый Новый AK2 `30 unique public phones` Finding
+Новый самый свежий факт на 2026-06-03 уже не про незавершённый batch, а про закрытую live-цель:
+- реальный run прошёл так:
+  - `GTK GUI -> Primary tdata -> Full History -> Сбор открытых номеров`
+  - профиль: `AK2 live 959756539365`
+  - `default_user` не менялся;
+- confirm-run шёл без старого workaround на `TELEGRAM_TDATA_LIST_TIMEOUT_SEC`;
+- хватило одного полного rerun 4-го чата:
+  - `Форум Косметология | Дерматология`
+  - `@chatkosmetologa`
+  - run `20260603T095301Z`
+  - `status=done`
+  - `phones_found=25`
+  - `history_messages_scanned=7373`
+  - `surface_badge=Primary tdata`;
+- cumulative result:
+  - baseline `1-4` до rerun = `14` unique phones;
+  - rerun дал `23` новых unique phones;
+  - итог = `37` unique open phones;
+  - цель `30` закрыта;
+- новые live artifacts:
+  - `/home/max/Документы/ак2/живой_тест_номеров/ak2_cosmetology_04_chatkosmetologa_rerun_20260603_phones.md`
+  - `/home/max/Документы/ак2/живой_тест_номеров/ak2_cosmetology_04_chatkosmetologa_rerun_20260603_phones.txt`
+  - `/home/max/Документы/ак2/живой_тест_номеров/ak2_cosmetology_04_chatkosmetologa_rerun_20260603_phones.json`
+  - `/home/max/Документы/ак2/живой_тест_номеров/ak2_cosmetology_public_phones_30_unique_progress_20260603.json`
+  - `/home/max/Документы/ак2/живой_тест_номеров/ak2_cosmetology_public_phones_30_unique_session_20260603T095221Z.json`
+  - `/home/max/.site-control-kit/telegram_workspace/logs/gui_ak2_cosmetology_30_unique_20260603T095221Z.log`
+  - `/home/max/.site-control-kit/telegram_workspace/logs/export_run_20260603T095301Z.log`
+  - `/home/max/.site-control-kit/telegram_workspace/runs/20260603T095301Z/{summary.json,artifacts.json,events.jsonl}`;
+- practical finding:
+  - старый list-timeout workaround больше не является live-blocker-ом для `export-public-phones`;
+  - remaining work теперь только optional target coverage после уже достигнутой цели:
+    - `@kosmetologi_chat_ru`
+    - `@cosmetologna`
+    - `@cosmochatrussia`.
+
 ## Самый Новый Stabilization Finding
 Новый самый свежий факт на 2026-06-03 уже не про очередной timeout, а про расхождение между обещанным scope и реальной helper-логикой:
 - `public_phones` V1 в docs/UI уже описывался как сбор из:
@@ -32,10 +68,10 @@
     - `pinned_messages_scanned=1`
     - `user_about_scanned=31`;
 - practical finding:
-  - текущий remaining gap теперь снова operational-only:
-    - допройти 4-й full-history chat без manual stop
-    - прогнать 5-й chat
-    - подтвердить GUI run уже без старого workaround на list-timeout
+  - этот operational gap уже частично закрыт новым live-run выше:
+    - 4-й full-history chat допройдён до `done`
+    - GUI run уже подтверждён без старого workaround на list-timeout
+  - оставшееся — только новый coverage-pass по следующим target-ам
 
 ## Самый Новый AK2 Cosmetology Full-History Finding
 Новый самый свежий факт на 2026-06-02 уже не только про quick-check phone smoke, а про реальный long-run на `AK2 live 959756539365`:

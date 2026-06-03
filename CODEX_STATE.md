@@ -1,5 +1,53 @@
 # CODEX_STATE
 
+## 2026-06-03 (AK2 `30 unique public phones` reached on live GTK flow)
+
+- Scope:
+  - executed a real GTK GUI `public_phones` live run on `AK2 live 959756539365`
+  - stayed on `Primary tdata`
+  - used `Full History`
+  - did not change `default_user`
+  - did not use the old temporary `TELEGRAM_TDATA_LIST_TIMEOUT_SEC` override
+- Live result:
+  - rerun target:
+    - `Форум Косметология | Дерматология`
+    - `@chatkosmetologa`
+    - run `20260603T095301Z`
+  - run outcome:
+    - `status=done`
+    - `phones_found=25`
+    - `history_messages_scanned=7373`
+    - `duration_sec=1049`
+    - `surface_badge=Primary tdata`
+  - cumulative outcome:
+    - baseline before rerun: `14` unique phones
+    - rerun added `23` new unique phones
+    - cumulative total: `37` unique open phones
+    - the `30 unique` goal is closed
+- Operator artifacts:
+  - rerun output:
+    - `/home/max/Документы/ак2/живой_тест_номеров/ak2_cosmetology_04_chatkosmetologa_rerun_20260603_phones.md`
+    - `/home/max/Документы/ак2/живой_тест_номеров/ak2_cosmetology_04_chatkosmetologa_rerun_20260603_phones.txt`
+    - `/home/max/Документы/ак2/живой_тест_номеров/ak2_cosmetology_04_chatkosmetologa_rerun_20260603_phones.json`
+  - aggregate/session:
+    - `/home/max/Документы/ак2/живой_тест_номеров/ak2_cosmetology_public_phones_30_unique_progress_20260603.txt`
+    - `/home/max/Документы/ак2/живой_тест_номеров/ak2_cosmetology_public_phones_30_unique_progress_20260603.json`
+    - `/home/max/Документы/ак2/живой_тест_номеров/ak2_cosmetology_public_phones_30_unique_progress_20260603.md`
+    - `/home/max/Документы/ак2/живой_тест_номеров/ak2_cosmetology_public_phones_30_unique_session_20260603T095221Z.json`
+    - `/home/max/Документы/ак2/живой_тест_номеров/ak2_cosmetology_public_phones_30_unique_session_20260603T095221Z.md`
+    - `/home/max/Документы/ак2/живой_тест_номеров/ak2_cosmetology_public_phones_30_unique_runner_20260603T095221Z.log`
+  - run metadata:
+    - `/home/max/.site-control-kit/telegram_workspace/logs/gui_ak2_cosmetology_30_unique_20260603T095221Z.log`
+    - `/home/max/.site-control-kit/telegram_workspace/logs/export_run_20260603T095301Z.log`
+    - `/home/max/.site-control-kit/telegram_workspace/runs/20260603T095301Z/{summary.json,artifacts.json,events.jsonl}`
+- Practical conclusion:
+  - the live operator goal is complete without new code changes
+  - the old list-timeout workaround is no longer a required part of the `public_phones` operator recipe
+  - remaining work, if the user wants more coverage, is only extra target coverage:
+    - `@kosmetologi_chat_ru`
+    - `@cosmetologna`
+    - `@cosmochatrussia`
+
 ## 2026-06-03 (Stabilization Pass For `public_phones`)
 
 - Scope:
@@ -36,10 +84,10 @@
       - `user_about_scanned=31`
 - Practical conclusion:
   - `public_phones` V1 implementation now matches the documented scope
-  - the remaining work is operational, not architectural:
-    - resume the 4th cosmetology chat without manual stop
-    - run the 5th chat
-    - confirm the timeout-fix path without the temporary runtime workaround
+  - that operational follow-up is now partially closed:
+    - the 4th cosmetology chat was resumed to completion
+    - the timeout-fix path is now confirmed without the temporary runtime workaround
+  - remaining work is optional extra target coverage, not a blocker
 
 ## 2026-06-02 (AK2 cosmetology full-history live checkpoint + timeout fix)
 

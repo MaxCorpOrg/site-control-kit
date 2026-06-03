@@ -29,13 +29,20 @@
 - Частичный полный batch от 2026-06-02 уже есть:
   - `/home/max/Документы/ак2/живой_тест_номеров/ak2_cosmetology_public_phones_full_history_summary_20260602T110438Z.json`
   - `/home/max/.site-control-kit/telegram_workspace/logs/gui_ak2_cosmetology_full_history_phones_20260602T110438Z.log`
+- Live goal `30 unique public phones` уже закрыт:
+  - rerun `@chatkosmetologa` `20260603T095301Z` -> `status=done`, `phones_found=25`, `history_messages_scanned=7373`
+  - cumulative total -> `37` unique open phones
+  - aggregate:
+    - `/home/max/Документы/ак2/живой_тест_номеров/ak2_cosmetology_public_phones_30_unique_progress_20260603.json`
+    - `/home/max/Документы/ак2/живой_тест_номеров/ak2_cosmetology_public_phones_30_unique_session_20260603T095221Z.json`
 
 ## Что осталось
 
-- Допройти через GUI `Full History` по двум незавершённым cosmetology-чатам:
-  - `Форум Косметология | Дерматология`
-  - `Косметологи Чат | Сообщество Профессионалов`
-- На следующем live pass отдельно подтвердить, что для `export-public-phones` больше не нужен искусственно большой `TELEGRAM_TDATA_LIST_TIMEOUT_SEC`.
+- Если нужен следующий live-pass, идти уже не за целью `30`, а за дополнительным покрытием target-ов:
+  - `Косметологи Чат | Сообщество Профессионалов` -> `@kosmetologi_chat_ru`
+  - `@cosmetologna`
+  - `@cosmochatrussia`
+- При необходимости отдельным новым batch-сводом сохранить прирост сверх текущих `37` уникальных номеров.
 - Не расширять `public_phones` на bridge/CDP/web fallback без отдельной задачи.
 
 ## Следующий узкий контур
@@ -49,9 +56,10 @@ TELEGRAM_API_COLLECTOR_PYTHON=/home/max/telegram-api-collector/.venv/bin/python 
 1. Выбрать `AK2 live 959756539365`
 2. Подключить `Primary tdata`
 3. Оставить `Full History`
-4. Повторить 4-й чат без ручной остановки
-5. Затем прогнать 5-й чат
-6. Сохранить `*_phones.md`, `*_phones.txt`, `*_phones.json`, `summary.json`, `artifacts.json`, `events.jsonl`
+4. Начинать уже с `@kosmetologi_chat_ru`
+5. Затем при необходимости идти в `@cosmetologna`
+6. Затем в `@cosmochatrussia`
+7. Сохранить `*_phones.md`, `*_phones.txt`, `*_phones.json`, `summary.json`, `artifacts.json`, `events.jsonl`
 
 ## Что не перепутать
 
@@ -59,6 +67,7 @@ TELEGRAM_API_COLLECTOR_PYTHON=/home/max/telegram-api-collector/.venv/bin/python 
   - `/home/max/telegram-api-collector/.venv/bin/python`
 - Голый системный `python3` может дать:
   - `Missing opentele dependency. Run this helper via the collector venv.`
+- Live confirm уже показал, что для GUI `export-public-phones` больше не нужен завышенный `TELEGRAM_TDATA_LIST_TIMEOUT_SEC`.
 - Не коммитить:
   - `.site-control-kit/`
   - `TG_CONTACT/`
