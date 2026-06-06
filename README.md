@@ -24,7 +24,7 @@
 - рядом с обычными `*_phones.txt/json` теперь сохраняются и `*.private.txt/json`, если найдены private-only номера.
 
 Что уже подтверждено:
-- полный `unittest` suite: `319 tests OK`, `2 skipped`;
+- полный `unittest` suite: `322 tests OK`, `2 skipped`;
 - `python3 -m webcontrol --help` -> OK;
 - `python3 -m webcontrol browser --help` -> OK;
 - `python3 -m scripts.telegram_username_collector_launcher --doctor` -> OK;
@@ -47,6 +47,10 @@
   - `private_phones_found=83`
   - артефакты: `/tmp/tg4_nadopinge_full_history_phones_20260606_phones.{md,txt,json,private.txt,private.json}`
   - run history: `/home/max/.site-control-kit/telegram_workspace/runs/20260606T092821Z/{summary.json,artifacts.json,events.jsonl}`;
+- GUI contour теперь тоже зафиксирован на этом ready source:
+  - stale registry row `TG_CONTACT 4` автоматически переводится в repo-local `/home/max/site-control-kit/TG_CONTACT/4`
+  - GTK account selection теперь предпочитает этот ready `Primary tdata` contour
+  - portable card для него пишет direct helper/API path, а не требует portable profile;
 - live цель `30` уникальных открытых номеров уже закрыта на `AK2 live 959756539365`:
   - rerun `@chatkosmetologa`
   - `status=done`
@@ -73,6 +77,7 @@
 - [docs/checkpoints/CHECKPOINT_2026-06-03_СТАБИЛИЗАЦИЯ_PUBLIC_PHONES.md](docs/checkpoints/CHECKPOINT_2026-06-03_СТАБИЛИЗАЦИЯ_PUBLIC_PHONES.md)
 - [docs/checkpoints/CHECKPOINT_2026-06-03_AK2_30_UNIQUE_PUBLIC_PHONES.md](docs/checkpoints/CHECKPOINT_2026-06-03_AK2_30_UNIQUE_PUBLIC_PHONES.md)
 - [docs/checkpoints/CHECKPOINT_2026-06-06_UNIFIED_PUBLIC_PHONES_TG_CONTACT4.md](docs/checkpoints/CHECKPOINT_2026-06-06_UNIFIED_PUBLIC_PHONES_TG_CONTACT4.md)
+- [docs/checkpoints/CHECKPOINT_2026-06-06_GUI_CONTOUR_TG_CONTACT4.md](docs/checkpoints/CHECKPOINT_2026-06-06_GUI_CONTOUR_TG_CONTACT4.md)
 
 ## Быстрый Вход В Браузерный Контур
 

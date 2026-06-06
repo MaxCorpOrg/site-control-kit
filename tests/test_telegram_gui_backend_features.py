@@ -524,6 +524,46 @@ class TelegramGuiBackendFeatureTests(unittest.TestCase):
             mod.USER_REGISTRY_PATH = old_registry
             mod.DEFAULT_PROFILE_DIR = old_default_profile
 
+    def test_load_accounts_falls_back_to_repo_tg_contact_source_when_registry_profile_is_missing(self) -> None:
+        old_root = mod.TELEGRAM_WORKSPACE_ROOT
+        old_registry = mod.USER_REGISTRY_PATH
+        old_default_profile = mod.DEFAULT_PROFILE_DIR
+        old_repo_root = mod.REPO_ROOT
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                workspace_root = Path(td) / "telegram_workspace"
+                repo_root = Path(td) / "repo"
+                tg_contact_root = repo_root / "TG_CONTACT" / "4" / "tdata-003" / "tdata"
+                _write_tdata_payload(tg_contact_root)
+                mod.TELEGRAM_WORKSPACE_ROOT = workspace_root
+                mod.USER_REGISTRY_PATH = workspace_root / "registry" / "users.json"
+                mod.DEFAULT_PROFILE_DIR = workspace_root / "profiles" / "default"
+                mod.REPO_ROOT = repo_root
+                mod.layout_mod.ensure_workspace(workspace_root, slots=1)
+
+                registry = mod.registry_mod.load_registry(mod.USER_REGISTRY_PATH)
+                registry = mod.registry_mod.add_or_update_user_by_profile(
+                    registry,
+                    name="TG_CONTACT 4",
+                    token="registry-token",
+                    profile=str(workspace_root / "PortableProfiles" / "TelegramPortable-tg-contact-4-9"),
+                )
+                mod.registry_mod.save_registry(mod.USER_REGISTRY_PATH, registry)
+
+                backend = mod.TelegramGuiBackend(action_log_path=workspace_root / "logs" / "actions.log")
+                accounts = backend.load_accounts()
+
+                account = next(item for item in accounts if item.label == "TG_CONTACT 4")
+                self.assertEqual(account.profile_source, str(repo_root / "TG_CONTACT" / "4"))
+                self.assertEqual(account.availability_state, "ready")
+                self.assertIn("repo-local Primary tdata source", account.availability_detail)
+                self.assertEqual(account.portable_profile_dir, "")
+        finally:
+            mod.TELEGRAM_WORKSPACE_ROOT = old_root
+            mod.USER_REGISTRY_PATH = old_registry
+            mod.DEFAULT_PROFILE_DIR = old_default_profile
+            mod.REPO_ROOT = old_repo_root
+
     def test_remove_portable_profile_rejects_legacy_slot_profile(self) -> None:
         old_root = mod.TELEGRAM_WORKSPACE_ROOT
         old_registry = mod.USER_REGISTRY_PATH

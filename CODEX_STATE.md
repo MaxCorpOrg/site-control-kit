@@ -1,5 +1,36 @@
 # CODEX_STATE
 
+## 2026-06-06 (GUI contour pinned to ready repo-local `TG_CONTACT 4` direct tdata)
+
+- Scope:
+  - fixed the actual operator contour inside the program and GTK GUI so the app no longer sticks to stale managed portable rows when a ready repo-local `TG_CONTACT` direct source already exists
+  - kept registry `default_user` untouched
+  - pinned GUI account choice to the current ready `Primary tdata` contour instead of the broken default portable path
+- Code changes:
+  - `scripts/telegram_gui/backend.py` now falls back from a stale registry row `TG_CONTACT N` to `REPO_ROOT/TG_CONTACT/N` when that repo-local source has a real working `tdata-*`
+  - `scripts/telegram_gui/ui/window.py` now chooses the highest ready `TG_CONTACT` direct source during initial account selection and shows a direct helper/API status in the portable card when no portable profile is required
+  - regression coverage was added in:
+    - `tests/test_telegram_gui_backend_features.py`
+    - `tests/test_telegram_members_export_gui.py`
+- Verify:
+  - targeted GUI/backend tests -> `83 tests OK`, `2 skipped`
+  - full suite: `python3 -m unittest discover -s tests -p 'test_*.py'` -> `322 tests OK`, `2 skipped`
+  - `python3 -m py_compile scripts/telegram_gui/backend.py scripts/telegram_gui/ui/window.py tests/test_telegram_gui_backend_features.py tests/test_telegram_members_export_gui.py` -> OK
+- Live probe:
+  - `backend.load_accounts()` in the current repo now resolves:
+    - `TG_CONTACT 2` -> `/home/max/site-control-kit/TG_CONTACT/2`
+    - `TG_CONTACT 3` -> `/home/max/site-control-kit/TG_CONTACT/3`
+    - `TG_CONTACT 4` -> `/home/max/site-control-kit/TG_CONTACT/4`
+  - GUI preferred account logic now picks:
+    - `TG_CONTACT 4`
+  - preflight on that selected account reports:
+    - `surface_badge=Primary tdata`
+    - `tdata_ready=True`
+    - notes begin with `tdata доступен и будет использован как основной surface.`
+- Practical conclusion:
+  - current GUI/operator baseline is now aligned with the real live contour already proven by helper/API runs
+  - the app no longer requires portable-launch success just to surface the working `TG_CONTACT 4` path to the operator
+
 ## 2026-06-06 (Unified `public_phones` flow: total/public/private aligned)
 
 - Scope:

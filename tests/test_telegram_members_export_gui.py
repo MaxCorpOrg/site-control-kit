@@ -33,6 +33,15 @@ def _gui_wrapper_path() -> Path:
     return _repo_root() / "scripts" / "telegram_members_export_gui.sh"
 
 
+def _write_direct_tdata_payload(tdata_dir: Path) -> None:
+    tdata_dir.mkdir(parents=True, exist_ok=True)
+    (tdata_dir / "key_datas").write_bytes(b"key")
+    (tdata_dir / "D877F783D5D3EF8Cs").write_bytes(b"session")
+    maps_dir = tdata_dir / "D877F783D5D3EF8C"
+    maps_dir.mkdir(parents=True, exist_ok=True)
+    (maps_dir / "maps").write_bytes(b"maps")
+
+
 class TelegramMembersExportGuiTests(unittest.TestCase):
     def test_app_exports_owner_module_symbols(self) -> None:
         from scripts.telegram_gui import backend as backend_mod
@@ -1059,6 +1068,142 @@ class TelegramMembersExportGuiTests(unittest.TestCase):
             mod.TELEGRAM_WORKSPACE_ROOT = old_root
             mod.USER_REGISTRY_PATH = old_registry
             mod.DEFAULT_PROFILE_DIR = old_default_profile
+
+    def test_preferred_account_index_prefers_ready_tg_contact_primary_tdata(self) -> None:
+        from scripts.telegram_gui.ui import window as window_mod
+
+        with tempfile.TemporaryDirectory() as td:
+            tg_contact_root = Path(td) / "TG_CONTACT" / "4"
+            _write_direct_tdata_payload(tg_contact_root / "tdata-003" / "tdata")
+            ready_profile = Path(td) / "ak2-profile"
+            ready_profile.mkdir(parents=True)
+
+            accounts = [
+                mod.AccountOption(
+                    key="registry:TG_CONTACT 2",
+                    label="TG_CONTACT 2",
+                    name="TG_CONTACT 2",
+                    token="token",
+                    profile_source=str(Path(td) / "missing"),
+                    source_kind="registry",
+                    sort_key=(0, "tg_contact_2", "missing"),
+                    availability_state="missing",
+                    availability_detail="missing",
+                ),
+                mod.AccountOption(
+                    key="registry:AK2",
+                    label="AK2 live 959756539365",
+                    name="AK2 live 959756539365",
+                    token="token",
+                    profile_source=str(ready_profile),
+                    source_kind="registry",
+                    sort_key=(1, "ak2", str(ready_profile)),
+                    availability_state="ready",
+                    availability_detail="ready",
+                ),
+                mod.AccountOption(
+                    key="registry:TG_CONTACT 4",
+                    label="TG_CONTACT 4",
+                    name="TG_CONTACT 4",
+                    token="token",
+                    profile_source=str(tg_contact_root),
+                    source_kind="registry",
+                    sort_key=(1, "tg_contact_4", str(tg_contact_root)),
+                    availability_state="ready",
+                    availability_detail="ready",
+                ),
+            ]
+
+            index = window_mod._preferred_account_index(accounts)
+
+        self.assertEqual(index, 2)
+
+    def test_refresh_portable_card_reports_direct_tdata_contour_without_portable_profile(self) -> None:
+        class FakeLabel:
+            def __init__(self) -> None:
+                self.value = ""
+
+            def set_label(self, value: str) -> None:
+                self.value = value
+
+            def get_label(self) -> str:
+                return self.value
+
+        class FakeBox:
+            def __init__(self) -> None:
+                self.visible = False
+
+            def set_visible(self, value: bool) -> None:
+                self.visible = value
+
+        class FakeButton:
+            def __init__(self) -> None:
+                self.sensitive = True
+                self.visible = True
+
+            def set_sensitive(self, value: bool) -> None:
+                self.sensitive = value
+
+            def set_visible(self, value: bool) -> None:
+                self.visible = value
+
+        class FakeRevealer:
+            def __init__(self) -> None:
+                self.revealed = False
+
+            def set_reveal_child(self, value: bool) -> None:
+                self.revealed = value
+
+        with tempfile.TemporaryDirectory() as td:
+            profile_dir = Path(td) / "tg_contact4"
+            _write_direct_tdata_payload(profile_dir / "tdata-003" / "tdata")
+            account = mod.AccountOption(
+                key="registry:TG_CONTACT 4",
+                label="TG_CONTACT 4",
+                name="TG_CONTACT 4",
+                token="token",
+                profile_source=str(profile_dir),
+                source_kind="registry",
+                sort_key=(0, "tg_contact_4", str(profile_dir)),
+                availability_state="ready",
+                availability_detail="ready",
+            )
+            info = mod.PreflightInfo(
+                surface_key="tdata",
+                surface_label="Telegram Desktop tdata",
+                surface_badge="Primary tdata",
+                is_primary=True,
+                tdata_ready=True,
+                helper_ready=True,
+                output_path=None,
+                preset_key="full_history",
+                preset_label="Full History",
+                history_limit="0",
+                timeout_sec=None,
+                resume_available=False,
+            )
+            fake_window = types.SimpleNamespace(
+                portable_card=FakeBox(),
+                portable_feedback_label=FakeLabel(),
+                portable_remove_revealer=FakeRevealer(),
+                portable_title_label=FakeLabel(),
+                portable_source_label=FakeLabel(),
+                portable_runtime_label=FakeLabel(),
+                portable_launch_button=FakeButton(),
+                portable_refresh_button=FakeButton(),
+                portable_remove_button=FakeButton(),
+                current_task=None,
+                portable_profiles=[],
+                _active_portable_profile=lambda: None,
+            )
+
+            mod.TelegramMembersExportWindow._refresh_portable_card(fake_window, info, account)
+
+            self.assertTrue(fake_window.portable_card.visible)
+            self.assertIn("direct helper/API path", fake_window.portable_source_label.get_label())
+            self.assertIn("portable profile не требуется", fake_window.portable_runtime_label.get_label())
+            self.assertFalse(fake_window.portable_launch_button.sensitive)
+            self.assertFalse(fake_window.portable_remove_button.visible)
 
     def test_resolve_best_client_ignores_offline_entries(self) -> None:
         backend = mod.TelegramGuiBackend(action_log_path=Path("/tmp/gui-actions.log"))

@@ -2,6 +2,21 @@
 
 ## 2026-06-06
 
+### GUI / Program Contour Fixed To Ready `TG_CONTACT 4`
+
+- Зафиксирован именно текущий рабочий contour внутри программы и GTK GUI:
+  - stale registry row `TG_CONTACT N` теперь может автоматически перейти на repo-local `REPO_ROOT/TG_CONTACT/N`, если там есть рабочий `tdata-*`
+  - initial account selection в GUI теперь предпочитает самый актуальный ready `TG_CONTACT` direct `Primary tdata` contour
+  - для такого аккаунта portable card теперь честно показывает direct helper/API path без требования portable profile
+- В текущем live окружении это закрепило:
+  - `TG_CONTACT 4`
+  - `/home/max/site-control-kit/TG_CONTACT/4`
+  - `Primary tdata`
+  - `tdata_ready=True`
+- Проверки:
+  - targeted GUI/backend tests -> `83 tests OK`, `2 skipped`
+  - full suite -> `322 tests OK`, `2 skipped`
+
 ### Unified `public_phones` Flow And TG_CONTACT 4 Full-History Verify
 
 - Завершён unified pass для `public_phones` без введения нового operation kind:

@@ -1,5 +1,24 @@
 # Known Issues And Live Findings
 
+## Самый Новый GUI Contour Finding
+Новый самый свежий факт на 2026-06-06 уже не только про helper/API success, а про то, что сам GUI теперь закреплён на этом рабочем контуре:
+- stale registry row `TG_CONTACT N` теперь может автоматически перейти на repo-local `REPO_ROOT/TG_CONTACT/N`, если там реально есть рабочий `tdata-*`;
+- initial GTK selection теперь предпочитает самый актуальный ready `TG_CONTACT` direct `Primary tdata` contour;
+- для такого аккаунта portable card больше не врёт про missing portable profile и пишет direct helper/API path.
+- Verify:
+  - targeted GUI/backend tests -> `83 tests OK`, `2 skipped`
+  - full suite -> `322 tests OK`, `2 skipped`
+- Live probe на текущем host:
+  - `backend.load_accounts()` теперь видит `TG_CONTACT 4` как:
+    - `availability_state=ready`
+    - `profile_source=/home/max/site-control-kit/TG_CONTACT/4`
+  - GUI preferred account logic выбирает:
+    - `TG_CONTACT 4`
+  - preflight по нему подтверждает:
+    - `surface_badge=Primary tdata`
+    - `tdata_ready=True`
+    - `tdata доступен и будет использован как основной surface.`
+
 ## Самый Новый Unified `public_phones` Finding
 Новый самый свежий факт на 2026-06-06 уже не про очередной timeout, а про согласованную total/public/private семантику во всём phone-flow:
 - один и тот же номер из public-source и `user.phone` теперь считается `public`;
@@ -8,7 +27,7 @@
 - `*.private.txt` и `*.private.json` теперь попадают в run history, `artifacts.json` и `artifacts/telegram_exports/INDEX.md`.
 - Verify:
   - targeted tests -> `169 tests OK`, `2 skipped`
-  - full suite -> `319 tests OK`, `2 skipped`
+  - full suite -> `322 tests OK`, `2 skipped`
   - `python3 -m webcontrol --help` -> OK
   - `python3 -m webcontrol browser --help` -> OK
 - Live smoke на этом хосте:

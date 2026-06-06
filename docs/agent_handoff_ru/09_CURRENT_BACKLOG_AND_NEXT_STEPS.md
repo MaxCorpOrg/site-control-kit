@@ -1,5 +1,21 @@
 # Current Backlog And Next Steps
 
+## Обновление 2026-06-06 (GUI / program contour закреплён на `TG_CONTACT 4`)
+- Новый текущий статус:
+  - программа и GTK GUI теперь сами держат рабочий direct `Primary tdata` contour, даже если старый registry-default указывает на битый portable path;
+  - для `TG_CONTACT N` stale registry row может автоматически перейти на repo-local `REPO_ROOT/TG_CONTACT/N`;
+  - в текущем окружении preferred GUI account теперь `TG_CONTACT 4`.
+- Что уже проверено:
+  - targeted GUI/backend tests -> `83 tests OK`, `2 skipped`
+  - full suite -> `322 tests OK`, `2 skipped`
+  - live probe:
+    - `backend.load_accounts()` -> `TG_CONTACT 4` = `ready`, source `/home/max/site-control-kit/TG_CONTACT/4`
+    - GUI preferred account logic -> `TG_CONTACT 4`
+    - preflight -> `Primary tdata`, `tdata_ready=True`
+- Новый ближайший следующий шаг теперь такой:
+  - если пользователю нужен следующий живой run без recovery-работ, просто оставаться на `TG_CONTACT 4` и идти в следующий чат через direct helper/API или GUI;
+  - `default_user` в registry отдельно не трогать без явного решения пользователя.
+
 ## Обновление 2026-06-06 (Unified `public_phones` pass закрыт)
 - Новый кодовый статус:
   - helper/backend/UI/history/index уже согласованы по total/public/private semantics;

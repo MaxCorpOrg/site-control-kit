@@ -56,7 +56,8 @@
 - держать текущий рабочий операторский путь в одном контуре:
   - `GTK GUI -> Primary tdata`;
 - отделять `public_phones` от старого bridge/CDP/web fallback;
-- сохранять progress, stop-path и отдельные sidecar-артефакты для длинных history-run.
+- сохранять progress, stop-path и отдельные sidecar-артефакты для длинных history-run;
+- при stale registry row `TG_CONTACT N` уметь автоматически перейти на repo-local `REPO_ROOT/TG_CONTACT/N`, если там уже есть рабочий direct `tdata-*` source.
 
 ### 6. Unified `public_phones` result contract
 Содержит:
@@ -176,6 +177,10 @@ Runtime теперь резолвится так:
     - `phones_found=145`
     - `public_phones=62`
     - `private_phones_found=83`
+  - GUI contour на этом же baseline теперь тоже зафиксирован:
+    - stale registry/default portable rows не считаются единственным источником истины для `TG_CONTACT N`;
+    - initial account selection предпочитает самый актуальный ready `TG_CONTACT` direct `Primary tdata` contour;
+    - в текущем окружении это приводит к выбору `TG_CONTACT 4` с source `/home/max/site-control-kit/TG_CONTACT/4`;
   - `AK2 live 959756539365` остаётся valid operator target, но его portable helper-clone перед следующим export ещё требует readiness refresh;
 - если на машине уже есть `%USERPROFILE%\.site-control-kit`, проект уходит в `legacy-adopted`, а repo-local `.site-control-kit/local.yaml` указывает на существующий runtime;
 - generated local token живёт в `.site-control-kit/generated_token.txt`, если явный `SITECTL_TOKEN` не задан.

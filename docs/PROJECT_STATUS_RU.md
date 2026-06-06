@@ -12,6 +12,27 @@ Repo-root entrypoint для любого агента: `AGENT_START_HERE.md`.
 
 ## Сделано
 
+### Обновление 2026-06-06 (GUI contour теперь закреплён на ready `TG_CONTACT 4`)
+- Программа и GTK GUI теперь не застревают на старом broken portable-path, если для `TG_CONTACT N` уже есть рабочий repo-local direct source.
+- Что изменено:
+  - [scripts/telegram_gui/backend.py](../scripts/telegram_gui/backend.py) теперь для stale registry row `TG_CONTACT N` автоматически подхватывает repo-local `REPO_ROOT/TG_CONTACT/N`, если там есть рабочий `tdata-*`;
+  - [scripts/telegram_gui/ui/window.py](../scripts/telegram_gui/ui/window.py) теперь при initial выборе аккаунта предпочитает самый актуальный ready `TG_CONTACT` direct `Primary tdata`;
+  - portable card в GUI теперь для такого аккаунта показывает direct helper/API contour без требования portable profile.
+- Verify:
+  - targeted GUI/backend tests -> `83 tests OK`, `2 skipped`
+  - full suite -> `322 tests OK`, `2 skipped`
+- Live probe:
+  - `backend.load_accounts()` теперь видит:
+    - `TG_CONTACT 2` -> `/home/max/site-control-kit/TG_CONTACT/2`
+    - `TG_CONTACT 3` -> `/home/max/site-control-kit/TG_CONTACT/3`
+    - `TG_CONTACT 4` -> `/home/max/site-control-kit/TG_CONTACT/4`
+  - GUI preferred account logic теперь выбирает именно:
+    - `TG_CONTACT 4`
+  - preflight даёт:
+    - `surface_badge=Primary tdata`
+    - `tdata_ready=True`
+    - note: `tdata доступен и будет использован как основной surface.`
+
 ### Обновление 2026-06-06 (Unified `public_phones`: total/public/private)
 - Завершён unified flow для `public_phones` без введения нового режима:
   - один и тот же номер из public-source и `user.phone` теперь считается `public`;
@@ -24,7 +45,7 @@ Repo-root entrypoint для любого агента: `AGENT_START_HERE.md`.
   - [scripts/telegram_gui/models.py](../scripts/telegram_gui/models.py), [scripts/telegram_gui/backend.py](../scripts/telegram_gui/backend.py), [scripts/telegram_gui/services/artifact_index.py](../scripts/telegram_gui/services/artifact_index.py) и [scripts/telegram_gui/ui/window.py](../scripts/telegram_gui/ui/window.py) теперь хранят `private_phones_found`, индексируют `*.private.*` и не называют total-count "открытыми номерами".
 - Verify:
   - targeted Telegram/UI tests -> `169 tests OK`, `2 skipped`
-  - full suite -> `319 tests OK`, `2 skipped`
+- full suite -> `322 tests OK`, `2 skipped`
   - `python3 -m py_compile` по затронутым Telegram-файлам -> OK
   - `python3 -m webcontrol --help` -> OK
   - `python3 -m webcontrol browser --help` -> OK

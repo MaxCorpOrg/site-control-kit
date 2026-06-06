@@ -39,6 +39,10 @@
   - `private_phones_found=83`
   - `/tmp/tg4_nadopinge_full_history_phones_20260606_phones.{md,txt,json,private.txt,private.json}`
   - `/home/max/.site-control-kit/telegram_workspace/runs/20260606T092821Z/{summary.json,artifacts.json,events.jsonl}`
+- GUI contour теперь закреплён на этом же source:
+  - stale registry rows `TG_CONTACT N` могут автоматически резолвиться в repo-local `/home/max/site-control-kit/TG_CONTACT/N`
+  - initial GTK selection теперь предпочитает самый актуальный ready `TG_CONTACT` direct `Primary tdata`
+  - в текущем окружении это даёт selected account `TG_CONTACT 4`
 
 ## Что осталось
 

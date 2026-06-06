@@ -791,14 +791,11 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
             for item in self.accounts:
                 self.account_combo.append_text(item.label)
             if self.accounts:
-                target_index = 0
-                for index, item in enumerate(self.accounts):
-                    if preferred_account_key and item.key == preferred_account_key:
-                        target_index = index
-                        break
-                    if preferred_profile_source and _normalize_path_key(item.profile_source) == _normalize_path_key(preferred_profile_source):
-                        target_index = index
-                        break
+                target_index = _preferred_account_index(
+                    self.accounts,
+                    preferred_account_key=preferred_account_key,
+                    preferred_profile_source=preferred_profile_source,
+                )
                 self.account_combo.set_active(target_index)
                 self._append_log(f"Профили загружены: {len(self.accounts)}")
                 self._load_portable_profiles_into_ui(
@@ -1016,6 +1013,24 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
         portable_runtime = info.portable_runtime
         self.portable_title_label.set_label("Portable Telegram Desktop")
         if portable_profile is None:
+            direct_tdata = None
+            if account is not None:
+                try:
+                    direct_tdata = resolve_tdata_dir(Path(account.profile_source).expanduser())
+                except Exception:
+                    direct_tdata = None
+            if direct_tdata is not None:
+                self.portable_source_label.set_label(
+                    f"Primary tdata contour: direct helper/API path | {direct_tdata}"
+                )
+                self.portable_runtime_label.set_label(
+                    "Status: ready | Для этого аккаунта portable profile не требуется."
+                )
+                self.portable_launch_button.set_sensitive(False)
+                self.portable_refresh_button.set_sensitive(self.current_task is None)
+                self.portable_remove_button.set_visible(False)
+                self.portable_remove_revealer.set_reveal_child(False)
+                return
             self.portable_source_label.set_label(
                 "Portable profile ещё не выбран. Импортируйте tdata.zip или подключите существующую portable-папку."
             )
@@ -2644,6 +2659,48 @@ def _slot_number_from_source(profile_value: str) -> str:
     normalized = str(profile_value or "").replace("\\", "/")
     match = re.search(r"/accounts/(\d+)/", normalized)
     return match.group(1) if match else ""
+
+
+def _preferred_account_index(
+    accounts: list[AccountOption],
+    *,
+    preferred_account_key: str = "",
+    preferred_profile_source: str = "",
+) -> int:
+    if not accounts:
+        return 0
+    for index, item in enumerate(accounts):
+        if preferred_account_key and item.key == preferred_account_key:
+            return index
+        if preferred_profile_source and _normalize_path_key(item.profile_source) == _normalize_path_key(preferred_profile_source):
+            return index
+
+    ready_tg_contact_index: int | None = None
+    ready_tg_contact_slot = -1
+    ready_index: int | None = None
+    for index, item in enumerate(accounts):
+        if str(item.availability_state or "").strip() == "missing":
+            continue
+        if ready_index is None:
+            ready_index = index
+        label = str(item.label or "").strip()
+        match = re.match(r"^TG_CONTACT\s+(\d+)$", label)
+        if match is None:
+            continue
+        try:
+            profile_dir = Path(item.profile_source).expanduser()
+            if resolve_tdata_dir(profile_dir) is not None:
+                slot_number = int(match.group(1))
+                if slot_number >= ready_tg_contact_slot:
+                    ready_tg_contact_slot = slot_number
+                    ready_tg_contact_index = index
+        except Exception:
+            continue
+    if ready_tg_contact_index is not None:
+        return ready_tg_contact_index
+    if ready_index is not None:
+        return ready_index
+    return 0
 
 
 def _chmod_best_effort(path: Path, mode: int) -> None:

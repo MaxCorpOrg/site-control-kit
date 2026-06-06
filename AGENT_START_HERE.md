@@ -29,6 +29,23 @@
 - Ближайший контекст: `origin/main` уже обновлён до `48abaf551e8997ad07bc6389719c7c1691766c3c`; не возвращать старый `b740d66` gate и regression с `/opt/.../.site-control-kit` в активный backlog
 
 ## Где Мы Закончили Работу
+- На 2026-06-06 дополнительно закреплён именно текущий рабочий GUI contour для ready direct source:
+  - registry/default в workspace по-прежнему может содержать старые portable rows вроде `TG_CONTACT 2`, но backend теперь не застревает на битом managed-path;
+  - `scripts/telegram_gui/backend.py` теперь для stale registry row `TG_CONTACT N` автоматически подхватывает repo-local source `REPO_ROOT/TG_CONTACT/N`, если там реально есть рабочий `tdata-*`;
+  - `scripts/telegram_gui/ui/window.py` теперь при initial выборе аккаунта предпочитает самый актуальный ready `TG_CONTACT` direct `Primary tdata` contour;
+  - в текущем живом окружении это даёт:
+    - selected contour: `TG_CONTACT 4`
+    - profile source: `/home/max/site-control-kit/TG_CONTACT/4`
+    - surface: `Primary tdata`
+    - `tdata_ready=True`;
+  - portable card в GUI теперь для такого аккаунта не врёт про missing portable profile, а прямо пишет, что используется direct helper/API path без portable profile;
+  - verify этого pass:
+    - targeted GUI/backend tests -> `83 tests OK`, `2 skipped`
+    - full suite -> `322 tests OK`, `2 skipped`
+    - live probe:
+      - `backend.load_accounts()` теперь видит `TG_CONTACT 4` как `ready`
+      - GUI preferred account logic выбирает `TG_CONTACT 4`
+      - `build_preflight()` даёт `surface_badge=Primary tdata`, `tdata_ready=True`;
 - На 2026-06-06 закрыт unified pass по `public_phones` total/public/private semantics:
   - новый rule:
     - один и тот же номер из public-source и `user.phone` считается `public`;

@@ -11,6 +11,40 @@ globals().update(
 )
 del _app
 
+
+def _tg_contact_slot_from_label(value: str) -> str:
+    text = str(value or "").strip()
+    match = re.search(r"\bTG[_ ]?CONTACT\s+(\d+)\b", text, flags=re.I)
+    return match.group(1) if match else ""
+
+
+def _repo_tg_contact_profile_root(label: str) -> Path | None:
+    slot_number = _tg_contact_slot_from_label(label)
+    if not slot_number:
+        return None
+    candidate = (REPO_ROOT / "TG_CONTACT" / slot_number).expanduser().resolve()
+    if not candidate.is_dir():
+        return None
+    try:
+        tdata_dir = resolve_tdata_dir(candidate)
+    except Exception:
+        tdata_dir = None
+    if tdata_dir is None:
+        return None
+    return candidate
+
+
+def _fallback_profile_source(label: str, profile_source: str) -> str:
+    source = str(profile_source or "").strip()
+    if source:
+        candidate = Path(source).expanduser()
+        if candidate.exists():
+            return source
+    fallback_root = _repo_tg_contact_profile_root(label)
+    if fallback_root is None:
+        return source
+    return str(fallback_root)
+
 class TelegramGuiBackend:
     def __init__(self, *, action_log_path: Path):
         self.action_log_path = action_log_path
@@ -1603,12 +1637,14 @@ class TelegramGuiBackend:
         options: list[AccountOption] = []
         seen_profile_keys: set[str] = set()
         seen_slot_numbers: set[str] = set()
+        original_profile_sources: dict[str, str] = {}
 
         default_user_name = str(registry.get("default_user") or "").strip()
         for row in registry_mod.list_users(registry):
             name = str(row.get("name") or "").strip()
             token = str(row.get("token") or "").strip() or DEFAULT_TOKEN
-            profile_source = str(row.get("profile") or "").strip()
+            original_profile_source = str(row.get("profile") or "").strip()
+            profile_source = _fallback_profile_source(name or "Пользователь из реестра", original_profile_source)
             profile_key = _normalize_path_key(profile_source or str(DEFAULT_PROFILE_DIR))
             seen_profile_keys.add(profile_key)
             rank = 0 if name == default_user_name else 1
@@ -1616,9 +1652,11 @@ class TelegramGuiBackend:
             slot_number = _slot_number_from_source(profile_source)
             if slot_number:
                 seen_slot_numbers.add(slot_number)
+            option_key = f"registry:{name or profile_key}"
+            original_profile_sources[option_key] = original_profile_source
             options.append(
                 AccountOption(
-                    key=f"registry:{name or profile_key}",
+                    key=option_key,
                     label=label,
                     name=name or label,
                     token=token,
@@ -1666,11 +1704,26 @@ class TelegramGuiBackend:
                 )
             )
 
+        tg_contact_root_key = _normalize_path_key(str((REPO_ROOT / "TG_CONTACT").resolve()))
         enriched: list[AccountOption] = []
         for item in options:
             resolved_profile, availability_state, availability_detail = self.resolve_profile_dir_safe(item.profile_source)
+            original_profile_source = original_profile_sources.get(item.key, item.profile_source)
+            used_repo_tg_contact_fallback = (
+                item.source_kind == "registry"
+                and str(original_profile_source).strip()
+                and _normalize_path_key(original_profile_source) != _normalize_path_key(item.profile_source)
+                and _normalize_path_key(item.profile_source).startswith(tg_contact_root_key)
+            )
+            if used_repo_tg_contact_fallback and availability_state == "ready":
+                availability_detail = (
+                    f"Используется repo-local Primary tdata source: {item.profile_source} "
+                    f"(registry path missing: {original_profile_source})"
+                )
             portable_source = self.inspect_portable_source(item)
             portable_profile = self.portable_profile_for_account(item)
+            if used_repo_tg_contact_fallback:
+                portable_profile = None
             portable_runtime_state = portable_profile.state if portable_profile is not None else ""
             if not portable_runtime_state and item.slot_number and portable_source.path is not None:
                 portable_runtime_state = _portable_runtime_state_from_workspace(
