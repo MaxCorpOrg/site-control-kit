@@ -2063,6 +2063,7 @@ class TelegramGuiBackend:
             history_messages_scanned=result.history_messages_scanned,
             operation_kind=operation_kind,
             phones_found=result.phones_found,
+            private_phones_found=result.private_phones_found,
             status=result.status or ("partial" if result.interrupted else "done"),
             duration_sec=result.duration_sec,
             started_at=result.started_at,
@@ -2132,9 +2133,13 @@ class TelegramGuiBackend:
         usernames_txt = None
         phones_txt = None
         phones_json = None
+        private_phones_txt = None
+        private_phones_json = None
         if operation_kind == "public_phones":
             phones_txt = output_path.with_suffix(".txt")
             phones_json = output_path.with_suffix(".json")
+            private_phones_txt = output_path.with_suffix(".private.txt")
+            private_phones_json = output_path.with_suffix(".private.json")
         else:
             usernames_txt = output_path.with_name(f"{output_path.stem}_usernames.txt")
         record = RunRecord(
@@ -2156,6 +2161,7 @@ class TelegramGuiBackend:
             history_messages_scanned=0,
             operation_kind=operation_kind,
             phones_found=0,
+            private_phones_found=0,
             status="failed",
             duration_sec=duration_sec,
             started_at=started_at.isoformat(),
@@ -2167,6 +2173,8 @@ class TelegramGuiBackend:
                 usernames_txt=usernames_txt,
                 phones_txt=phones_txt,
                 phones_json=phones_json,
+                private_phones_txt=private_phones_txt,
+                private_phones_json=private_phones_json,
                 summary_json=summary_path,
                 artifacts_json=artifacts_path,
                 events_jsonl=events_path,
@@ -2375,14 +2383,61 @@ class TelegramGuiBackend:
         stats = payload.get("stats") or {}
         history_messages_scanned = int(stats.get("history_messages_scanned") or 0)
         interrupted = bool(payload.get("interrupted")) or bool(stats.get("interrupted"))
+        private_phone_rows = [r for r in phone_rows if r.get("source_kind") == "user_phone"]
+        total_phones_count = len(phone_rows)
+        public_phones_count = int(stats.get("public_phones_kept") or 0)
+        private_phones_count = int(stats.get("private_phones_kept") or 0)
+        if public_phones_count + private_phones_count != total_phones_count:
+            private_phones_count = len(private_phone_rows)
+            public_phones_count = max(total_phones_count - private_phones_count, 0)
         emit("tdata source=public-phones")
         emit(f"tdata history_messages={history_messages_scanned}")
-        emit(f"tdata phones={len(phone_rows)}")
+        emit(f"tdata phones={total_phones_count}")
+        emit(f"tdata public_phones={public_phones_count}")
+        emit(f"tdata private_phones={private_phones_count}")
         if interrupted:
             emit("tdata interrupted=1")
         phones_txt = Path(str(sidecars.get("phones_txt") or output_path.with_suffix(".txt")))
         phones_json = Path(str(sidecars.get("phones_json") or output_path.with_suffix(".json")))
-        self._log_action(f"run_success tdata_public_phones output={output_path} phones={len(phone_rows)}")
+        # Write private phones sidecars
+        private_txt = output_path.with_suffix(".private.txt")
+        private_json = output_path.with_suffix(".private.json")
+        if private_phone_rows:
+            private_header = "username\tfull_name\tphone"
+            private_txt_lines = [private_header]
+            for row in private_phone_rows:
+                private_txt_lines.append(
+                    "\t".join([
+                        str(row.get("username") or "—").strip() or "—",
+                        str(row.get("full_name") or "—").strip() or "—",
+                        str(row.get("phone") or "—").strip() or "—",
+                    ])
+                )
+            private_txt.write_text("\n".join(private_txt_lines) + "\n", encoding="utf-8")
+            private_json.write_text(
+                json.dumps(
+                    {
+                        "group_url": chat.url or chat.fragment,
+                        "source_mode": "tdata-public-phones-private-only",
+                        "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                        "count": len(private_phone_rows),
+                        "phones": [str(r.get("phone") or "—").strip() for r in private_phone_rows],
+                        "rows": private_phone_rows,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+        else:
+            for stale_path in (private_txt, private_json):
+                if stale_path.exists():
+                    stale_path.unlink()
+        self._log_action(
+            f"run_success tdata_public_phones output={output_path} phones={total_phones_count} "
+            f"public={public_phones_count} private={private_phones_count}"
+        )
         return ExportResult(
             output_path=output_path,
             usernames_txt=None,
@@ -2395,9 +2450,12 @@ class TelegramGuiBackend:
             log_path=run_log_path,
             action_log_path=self.action_log_path,
             operation_kind="public_phones",
-            phones_found=len(phone_rows),
+            phones_found=total_phones_count,
             phones_txt=phones_txt if phones_txt.exists() else None,
             phones_json=phones_json if phones_json.exists() else None,
+            private_phones_found=private_phones_count,
+            private_phones_txt=private_txt if private_txt.exists() else None,
+            private_phones_json=private_json if private_json.exists() else None,
             surface_key=surface_key,
             surface_label=surface_label,
             surface_badge=surface_badge,

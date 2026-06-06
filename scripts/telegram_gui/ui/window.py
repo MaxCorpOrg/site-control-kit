@@ -1996,19 +1996,26 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
     def _handle_export_finished(self, result: ExportResult) -> None:
         self.last_export_result = result
         operation_kind = normalize_operation_kind(result.operation_kind)
-        metric_summary = operation_metric_count(
-            operation_kind=operation_kind,
-            usernames_found=result.usernames_found,
-            phones_found=result.phones_found,
+        metric_summary = operation_metric_summary(
+            operation_kind,
+            result.usernames_found,
+            result.phones_found,
+            result.private_phones_found,
         )
         lines = [f"Markdown: {result.output_path}"]
         if operation_kind == "public_phones":
+            public_count = max(result.phones_found - max(result.private_phones_found, 0), 0)
+            private_count = max(result.private_phones_found, 0)
             if result.phones_txt:
                 lines.append(f"Phones TXT: {result.phones_txt}")
             if result.phones_json:
                 lines.append(f"Phones JSON: {result.phones_json}")
+            if result.private_phones_txt:
+                lines.append(f"Private Phones TXT: {result.private_phones_txt}")
+            if result.private_phones_json:
+                lines.append(f"Private Phones JSON: {result.private_phones_json}")
             lines.append(f"History messages: {result.history_messages_scanned}")
-            lines.append(f"Открытых номеров найдено: {result.phones_found}")
+            lines.append(f"Номеров найдено: {result.phones_found} (public: {public_count}, private: {private_count})")
         else:
             lines.extend(
                 [
@@ -2037,7 +2044,7 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
         self.result_label.set_label("\n".join(lines))
         self.artifact_panel.set_artifacts(result.artifact_bundle(), summary="\n".join(lines))
         self.last_run_label.set_label(
-            f"Последний запуск: {result.output_path.name} | {result.status or ('partial' if result.interrupted else 'done')} | {operation_metric_label(operation_kind)} {metric_summary}"
+            f"Последний запуск: {result.output_path.name} | {result.status or ('partial' if result.interrupted else 'done')} | {metric_summary}"
         )
         if result.interrupted:
             self.hero_status.set_label("Остановлено")

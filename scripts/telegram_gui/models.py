@@ -10,7 +10,7 @@ def normalize_operation_kind(value: str | None) -> str:
 
 
 def operation_metric_label(operation_kind: str) -> str:
-    return "открытые номера" if normalize_operation_kind(operation_kind) == "public_phones" else "@username"
+    return "номеров" if normalize_operation_kind(operation_kind) == "public_phones" else "@username"
 
 
 def operation_metric_count(*, operation_kind: str, usernames_found: int, phones_found: int) -> int:
@@ -19,14 +19,23 @@ def operation_metric_count(*, operation_kind: str, usernames_found: int, phones_
     return max(int(usernames_found or 0), 0)
 
 
-def operation_metric_summary(operation_kind: str, usernames_found: int, phones_found: int) -> str:
+def operation_metric_summary(
+    operation_kind: str,
+    usernames_found: int,
+    phones_found: int,
+    private_phones_found: int = 0,
+) -> str:
     count = operation_metric_count(
         operation_kind=operation_kind,
         usernames_found=usernames_found,
         phones_found=phones_found,
     )
     if normalize_operation_kind(operation_kind) == "public_phones":
-        return f"phones {count}"
+        private_count = max(int(private_phones_found or 0), 0)
+        public_count = max(count - private_count, 0)
+        if private_count > 0:
+            return f"номеров {count} (public: {public_count}, private: {private_count})"
+        return f"номеров {count}"
     return f"@{count}"
 
 
@@ -165,6 +174,8 @@ class ArtifactBundle:
     usernames_json: Path | None = None
     phones_txt: Path | None = None
     phones_json: Path | None = None
+    private_phones_txt: Path | None = None
+    private_phones_json: Path | None = None
     safe_txt: Path | None = None
     safe_md: Path | None = None
     run_log: Path | None = None
@@ -180,6 +191,8 @@ class ArtifactBundle:
             ("Usernames JSON", self.usernames_json),
             ("Phones TXT", self.phones_txt),
             ("Phones JSON", self.phones_json),
+            ("Private Phones TXT", self.private_phones_txt),
+            ("Private Phones JSON", self.private_phones_json),
             ("Safe TXT", self.safe_txt),
             ("Safe MD", self.safe_md),
             ("Run log", self.run_log),
@@ -202,6 +215,8 @@ class ArtifactBundle:
                 "usernames_json": self.usernames_json,
                 "phones_txt": self.phones_txt,
                 "phones_json": self.phones_json,
+                "private_phones_txt": self.private_phones_txt,
+                "private_phones_json": self.private_phones_json,
                 "safe_txt": self.safe_txt,
                 "safe_md": self.safe_md,
                 "run_log": self.run_log,
@@ -221,6 +236,8 @@ class ArtifactBundle:
             usernames_json=Path(str(payload["usernames_json"])) if payload.get("usernames_json") else None,
             phones_txt=Path(str(payload["phones_txt"])) if payload.get("phones_txt") else None,
             phones_json=Path(str(payload["phones_json"])) if payload.get("phones_json") else None,
+            private_phones_txt=Path(str(payload["private_phones_txt"])) if payload.get("private_phones_txt") else None,
+            private_phones_json=Path(str(payload["private_phones_json"])) if payload.get("private_phones_json") else None,
             safe_txt=Path(str(payload["safe_txt"])) if payload.get("safe_txt") else None,
             safe_md=Path(str(payload["safe_md"])) if payload.get("safe_md") else None,
             run_log=Path(str(payload["run_log"])) if payload.get("run_log") else None,
@@ -248,6 +265,9 @@ class ExportResult:
     usernames_json: Path | None = None
     phones_txt: Path | None = None
     phones_json: Path | None = None
+    private_phones_found: int = 0
+    private_phones_txt: Path | None = None
+    private_phones_json: Path | None = None
     surface_key: str = ""
     surface_label: str = ""
     surface_badge: str = ""
@@ -270,6 +290,8 @@ class ExportResult:
             usernames_json=self.usernames_json,
             phones_txt=self.phones_txt,
             phones_json=self.phones_json,
+            private_phones_txt=self.private_phones_txt,
+            private_phones_json=self.private_phones_json,
             safe_txt=self.safe_txt,
             safe_md=self.safe_md,
             run_log=self.log_path,
@@ -371,6 +393,7 @@ class RunStatusSummary:
     interrupted: bool
     operation_kind: str = "usernames"
     phones_found: int = 0
+    private_phones_found: int = 0
     failure_reason: str = ""
 
     def metric_count(self) -> int:
@@ -384,7 +407,12 @@ class RunStatusSummary:
         return operation_metric_label(self.operation_kind)
 
     def metric_summary(self) -> str:
-        return operation_metric_summary(self.operation_kind, self.usernames_found, self.phones_found)
+        return operation_metric_summary(
+            self.operation_kind,
+            self.usernames_found,
+            self.phones_found,
+            self.private_phones_found,
+        )
 
 
 @dataclass(frozen=True)
@@ -408,6 +436,7 @@ class RunRecord:
     artifacts: ArtifactBundle
     operation_kind: str = "usernames"
     phones_found: int = 0
+    private_phones_found: int = 0
     status: str = ""
     duration_sec: int = 0
     started_at: str = ""
@@ -435,6 +464,7 @@ class RunRecord:
             "history_messages_scanned": self.history_messages_scanned,
             "operation_kind": normalize_operation_kind(self.operation_kind),
             "phones_found": self.phones_found,
+            "private_phones_found": self.private_phones_found,
             "status": self.status,
             "duration_sec": self.duration_sec,
             "started_at": self.started_at,
@@ -465,6 +495,7 @@ class RunRecord:
             history_messages_scanned=int(payload.get("history_messages_scanned") or 0),
             operation_kind=normalize_operation_kind(str(payload.get("operation_kind") or "usernames")),
             phones_found=int(payload.get("phones_found") or 0),
+            private_phones_found=int(payload.get("private_phones_found") or 0),
             status=str(payload.get("status") or ("partial" if payload.get("interrupted") else "done")),
             duration_sec=int(payload.get("duration_sec") or 0),
             started_at=str(payload.get("started_at") or ""),
@@ -484,6 +515,7 @@ class RunRecord:
             interrupted=self.interrupted,
             operation_kind=self.operation_kind,
             phones_found=self.phones_found,
+            private_phones_found=self.private_phones_found,
             failure_reason=self.failure_reason,
         )
 

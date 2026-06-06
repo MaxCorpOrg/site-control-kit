@@ -10,23 +10,43 @@
 
 ## Текущий Статус Проекта
 
-Актуальная рабочая точка на 2026-06-03:
+Актуальная рабочая точка на 2026-06-06:
 - основной Telegram-операторский путь: `GTK GUI -> Primary tdata`;
 - в GUI есть два основных действия:
   - `Собрать @username`
   - `Сбор открытых номеров`;
-- `public_phones` V1 теперь реально собирает открытые номера из:
+- unified `public_phones` flow теперь собирает:
   - `chat about`
   - `pinned/history` message text
   - `public bio/about`
-  - не из приватного `user.phone`.
+  - private-only номера из `user.phone`;
+- один и тот же номер из public-source и `user.phone` считается `public`;
+- рядом с обычными `*_phones.txt/json` теперь сохраняются и `*.private.txt/json`, если найдены private-only номера.
 
 Что уже подтверждено:
-- полный `unittest` suite: `318 tests OK`, `2 skipped`;
+- полный `unittest` suite: `319 tests OK`, `2 skipped`;
 - `python3 -m webcontrol --help` -> OK;
 - `python3 -m webcontrol browser --help` -> OK;
 - `python3 -m scripts.telegram_username_collector_launcher --doctor` -> OK;
 - GTK GUI видим на `DISPLAY=:0`;
+- живой GTK smoke на текущем хосте снова поднимает окно `Telegram Username Collector`;
+- live `Quick Check` unified-flow на авторизованном `Primary tdata` source `/home/max/site-control-kit/TG_CONTACT/4/tdata-003/tdata` уже дал private-only hit:
+  - run `20260606T074214Z`
+  - чат `-1002465948544`
+  - `phones_found=1`
+  - `private_phones_found=1`
+  - артефакты: `/tmp/site-control-live-private-phones-1_phones.{md,txt,json,private.txt,private.json}`
+  - run history: `/home/max/.site-control-kit/telegram_workspace/runs/20260606T074214Z/{summary.json,artifacts.json,events.jsonl}`
+  - `artifacts/telegram_exports/INDEX.md` уже содержит entry с `Private Phones TXT/JSON`;
+- direct helper/API `Full History` на том же ready source уже завершён до `done`:
+  - run `20260606T092821Z`
+  - чат `НаДопинге 2.0 ЧАТ | Бодибилдинг | Фитнес | Спорт Фармакология`
+  - `history_messages_scanned=187923`
+  - `phones_found=145`
+  - `public_count=62`
+  - `private_phones_found=83`
+  - артефакты: `/tmp/tg4_nadopinge_full_history_phones_20260606_phones.{md,txt,json,private.txt,private.json}`
+  - run history: `/home/max/.site-control-kit/telegram_workspace/runs/20260606T092821Z/{summary.json,artifacts.json,events.jsonl}`;
 - live цель `30` уникальных открытых номеров уже закрыта на `AK2 live 959756539365`:
   - rerun `@chatkosmetologa`
   - `status=done`
@@ -42,6 +62,7 @@
   - артефакты: `/tmp/ak2_public_phones_smoke_20260603.{json,log,session}`.
 
 Что осталось:
+- если нужен live-run именно на `AK2 live 959756539365`, сначала вернуть helper-клон этого portable-профиля в состояние `ready for export`: сейчас он виден, но helper пишет, что сессия ещё не открывается;
 - если нужен следующий live-pass, идти уже не за целью `30`, а за дополнительным покрытием target-ов:
   - `@kosmetologi_chat_ru`
   - `@cosmetologna`
@@ -51,6 +72,7 @@
 Подробные checkpoints:
 - [docs/checkpoints/CHECKPOINT_2026-06-03_СТАБИЛИЗАЦИЯ_PUBLIC_PHONES.md](docs/checkpoints/CHECKPOINT_2026-06-03_СТАБИЛИЗАЦИЯ_PUBLIC_PHONES.md)
 - [docs/checkpoints/CHECKPOINT_2026-06-03_AK2_30_UNIQUE_PUBLIC_PHONES.md](docs/checkpoints/CHECKPOINT_2026-06-03_AK2_30_UNIQUE_PUBLIC_PHONES.md)
+- [docs/checkpoints/CHECKPOINT_2026-06-06_UNIFIED_PUBLIC_PHONES_TG_CONTACT4.md](docs/checkpoints/CHECKPOINT_2026-06-06_UNIFIED_PUBLIC_PHONES_TG_CONTACT4.md)
 
 ## Быстрый Вход В Браузерный Контур
 
@@ -77,17 +99,17 @@ TELEGRAM_API_COLLECTOR_PYTHON=/home/max/telegram-api-collector/.venv/bin/python 
 Что важно:
 - не менять `default_user` без явной причины;
 - для live `tdata` helper-path использовать collector venv, а не голый системный `python3`;
-- текущий живой профиль для оператора: `AK2 live 959756539365`;
-- текущий источник `tdata`: `/home/max/Документы/ак2/у/959756539365/tdata`.
+- текущий ready direct helper source на этом хосте: `/home/max/site-control-kit/TG_CONTACT/4/tdata-003/tdata`;
+- portable helper-clone для `AK2 live 959756539365` перед следующим export ещё требует readiness refresh.
 
 Прямой helper smoke для `public_phones`:
 
 ```bash
 cd /home/max/site-control-kit
 /home/max/telegram-api-collector/.venv/bin/python scripts/telegram_tdata_helper.py export-public-phones \
-  --tdata "/home/max/Документы/ак2/у/959756539365/tdata" \
-  --session /tmp/ak2_public_phones_smoke.session \
-  --chat-ref @cosmetologi_chat \
+  --tdata "/home/max/site-control-kit/TG_CONTACT/4/tdata-003/tdata" \
+  --session /tmp/tg4_public_phones_smoke.session \
+  --chat-ref -1002465948544 \
   --history-limit 50 \
   --progress-every 25
 ```

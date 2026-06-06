@@ -29,6 +29,62 @@
 - Ближайший контекст: `origin/main` уже обновлён до `48abaf551e8997ad07bc6389719c7c1691766c3c`; не возвращать старый `b740d66` gate и regression с `/opt/.../.site-control-kit` в активный backlog
 
 ## Где Мы Закончили Работу
+- На 2026-06-06 закрыт unified pass по `public_phones` total/public/private semantics:
+  - новый rule:
+    - один и тот же номер из public-source и `user.phone` считается `public`;
+    - `phones_found` теперь всегда total unique phones;
+    - `private_phones_found` хранит только private-only split;
+  - helper/backend/history/index теперь синхронизированы:
+    - `scripts/telegram_tdata_helper.py`
+    - `scripts/export_telegram_members_non_pii.py`
+    - `scripts/telegram_gui/models.py`
+    - `scripts/telegram_gui/backend.py`
+    - `scripts/telegram_gui/services/artifact_index.py`
+    - `scripts/telegram_gui/ui/window.py`;
+  - verify этого цикла:
+    - targeted: `python3 -m unittest tests.test_telegram_tdata_helper tests.test_telegram_export_runtime tests.test_telegram_gui_backend_features tests.test_telegram_gui_run_history tests.test_telegram_members_export_gui` -> `169 tests OK`, `2 skipped`
+    - full suite: `python3 -m unittest discover -s tests -p 'test_*.py'` -> `319 tests OK`, `2 skipped`
+    - `python3 -m py_compile` по затронутым Telegram-файлам -> OK
+    - `python3 -m webcontrol --help` -> OK
+    - `python3 -m webcontrol browser --help` -> OK
+  - live smoke этого цикла:
+    - GTK app снова поднимается на `DISPLAY=:0` с окном `Telegram Username Collector`;
+    - текущий авторизованный direct `Primary tdata` source на этой машине:
+      - `/home/max/site-control-kit/TG_CONTACT/4/tdata-003/tdata`;
+    - live backend `Quick Check` по чату `-1002465948544` дал:
+      - run `20260606T074214Z`
+      - `phones_found=1`
+      - `private_phones_found=1`
+      - `public_count=0`
+    - реальные артефакты:
+      - `/tmp/site-control-live-private-phones-1_phones.md`
+      - `/tmp/site-control-live-private-phones-1_phones.txt`
+      - `/tmp/site-control-live-private-phones-1_phones.json`
+      - `/tmp/site-control-live-private-phones-1_phones.private.txt`
+      - `/tmp/site-control-live-private-phones-1_phones.private.json`
+      - `/home/max/.site-control-kit/telegram_workspace/runs/20260606T074214Z/{summary.json,artifacts.json,events.jsonl}`
+      - `artifacts/telegram_exports/INDEX.md` уже содержит `Private Phones TXT/JSON` для этого run;
+    - direct helper/API `Full History` на том же ready source уже дошёл до `done`:
+      - chat:
+        - `НаДопинге 2.0 ЧАТ | Бодибилдинг | Фитнес | Спорт Фармакология`
+        - `-1002465948544`
+      - run:
+        - `20260606T092821Z`
+        - `status=done`
+        - `history_messages_scanned=187923`
+        - `phones_found=145`
+        - `public_count=62`
+        - `private_phones_found=83`
+      - реальные артефакты:
+        - `/tmp/tg4_nadopinge_full_history_phones_20260606_phones.md`
+        - `/tmp/tg4_nadopinge_full_history_phones_20260606_phones.txt`
+        - `/tmp/tg4_nadopinge_full_history_phones_20260606_phones.json`
+        - `/tmp/tg4_nadopinge_full_history_phones_20260606_phones.private.txt`
+        - `/tmp/tg4_nadopinge_full_history_phones_20260606_phones.private.json`
+        - `/tmp/tg4_direct_full_history_actions_20260606.log`
+        - `/home/max/.site-control-kit/telegram_workspace/runs/20260606T092821Z/{summary.json,artifacts.json,events.jsonl}`;
+  - остаточный runtime note:
+    - если пользователь хочет следующий run именно на `AK2 live 959756539365`, сначала нужно вернуть helper-клон этого portable-профиля в `ready for export`; сейчас backend пишет `Portable профиль найден, но helper не смог открыть сессию. Откройте этот Telegram Desktop профиль и дождитесь полной загрузки.`
 - На 2026-06-03 закрыт live-goal `30 unique public phones` на текущем AK2 operator path без code changes и без env-workaround на list-timeout:
   - путь был строго такой:
     - `GTK GUI -> Primary tdata -> Full History -> Сбор открытых номеров`;
@@ -122,8 +178,9 @@
   - новый artifact contract:
     - markdown `*_phones.md`
     - sidecars `*_phones.txt`, `*_phones.json`
+    - private sidecars `*.private.txt`, `*.private.json` при private-only hit
     - history/run metadata теперь различают `operation_kind=usernames|public_phones`;
-  - приватное `user.phone` не читается; используются только открытые номера из `chat about`, pinned/history message text и public `bio/about`;
+  - текущий flow читает public-номера из `chat about`, pinned/history message text и public `bio/about`, а private-only номера — из `user.phone`; overlap классифицируется как `public`;
   - unit verify этого цикла:
     - targeted: `python3 -m unittest tests.test_telegram_tdata_helper tests.test_telegram_export_runtime tests.test_telegram_gui_run_history tests.test_telegram_gui_backend_features tests.test_telegram_members_export_gui` -> OK
     - full suite: `PYTHONPATH="$PWD" python3 -m unittest discover -s tests -p 'test_*.py'` -> `317 tests OK`, `2 skipped`

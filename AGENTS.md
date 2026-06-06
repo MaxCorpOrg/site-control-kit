@@ -136,11 +136,13 @@
 
 ## Telegram Артефакты
 - Для Telegram-export не ограничивайтесь только `.md`-отчётом: рядом должны появляться `*_usernames.txt` и `*_usernames.json`.
-- Для `public_phones` рядом должны появляться `*_phones.txt` и `*_phones.json`; V1-источники только такие:
-  - `chat about`
-  - `pinned/history` text
-  - `public bio/about`
-  - не `user.phone`
+- Для `public_phones` рядом должны появляться `*_phones.txt` и `*_phones.json`; если найдены private-only номера, рядом также должны появляться `*.private.txt` и `*.private.json`.
+- Текущий unified `public_phones` flow собирает:
+  - public-номера из `chat about`
+  - public-номера из `pinned/history` text
+  - public-номера из `public bio/about`
+  - private-only номера из `user.phone`
+- Если один и тот же нормализованный номер найден и публично, и в `user.phone`, считать его `public`, а не `private`.
 - Архивный каталог по умолчанию: `artifacts/telegram_exports`.
 - Индекс путей хранится в `artifacts/telegram_exports/INDEX.md`; если агент сделал новый живой прогон, в ответе нужно назвать эти пути явно.
 - Для текущего `tdata-history-authors` path полный history-run по умолчанию не должен обрываться искусственным timeout: `TELEGRAM_TDATA_EXPORT_TIMEOUT_SEC=0` трактуется как unlimited, а progress/stop UX считается основным способом контроля длинного скана.

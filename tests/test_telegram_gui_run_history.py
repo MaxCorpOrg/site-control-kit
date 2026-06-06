@@ -188,12 +188,15 @@ class RunHistoryServiceTests(unittest.TestCase):
                     usernames_txt=None,
                     phones_txt=Path("/tmp/export_phones.txt"),
                     phones_json=Path("/tmp/export_phones.json"),
+                    private_phones_txt=Path("/tmp/export_phones.private.txt"),
+                    private_phones_json=Path("/tmp/export_phones.private.json"),
                     summary_json=Path("/tmp/summary.json"),
                     artifacts_json=Path("/tmp/artifacts.json"),
                     events_jsonl=Path("/tmp/events.jsonl"),
                 ),
                 operation_kind="public_phones",
                 phones_found=4,
+                private_phones_found=1,
                 status="done",
             )
             service.append_run(record)
@@ -202,4 +205,6 @@ class RunHistoryServiceTests(unittest.TestCase):
         self.assertEqual(len(recent), 1)
         self.assertEqual(recent[0].operation_kind, "public_phones")
         self.assertEqual(recent[0].phones_found, 4)
+        self.assertEqual(recent[0].private_phones_found, 1)
         self.assertEqual(recent[0].artifacts.phones_txt, Path("/tmp/export_phones.txt"))
+        self.assertEqual(recent[0].artifacts.private_phones_txt, Path("/tmp/export_phones.private.txt"))

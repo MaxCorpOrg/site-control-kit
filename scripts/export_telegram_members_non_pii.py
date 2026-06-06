@@ -5062,27 +5062,48 @@ def _write_public_phones_markdown(
     source_mode: str,
 ) -> None:
     ts = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    public_rows = [r for r in phone_rows if r.get("source_kind") != "user_phone"]
+    private_rows = [r for r in phone_rows if r.get("source_kind") == "user_phone"]
     lines: list[str] = [
-        "# Открытые номера из Telegram",
+        "# Номера из Telegram",
         "",
         f"Источник: `{group_url}`",
         f"Режим сбора: `{source_mode}`",
         f"Дата выгрузки: {ts}",
-        f"Количество уникальных открытых номеров: **{len(phone_rows)}**",
+        f"Всего уникальных номеров: **{len(phone_rows)}**",
+        f"Открытых (public): **{len(public_rows)}**",
+        f"Личных (private): **{len(private_rows)}**",
         "",
-        "| # | Nick | Имя / ФИО | Номер | Источник | Peer ID |",
-        "|---|---|---|---|---|---|",
     ]
-    for index, item in enumerate(phone_rows, start=1):
-        username = str(item.get("username") or "—").replace("|", r"\|")
-        full_name = str(item.get("full_name") or "—").replace("|", r"\|")
-        phone = str(item.get("phone") or "—").replace("|", r"\|")
-        source_kind = str(item.get("source_kind") or "—").replace("|", r"\|")
-        peer_id = str(item.get("peer_id") or "—").replace("|", r"\|")
-        lines.append(f"| {index} | {username} | {full_name} | {phone} | {source_kind} | {peer_id} |")
-    lines.append("")
-    lines.append("Примечание: сохраняются только открытые номера из chat about, pinned/history текста и public bio/about.")
-    lines.append("Приватные phone-поля Telegram не читаются и не сохраняются.")
+    if public_rows:
+        lines.append("## Открытые номера (из chat about, pinned/history, public bio/about)")
+        lines.append("")
+        lines.append("| # | Nick | Имя / ФИО | Номер | Источник | Peer ID |")
+        lines.append("|---|---|---|---|---|---|")
+        for index, item in enumerate(public_rows, start=1):
+            username = str(item.get("username") or "—").replace("|", r"\|")
+            full_name = str(item.get("full_name") or "—").replace("|", r"\|")
+            phone = str(item.get("phone") or "—").replace("|", r"\|")
+            source_kind = str(item.get("source_kind") or "—").replace("|", r"\|")
+            peer_id = str(item.get("peer_id") or "—").replace("|", r"\|")
+            lines.append(f"| {index} | {username} | {full_name} | {phone} | {source_kind} | {peer_id} |")
+        lines.append("")
+    if private_rows:
+        lines.append("## Личные номера (из user.phone — видны только авторизованному профилю)")
+        lines.append("")
+        lines.append("| # | Nick | Имя / ФИО | Номер | Источник | Peer ID |")
+        lines.append("|---|---|---|---|---|---|")
+        for index, item in enumerate(private_rows, start=1):
+            username = str(item.get("username") or "—").replace("|", r"\|")
+            full_name = str(item.get("full_name") or "—").replace("|", r"\|")
+            phone = str(item.get("phone") or "—").replace("|", r"\|")
+            source_kind = str(item.get("source_kind") or "—").replace("|", r"\|")
+            peer_id = str(item.get("peer_id") or "—").replace("|", r"\|")
+            lines.append(f"| {index} | {username} | {full_name} | {phone} | {source_kind} | {peer_id} |")
+        lines.append("")
+    lines.append("### Источники")
+    lines.append("- **Открытые номера**: из chat about, pinned/history текста, public bio/about.")
+    lines.append("- **Личные номера**: из user.phone (доступны только авторизованному профилю Telegram).")
     lines.append("")
     path.write_text("\n".join(lines), encoding="utf-8")
 
@@ -5110,12 +5131,18 @@ def _write_phone_sidecars(
         )
     txt_path.write_text("\n".join(txt_lines) + "\n", encoding="utf-8")
 
+    public_rows = [r for r in phone_rows if r.get("source_kind") != "user_phone"]
+    private_rows = [r for r in phone_rows if r.get("source_kind") == "user_phone"]
     payload = {
         "group_url": group_url,
         "source_mode": source_mode,
         "generated_at": dt.datetime.now().isoformat(timespec="seconds"),
         "count": len(phone_rows),
+        "public_count": len(public_rows),
+        "private_count": len(private_rows),
         "phones": [str(row.get("phone") or "—").strip() or "—" for row in phone_rows],
+        "public_phones": [str(row.get("phone") or "—").strip() or "—" for row in public_rows],
+        "private_phones": [str(row.get("phone") or "—").strip() or "—" for row in private_rows],
         "rows": phone_rows,
     }
     json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

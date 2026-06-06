@@ -58,6 +58,22 @@
 - отделять `public_phones` от старого bridge/CDP/web fallback;
 - сохранять progress, stop-path и отдельные sidecar-артефакты для длинных history-run.
 
+### 6. Unified `public_phones` result contract
+Содержит:
+- один `operation_kind=public_phones` для всего phone-flow;
+- `phones_found` как total unique phones;
+- `private_phones_found` как private-only split;
+- sidecars:
+  - `*_phones.md`
+  - `*_phones.txt`
+  - `*_phones.json`
+  - `*.private.txt`
+  - `*.private.json` при наличии private-only номеров.
+
+Назначение:
+- держать одинаковую total/public/private семантику в helper, markdown/json, GUI, run history и `artifacts/telegram_exports/INDEX.md`;
+- применять правило `public wins`, если один и тот же нормализованный номер найден и публично, и в `user.phone`.
+
 ## Схема Потока
 
 ```text
@@ -152,11 +168,15 @@ Runtime теперь резолвится так:
 
 - canonical default runtime root — `./var/site-control-kit`;
 - для текущего Telegram operator flow long full-history export живёт на отдельном export-timeout path, а не на list-timeout;
-- фактический live baseline на 2026-06-03:
-  - `AK2 live 959756539365`
-  - `Primary tdata`
-  - `public_phones`
-  - цель `30` unique phones уже закрыта cumulative итогом `37`.
+- фактический live baseline на 2026-06-06:
+  - ready direct `Primary tdata` source на этом хосте:
+    - `/home/max/site-control-kit/TG_CONTACT/4/tdata-003/tdata`
+  - unified `public_phones` full-history run `20260606T092821Z` уже подтвердил:
+    - `history_messages_scanned=187923`
+    - `phones_found=145`
+    - `public_phones=62`
+    - `private_phones_found=83`
+  - `AK2 live 959756539365` остаётся valid operator target, но его portable helper-clone перед следующим export ещё требует readiness refresh;
 - если на машине уже есть `%USERPROFILE%\.site-control-kit`, проект уходит в `legacy-adopted`, а repo-local `.site-control-kit/local.yaml` указывает на существующий runtime;
 - generated local token живёт в `.site-control-kit/generated_token.txt`, если явный `SITECTL_TOKEN` не задан.
 

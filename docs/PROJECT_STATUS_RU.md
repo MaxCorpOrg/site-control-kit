@@ -1,6 +1,6 @@
 # Project Status RU
 
-Последнее обновление: 2026-06-03
+Последнее обновление: 2026-06-06
 
 Этот файл нужен как точка входа для любого нового чата и любого нового агента.
 Перед новой задачей его нужно прочитать целиком.
@@ -11,6 +11,61 @@ Repo-root entrypoint для любого агента: `AGENT_START_HERE.md`.
 Читать его нужно по номерам файлов, начиная с `00_START_HERE.md`.
 
 ## Сделано
+
+### Обновление 2026-06-06 (Unified `public_phones`: total/public/private)
+- Завершён unified flow для `public_phones` без введения нового режима:
+  - один и тот же номер из public-source и `user.phone` теперь считается `public`;
+  - `phones_found` = общее число уникальных номеров;
+  - `private_phones_found` = только private-only номера;
+  - `*.private.txt` и `*.private.json` теперь попадают в run history, `artifacts.json` и `artifacts/telegram_exports/INDEX.md`.
+- Что изменено:
+  - [scripts/telegram_tdata_helper.py](../scripts/telegram_tdata_helper.py) теперь ведёт по каждому номеру public/private visibility и финализирует итоговую классификацию по правилу `public wins`;
+  - [scripts/export_telegram_members_non_pii.py](../scripts/export_telegram_members_non_pii.py) теперь пишет согласованные total/public/private counts в markdown и JSON;
+  - [scripts/telegram_gui/models.py](../scripts/telegram_gui/models.py), [scripts/telegram_gui/backend.py](../scripts/telegram_gui/backend.py), [scripts/telegram_gui/services/artifact_index.py](../scripts/telegram_gui/services/artifact_index.py) и [scripts/telegram_gui/ui/window.py](../scripts/telegram_gui/ui/window.py) теперь хранят `private_phones_found`, индексируют `*.private.*` и не называют total-count "открытыми номерами".
+- Verify:
+  - targeted Telegram/UI tests -> `169 tests OK`, `2 skipped`
+  - full suite -> `319 tests OK`, `2 skipped`
+  - `python3 -m py_compile` по затронутым Telegram-файлам -> OK
+  - `python3 -m webcontrol --help` -> OK
+  - `python3 -m webcontrol browser --help` -> OK
+- Live smoke:
+  - GTK GUI снова поднимается на `DISPLAY=:0` с окном `Telegram Username Collector`;
+  - рабочий авторизованный `Primary tdata` source на этом хосте: `/home/max/site-control-kit/TG_CONTACT/4/tdata-003/tdata`;
+  - backend `Quick Check` run `20260606T074214Z` по чату `-1002465948544` дал:
+    - `phones_found=1`
+    - `private_phones_found=1`
+    - `public_count=0`
+  - реальные артефакты:
+    - `/tmp/site-control-live-private-phones-1_phones.md`
+    - `/tmp/site-control-live-private-phones-1_phones.txt`
+    - `/tmp/site-control-live-private-phones-1_phones.json`
+    - `/tmp/site-control-live-private-phones-1_phones.private.txt`
+    - `/tmp/site-control-live-private-phones-1_phones.private.json`
+    - `/home/max/.site-control-kit/telegram_workspace/runs/20260606T074214Z/{summary.json,artifacts.json,events.jsonl}`
+  - согласованность подтверждена:
+    - markdown: `Всего=1`, `public=0`, `private=1`
+    - JSON sidecar: `count=1`, `public_count=0`, `private_count=1`
+    - run summary: `phones_found=1`, `private_phones_found=1`
+    - `artifacts/telegram_exports/INDEX.md` содержит `Private Phones TXT/JSON`
+  - direct helper/API `Full History` по тому же ready source уже доведён до конца:
+    - чат: `НаДопинге 2.0 ЧАТ | Бодибилдинг | Фитнес | Спорт Фармакология` (`-1002465948544`)
+    - run: `20260606T092821Z`
+    - итог:
+      - `status=done`
+      - `history_messages_scanned=187923`
+      - `phones_found=145`
+      - `public_count=62`
+      - `private_phones_found=83`
+    - артефакты:
+      - `/tmp/tg4_nadopinge_full_history_phones_20260606_phones.md`
+      - `/tmp/tg4_nadopinge_full_history_phones_20260606_phones.txt`
+      - `/tmp/tg4_nadopinge_full_history_phones_20260606_phones.json`
+      - `/tmp/tg4_nadopinge_full_history_phones_20260606_phones.private.txt`
+      - `/tmp/tg4_nadopinge_full_history_phones_20260606_phones.private.json`
+      - `/tmp/tg4_direct_full_history_actions_20260606.log`
+      - `/home/max/.site-control-kit/telegram_workspace/runs/20260606T092821Z/{summary.json,artifacts.json,events.jsonl}`
+- Остаточный runtime-нюанс:
+  - если нужен именно следующий прогон на `AK2 live 959756539365`, сначала нужно вернуть helper-клон этого portable-профиля в состояние `ready for export`; сейчас backend видит профиль, но helper ещё не может открыть его session.
 
 ### Обновление 2026-06-03 (AK2: цель `30` уникальных открытых номеров закрыта)
 - Выполнен реальный live-run через текущий операторский путь:
@@ -155,8 +210,9 @@ Repo-root entrypoint для любого агента: `AGENT_START_HERE.md`.
 - Границы V1:
   - работает только для `Primary tdata`;
   - не использует bridge/CDP/web fallback;
-  - читает только открытые номера из `chat about`, pinned/history message text и public `bio/about`;
-  - не читает и не сохраняет приватное `user.phone`.
+  - читает public-номера из `chat about`, pinned/history message text и public `bio/about`;
+  - читает private-only номера из `user.phone`;
+  - если один и тот же номер встречается и публично, и в `user.phone`, он сохраняется как `public`.
 - Что изменено:
   - [scripts/telegram_tdata_helper.py](../scripts/telegram_tdata_helper.py) получил отдельную команду `export-public-phones`;
   - [scripts/export_telegram_members_non_pii.py](../scripts/export_telegram_members_non_pii.py) теперь пишет `*_phones.md`, `*_phones.txt`, `*_phones.json`;

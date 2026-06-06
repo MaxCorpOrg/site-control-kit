@@ -62,6 +62,7 @@ from .models import (
     normalize_operation_kind,
     operation_metric_count,
     operation_metric_label,
+    operation_metric_summary,
 )
 from .services.artifact_index import append_index_entry, build_artifact_bundle
 from .services.portable_profiles import PortableProfileRegistry, portable_profile_kind, portable_profile_label

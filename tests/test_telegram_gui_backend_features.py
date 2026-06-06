@@ -204,6 +204,9 @@ class TelegramGuiBackendFeatureTests(unittest.TestCase):
                 phones_found=7,
                 phones_txt=Path(td) / "cosmetologna_phones.txt",
                 phones_json=Path(td) / "cosmetologna_phones.json",
+                private_phones_found=2,
+                private_phones_txt=Path(td) / "cosmetologna_phones.private.txt",
+                private_phones_json=Path(td) / "cosmetologna_phones.private.json",
                 surface_key="tdata",
                 surface_label="Telegram Desktop tdata",
                 surface_badge="Primary tdata",
@@ -230,8 +233,11 @@ class TelegramGuiBackendFeatureTests(unittest.TestCase):
             text = index_path.read_text(encoding="utf-8")
             self.assertEqual(recorded.operation_kind, "public_phones")
             self.assertEqual(recorded.phones_found, 7)
+            self.assertEqual(recorded.private_phones_found, 2)
             self.assertIn(f"Phones TXT: `{Path(td) / 'cosmetologna_phones.txt'}`", text)
             self.assertIn(f"Phones JSON: `{Path(td) / 'cosmetologna_phones.json'}`", text)
+            self.assertIn(f"Private Phones TXT: `{Path(td) / 'cosmetologna_phones.private.txt'}`", text)
+            self.assertIn(f"Private Phones JSON: `{Path(td) / 'cosmetologna_phones.private.json'}`", text)
 
     def test_bridge_export_uses_env_token_and_masks_logs(self) -> None:
         with tempfile.TemporaryDirectory() as td:

@@ -135,7 +135,7 @@ class TelegramMembersExportGuiTests(unittest.TestCase):
         self.assertEqual(fake_window.progress_bar.fraction, 0.0)
         self.assertIn("166750", fake_window.progress_bar.text)
 
-    def test_render_progress_state_uses_public_phone_metric_label(self) -> None:
+    def test_render_progress_state_uses_total_phone_metric_label(self) -> None:
         class FakeProgressBar:
             def __init__(self) -> None:
                 self.fraction = None
@@ -180,8 +180,8 @@ class TelegramMembersExportGuiTests(unittest.TestCase):
 
         mod.TelegramMembersExportWindow._render_progress_state(fake_window)
 
-        self.assertIn("7 открытые номера", fake_window.progress_bar.text)
-        self.assertIn("открытые номера: 7", fake_window.progress_meta_label.get_label())
+        self.assertIn("7 номеров", fake_window.progress_bar.text)
+        self.assertIn("номеров: 7", fake_window.progress_meta_label.get_label())
 
     def test_finish_task_error_marks_export_progress_failed(self) -> None:
         class FakeButton:

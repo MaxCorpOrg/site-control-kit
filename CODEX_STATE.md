@@ -1,5 +1,69 @@
 # CODEX_STATE
 
+## 2026-06-06 (Unified `public_phones` flow: total/public/private aligned)
+
+- Scope:
+  - finished the unified `public_phones` implementation so total/public/private semantics now match across helper, markdown/json sidecars, GUI, run history, and `artifacts/telegram_exports/INDEX.md`
+  - kept one operation kind only: `public_phones`
+  - locked the overlap rule to `public wins`
+- Code changes:
+  - `scripts/telegram_tdata_helper.py` now tracks each normalized phone with public/private visibility and finalizes rows so a number seen both publicly and in `user.phone` is stored as public
+  - `scripts/export_telegram_members_non_pii.py` now writes consistent total/public/private counts and preserves the same split in markdown + JSON sidecars
+  - `scripts/telegram_gui/models.py`, `scripts/telegram_gui/backend.py`, `scripts/telegram_gui/services/artifact_index.py`, and `scripts/telegram_gui/ui/window.py` now persist `private_phones_found`, include `*.private.*` artifacts in run history/index, and use total wording instead of the old open-only wording for generic counters
+  - regression coverage was extended in:
+    - `tests/test_telegram_tdata_helper.py`
+    - `tests/test_telegram_export_runtime.py`
+    - `tests/test_telegram_gui_backend_features.py`
+    - `tests/test_telegram_gui_run_history.py`
+    - `tests/test_telegram_members_export_gui.py`
+- Verify:
+  - targeted Telegram/UI tests -> `169 tests OK`, `2 skipped`
+  - full suite: `python3 -m unittest discover -s tests -p 'test_*.py'` -> `319 tests OK`, `2 skipped`
+  - `python3 -m py_compile` on touched Telegram files -> OK
+  - `python3 -m webcontrol --help` -> OK
+  - `python3 -m webcontrol browser --help` -> OK
+- Live smoke:
+  - GTK app still opens on `DISPLAY=:0` with live window title `Telegram Username Collector`
+  - current direct authorized `Primary tdata` source that succeeded on this host:
+    - `/home/max/site-control-kit/TG_CONTACT/4/tdata-003/tdata`
+  - backend `Quick Check` live run:
+    - chat: `-1002465948544`
+    - run: `20260606T074214Z`
+    - result: `phones_found=1`, `private_phones_found=1`, `public_phones=0`
+    - artifacts:
+      - `/tmp/site-control-live-private-phones-1_phones.md`
+      - `/tmp/site-control-live-private-phones-1_phones.txt`
+      - `/tmp/site-control-live-private-phones-1_phones.json`
+      - `/tmp/site-control-live-private-phones-1_phones.private.txt`
+      - `/tmp/site-control-live-private-phones-1_phones.private.json`
+      - `/home/max/.site-control-kit/telegram_workspace/runs/20260606T074214Z/{summary.json,artifacts.json,events.jsonl}`
+  - consistency confirmed:
+    - markdown shows `Всего=1`, `public=0`, `private=1`
+    - phone JSON shows `count=1`, `public_count=0`, `private_count=1`
+    - run summary stores `phones_found=1`, `private_phones_found=1`
+    - `artifacts/telegram_exports/INDEX.md` includes `Private Phones TXT/JSON` for this run
+  - direct helper/API `Full History` live run on the same ready source also finished:
+    - chat:
+      - `НаДопинге 2.0 ЧАТ | Бодибилдинг | Фитнес | Спорт Фармакология`
+      - `-1002465948544`
+    - run: `20260606T092821Z`
+    - outcome:
+      - `status=done`
+      - `history_messages_scanned=187923`
+      - `phones_found=145`
+      - `public_phones=62`
+      - `private_phones_found=83`
+    - artifacts:
+      - `/tmp/tg4_nadopinge_full_history_phones_20260606_phones.md`
+      - `/tmp/tg4_nadopinge_full_history_phones_20260606_phones.txt`
+      - `/tmp/tg4_nadopinge_full_history_phones_20260606_phones.json`
+      - `/tmp/tg4_nadopinge_full_history_phones_20260606_phones.private.txt`
+      - `/tmp/tg4_nadopinge_full_history_phones_20260606_phones.private.json`
+      - `/tmp/tg4_direct_full_history_actions_20260606.log`
+      - `/home/max/.site-control-kit/telegram_workspace/runs/20260606T092821Z/{summary.json,artifacts.json,events.jsonl}`
+- Remaining runtime note:
+  - `AK2 live 959756539365` still needs a separate portable-helper readiness refresh if the user wants the next run on that exact profile; current helper detail there is `Portable профиль найден, но helper не смог открыть сессию. Откройте этот Telegram Desktop профиль и дождитесь полной загрузки.`
+
 ## 2026-06-03 (AK2 `30 unique public phones` reached on live GTK flow)
 
 - Scope:

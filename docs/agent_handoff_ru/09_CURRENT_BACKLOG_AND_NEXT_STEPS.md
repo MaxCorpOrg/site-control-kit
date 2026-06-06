@@ -1,5 +1,51 @@
 # Current Backlog And Next Steps
 
+## Обновление 2026-06-06 (Unified `public_phones` pass закрыт)
+- Новый кодовый статус:
+  - helper/backend/UI/history/index уже согласованы по total/public/private semantics;
+  - `phones_found` теперь total unique phones;
+  - `private_phones_found` теперь сохраняется отдельно;
+  - `*.private.txt` и `*.private.json` уже попадают в `artifacts.json` и `artifacts/telegram_exports/INDEX.md`.
+- Что уже проверено:
+  - targeted tests -> `169 tests OK`, `2 skipped`
+  - full suite -> `319 tests OK`, `2 skipped`
+  - `python3 -m webcontrol --help` -> OK
+  - `python3 -m webcontrol browser --help` -> OK
+  - GTK app снова открывается на `DISPLAY=:0`
+  - live `Quick Check` на рабочем direct `Primary tdata` source `/home/max/site-control-kit/TG_CONTACT/4/tdata-003/tdata` уже сохранил:
+    - `/tmp/site-control-live-private-phones-1_phones.md`
+    - `/tmp/site-control-live-private-phones-1_phones.txt`
+    - `/tmp/site-control-live-private-phones-1_phones.json`
+    - `/tmp/site-control-live-private-phones-1_phones.private.txt`
+    - `/tmp/site-control-live-private-phones-1_phones.private.json`
+    - `/home/max/.site-control-kit/telegram_workspace/runs/20260606T074214Z/{summary.json,artifacts.json,events.jsonl}`
+  - реальный итог smoke:
+    - чат `-1002465948544`
+    - `phones_found=1`
+    - `private_phones_found=1`
+    - `public_count=0`
+  - direct helper/API `Full History` на том же source уже завершён:
+    - run `20260606T092821Z`
+    - `status=done`
+    - `history_messages_scanned=187923`
+    - `phones_found=145`
+    - `public_count=62`
+    - `private_phones_found=83`
+    - артефакты:
+      - `/tmp/tg4_nadopinge_full_history_phones_20260606_phones.md`
+      - `/tmp/tg4_nadopinge_full_history_phones_20260606_phones.txt`
+      - `/tmp/tg4_nadopinge_full_history_phones_20260606_phones.json`
+      - `/tmp/tg4_nadopinge_full_history_phones_20260606_phones.private.txt`
+      - `/tmp/tg4_nadopinge_full_history_phones_20260606_phones.private.json`
+      - `/home/max/.site-control-kit/telegram_workspace/runs/20260606T092821Z/{summary.json,artifacts.json,events.jsonl}`
+- Новый ближайший следующий шаг теперь такой:
+  - если пользователь хочет продолжать именно на `TG_CONTACT 4`/этом ready source, unified flow уже готов и подтверждён и на `Quick Check`, и на полном `Full History`;
+  - если нужен следующий run именно на `AK2 live 959756539365`, сначала вернуть portable helper clone этого профиля в `ready for export`, затем повторить `Quick Check`.
+- Что важно не перепутать:
+  - не вводить отдельный `private_phones` operation_kind;
+  - не трактовать total-count как "открытые номера";
+  - `artifacts/telegram_exports/INDEX.md` остаётся generated local artifact и не обязан публиковаться сам по себе.
+
 ## Обновление 2026-06-03 (AK2 `30 unique public phones` goal closed)
 - Новый текущий статус:
   - live-goal `30 unique public phones` уже закрыт;

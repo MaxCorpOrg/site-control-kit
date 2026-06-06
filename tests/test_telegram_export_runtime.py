@@ -708,6 +708,15 @@ class TelegramExportRuntimeTests(unittest.TestCase):
                     "source_ref": "chat:-1001",
                     "excerpt": "Contact +49 30 12345678",
                 },
+                {
+                    "phone": "+70000000001",
+                    "username": "@private_user",
+                    "full_name": "Private User",
+                    "peer_id": "3",
+                    "source_kind": "user_phone",
+                    "source_ref": "user:3",
+                    "excerpt": "phone из user.phone",
+                },
             ]
 
             sidecars = self.mod._write_phone_sidecars(
@@ -720,14 +729,18 @@ class TelegramExportRuntimeTests(unittest.TestCase):
             txt_body = sidecars["phones_txt"].read_text(encoding="utf-8")
             self.assertEqual(
                 txt_body,
-                "username\tfull_name\tphone\n@alice\tAlice Example\t+79991234567\n—\tBerlin Clinic\t+493012345678\n",
+                "username\tfull_name\tphone\n@alice\tAlice Example\t+79991234567\n—\tBerlin Clinic\t+493012345678\n@private_user\tPrivate User\t+70000000001\n",
             )
 
             payload = json.loads(sidecars["phones_json"].read_text(encoding="utf-8"))
             self.assertEqual(payload["group_url"], "@cosmetologna")
             self.assertEqual(payload["source_mode"], "tdata-public-phones")
-            self.assertEqual(payload["count"], 2)
-            self.assertEqual(payload["phones"], ["+79991234567", "+493012345678"])
+            self.assertEqual(payload["count"], 3)
+            self.assertEqual(payload["public_count"], 2)
+            self.assertEqual(payload["private_count"], 1)
+            self.assertEqual(payload["phones"], ["+79991234567", "+493012345678", "+70000000001"])
+            self.assertEqual(payload["public_phones"], ["+79991234567", "+493012345678"])
+            self.assertEqual(payload["private_phones"], ["+70000000001"])
             self.assertEqual(payload["rows"][0]["source_ref"], "message:101")
 
     def test_write_public_phones_markdown_renders_summary(self) -> None:
@@ -743,7 +756,16 @@ class TelegramExportRuntimeTests(unittest.TestCase):
                     "source_kind": "message_text",
                     "source_ref": "message:101",
                     "excerpt": "Звоните +7 999 123-45-67",
-                }
+                },
+                {
+                    "phone": "+70000000001",
+                    "username": "@private_user",
+                    "full_name": "Private User",
+                    "peer_id": "3",
+                    "source_kind": "user_phone",
+                    "source_ref": "user:3",
+                    "excerpt": "phone из user.phone",
+                },
             ]
 
             self.mod._write_public_phones_markdown(
@@ -754,12 +776,17 @@ class TelegramExportRuntimeTests(unittest.TestCase):
             )
 
             text = output_path.read_text(encoding="utf-8")
-            self.assertIn("# Открытые номера из Telegram", text)
-            self.assertIn("Количество уникальных открытых номеров: **1**", text)
+            self.assertIn("# Номера из Telegram", text)
+            self.assertIn("Всего уникальных номеров: **2**", text)
+            self.assertIn("Открытых (public): **1**", text)
+            self.assertIn("Личных (private): **1**", text)
+            self.assertIn("## Открытые номера", text)
+            self.assertIn("## Личные номера", text)
             self.assertIn("| 1 | @alice | Alice Example | +79991234567 | message_text | 1 |", text)
-            self.assertIn("сохраняются только открытые номера из chat about", text)
-            self.assertIn("pinned/history текста", text)
+            self.assertIn("| 1 | @private_user | Private User | +70000000001 | user_phone | 3 |", text)
+            self.assertIn("chat about, pinned/history текста", text)
             self.assertIn("public bio/about", text)
+            self.assertIn("user.phone", text)
 
     def test_default_identity_history_path_uses_archive_state_dir(self) -> None:
         archive_dir = Path("/tmp/telegram-archive")

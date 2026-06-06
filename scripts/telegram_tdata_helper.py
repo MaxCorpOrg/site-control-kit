@@ -188,13 +188,72 @@ def _row_score(row: dict[str, str]) -> tuple[int, int, int]:
     )
 
 
-def _merge_phone_row(rows_by_phone: dict[str, dict[str, str]], row: dict[str, str]) -> None:
+def _new_phone_tracker() -> dict[str, Any]:
+    return {
+        "seen_public": False,
+        "seen_private": False,
+        "public_row": None,
+        "private_row": None,
+    }
+
+
+def _merge_phone_row(rows_by_phone: dict[str, dict[str, Any]], row: dict[str, str]) -> None:
     phone = str(row.get("phone") or "").strip()
     if not phone:
         return
-    current = rows_by_phone.get(phone)
+    tracker = rows_by_phone.setdefault(phone, _new_phone_tracker())
+    source_kind = str(row.get("source_kind") or "").strip()
+    if source_kind == "user_phone":
+        tracker["seen_private"] = True
+        current = tracker.get("private_row")
+        if current is None or _row_score(row) > _row_score(current):
+            tracker["private_row"] = row
+        return
+    tracker["seen_public"] = True
+    current = tracker.get("public_row")
     if current is None or _row_score(row) > _row_score(current):
-        rows_by_phone[phone] = row
+        tracker["public_row"] = row
+
+
+def _finalize_phone_rows(rows_by_phone: dict[str, dict[str, Any]]) -> tuple[list[dict[str, str]], list[str], list[str]]:
+    public_rows: list[dict[str, str]] = []
+    private_rows: list[dict[str, str]] = []
+    for phone, tracker in rows_by_phone.items():
+        public_row = tracker.get("public_row")
+        private_row = tracker.get("private_row")
+        if tracker.get("seen_public") and isinstance(public_row, dict):
+            public_rows.append(dict(public_row))
+            continue
+        if tracker.get("seen_private") and isinstance(private_row, dict):
+            private_rows.append(dict(private_row))
+            continue
+        fallback_row = public_row if isinstance(public_row, dict) else private_row
+        if isinstance(fallback_row, dict):
+            target_rows = public_rows if str(fallback_row.get("source_kind") or "").strip() != "user_phone" else private_rows
+            target_rows.append(dict(fallback_row))
+            continue
+        private_rows.append(
+            {
+                "phone": phone,
+                "username": "—",
+                "full_name": "—",
+                "peer_id": "—",
+                "source_kind": "user_phone",
+                "source_ref": "—",
+                "excerpt": "—",
+            }
+        )
+    combined_rows = public_rows + private_rows
+    combined_rows.sort(
+        key=lambda item: (
+            str(item.get("username") or "—") == "—",
+            str(item.get("full_name") or "—").lower(),
+            str(item.get("phone") or ""),
+        )
+    )
+    public_phones = [str(item.get("phone") or "").strip() for item in public_rows if str(item.get("phone") or "").strip()]
+    private_phones = [str(item.get("phone") or "").strip() for item in private_rows if str(item.get("phone") or "").strip()]
+    return combined_rows, public_phones, private_phones
 
 
 def _build_phone_row(
@@ -841,16 +900,18 @@ async def export_public_phones(
     stop_state: Any | None = None,
 ) -> dict[str, Any]:
     client = await _open_client(tdata_path, session_path, passcode)
-    rows_by_phone: dict[str, dict[str, str]] = {}
+    rows_by_phone: dict[str, dict[str, Any]] = {}
     sender_cache: dict[int, Any | None] = {}
     user_about_scanned: set[str] = set()
     interrupted = False
     stats = {
         "history_messages_scanned": 0,
         "public_phones_kept": 0,
+        "private_phones_kept": 0,
         "chat_about_scanned": 0,
         "user_about_scanned": 0,
         "pinned_messages_scanned": 0,
+        "user_phone_read": 0,
     }
     try:
         entity = await client.get_entity(int(chat_ref) if str(chat_ref).lstrip("-").isdigit() else chat_ref)
@@ -942,6 +1003,21 @@ async def export_public_phones(
                     ),
                 )
             await _collect_user_about(sender)
+            phone_value = getattr(sender, "phone", None)
+            if phone_value:
+                normalized = _normalize_phone(str(phone_value))
+                if normalized:
+                    stats["user_phone_read"] += 1
+                    _merge_phone_row(
+                        rows_by_phone,
+                        _build_phone_row(
+                            entity=sender,
+                            phone=normalized,
+                            source_kind="user_phone",
+                            source_ref=f"user:{_peer_id(sender) or stats['history_messages_scanned']}",
+                            excerpt="phone из user.phone",
+                        ),
+                    )
             if progress_every > 0 and stats["history_messages_scanned"] % progress_every == 0:
                 _emit_progress(
                     chat_ref,
@@ -950,23 +1026,24 @@ async def export_public_phones(
                     phones_found=len(rows_by_phone),
                     stage="scan",
                 )
-        stats["public_phones_kept"] = len(rows_by_phone)
+        rows, public_phones_list, private_phones_list = _finalize_phone_rows(rows_by_phone)
+        stats["public_phones_kept"] = len(public_phones_list)
+        stats["private_phones_kept"] = len(private_phones_list)
         _emit_progress(
             chat_ref,
             messages_scanned=stats["history_messages_scanned"],
             usernames_found=0,
-            phones_found=len(rows_by_phone),
+            phones_found=len(rows),
             interrupted=interrupted,
             done=True,
         )
     finally:
         await client.disconnect()
 
-    rows = list(rows_by_phone.values())
-    rows.sort(key=lambda item: (str(item.get("username") or "—") == "—", str(item.get("full_name") or "—").lower(), str(item.get("phone") or "")))
+    rows, public_phones_list, private_phones_list = _finalize_phone_rows(rows_by_phone)
     phones = [str(item.get("phone") or "").strip() for item in rows if str(item.get("phone") or "").strip()]
     stats["interrupted"] = 1 if interrupted else 0
-    return {"ok": True, "rows": rows, "phones": phones, "stats": stats, "interrupted": interrupted}
+    return {"ok": True, "rows": rows, "phones": phones, "public_phones": public_phones_list, "private_phones": private_phones_list, "stats": stats, "interrupted": interrupted}
 
 
 async def _async_main(args: argparse.Namespace) -> dict[str, Any]:

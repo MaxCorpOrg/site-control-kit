@@ -50,6 +50,8 @@ def build_artifact_bundle(result: ExportResult) -> ArtifactBundle:
         usernames_json=result.usernames_json or usernames_json_for_output(result.output_path),
         phones_txt=result.phones_txt,
         phones_json=result.phones_json,
+        private_phones_txt=result.private_phones_txt,
+        private_phones_json=result.private_phones_json,
         safe_txt=result.safe_txt,
         safe_md=result.safe_md,
         run_log=result.log_path,

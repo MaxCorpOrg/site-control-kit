@@ -1,65 +1,71 @@
 # Next Steps
 
-Дата: 2026-06-03
+Дата: 2026-06-06
 
 ## Текущий baseline
 
 - Ветка: `main`
 - Основной операторский путь: `GTK GUI -> Primary tdata`
-- Текущий живой профиль: `AK2 live 959756539365`
-- Текущий live source: `/home/max/Документы/ак2/у/959756539365/tdata`
+- Ready direct helper source на этом хосте:
+  - `/home/max/site-control-kit/TG_CONTACT/4/tdata-003/tdata`
 - `default_user` не менять без отдельной причины
+- `AK2 live 959756539365` не потерян, но его portable helper-clone перед следующим export ещё требует readiness refresh
 
 ## Что уже подтверждено
 
-- `public_phones` V1 теперь реально собирает:
-  - `chat about`
-  - `pinned/history` message text
-  - `public bio/about`
+- Unified `public_phones` flow теперь согласован в helper, GUI, history и `INDEX.md`:
+  - `phones_found` = total unique phones
+  - `private_phones_found` = private-only split
+  - overlap rule = `public wins`
 - Полный suite зелёный:
-  - `python3 -m unittest discover -s tests -p 'test_*.py'` -> `318 tests OK`, `2 skipped`
+  - `python3 -m unittest discover -s tests -p 'test_*.py'` -> `319 tests OK`, `2 skipped`
 - Базовые runtime-check команды зелёные:
   - `python3 -m webcontrol --help`
   - `python3 -m webcontrol browser --help`
-  - `python3 -m scripts.telegram_username_collector_launcher --doctor`
+- `python3 -m py_compile` по затронутым Telegram-файлам -> OK
 - GTK GUI видим на `DISPLAY=:0`
-- Узкий live smoke helper-а на AK2 уже сохранён:
-  - `/tmp/ak2_public_phones_smoke_20260603.json`
-  - `/tmp/ak2_public_phones_smoke_20260603.log`
-- Частичный полный batch от 2026-06-02 уже есть:
-  - `/home/max/Документы/ак2/живой_тест_номеров/ak2_cosmetology_public_phones_full_history_summary_20260602T110438Z.json`
-  - `/home/max/.site-control-kit/telegram_workspace/logs/gui_ak2_cosmetology_full_history_phones_20260602T110438Z.log`
-- Live goal `30 unique public phones` уже закрыт:
-  - rerun `@chatkosmetologa` `20260603T095301Z` -> `status=done`, `phones_found=25`, `history_messages_scanned=7373`
-  - cumulative total -> `37` unique open phones
-  - aggregate:
-    - `/home/max/Документы/ак2/живой_тест_номеров/ak2_cosmetology_public_phones_30_unique_progress_20260603.json`
-    - `/home/max/Документы/ак2/живой_тест_номеров/ak2_cosmetology_public_phones_30_unique_session_20260603T095221Z.json`
+- Live `Quick Check` на ready source уже сохранён:
+  - run `20260606T074214Z`
+  - `phones_found=1`
+  - `private_phones_found=1`
+  - `/tmp/site-control-live-private-phones-1_phones.{md,txt,json,private.txt,private.json}`
+- Full-history run на том же source уже завершён:
+  - чат `НаДопинге 2.0 ЧАТ | Бодибилдинг | Фитнес | Спорт Фармакология`
+  - run `20260606T092821Z`
+  - `status=done`
+  - `history_messages_scanned=187923`
+  - `phones_found=145`
+  - `public_count=62`
+  - `private_phones_found=83`
+  - `/tmp/tg4_nadopinge_full_history_phones_20260606_phones.{md,txt,json,private.txt,private.json}`
+  - `/home/max/.site-control-kit/telegram_workspace/runs/20260606T092821Z/{summary.json,artifacts.json,events.jsonl}`
 
 ## Что осталось
 
-- Если нужен следующий live-pass, идти уже не за целью `30`, а за дополнительным покрытием target-ов:
-  - `Косметологи Чат | Сообщество Профессионалов` -> `@kosmetologi_chat_ru`
-  - `@cosmetologna`
-  - `@cosmochatrussia`
-- При необходимости отдельным новым batch-сводом сохранить прирост сверх текущих `37` уникальных номеров.
-- Не расширять `public_phones` на bridge/CDP/web fallback без отдельной задачи.
+- Если нужен следующий live-pass без recovery-работ, идти уже через ready source `TG_CONTACT 4`:
+  - либо анализировать текущие `145` номеров,
+  - либо брать следующий чат тем же direct helper/API path
+- Если нужен именно AK2-run:
+  - сначала вернуть helper-clone профиля `AK2 live 959756539365` в `ready for export`
+- Не расширять `public_phones` на bridge/CDP/web fallback без отдельной задачи
 
 ## Следующий узкий контур
 
 ```bash
 cd /home/max/site-control-kit
-TELEGRAM_API_COLLECTOR_PYTHON=/home/max/telegram-api-collector/.venv/bin/python DISPLAY=:0 python3 scripts/telegram_members_export_gui.py
+/home/max/telegram-api-collector/.venv/bin/python scripts/telegram_tdata_helper.py export-public-phones \
+  --tdata "/home/max/site-control-kit/TG_CONTACT/4/tdata-003/tdata" \
+  --session /tmp/tg4_public_phones_smoke.session \
+  --chat-ref -1002465948544 \
+  --history-limit 50 \
+  --progress-every 25
 ```
 
-В GUI:
-1. Выбрать `AK2 live 959756539365`
-2. Подключить `Primary tdata`
-3. Оставить `Full History`
-4. Начинать уже с `@kosmetologi_chat_ru`
-5. Затем при необходимости идти в `@cosmetologna`
-6. Затем в `@cosmochatrussia`
-7. Сохранить `*_phones.md`, `*_phones.txt`, `*_phones.json`, `summary.json`, `artifacts.json`, `events.jsonl`
+Если нужен GUI-path:
+1. Запустить `scripts/telegram_members_export_gui.py`
+2. Выбрать ready `Primary tdata` source
+3. Оставить `Full History` или `Quick Check`
+4. Сохранить `*_phones.md`, `*_phones.txt`, `*_phones.json`, `*.private.*`, `summary.json`, `artifacts.json`, `events.jsonl`
 
 ## Что не перепутать
 
@@ -67,11 +73,10 @@ TELEGRAM_API_COLLECTOR_PYTHON=/home/max/telegram-api-collector/.venv/bin/python 
   - `/home/max/telegram-api-collector/.venv/bin/python`
 - Голый системный `python3` может дать:
   - `Missing opentele dependency. Run this helper via the collector venv.`
-- Live confirm уже показал, что для GUI `export-public-phones` больше не нужен завышенный `TELEGRAM_TDATA_LIST_TIMEOUT_SEC`.
+- Generated `artifacts/telegram_exports/INDEX.md` не тащить в commit, если это только локальный live-след
 - Не коммитить:
   - `.site-control-kit/`
   - `TG_CONTACT/`
   - `dist/`
   - `*.log`
   - токены, ключи, временные сессии
-  - generated `artifacts/telegram_exports/INDEX.md`, если это только локальный live-след

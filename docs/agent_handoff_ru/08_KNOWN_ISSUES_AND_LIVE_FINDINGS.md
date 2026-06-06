@@ -1,5 +1,58 @@
 # Known Issues And Live Findings
 
+## Самый Новый Unified `public_phones` Finding
+Новый самый свежий факт на 2026-06-06 уже не про очередной timeout, а про согласованную total/public/private семантику во всём phone-flow:
+- один и тот же номер из public-source и `user.phone` теперь считается `public`;
+- `phones_found` теперь означает total unique phones;
+- `private_phones_found` хранит только private-only split;
+- `*.private.txt` и `*.private.json` теперь попадают в run history, `artifacts.json` и `artifacts/telegram_exports/INDEX.md`.
+- Verify:
+  - targeted tests -> `169 tests OK`, `2 skipped`
+  - full suite -> `319 tests OK`, `2 skipped`
+  - `python3 -m webcontrol --help` -> OK
+  - `python3 -m webcontrol browser --help` -> OK
+- Live smoke на этом хосте:
+  - GTK app снова поднимается с окном `Telegram Username Collector`;
+  - текущий авторизованный direct `Primary tdata` source, который реально прошёл backend/helper run:
+    - `/home/max/site-control-kit/TG_CONTACT/4/tdata-003/tdata`
+  - backend `Quick Check` run `20260606T074214Z` по чату `-1002465948544` дал:
+    - `phones_found=1`
+    - `private_phones_found=1`
+    - `public_count=0`
+  - артефакты этого run:
+    - `/tmp/site-control-live-private-phones-1_phones.md`
+    - `/tmp/site-control-live-private-phones-1_phones.txt`
+    - `/tmp/site-control-live-private-phones-1_phones.json`
+    - `/tmp/site-control-live-private-phones-1_phones.private.txt`
+    - `/tmp/site-control-live-private-phones-1_phones.private.json`
+    - `/home/max/.site-control-kit/telegram_workspace/runs/20260606T074214Z/{summary.json,artifacts.json,events.jsonl}`
+  - consistency уже подтверждена:
+    - markdown = `Всего 1 / public 0 / private 1`
+    - JSON sidecar = `count 1 / public_count 0 / private_count 1`
+    - run summary = `phones_found 1 / private_phones_found 1`
+    - `INDEX.md` entry содержит `Private Phones TXT/JSON`
+  - direct helper/API `Full History` по тому же source уже тоже подтверждён живым run:
+    - chat:
+      - `НаДопинге 2.0 ЧАТ | Бодибилдинг | Фитнес | Спорт Фармакология`
+      - `-1002465948544`
+    - run `20260606T092821Z`:
+      - `status=done`
+      - `history_messages_scanned=187923`
+      - `phones_found=145`
+      - `public_count=62`
+      - `private_phones_found=83`
+    - артефакты:
+      - `/tmp/tg4_nadopinge_full_history_phones_20260606_phones.md`
+      - `/tmp/tg4_nadopinge_full_history_phones_20260606_phones.txt`
+      - `/tmp/tg4_nadopinge_full_history_phones_20260606_phones.json`
+      - `/tmp/tg4_nadopinge_full_history_phones_20260606_phones.private.txt`
+      - `/tmp/tg4_nadopinge_full_history_phones_20260606_phones.private.json`
+      - `/tmp/tg4_direct_full_history_actions_20260606.log`
+      - `/home/max/.site-control-kit/telegram_workspace/runs/20260606T092821Z/{summary.json,artifacts.json,events.jsonl}`
+- Отдельный runtime-нюанс:
+  - exact profile `AK2 live 959756539365` сейчас не ready для helper-export через его portable runtime clone;
+  - backend detail там: `Portable профиль найден, но helper не смог открыть сессию. Откройте этот Telegram Desktop профиль и дождитесь полной загрузки.`
+
 ## Самый Новый AK2 `30 unique public phones` Finding
 Новый самый свежий факт на 2026-06-03 уже не про незавершённый batch, а про закрытую live-цель:
 - реальный run прошёл так:

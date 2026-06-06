@@ -1,5 +1,44 @@
 # Changelog
 
+## 2026-06-06
+
+### Unified `public_phones` Flow And TG_CONTACT 4 Full-History Verify
+
+- Завершён unified pass для `public_phones` без введения нового operation kind:
+  - `phones_found` теперь трактуется как total unique phones;
+  - `private_phones_found` сохраняет private-only split;
+  - если один и тот же номер найден и публично, и в `user.phone`, действует правило `public wins`.
+- Обновлены helper/export/GUI/history/index слои:
+  - `scripts/telegram_tdata_helper.py`
+  - `scripts/export_telegram_members_non_pii.py`
+  - `scripts/telegram_gui/models.py`
+  - `scripts/telegram_gui/backend.py`
+  - `scripts/telegram_gui/services/artifact_index.py`
+  - `scripts/telegram_gui/ui/window.py`
+- Теперь `public_phones` сохраняет не только `*_phones.md/txt/json`, но и `*.private.txt/json`, а `artifacts/telegram_exports/INDEX.md` индексирует их в том же run.
+- Расширены regression tests:
+  - `tests/test_telegram_tdata_helper.py`
+  - `tests/test_telegram_export_runtime.py`
+  - `tests/test_telegram_gui_backend_features.py`
+  - `tests/test_telegram_gui_run_history.py`
+  - `tests/test_telegram_members_export_gui.py`
+- Проверки:
+  - targeted tests -> `169 tests OK`, `2 skipped`
+  - full suite -> `319 tests OK`, `2 skipped`
+  - `python3 -m py_compile` по затронутым Telegram-файлам -> OK
+  - `python3 -m webcontrol --help` -> OK
+  - `python3 -m webcontrol browser --help` -> OK
+- Live verify на ready direct source `/home/max/site-control-kit/TG_CONTACT/4/tdata-003/tdata`:
+  - `Quick Check` run `20260606T074214Z` -> `phones_found=1`, `private_phones_found=1`
+  - `Full History` run `20260606T092821Z` по чату `-1002465948544` -> `status=done`, `history_messages_scanned=187923`, `phones_found=145`, `public_count=62`, `private_phones_found=83`
+  - артефакты full-history:
+    - `/tmp/tg4_nadopinge_full_history_phones_20260606_phones.md`
+    - `/tmp/tg4_nadopinge_full_history_phones_20260606_phones.txt`
+    - `/tmp/tg4_nadopinge_full_history_phones_20260606_phones.json`
+    - `/tmp/tg4_nadopinge_full_history_phones_20260606_phones.private.txt`
+    - `/tmp/tg4_nadopinge_full_history_phones_20260606_phones.private.json`
+    - `/home/max/.site-control-kit/telegram_workspace/runs/20260606T092821Z/{summary.json,artifacts.json,events.jsonl}`
+
 ## 2026-06-03
 
 ### AK2 Live Goal: `30` Unique Public Phones Closed
