@@ -75,6 +75,26 @@
 - держать одинаковую total/public/private семантику в helper, markdown/json, GUI, run history и `artifacts/telegram_exports/INDEX.md`;
 - применять правило `public wins`, если один и тот же нормализованный номер найден и публично, и в `user.phone`.
 
+### 7. Desktop product packaging and UI scaling
+Содержит:
+- `scripts/build_linux_deb.sh` — сборка Linux `.deb`-пакета;
+- `packaging/linux/telegram-username-collector.wrapper.sh` — installed-mode wrapper;
+- `scripts/telegram_username_collector_launcher.py` — product launcher, doctor и desktop shortcut path;
+- `scripts/telegram_gui/app.py` и `scripts/telegram_gui/ui/styles.py` — масштабируемый GTK startup/style layer.
+- `resources/branding/shadow-admin-logo-mark.png` — Shadow Admin logo asset, extracted from the user-provided PDF design guide.
+
+Назначение:
+- дать оператору готовую программу, а не только repo-run сценарий;
+- устанавливать desktop product в `/opt/telegram-username-collector`;
+- публиковать entrypoint `/usr/bin/telegram-username-collector`;
+- держать пользовательские runtime-данные в XDG config/data/state директориях;
+- поддерживать масштабирование через:
+  - GUI selector `Масштаб интерфейса`;
+  - `telegram-username-collector --ui-scale FACTOR`;
+  - `TELEGRAM_GUI_SCALE`.
+- показывать оператору следующий понятный шаг прямо в верхнем hero-блоке, а технические пути держать в компактном виде.
+- давать явную визуальную отдачу у кнопок при hover/press, чтобы оператор сразу видел, что кнопка активна.
+
 ## Схема Потока
 
 ```text

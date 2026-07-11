@@ -10,7 +10,24 @@
 
 ## Текущий Статус Проекта
 
-Актуальная рабочая точка на 2026-06-06:
+Актуальная рабочая точка на 2026-07-11:
+- собран готовый Linux desktop package для оператора:
+  - `dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`
+  - размер: около `52M`;
+  - актуальный sha256 фиксируется в checkpoint/handoff-файлах после сборки;
+- установщик кладёт программу в `/opt/telegram-username-collector`, wrapper в `/usr/bin/telegram-username-collector`, desktop entry в `/usr/share/applications/telegram-username-collector.desktop`;
+- верхняя часть GTK-панели приведена к Shadow Admin design guide:
+  - источник: `/home/max/Shadow_Admin/Shadow_Admin_Design_Guide_v1.0.pdf`
+  - logo asset: `resources/branding/shadow-admin-logo-mark.png`
+  - тёмная pixel/mono тема и зелёные accent-состояния
+  - заметная отдача кнопок при наведении и нажатии
+  - плашка `Следующий шаг`
+  - русские status badges
+  - короткая product-сводка без длинных технических путей;
+- GTK-панель поддерживает масштаб интерфейса:
+  - через поле `Масштаб интерфейса` в самой панели;
+  - через launcher option `--ui-scale`, например `telegram-username-collector --ui-scale 1.25`;
+  - через env `TELEGRAM_GUI_SCALE`;
 - основной Telegram-операторский путь: `GTK GUI -> Primary tdata`;
 - в GUI есть два основных действия:
   - `Собрать @username`
@@ -24,10 +41,14 @@
 - рядом с обычными `*_phones.txt/json` теперь сохраняются и `*.private.txt/json`, если найдены private-only номера.
 
 Что уже подтверждено:
-- полный `unittest` suite: `322 tests OK`, `2 skipped`;
+- полный `unittest` suite: `324 tests OK`, `2 skipped`;
 - `python3 -m webcontrol --help` -> OK;
 - `python3 -m webcontrol browser --help` -> OK;
-- `python3 -m scripts.telegram_username_collector_launcher --doctor` -> OK;
+- `dpkg-deb --info` и `dpkg-deb --contents` по `.deb` -> OK;
+- extracted `.deb` smoke: `--help` и `--doctor` -> OK;
+- live panel hover/press smoke:
+  - `/tmp/shadow_admin_gui_final2_hover_refresh_20260711.png`
+  - `/tmp/shadow_admin_gui_final2_press_refresh_20260711.png`;
 - GTK GUI видим на `DISPLAY=:0`;
 - живой GTK smoke на текущем хосте снова поднимает окно `Telegram Username Collector`;
 - live `Quick Check` unified-flow на авторизованном `Primary tdata` source `/home/max/site-control-kit/TG_CONTACT/4/tdata-003/tdata` уже дал private-only hit:
@@ -74,6 +95,7 @@
 - `public_phones` V1 по-прежнему доступен только для `Primary tdata`.
 
 Подробные checkpoints:
+- [docs/checkpoints/CHECKPOINT_2026-07-11_READY_GUI_INSTALLER_SCALE.md](docs/checkpoints/CHECKPOINT_2026-07-11_READY_GUI_INSTALLER_SCALE.md)
 - [docs/checkpoints/CHECKPOINT_2026-06-03_СТАБИЛИЗАЦИЯ_PUBLIC_PHONES.md](docs/checkpoints/CHECKPOINT_2026-06-03_СТАБИЛИЗАЦИЯ_PUBLIC_PHONES.md)
 - [docs/checkpoints/CHECKPOINT_2026-06-03_AK2_30_UNIQUE_PUBLIC_PHONES.md](docs/checkpoints/CHECKPOINT_2026-06-03_AK2_30_UNIQUE_PUBLIC_PHONES.md)
 - [docs/checkpoints/CHECKPOINT_2026-06-06_UNIFIED_PUBLIC_PHONES_TG_CONTACT4.md](docs/checkpoints/CHECKPOINT_2026-06-06_UNIFIED_PUBLIC_PHONES_TG_CONTACT4.md)

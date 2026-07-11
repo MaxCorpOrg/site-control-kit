@@ -1,5 +1,111 @@
 # CODEX_STATE
 
+## 2026-07-11 (Ready desktop product: GTK panel, installer, UI scaling)
+
+- Scope:
+  - turned the existing Telegram GTK operator tool into a ready local desktop product contour
+  - kept the current `TG_CONTACT 4`/direct helper semantics intact
+  - added operator-facing UI scaling without adding a new runtime dependency
+- Code changes:
+  - `scripts/telegram_username_collector_launcher.py` now accepts `--ui-scale FACTOR` and exports `TELEGRAM_GUI_SCALE` before importing the GUI
+  - `scripts/telegram_gui/ui/styles.py` now builds scale-aware GTK CSS from `TELEGRAM_GUI_SCALE`
+  - `scripts/telegram_gui/app.py` sizes the first window according to the resolved scale
+  - `scripts/telegram_gui/ui/window.py` adds a simple scale selector in the product card:
+    - `90%`
+    - `100%`
+    - `115%`
+    - `125%`
+    - `150%`
+  - `scripts/telegram_gui/ui/window.py` also adds:
+    - Shadow Admin logo mark from `resources/branding/shadow-admin-logo-mark.png`
+    - dark pixel/mono theme based on `/home/max/Shadow_Admin/Shadow_Admin_Design_Guide_v1.0.pdf`
+    - explicit hover/press feedback for GTK buttons
+    - operator `Следующий шаг` guidance
+    - Russian status badges
+    - clearer action button labels
+    - compact product summary paths
+  - `scripts/telegram_gui/ui/panels.py` now uses Russian preflight/log labels
+  - `scripts/telegram_gui/backend.py` no longer reports the unified phone action as old `Сбор открытых номеров v1`
+  - `tests/test_telegram_username_collector_launcher.py` covers valid and invalid launcher scaling options
+- Installer artifact:
+  - `/home/max/site-control-kit/dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`
+  - size: `52M`
+  - sha256: `57f4d9ea88c20b1cb67762a9ce0e1e7b200ca9a89ff07a42aef55dc8a5a73736`
+  - package contents confirmed:
+    - `/usr/bin/telegram-username-collector`
+    - `/usr/bin/sitectl`
+    - `/usr/share/applications/telegram-username-collector.desktop`
+    - `/opt/telegram-username-collector/app`
+    - `/opt/telegram-username-collector/app/resources/site-control-bridge-extension.zip`
+    - `/opt/telegram-username-collector/app/resources/branding/shadow-admin-logo-mark.png`
+- Verify:
+  - `python3 -m py_compile scripts/telegram_username_collector_launcher.py scripts/telegram_gui/app.py scripts/telegram_gui/ui/styles.py scripts/telegram_gui/ui/window.py tests/test_telegram_username_collector_launcher.py` -> OK
+  - `python3 -m unittest tests.test_telegram_username_collector_launcher tests.test_telegram_members_export_gui` -> `53 tests OK`, `2 skipped`
+  - `python3 -m unittest discover -s tests -p 'test_*.py'` -> `324 tests OK`, `2 skipped`
+  - `python3 -m webcontrol --help` -> OK
+  - `python3 -m webcontrol browser --help` -> OK
+  - `git diff --check` -> OK
+  - `dpkg-deb --info` / `dpkg-deb --contents` on the package -> OK
+  - repo GUI smoke on `DISPLAY=:0` with `--ui-scale 1.15` -> live `Telegram Username Collector` window appeared
+  - extracted `.deb` smoke -> `--help` and `--doctor` worked; `hub_reachable=0` was expected because the hub was not started for that smoke
+  - live panel smoke from repo on `DISPLAY=:0` -> hover and press feedback visible on `Обновить профили`, click completed without a crash
+  - final screenshots:
+    - repo normal: `/tmp/shadow_admin_gui_after_feedback_normal_20260711.png`
+    - hover: `/tmp/shadow_admin_gui_final2_hover_refresh_20260711.png`
+    - press: `/tmp/shadow_admin_gui_final2_press_refresh_20260711.png`
+- Practical conclusion:
+  - the program now has a packaged Linux desktop shape suitable for a simple operator install
+  - scaling is available both from CLI/env and directly inside the GTK panel
+  - a real `sudo apt install` smoke is still the next optional packaging check before distributing outside this machine
+
+## 2026-06-07 (TG_CONTACT 4 cosmetology E2E batch: 1 reachable, 6 blocked)
+
+- Scope:
+  - executed a live E2E usernames/export contour test for the agreed cosmetology chat set on the current ready direct `TG_CONTACT 4` account
+  - stayed on `/home/max/site-control-kit/TG_CONTACT/4/tdata-003/tdata`
+  - did not switch back to `AK2`
+  - reused a single helper session for the whole batch:
+    - `/tmp/tg4_cosmetology_batch_20260607T105308Z.session`
+- Canonical targets:
+  - `@cosmetologi_chat` -> `Косметология` -> `-1001621257382`
+  - `@cosmetology_chat` -> `КОСМЕТОЛОГИЯ ЧАТ` -> `-1001667132289`
+  - `@cosmetology_help` -> `ЧАТ КОСМЕТОЛОГОВ +1` -> `-1001954030482`
+  - `@chatkosmetologa` -> `Форум Косметология | Дерматология` -> `-1001857017224`
+  - `@kosmetologi_chat_ru` -> `Косметологи Чат | Сообщество Профессионалов` -> `-1001823633881`
+  - `@cosmetologna` / `https://t.me/cosmetologna` -> `Косметолог на Миллион` -> `-1001506021345`
+  - `@cosmochatrussia` -> `Чат Косметологов | Косметологи чат | Чат косметологов России` -> `-1001909598727`
+- Live result:
+  - only `@cosmochatrussia` was reachable on the current account:
+    - access path: `list_chats:chat_ref`
+    - quick-check: `done`, `history_messages_scanned=400`, `usernames_found=107`
+    - full-history: `done`, `history_messages_scanned=9383`, `usernames_found=1495`
+  - the other six targets were not helper regressions; they were confirmed as current-account visibility blockers:
+    - `final_status=blocked_on_current_account`
+    - typical detail: `Could not find the input entity for PeerChannel(...)`
+- Artifacts:
+  - consolidated summary:
+    - `/tmp/tg4_cosmetology_e2e_summary_20260607T105308Z.json`
+    - `/tmp/tg4_cosmetology_e2e_summary_20260607T105308Z.md`
+  - batch log:
+    - `/home/max/.site-control-kit/telegram_workspace/logs/batch_tg4_cosmetology_e2e_20260607T105308Z.log`
+  - list-chats log:
+    - `/home/max/.site-control-kit/telegram_workspace/logs/tg4_cosmetology_e2e_20260607T105308Z_list_chats.log`
+  - reachable target artifacts:
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg4_cosmetology_e2e_cosmochatrussia_quick_check_20260607T105308Z.md`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg4_cosmetology_e2e_cosmochatrussia_quick_check_20260607T105308Z_usernames.txt`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg4_cosmetology_e2e_cosmochatrussia_quick_check_20260607T105308Z_usernames.json`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg4_cosmetology_e2e_cosmochatrussia_full_history_20260607T105308Z.md`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg4_cosmetology_e2e_cosmochatrussia_full_history_20260607T105308Z_usernames.txt`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg4_cosmetology_e2e_cosmochatrussia_full_history_20260607T105308Z_usernames.json`
+    - `/home/max/.site-control-kit/telegram_workspace/logs/tg4_cosmetology_e2e_cosmochatrussia_quick_retry_20260607T105308Z.log`
+    - `/home/max/.site-control-kit/telegram_workspace/logs/tg4_cosmetology_e2e_cosmochatrussia_full_retry_20260607T105308Z.log`
+- Practical conclusion:
+  - the current `TG_CONTACT 4` contour is live-valid for cosmetology export only for `@cosmochatrussia`
+  - the remaining six agreed targets should not be retried blindly on the same account
+  - if they are needed now, the next work item is access restoration, not helper debugging:
+    - either refresh `AK2 live 959756539365` back to `ready for export`
+    - or obtain fresh working public links / visibility on `TG_CONTACT 4`
+
 ## 2026-06-06 (GUI contour pinned to ready repo-local `TG_CONTACT 4` direct tdata)
 
 - Scope:

@@ -73,7 +73,7 @@ from .services.secrets import SecretStore, mask_secret
 from .services.ui_tasks import UiTaskService
 from .runtime import load_gui_runtime_paths
 from .ui.panels import ArtifactPanel, HistoryPanel, PreflightPanel, ProgressPanel
-from .ui.styles import install_css
+from .ui.styles import attach_button_feedback, install_css, resolve_ui_scale
 from webcontrol.runtime_logging import RuntimeEventLogger
 from webcontrol.settings import LEGACY_INSECURE_TOKEN, venv_python_path
 
@@ -165,8 +165,9 @@ TDATA_SESSION_DIR = RUNTIME_DIR / "tdata_sessions"
 TDATA_SIGNATURE_FILES = ("key_datas", "D877F783D5D3EF8Cs", "D877F783D5D3EF8C/maps")
 ALLOW_COLLECTOR_TDATA_DEBUG_FALLBACK = str(os.getenv("TELEGRAM_TDATA_ALLOW_COLLECTOR_FALLBACK", "")).strip() == "1"
 WINDOW_TITLE = "Telegram Username Collector"
-WINDOW_WIDTH = 1380
-WINDOW_HEIGHT = 920
+UI_SCALE = resolve_ui_scale()
+WINDOW_WIDTH = int(round(1380 * UI_SCALE))
+WINDOW_HEIGHT = int(round(920 * UI_SCALE))
 CHAT_LIST_READY_SELECTOR = "#LeftColumn a.chatlist-chat, #column-left a.chatlist-chat, a.chatlist-chat, #LeftColumn, #column-left"
 
 TELEGRAM_TITLE_SUFFIX_RE = re.compile(r"\s*\|\s*Telegram\s*$", flags=re.I)
@@ -669,7 +670,7 @@ def parse_key_value_output(stdout: str) -> dict[str, str]:
 
 def operation_busy_status(operation_kind: str) -> str:
     if normalize_operation_kind(operation_kind) == "public_phones":
-        return "Идёт сбор открытых номеров..."
+        return "Идёт сбор номеров..."
     return "Идёт сбор @username..."
 
 
@@ -715,7 +716,7 @@ def _latest_progress_summary(lines: list[str]) -> str:
         usernames = _progress_int(payload, "usernames")
         phones = _progress_int(payload, "phones")
         if phones > 0:
-            return f"{messages} сообщений, {phones} открытых номеров"
+            return f"{messages} сообщений, {phones} номеров"
         return f"{messages} сообщений, {usernames} @username"
     return ""
 

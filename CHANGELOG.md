@@ -1,5 +1,47 @@
 # Changelog
 
+## 2026-07-11
+
+### Ready Desktop Product Package, Shadow Admin Theme, GTK Scaling
+
+- Подготовлен готовый Linux desktop contour для `Telegram Username Collector`:
+  - GTK-панель остаётся основным операторским интерфейсом;
+  - собран `.deb`-установщик;
+  - добавлено масштабирование интерфейса.
+- UI scaling:
+  - launcher принимает `--ui-scale FACTOR`;
+  - поддерживается env `TELEGRAM_GUI_SCALE`;
+  - в самой GTK-панели добавлен выбор масштаба `90%`, `100%`, `115%`, `125%`, `150%`;
+  - CSS и стартовый размер окна теперь считаются от выбранного scale.
+- UX polish:
+  - дизайн приведён к `/home/max/Shadow_Admin/Shadow_Admin_Design_Guide_v1.0.pdf`;
+  - добавлен Shadow Admin logo asset:
+    - `resources/branding/shadow-admin-logo-mark.png`
+  - кнопки получили явную отдачу при hover/press;
+  - верх панели теперь показывает понятный `Следующий шаг`;
+  - status badges переведены на русский;
+  - основные кнопки переименованы под операторский flow;
+  - product summary сокращён, длинные пути компактируются.
+- Пакет:
+  - `/home/max/site-control-kit/dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`
+  - размер: около `52M`
+  - финальный sha256 фиксируется в checkpoint/handoff-файлах после сборки
+  - содержит `/usr/bin/telegram-username-collector`, desktop entry, bundled app under `/opt/telegram-username-collector`, extension zip and venv.
+- Проверки:
+  - `python3 -m py_compile` по изменённым launcher/GUI/test файлам -> OK
+  - targeted GUI tests -> `53 tests OK`, `2 skipped`
+  - full suite -> `324 tests OK`, `2 skipped`
+  - `python3 -m webcontrol --help` -> OK
+  - `python3 -m webcontrol browser --help` -> OK
+  - `git diff --check` -> OK
+  - `dpkg-deb --info` / `dpkg-deb --contents` -> OK
+  - repo GUI smoke on `DISPLAY=:0` -> window appeared, hover/press feedback checked on `Обновить профили`, safe click completed
+  - extracted `.deb` smoke -> `--help` and `--doctor` OK
+  - hover screenshot -> `/tmp/shadow_admin_gui_final2_hover_refresh_20260711.png`
+  - press screenshot -> `/tmp/shadow_admin_gui_final2_press_refresh_20260711.png`
+- Ограничение:
+  - реальный `sudo apt install` не выполнялся; установочный артефакт проверен через `dpkg-deb` и запуск из распакованного installed-mode дерева.
+
 ## 2026-06-06
 
 ### GUI / Program Contour Fixed To Ready `TG_CONTACT 4`

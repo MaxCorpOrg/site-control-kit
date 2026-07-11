@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import os
+
 from .. import app as _app
 from ..backend import TelegramGuiBackend
+from .styles import attach_button_feedback
 from ...telegram_product_runtime import create_desktop_shortcut, resolve_product_paths
 from webcontrol.settings import load_runtime_settings, resolve_hub_token
 
@@ -20,6 +23,48 @@ SUGGESTED_CHAT_TARGETS: tuple[tuple[str, str], ...] = (
     ("Форум Косметология | Дерматология", "@chatkosmetologa"),
     ("Косметологи Чат | Сообщество Профессионалов", "@kosmetologi_chat_ru"),
 )
+
+
+def _refresh_next_step_hint_if_available(window: object) -> None:
+    refresh = getattr(window, "_refresh_next_step_hint", None)
+    if callable(refresh):
+        refresh()
+
+
+def _friendly_surface_badge(value: str) -> str:
+    text = str(value or "").strip()
+    return {
+        "Surface pending": "Контур: ждём",
+        "Primary tdata": "Primary tdata",
+        "Fallback Bridge": "Bridge fallback",
+        "Fallback CDP": "CDP fallback",
+        "Profile missing": "Профиль не найден",
+    }.get(text, text or "Контур: ждём")
+
+
+def _friendly_preset_label(value: str) -> str:
+    text = str(value or "").strip()
+    return {
+        "Full History": "Полная история",
+        "Quick Check": "Быстрая проверка",
+        "Resume Last": "Повтор последнего",
+    }.get(text, text or "Режим не выбран")
+
+
+def _friendly_security_status(value: str) -> str:
+    text = str(value or "").strip()
+    if not text or text == "Security pending":
+        return "Security: ждём"
+    if text == "No token configured":
+        return "Token не настроен"
+    return text
+
+
+def _compact_path_for_ui(path: object, *, max_chars: int = 72) -> str:
+    text = str(path or "").strip()
+    if len(text) <= max_chars:
+        return text
+    return f"...{text[-(max_chars - 3):]}"
 
 
 class TelegramMembersExportWindow(Gtk.ApplicationWindow):
@@ -63,6 +108,7 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
         self.set_child(self.window_scroll)
 
         self.hero_status = Gtk.Label(label="Не подключено")
+        self.next_step_label = Gtk.Label(label="Следующий шаг: выберите профиль Telegram.")
         self.security_status = Gtk.Label(label="Security pending")
         self.connection_status = Gtk.Label(label="Telegram не подключён")
         self.preset_status = Gtk.Label(label="Full History")
@@ -111,6 +157,7 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
         self.product_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         self.product_summary_label = Gtk.Label(label="Подготовка product setup...")
         self.product_feedback_label = Gtk.Label(label="")
+        self.ui_scale_combo = Gtk.ComboBoxText()
         self.run_stack = Gtk.Stack()
         self.run_switcher = Gtk.StackSwitcher(stack=self.run_stack)
         self.progress_panel = ProgressPanel()
@@ -129,6 +176,7 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
 
         self._build_ui()
         self._refresh_product_setup_card()
+        _refresh_next_step_hint_if_available(self)
         self.connect("close-request", self._on_close_request)
         self._apply_preflight_info(
             self.backend.build_preflight(
@@ -183,26 +231,64 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
         right.append(self._build_run_center())
 
     def _build_hero(self) -> Gtk.Widget:
-        hero = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        hero = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=18)
         hero.add_css_class("hero")
+        hero.set_hexpand(True)
 
-        title = Gtk.Label(label="Telegram Username Collector")
+        text_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        text_box.set_hexpand(True)
+        text_box.add_css_class("hero-text")
+
+        title = Gtk.Label(label="Shadow Admin")
         title.set_xalign(0)
         title.add_css_class("hero-title")
         copy = Gtk.Label(
-            label="Операторский поток: профиль -> чат -> файл -> старт. Основной path: tdata-history-authors.",
+            label="Telegram Username Collector / профиль -> чат -> отчёт -> старт.",
             wrap=True,
             justify=Gtk.Justification.LEFT,
             xalign=0,
         )
+        copy.set_max_width_chars(82)
         copy.add_css_class("hero-copy")
+        self.next_step_label.set_xalign(0)
+        self.next_step_label.set_wrap(True)
+        self.next_step_label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        self.next_step_label.set_max_width_chars(54)
+        self.next_step_label.add_css_class("next-step")
         self.last_run_label.set_xalign(0)
         self.last_run_label.set_wrap(True)
+        self.last_run_label.set_max_width_chars(82)
         self.last_run_label.add_css_class("meta")
-        hero.append(title)
-        hero.append(copy)
-        hero.append(self.last_run_label)
+        text_box.append(title)
+        text_box.append(copy)
+        text_box.append(self.next_step_label)
+        art = self._build_hero_art()
+        if art is not None:
+            hero.append(art)
+        text_box.append(self.last_run_label)
+        hero.append(text_box)
         return hero
+
+    def _build_hero_art(self) -> Gtk.Widget | None:
+        art_path = REPO_ROOT / "resources" / "branding" / "shadow-admin-logo-mark.png"
+        if not art_path.exists():
+            return None
+        try:
+            picture = Gtk.Picture.new_for_filename(str(art_path))
+        except Exception:
+            return None
+        if picture is None:
+            return None
+        scale = resolve_ui_scale()
+        picture.set_size_request(int(round(150 * scale)), int(round(112 * scale)))
+        picture.set_hexpand(False)
+        picture.set_vexpand(False)
+        picture.add_css_class("hero-art")
+        try:
+            picture.set_content_fit(Gtk.ContentFit.COVER)
+        except Exception:
+            pass
+        return picture
 
     def _build_status_strip(self) -> Gtk.Widget:
         strip = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
@@ -214,7 +300,7 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
 
     def _build_product_card(self) -> Gtk.Widget:
         self.product_card.add_css_class("card")
-        title = Gtk.Label(label="Установка и первый запуск")
+        title = Gtk.Label(label="Программа и удобство")
         title.set_xalign(0)
         title.add_css_class("card-title")
         self.product_summary_label.set_xalign(0)
@@ -224,33 +310,68 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
         self.product_feedback_label.set_wrap(True)
         self.product_feedback_label.add_css_class("meta")
 
+        scale_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        scale_label = Gtk.Label(label="Масштаб интерфейса")
+        scale_label.set_xalign(0)
+        scale_label.add_css_class("meta")
+        self.ui_scale_combo.append("0.9", "90%")
+        self.ui_scale_combo.append("1", "100%")
+        self.ui_scale_combo.append("1.15", "115%")
+        self.ui_scale_combo.append("1.25", "125%")
+        self.ui_scale_combo.append("1.5", "150%")
+        self.ui_scale_combo.set_active_id(self._nearest_ui_scale_id(resolve_ui_scale()))
+        self.ui_scale_combo.connect("changed", self._on_ui_scale_changed)
+        scale_row.append(scale_label)
+        scale_row.append(self.ui_scale_combo)
+
         actions_top = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        actions_top.append(self._button("Создать ярлык на рабочем столе", self._create_product_shortcut))
-        actions_top.append(self._button("Открыть папку данных", self._open_product_runtime_root))
-        actions_top.append(self._button("Открыть папку extension", self._open_product_extension_dir))
+        actions_top.append(self._button("Создать ярлык", self._create_product_shortcut))
+        actions_top.append(self._button("Папка данных", self._open_product_runtime_root))
+        actions_top.append(self._button("Папка расширения", self._open_product_extension_dir))
 
         actions_bottom = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        actions_bottom.append(self._button("Открыть extension ZIP", self._open_product_extension_zip))
+        actions_bottom.append(self._button("Открыть ZIP расширения", self._open_product_extension_zip))
         actions_bottom.append(self._button("Копировать URL хаба", self._copy_product_hub_url))
         actions_bottom.append(self._button("Копировать token", self._copy_product_hub_token))
 
         self.product_card.append(title)
         self.product_card.append(self.product_summary_label)
+        self.product_card.append(scale_row)
         self.product_card.append(actions_top)
         self.product_card.append(actions_bottom)
         self.product_card.append(self.product_feedback_label)
         return self.product_card
 
+    def _nearest_ui_scale_id(self, value: float) -> str:
+        choices = (0.9, 1.0, 1.15, 1.25, 1.5)
+        nearest = min(choices, key=lambda candidate: abs(candidate - float(value)))
+        return f"{nearest:g}"
+
+    def _on_ui_scale_changed(self, *_args: object) -> None:
+        scale_id = self.ui_scale_combo.get_active_id()
+        if not scale_id:
+            return
+        os.environ["TELEGRAM_GUI_SCALE"] = str(scale_id)
+        install_css()
+        try:
+            scale_value = float(scale_id)
+        except ValueError:
+            scale_value = 1.0
+        self.set_default_size(int(round(1380 * scale_value)), int(round(920 * scale_value)))
+        percent = int(round(scale_value * 100))
+        self.product_feedback_label.set_label(f"Масштаб интерфейса: {percent}%.")
+        _refresh_next_step_hint_if_available(self)
+
     def _build_account_section(self) -> Gtk.Widget:
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
-        box.append(self._section_title("1. Профиль и подключение"))
+        box.append(self._section_title("1. Профиль"))
 
         self.account_combo.set_hexpand(True)
         self.account_combo.connect("changed", lambda *_args: self._on_account_changed())
         box.append(self.account_combo)
 
         actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        actions.append(self._button("Подключить Telegram", self._connect_selected_account, accent=True))
+        actions.append(self._button("1. Подключить Telegram", self._connect_selected_account, accent=True))
         actions.append(self._button("Импортировать tdata.zip", self._choose_portable_zip))
         actions.append(self._button("Обновить профили", self._load_accounts_into_ui))
         box.append(actions)
@@ -265,28 +386,28 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
     def _build_chat_section(self) -> Gtk.Widget:
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
         box.set_vexpand(True)
-        box.append(self._section_title("2. Чаты и группы из Telegram"))
+        box.append(self._section_title("2. Чат"))
 
         self.search_entry.set_hexpand(True)
-        self.search_entry.set_placeholder_text("Фильтр по названию, описанию или URL")
+        self.search_entry.set_placeholder_text("Фильтр по названию, описанию или ссылке")
         self.search_entry.connect("search-changed", lambda *_args: self._apply_chat_filter())
         box.append(self.search_entry)
 
         resolve_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         self.chat_target_entry.set_hexpand(True)
-        self.chat_target_entry.set_placeholder_text("https://t.me/cosmetologna, @cosmetologna или peer id")
+        self.chat_target_entry.set_placeholder_text("Вставьте ссылку, @username или peer id")
         self.chat_target_entry.connect("activate", lambda *_args: self._resolve_chat_target())
         resolve_row.append(self.chat_target_entry)
-        resolve_row.append(self._button("Открыть чат по ссылке / @username", self._resolve_chat_target))
+        resolve_row.append(self._button("Найти чат", self._resolve_chat_target, accent=True))
         box.append(resolve_row)
 
         actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        actions.append(self._button("Обновить список", self._refresh_chats))
-        actions.append(self._button("Открыть чат", self._open_selected_chat))
+        actions.append(self._button("Обновить список чатов", self._refresh_chats))
+        actions.append(self._button("Открыть выбранный", self._open_selected_chat))
         actions.append(self._button("Закрепить чат", self._pin_selected_chat))
         box.append(actions)
 
-        quick_title = self._meta_label("Pinned / recent")
+        quick_title = self._meta_label("Быстрый выбор: закреплённые и последние чаты")
         box.append(quick_title)
         self.quick_chat_box.add_css_class("dim-box")
         box.append(self.quick_chat_box)
@@ -307,7 +428,7 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
 
     def _build_export_section(self) -> Gtk.Widget:
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-        box.append(self._section_title("3. Экспорт и preflight"))
+        box.append(self._section_title("3. Проверка и запуск"))
 
         self.chat_title_label.set_xalign(0)
         self.chat_title_label.set_wrap(True)
@@ -324,7 +445,7 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
         box.append(self.chat_url_label)
 
         preset_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        preset_title = self._meta_label("Preset")
+        preset_title = self._meta_label("Режим")
         preset_title.set_size_request(92, -1)
         preset_row.append(preset_title)
         self.preset_combo.set_hexpand(True)
@@ -340,29 +461,32 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
         box.append(self._build_security_card())
 
         self.output_entry.set_hexpand(True)
-        self.output_entry.set_placeholder_text("Путь к .md файлу")
+        self.output_entry.set_placeholder_text("Куда сохранить .md отчёт")
         self.output_entry.connect("changed", lambda *_args: self._on_output_path_changed())
         choose_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         choose_row.append(self.output_entry)
-        choose_row.append(self._button("Выбрать .md файл", self._choose_output_file))
+        choose_row.append(self._button("Выбрать файл отчёта", self._choose_output_file, accent=True))
         box.append(choose_row)
-        box.append(self._meta_label("Откроется системный диалог: там выбираются и папка, и имя итогового файла."))
+        output_hint = self._meta_label("Выберите папку и имя отчёта. Рядом автоматически появятся .txt/.json артефакты.")
+        output_hint.add_css_class("operator-note")
+        box.append(output_hint)
 
         actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        self.username_export_button = self._button("Собрать @username", self._run_export, accent=True)
-        self.public_phones_button = self._button("Сбор открытых номеров", self._run_public_phone_export)
-        self.repeat_last_button = self._button("Повторить последний запуск", self._repeat_last_run)
+        self.username_export_button = self._button("Начать сбор @username", self._run_export, accent=True)
+        self.public_phones_button = self._button("Собрать номера", self._run_public_phone_export)
+        self.repeat_last_button = self._button("Повторить запуск", self._repeat_last_run)
         actions.append(self.username_export_button)
         actions.append(self.public_phones_button)
         actions.append(self.repeat_last_button)
         self.stop_button.connect("clicked", lambda *_args: self._request_stop())
-        self.stop_button.add_css_class("subtle-button")
+        self.stop_button.add_css_class("danger-button")
+        attach_button_feedback(self.stop_button)
         self.stop_button.set_sensitive(False)
         actions.append(self.stop_button)
         box.append(actions)
         bottom_actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        bottom_actions.append(self._button("Открыть папку результата", self._open_result_directory))
-        bottom_actions.append(self._button("Открыть последние артефакты", self._open_last_artifacts))
+        bottom_actions.append(self._button("Папка результата", self._open_result_directory))
+        bottom_actions.append(self._button("Последние файлы", self._open_last_artifacts))
         box.append(bottom_actions)
         return box
 
@@ -379,8 +503,10 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
 
         action_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         self.security_setup_button.add_css_class("subtle-button")
+        attach_button_feedback(self.security_setup_button)
         self.security_setup_button.connect("clicked", lambda *_args: self._show_security_setup_form())
         self.security_restart_button.add_css_class("subtle-button")
+        attach_button_feedback(self.security_restart_button)
         self.security_restart_button.connect("clicked", lambda *_args: self._restart_owned_hub_with_selected_token())
         action_row.append(self.security_setup_button)
         action_row.append(self.security_restart_button)
@@ -396,9 +522,11 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
         form_actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         save_button = Gtk.Button(label="Сохранить secure token")
         save_button.add_css_class("accent-button")
+        attach_button_feedback(save_button)
         save_button.connect("clicked", lambda *_args: self._save_security_token_inline())
         cancel_button = Gtk.Button(label="Отмена")
         cancel_button.add_css_class("subtle-button")
+        attach_button_feedback(cancel_button)
         cancel_button.connect("clicked", lambda *_args: self._cancel_security_setup())
         form_actions.append(save_button)
         form_actions.append(cancel_button)
@@ -435,14 +563,19 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
         import_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         action_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         self.portable_add_button.add_css_class("subtle-button")
+        attach_button_feedback(self.portable_add_button)
         self.portable_add_button.connect("clicked", lambda *_args: self._choose_portable_zip())
         self.portable_adopt_button.add_css_class("subtle-button")
+        attach_button_feedback(self.portable_adopt_button)
         self.portable_adopt_button.connect("clicked", lambda *_args: self._choose_existing_portable_folder())
         self.portable_launch_button.add_css_class("subtle-button")
+        attach_button_feedback(self.portable_launch_button)
         self.portable_launch_button.connect("clicked", lambda *_args: self._launch_selected_portable_profile())
         self.portable_refresh_button.add_css_class("subtle-button")
+        attach_button_feedback(self.portable_refresh_button)
         self.portable_refresh_button.connect("clicked", lambda *_args: self._refresh_selected_portable_profile())
         self.portable_remove_button.add_css_class("subtle-button")
+        attach_button_feedback(self.portable_remove_button)
         self.portable_remove_button.connect("clicked", lambda *_args: self._show_remove_portable_profile_confirmation())
         import_row.append(self.portable_add_button)
         import_row.append(self.portable_adopt_button)
@@ -454,9 +587,11 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
         remove_actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         confirm_button = Gtk.Button(label="Подтвердить")
         confirm_button.add_css_class("accent-button")
+        attach_button_feedback(confirm_button)
         confirm_button.connect("clicked", lambda *_args: self._confirm_remove_selected_portable_profile())
         cancel_button = Gtk.Button(label="Отмена")
         cancel_button.add_css_class("subtle-button")
+        attach_button_feedback(cancel_button)
         cancel_button.connect("clicked", lambda *_args: self._cancel_remove_portable_profile())
         remove_actions.append(confirm_button)
         remove_actions.append(cancel_button)
@@ -484,8 +619,10 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
             widget.add_css_class("meta")
         action_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         self.fallback_prepare_bridge_button.add_css_class("subtle-button")
+        attach_button_feedback(self.fallback_prepare_bridge_button)
         self.fallback_prepare_bridge_button.connect("clicked", lambda *_args: self._prepare_bridge_profile())
         self.fallback_retry_button.add_css_class("subtle-button")
+        attach_button_feedback(self.fallback_retry_button)
         self.fallback_retry_button.connect("clicked", lambda *_args: self._retry_fallback_readiness())
         action_row.append(self.fallback_prepare_bridge_button)
         action_row.append(self.fallback_retry_button)
@@ -500,7 +637,7 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
     def _build_run_center(self) -> Gtk.Widget:
         wrapper = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         wrapper.set_vexpand(True)
-        wrapper.append(self._section_title("Execution Center"))
+        wrapper.append(self._section_title("Центр выполнения"))
         wrapper.append(self.run_switcher)
         self.run_stack.set_vexpand(True)
         self.run_stack.add_titled(self.progress_panel, "progress", "Прогресс")
@@ -524,11 +661,36 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
         label.add_css_class("meta")
         return label
 
-    def _button(self, text: str, callback: Callable[[], None], *, accent: bool = False) -> Gtk.Widget:
+    def _button(self, text: str, callback: Callable[[], None], *, accent: bool = False, danger: bool = False) -> Gtk.Widget:
         button = Gtk.Button(label=text)
         button.connect("clicked", lambda *_args: callback())
-        button.add_css_class("accent-button" if accent else "subtle-button")
+        button.add_css_class("danger-button" if danger else ("accent-button" if accent else "subtle-button"))
+        attach_button_feedback(button)
         return button
+
+    def _refresh_next_step_hint(self) -> None:
+        if not hasattr(self, "next_step_label"):
+            return
+        if self.current_task is not None:
+            self.next_step_label.set_label("Идёт операция. Дождитесь завершения или нажмите 'Остановить'.")
+            return
+        account = self._selected_account() if hasattr(self, "account_combo") else None
+        if account is None:
+            self.next_step_label.set_label("Следующий шаг: выберите профиль или импортируйте tdata.zip.")
+            return
+        if self.connected_target is None:
+            if self.preflight_info is not None and self.preflight_info.tdata_ready:
+                self.next_step_label.set_label("Следующий шаг: нажмите '1. Подключить Telegram'.")
+            else:
+                self.next_step_label.set_label("Следующий шаг: проверьте профиль по подсказкам ниже.")
+            return
+        if self._selected_chat() is None:
+            self.next_step_label.set_label("Следующий шаг: выберите чат или вставьте ссылку/@username.")
+            return
+        if not self.output_entry.get_text().strip():
+            self.next_step_label.set_label("Следующий шаг: выберите файл отчёта .md.")
+            return
+        self.next_step_label.set_label("Готово: нажмите сбор @username или сбор номеров.")
 
     def _refresh_export_actions(self) -> None:
         busy = self.current_task is not None
@@ -550,9 +712,9 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
             elif busy:
                 tooltip = "Дождитесь завершения текущей операции."
             elif self.connected_target is None:
-                tooltip = "V1 доступна только после подключения Primary tdata."
+                tooltip = "Сбор номеров доступен после подключения Primary tdata."
             else:
-                tooltip = "V1 доступна только для Primary tdata."
+                tooltip = "Сбор номеров доступен только для Primary tdata."
             self.public_phones_button.set_tooltip_text(tooltip)
         if hasattr(self, "repeat_last_button"):
             self.repeat_last_button.set_sensitive(repeat_enabled)
@@ -739,8 +901,9 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
         if monitor is None:
             return False
         geometry = monitor.get_geometry()
-        width = max(860, min(920, int(geometry.width) - 160))
-        height = max(620, min(640, int(geometry.height) - 140))
+        scale = resolve_ui_scale()
+        width = max(920, min(int(round(1180 * scale)), int(geometry.width) - 80))
+        height = max(660, min(int(round(760 * scale)), int(geometry.height) - 80))
         self.set_default_size(width, height)
         return False
 
@@ -922,23 +1085,24 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
 
     def _apply_preflight_info(self, info: PreflightInfo) -> None:
         self.preflight_info = info
-        self.surface_badge_label.set_label(info.surface_badge)
+        self.surface_badge_label.set_label(_friendly_surface_badge(info.surface_badge))
         self.preflight_panel.set_info(info)
-        self.security_status.set_label(info.security_mode or "Security pending")
-        self.preset_status.set_label(info.preset_label)
+        self.security_status.set_label(_friendly_security_status(info.security_mode or "Security pending"))
+        self.preset_status.set_label(_friendly_preset_label(info.preset_label))
         account = self._selected_account()
         self._refresh_portable_card(info, account)
         self._refresh_fallback_card(info, account)
         self._refresh_security_card(info, account)
         if self.connected_target is not None:
-            self.connection_status.set_label("Connected")
+            self.connection_status.set_label("Telegram подключён")
         elif info.surface_key == "tdata" and info.tdata_ready:
-            self.connection_status.set_label("Primary ready")
+            self.connection_status.set_label("Primary готов")
         else:
-            self.connection_status.set_label("Not connected")
+            self.connection_status.set_label("Не подключено")
         refresh = getattr(self, "_refresh_export_actions", None)
         if callable(refresh):
             refresh()
+        _refresh_next_step_hint_if_available(self)
 
     def _queue_deep_preflight(self, account: AccountOption) -> None:
         self._preflight_revision += 1
@@ -1092,22 +1256,16 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
         resolve_hub_token(settings, mutate=True)
         product_paths = resolve_product_paths(settings=settings)
         mode_label = "Installed .deb mode" if product_paths.installed_mode else "Repo/dev mode"
-        zip_line = (
-            str(product_paths.extension_zip_path)
-            if product_paths.extension_zip_path.exists()
-            else f"{product_paths.extension_zip_path} (будет создан build-скриптом)"
-        )
+        zip_line = "ZIP готов" if product_paths.extension_zip_path.exists() else "ZIP не найден, пересоберите пакет"
         summary_lines = [
             f"Режим: {mode_label}",
-            f"Данные и workspace: {settings.runtime_root}",
-            f"Config/token: {settings.hub_token_file}",
-            f"Логи: {settings.logs_root}",
-            f"Отчёты: {settings.telegram_default_output_dir}",
-            f"Hub URL: {settings.server_url}",
-            f"Extension folder: {product_paths.extension_dir}",
-            f"Extension ZIP: {zip_line}",
+            "Данные, токены и логи хранятся локально на этом компьютере.",
+            f"Отчёты: {_compact_path_for_ui(settings.telegram_default_output_dir)}",
+            f"Hub: {settings.server_url}",
+            f"Расширение: {zip_line}",
         ]
         self.product_summary_label.set_label("\n".join(summary_lines))
+        _refresh_next_step_hint_if_available(self)
 
     def _copy_text_value(self, value: str, *, success_message: str) -> None:
         display = self.get_display()
@@ -1535,6 +1693,7 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
             for chat_title, chat_target in SUGGESTED_CHAT_TARGETS:
                 button = Gtk.Button(label=chat_title)
                 button.add_css_class("subtle-button")
+                attach_button_feedback(button)
                 button.set_tooltip_text(f"Быстро резолвить и открыть: {chat_target}")
                 button.connect(
                     "clicked",
@@ -1565,6 +1724,7 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
         for account_key, chat_ref, chat_title in rows:
             button = Gtk.Button(label=chat_title or chat_ref)
             button.add_css_class("subtle-button")
+            attach_button_feedback(button)
             button.connect("clicked", lambda _btn, a=account_key, c=chat_ref, t=chat_title: self._select_quick_chat(a, c, t))
             self.quick_chat_box.append(button)
 
@@ -1878,7 +2038,7 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
             self._show_error("Сначала подключите Telegram и загрузите список чатов.")
             return
         if operation_kind == "public_phones" and not self.backend._is_tdata_target(self.connected_target):
-            self._show_error("Сбор открытых номеров v1 доступен только для Primary tdata.")
+            self._show_error("Сбор номеров доступен только для Primary tdata.")
             return
         if self.backend._is_tdata_target(self.connected_target) and getattr(chat, "source_kind", "live") == "known":
             self._show_error(
@@ -2087,12 +2247,14 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
         if callable(refresh):
             refresh()
         self.run_stack.set_visible_child(self.artifact_panel)
+        _refresh_next_step_hint_if_available(self)
 
     def _on_chat_selected(self) -> None:
         chat = self._selected_chat()
         if chat is None:
             self.chat_title_label.set_label("Чат не выбран")
             self.chat_url_label.set_label("")
+            _refresh_next_step_hint_if_available(self)
             return
         self.chat_title_label.set_label(chat.title)
         subtitle = f"{chat.subtitle}\n" if chat.subtitle else ""
@@ -2107,6 +2269,7 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
         refresh = getattr(self, "_refresh_export_actions", None)
         if callable(refresh):
             refresh()
+        _refresh_next_step_hint_if_available(self)
 
     def _apply_chat_filter(self) -> None:
         query = self.search_entry.get_text().strip().lower()
@@ -2246,6 +2409,7 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
         refresh = getattr(self, "_refresh_export_actions", None)
         if callable(refresh):
             refresh()
+        _refresh_next_step_hint_if_available(self)
         self.ui_tasks.start(worker=worker, on_success=lambda result: self._finish_task_success(on_success, result), on_error=self._finish_task_error)
 
     def _finish_task_success(self, callback: Callable[[Any], None], result: Any) -> bool:
@@ -2256,6 +2420,7 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
         if callable(refresh):
             refresh()
         callback(result)
+        _refresh_next_step_hint_if_available(self)
         self._finalize_pending_close()
         return False
 
@@ -2267,6 +2432,7 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
         refresh = getattr(self, "_refresh_export_actions", None)
         if callable(refresh):
             refresh()
+        _refresh_next_step_hint_if_available(self)
         if isinstance(exc, TaskCancelled):
             self.hero_status.set_label("Остановлено")
             self._append_log(str(exc))
@@ -2552,7 +2718,7 @@ def parse_key_value_output(stdout: str) -> dict[str, str]:
 
 def operation_busy_status(operation_kind: str) -> str:
     if normalize_operation_kind(operation_kind) == "public_phones":
-        return "Идёт сбор открытых номеров..."
+        return "Идёт сбор номеров..."
     return "Идёт сбор @username..."
 
 
@@ -2598,7 +2764,7 @@ def _latest_progress_summary(lines: list[str]) -> str:
         usernames = _progress_int(payload, "usernames")
         phones = _progress_int(payload, "phones")
         if phones > 0:
-            return f"{messages} сообщений, {phones} открытых номеров"
+            return f"{messages} сообщений, {phones} номеров"
         return f"{messages} сообщений, {usernames} @username"
     return ""
 

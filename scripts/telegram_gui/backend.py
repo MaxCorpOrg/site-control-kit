@@ -1965,7 +1965,7 @@ class TelegramGuiBackend:
         try:
             if operation_kind == "public_phones":
                 if not self._is_tdata_target(target):
-                    raise RuntimeError("Сбор открытых номеров v1 доступен только для Primary tdata.")
+                    raise RuntimeError("Сбор номеров доступен только для Primary tdata.")
                 tdata_dir = self._tdata_dir_from_target(target)
                 if tdata_dir is None:
                     raise RuntimeError("tdata target is invalid.")

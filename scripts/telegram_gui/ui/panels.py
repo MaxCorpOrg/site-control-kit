@@ -6,6 +6,15 @@ from typing import Callable
 from ..gtk_compat import Gtk
 
 from ..models import ArtifactBundle, PreflightInfo, PreflightStatus, RunRecord, SessionResumeState
+from .styles import attach_button_feedback
+
+
+def _friendly_preset_label(value: str) -> str:
+    return {
+        "Full History": "Полная история",
+        "Quick Check": "Быстрая проверка",
+        "Resume Last": "Повтор последнего",
+    }.get(str(value or "").strip(), str(value or "—"))
 
 
 class ProgressPanel(Gtk.Box):
@@ -45,7 +54,7 @@ class ProgressPanel(Gtk.Box):
         self.append(self.progress_meta_label)
         self.append(self.progress_hint_label)
 
-        log_title = Gtk.Label(label="Live log")
+        log_title = Gtk.Label(label="Журнал выполнения")
         log_title.set_xalign(0)
         self.append(log_title)
 
@@ -71,7 +80,7 @@ class PreflightPanel(Gtk.Box):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         self.set_vexpand(False)
 
-        header = Gtk.Label(label="Preflight checklist")
+        header = Gtk.Label(label="Проверка перед запуском")
         header.set_xalign(0)
         header.add_css_class("card-title")
         self.append(header)
@@ -87,9 +96,9 @@ class PreflightPanel(Gtk.Box):
 
     def set_info(self, info: PreflightInfo) -> None:
         summary_lines = [
-            f"Surface: {info.surface_label}",
-            f"Preset: {info.preset_label}",
-            f"Security: {info.security_mode or '—'}",
+            f"Контур: {info.surface_label}",
+            f"Режим: {_friendly_preset_label(info.preset_label)}",
+            f"Безопасность: {info.security_mode or '—'}",
         ]
         if info.notes:
             summary_lines.append(" / ".join(info.notes[:2]))
@@ -171,6 +180,7 @@ class ArtifactPanel(Gtk.Box):
             copy_button.connect("clicked", lambda _btn, p=path: self._copy_path(p))
             for button in (open_button, folder_button, copy_button):
                 button.add_css_class("subtle-button")
+                attach_button_feedback(button)
                 row.append(button)
             self.button_box.append(row)
 
@@ -179,7 +189,7 @@ class HistoryPanel(Gtk.Box):
     def __init__(self) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=10)
         self.set_vexpand(True)
-        self.resume_label = Gtk.Label(label="Resume Last недоступен")
+        self.resume_label = Gtk.Label(label="Повтор последнего запуска недоступен")
         self.resume_label.set_xalign(0)
         self.resume_label.set_wrap(True)
         self.append(self.resume_label)
@@ -197,6 +207,7 @@ class HistoryPanel(Gtk.Box):
         ):
             button = Gtk.Button(label=label)
             button.add_css_class("subtle-button")
+            attach_button_feedback(button)
             self._filter_buttons[key] = button
             self.filter_box.append(button)
 
@@ -218,10 +229,10 @@ class HistoryPanel(Gtk.Box):
 
     def set_resume_state(self, session: SessionResumeState | None) -> None:
         if session is None:
-            self.resume_label.set_label("Resume Last недоступен")
+            self.resume_label.set_label("Повтор последнего запуска недоступен")
             return
         self.resume_label.set_label(
-            f"Resume Last: {session.chat_title or session.chat_ref} -> {session.output_path} "
+            f"Повтор последнего запуска: {session.chat_title or session.chat_ref} -> {session.output_path} "
             f"({session.surface_badge}, {session.operation_kind})"
         )
 

@@ -5,6 +5,7 @@ import argparse
 import os
 import sys
 import importlib
+from typing import Any
 
 try:
     from .telegram_product_runtime import create_desktop_shortcut, format_doctor_report, gather_doctor_report
@@ -30,6 +31,19 @@ def _render_startup_error(exc: Exception) -> str:
     return f"ERROR: failed to start telegram GUI: {text}"
 
 
+UI_SCALE_ENV = "TELEGRAM_GUI_SCALE"
+
+
+def _parse_ui_scale(raw: str) -> str:
+    try:
+        value = float(str(raw).strip())
+    except (TypeError, ValueError) as exc:
+        raise argparse.ArgumentTypeError("scale must be a number between 0.75 and 1.75") from exc
+    if value < 0.75 or value > 1.75:
+        raise argparse.ArgumentTypeError("scale must be between 0.75 and 1.75")
+    return f"{value:.2f}".rstrip("0").rstrip(".")
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="telegram-username-collector",
@@ -45,13 +59,25 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="create a desktop launcher for the current Linux user",
     )
+    parser.add_argument(
+        "--ui-scale",
+        type=_parse_ui_scale,
+        metavar="FACTOR",
+        help="scale the GTK panel, for example 0.9, 1.0, 1.25 or 1.5",
+    )
     return parser
+
+
+def _apply_launcher_options(args: Any) -> None:
+    if getattr(args, "ui_scale", None):
+        os.environ[UI_SCALE_ENV] = str(args.ui_scale)
 
 
 def main(argv: list[str] | None = None) -> int:
     raw_args = list(sys.argv[1:] if argv is None else argv)
     parser = _build_parser()
     args, remaining = parser.parse_known_args(raw_args)
+    _apply_launcher_options(args)
 
     if _is_windows_platform():
         print(

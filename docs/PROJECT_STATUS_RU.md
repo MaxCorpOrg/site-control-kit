@@ -1,6 +1,6 @@
 # Project Status RU
 
-Последнее обновление: 2026-06-06
+Последнее обновление: 2026-07-11
 
 Этот файл нужен как точка входа для любого нового чата и любого нового агента.
 Перед новой задачей его нужно прочитать целиком.
@@ -11,6 +11,95 @@ Repo-root entrypoint для любого агента: `AGENT_START_HERE.md`.
 Читать его нужно по номерам файлов, начиная с `00_START_HERE.md`.
 
 ## Сделано
+
+### Обновление 2026-07-11 (Готовая desktop-программа, установщик, масштабирование)
+- Подготовлен готовый Linux desktop contour для `Telegram Username Collector`:
+  - GTK-панель остаётся основным операторским интерфейсом;
+  - добавлен выбор масштаба в самой панели;
+  - launcher принимает `--ui-scale`;
+  - `.deb`-установщик пересобран и проверен.
+- Дополнительно выполнен Shadow Admin UX-pass по PDF `/home/max/Shadow_Admin/Shadow_Admin_Design_Guide_v1.0.pdf`:
+  - добавлен логотип:
+    - `resources/branding/shadow-admin-logo-mark.png`
+  - панель переведена на тёмную pixel/mono тему с зелёным accent;
+  - кнопки получили явную отдачу при hover/press;
+  - верх панели показывает `Следующий шаг`;
+  - status badges переведены на русский;
+  - основные действия переименованы под простой операторский flow;
+  - product summary теперь компактный и не растягивает окно длинными путями.
+- Что изменено:
+  - [scripts/telegram_username_collector_launcher.py](../scripts/telegram_username_collector_launcher.py) теперь принимает `--ui-scale FACTOR` и выставляет `TELEGRAM_GUI_SCALE` до импорта GUI;
+  - [scripts/telegram_gui/ui/styles.py](../scripts/telegram_gui/ui/styles.py) теперь строит GTK CSS с учётом scale;
+  - [scripts/telegram_gui/app.py](../scripts/telegram_gui/app.py) масштабирует стартовый размер окна;
+  - [scripts/telegram_gui/ui/window.py](../scripts/telegram_gui/ui/window.py) содержит selector `Масштаб интерфейса`;
+  - [tests/test_telegram_username_collector_launcher.py](../tests/test_telegram_username_collector_launcher.py) покрывает launcher scale path.
+- Установочный артефакт:
+  - `/home/max/site-control-kit/dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`
+  - размер: около `52M`
+  - финальный sha256 фиксируется в checkpoint/handoff-файлах после сборки
+- Содержимое пакета подтверждено:
+  - `/usr/bin/telegram-username-collector`
+  - `/usr/bin/sitectl`
+  - `/usr/share/applications/telegram-username-collector.desktop`
+  - `/opt/telegram-username-collector/app`
+  - `/opt/telegram-username-collector/app/resources/site-control-bridge-extension.zip`
+- Verify:
+  - `python3 -m py_compile` по изменённым launcher/GUI/test файлам -> OK
+  - targeted GUI tests -> `53 tests OK`, `2 skipped`
+  - full suite -> `324 tests OK`, `2 skipped`
+  - `python3 -m webcontrol --help` -> OK
+  - `python3 -m webcontrol browser --help` -> OK
+  - `git diff --check` -> OK
+  - `dpkg-deb --info` / `dpkg-deb --contents` -> OK
+  - repo GUI smoke на `DISPLAY=:0` -> окно появилось
+  - extracted `.deb` smoke -> `--help` и `--doctor` работают
+  - live panel smoke из repo:
+    - hover: `/tmp/shadow_admin_gui_final2_hover_refresh_20260711.png`
+    - press: `/tmp/shadow_admin_gui_final2_press_refresh_20260711.png`
+    - клик по `Обновить профили` прошёл без падения панели
+- Ограничение:
+  - реальный `sudo apt install` в этом проходе не выполнялся; package был проверен через распаковку и запуск installed-mode из extracted tree.
+
+### Обновление 2026-06-07 (Cosmetology E2E batch на `TG_CONTACT 4`)
+- Выполнен live E2E usernames/export batch по согласованным cosmetology targets на текущем ready direct source:
+  - `/home/max/site-control-kit/TG_CONTACT/4/tdata-003/tdata`
+- Batch шёл через один общий helper session:
+  - `/tmp/tg4_cosmetology_batch_20260607T105308Z.session`
+- Canonical target-set был нормализован так:
+  - `@cosmetologi_chat` -> `Косметология`
+  - `@cosmetology_chat` -> `КОСМЕТОЛОГИЯ ЧАТ`
+  - `@cosmetology_help` -> `ЧАТ КОСМЕТОЛОГОВ +1`
+  - `@chatkosmetologa` -> `Форум Косметология | Дерматология`
+  - `@kosmetologi_chat_ru` -> `Косметологи Чат | Сообщество Профессионалов`
+  - `@cosmetologna` / `https://t.me/cosmetologna` -> `Косметолог на Миллион`
+  - `@cosmochatrussia` -> `Чат Косметологов | Косметологи чат | Чат косметологов России`
+- Live result:
+  - `@cosmochatrussia` = единственный reachable target на текущем аккаунте:
+    - access path: `list_chats:chat_ref`
+    - quick-check: `done`, `history_messages_scanned=400`, `usernames_found=107`
+    - full-history: `done`, `history_messages_scanned=9383`, `usernames_found=1495`
+  - остальные `6` target-ов сейчас подтверждены как `blocked_on_current_account`, а не как helper/code regression:
+    - их historical peer-и не открываются на текущем `TG_CONTACT 4`
+    - типовой detail: `Could not find the input entity for PeerChannel(...)`
+- Артефакты:
+  - consolidated summary:
+    - `/tmp/tg4_cosmetology_e2e_summary_20260607T105308Z.json`
+    - `/tmp/tg4_cosmetology_e2e_summary_20260607T105308Z.md`
+  - batch log:
+    - `/home/max/.site-control-kit/telegram_workspace/logs/batch_tg4_cosmetology_e2e_20260607T105308Z.log`
+  - `@cosmochatrussia` quick:
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg4_cosmetology_e2e_cosmochatrussia_quick_check_20260607T105308Z.md`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg4_cosmetology_e2e_cosmochatrussia_quick_check_20260607T105308Z_usernames.txt`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg4_cosmetology_e2e_cosmochatrussia_quick_check_20260607T105308Z_usernames.json`
+  - `@cosmochatrussia` full:
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg4_cosmetology_e2e_cosmochatrussia_full_history_20260607T105308Z.md`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg4_cosmetology_e2e_cosmochatrussia_full_history_20260607T105308Z_usernames.txt`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg4_cosmetology_e2e_cosmochatrussia_full_history_20260607T105308Z_usernames.json`
+- Практический вывод:
+  - на текущем `TG_CONTACT 4` не надо бесконечно retry-ить остальные `6` cosmetology targets тем же helper-path;
+  - если они нужны сейчас, следующий шаг уже не про код, а про доступ:
+    - либо вернуть `AK2 live 959756539365` в `ready for export`
+    - либо получить новые рабочие public links / membership для `TG_CONTACT 4`
 
 ### Обновление 2026-06-06 (GUI contour теперь закреплён на ready `TG_CONTACT 4`)
 - Программа и GTK GUI теперь не застревают на старом broken portable-path, если для `TG_CONTACT N` уже есть рабочий repo-local direct source.

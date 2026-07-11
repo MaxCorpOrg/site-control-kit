@@ -1,5 +1,82 @@
 # Known Issues And Live Findings
 
+## Самый Новый Product Packaging Finding
+Новый самый свежий факт на 2026-07-11 уже не про Telegram access, а про готовый desktop product contour:
+- собран локальный Linux `.deb`:
+  - `/home/max/site-control-kit/dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`
+  - размер: `52M`
+  - sha256: `57f4d9ea88c20b1cb67762a9ce0e1e7b200ca9a89ff07a42aef55dc8a5a73736`
+- новый внешний вид:
+  - Shadow Admin дизайн из `/home/max/Shadow_Admin/Shadow_Admin_Design_Guide_v1.0.pdf`
+  - logo asset:
+    - `resources/branding/shadow-admin-logo-mark.png`
+  - hover/press feedback у кнопок проверен в live panel smoke
+  - верхняя плашка `Следующий шаг`
+  - русские status badges
+  - короткие operator-friendly action labels
+- GTK-панель теперь поддерживает масштабирование:
+  - in-app selector `Масштаб интерфейса`
+  - launcher option `--ui-scale`
+  - env `TELEGRAM_GUI_SCALE`
+- package contents проверены:
+  - `/usr/bin/telegram-username-collector`
+  - `/usr/share/applications/telegram-username-collector.desktop`
+  - `/opt/telegram-username-collector/app`
+  - bundled extension zip
+- Verify:
+  - full suite -> `324 tests OK`, `2 skipped`
+  - CLI help -> OK
+  - `dpkg-deb --info` / `dpkg-deb --contents` -> OK
+  - repo GUI smoke on `DISPLAY=:0` -> window appeared
+  - hover screenshot:
+    - `/tmp/shadow_admin_gui_final2_hover_refresh_20260711.png`
+  - press screenshot:
+    - `/tmp/shadow_admin_gui_final2_press_refresh_20260711.png`
+  - safe click on `Обновить профили` completed without a panel crash
+  - extracted `.deb` smoke -> `--help` and `--doctor` OK
+- known limitation:
+  - реальный system install через `sudo apt install` не выполнялся в этом проходе; если пакет отдаётся внешнему пользователю, первым следующим smoke сделать установку на чистой Ubuntu-среде.
+
+## Самый Новый Cosmetology E2E Finding
+Новый самый свежий факт на 2026-06-07 уже не про старый AK2 baseline, а про текущую live-видимость agreed cosmetology targets на ready `TG_CONTACT 4`:
+- batch шёл только через direct helper/API contour:
+  - `/home/max/site-control-kit/TG_CONTACT/4/tdata-003/tdata`
+  - session: `/tmp/tg4_cosmetology_batch_20260607T105308Z.session`
+- canonical target-set был нормализован до `7` targets:
+  - `@cosmetologi_chat`
+  - `@cosmetology_chat`
+  - `@cosmetology_help`
+  - `@chatkosmetologa`
+  - `@kosmetologi_chat_ru`
+  - `@cosmetologna`
+  - `@cosmochatrussia`
+- live result на текущем аккаунте:
+  - `@cosmochatrussia` = reachable:
+    - access path: `list_chats:chat_ref`
+    - quick-check: `done`, `history_messages_scanned=400`, `usernames_found=107`
+    - full-history: `done`, `history_messages_scanned=9383`, `usernames_found=1495`
+  - остальные `6` targets = не code regression, а именно current-account visibility blockers:
+    - `final_status=blocked_on_current_account`
+    - типовой detail: `Could not find the input entity for PeerChannel(...)`
+- ключевые артефакты:
+  - consolidated summary:
+    - `/tmp/tg4_cosmetology_e2e_summary_20260607T105308Z.json`
+    - `/tmp/tg4_cosmetology_e2e_summary_20260607T105308Z.md`
+  - batch log:
+    - `/home/max/.site-control-kit/telegram_workspace/logs/batch_tg4_cosmetology_e2e_20260607T105308Z.log`
+  - list-chats log:
+    - `/home/max/.site-control-kit/telegram_workspace/logs/tg4_cosmetology_e2e_20260607T105308Z_list_chats.log`
+  - reachable target artifacts:
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg4_cosmetology_e2e_cosmochatrussia_quick_check_20260607T105308Z.md`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg4_cosmetology_e2e_cosmochatrussia_quick_check_20260607T105308Z_usernames.txt`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg4_cosmetology_e2e_cosmochatrussia_quick_check_20260607T105308Z_usernames.json`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg4_cosmetology_e2e_cosmochatrussia_full_history_20260607T105308Z.md`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg4_cosmetology_e2e_cosmochatrussia_full_history_20260607T105308Z_usernames.txt`
+    - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg4_cosmetology_e2e_cosmochatrussia_full_history_20260607T105308Z_usernames.json`
+- practical finding:
+  - если пользователю нужны оставшиеся `6` cosmetology targets, следующий узкий шаг уже не про helper-fix и не про бесконечный retry на `TG_CONTACT 4`;
+  - нужен либо другой аккаунт (`AK2` после readiness refresh), либо новые public links / membership для текущего `TG_CONTACT 4`.
+
 ## Самый Новый GUI Contour Finding
 Новый самый свежий факт на 2026-06-06 уже не только про helper/API success, а про то, что сам GUI теперь закреплён на этом рабочем контуре:
 - stale registry row `TG_CONTACT N` теперь может автоматически перейти на repo-local `REPO_ROOT/TG_CONTACT/N`, если там реально есть рабочий `tdata-*`;

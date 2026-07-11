@@ -1,5 +1,67 @@
 # Current Backlog And Next Steps
 
+## Обновление 2026-07-11 (Ready desktop program package)
+- Новый текущий статус:
+  - готовый Linux desktop package собран;
+  - GTK GUI остаётся основным операторским интерфейсом;
+  - масштабирование доступно прямо в панели и через launcher/env.
+- Что уже проверено:
+  - `.deb`:
+    - `/home/max/site-control-kit/dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`
+    - sha256: `57f4d9ea88c20b1cb67762a9ce0e1e7b200ca9a89ff07a42aef55dc8a5a73736`
+  - UI:
+    - Shadow Admin дизайн из `/home/max/Shadow_Admin/Shadow_Admin_Design_Guide_v1.0.pdf` встроен
+    - `resources/branding/shadow-admin-logo-mark.png` используется в hero
+    - hover/press feedback кнопок проверен
+    - `Следующий шаг` виден вверху
+    - status badges на русском
+    - product summary компактный
+  - full suite -> `324 tests OK`, `2 skipped`
+  - `python3 -m webcontrol --help` -> OK
+  - `python3 -m webcontrol browser --help` -> OK
+  - `dpkg-deb --info` / `dpkg-deb --contents` -> OK
+  - GUI smoke из repo -> окно появляется на `DISPLAY=:0`
+  - extracted `.deb` smoke -> `--help` и `--doctor` работают
+  - hover/press screenshots:
+    - `/tmp/shadow_admin_gui_final2_hover_refresh_20260711.png`
+    - `/tmp/shadow_admin_gui_final2_press_refresh_20260711.png`
+- Новый ближайший следующий шаг:
+  - если нужно отдать программу оператору, взять этот `.deb`;
+  - если нужно повысить confidence перед внешней установкой, сделать чистый `sudo apt install` smoke на отдельной Ubuntu-среде;
+  - если нужна дальнейшая масштабируемость по нагрузке, следующий кодовый слой уже не UI-scale, а очередь batch/jobs и профили запуска.
+- Что важно не перепутать:
+  - `dist/` остаётся build artifact и обычно не коммитится без отдельного решения;
+  - extracted `--doctor` smoke показал `hub_reachable=0` только потому, что хаб не запускался;
+  - этот product pass не менял Telegram account/access baseline.
+
+## Обновление 2026-06-07 (Cosmetology E2E batch на `TG_CONTACT 4`)
+- Новый текущий статус:
+  - live E2E batch по согласованным cosmetology targets на `TG_CONTACT 4` уже выполнен;
+  - из `7` canonical targets только `@cosmochatrussia` сейчас reachable на этом аккаунте;
+  - остальные `6` зафиксированы как `blocked_on_current_account`, а не как helper regression.
+- Что уже проверено:
+  - `list-chats` на `/home/max/site-control-kit/TG_CONTACT/4/tdata-003/tdata` -> OK
+  - consolidated summary:
+    - `/tmp/tg4_cosmetology_e2e_summary_20260607T105308Z.json`
+    - `/tmp/tg4_cosmetology_e2e_summary_20260607T105308Z.md`
+  - `@cosmochatrussia`:
+    - quick-check -> `done`, `history_messages_scanned=400`, `usernames_found=107`
+    - full-history -> `done`, `history_messages_scanned=9383`, `usernames_found=1495`
+    - артефакты:
+      - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg4_cosmetology_e2e_cosmochatrussia_quick_check_20260607T105308Z.md`
+      - `/home/max/.site-control-kit/telegram_workspace/live_smokes/tg4_cosmetology_e2e_cosmochatrussia_full_history_20260607T105308Z.md`
+  - batch log:
+    - `/home/max/.site-control-kit/telegram_workspace/logs/batch_tg4_cosmetology_e2e_20260607T105308Z.log`
+- Новый ближайший следующий шаг теперь такой:
+  - если нужен именно `@cosmochatrussia`, текущий `TG_CONTACT 4` contour уже подтверждён и его можно продолжать тем же export path;
+  - если нужны оставшиеся `6` cosmetology targets, следующий цикл уже должен быть про доступ:
+    - вернуть `AK2 live 959756539365` в `ready for export`
+    - или получить новые рабочие public links / membership для `TG_CONTACT 4`
+- Что важно не перепутать:
+  - не считать `blocked_on_current_account` кодовым дефектом helper-а;
+  - не retry-ить бесконечно те же historical peer-id на текущем `TG_CONTACT 4`;
+  - не смешивать этот access-gap с готовым `@cosmochatrussia` contour.
+
 ## Обновление 2026-06-06 (GUI / program contour закреплён на `TG_CONTACT 4`)
 - Новый текущий статус:
   - программа и GTK GUI теперь сами держат рабочий direct `Primary tdata` contour, даже если старый registry-default указывает на битый portable path;

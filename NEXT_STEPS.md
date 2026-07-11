@@ -1,10 +1,26 @@
 # Next Steps
 
-Дата: 2026-06-06
+Дата: 2026-07-11
 
 ## Текущий baseline
 
 - Ветка: `main`
+- Готовый desktop package:
+  - `/home/max/site-control-kit/dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`
+  - sha256: `57f4d9ea88c20b1cb67762a9ce0e1e7b200ca9a89ff07a42aef55dc8a5a73736`
+- Основной запуск после установки:
+  - `telegram-username-collector`
+- Визуальный baseline:
+  - Shadow Admin тёмная pixel/mono тема из `/home/max/Shadow_Admin/Shadow_Admin_Design_Guide_v1.0.pdf`
+  - логотип `resources/branding/shadow-admin-logo-mark.png`
+  - заметный hover/press feedback у кнопок
+  - плашка `Следующий шаг`
+  - русские status badges
+  - основные кнопки: `1. Подключить Telegram`, `Найти чат`, `Выбрать файл отчёта`, `Начать сбор @username`, `Собрать номера`
+- Масштабирование:
+  - в GUI: поле `Масштаб интерфейса`
+  - из CLI: `telegram-username-collector --ui-scale 1.25`
+  - из env: `TELEGRAM_GUI_SCALE=1.25`
 - Основной операторский путь: `GTK GUI -> Primary tdata`
 - Ready direct helper source на этом хосте:
   - `/home/max/site-control-kit/TG_CONTACT/4/tdata-003/tdata`
@@ -13,12 +29,22 @@
 
 ## Что уже подтверждено
 
+- `.deb` собран и проверен через `dpkg-deb --info` / `dpkg-deb --contents`
+- Repo GUI smoke на `DISPLAY=:0` с `--ui-scale 1.15` поднимает окно `Telegram Username Collector`
+- Extracted `.deb` smoke:
+  - `--help` работает
+  - `--doctor` работает
+  - `hub_reachable=0` был ожидаемым warning, потому что хаб в smoke не запускался
+- Live panel smoke:
+  - hover: `/tmp/shadow_admin_gui_final2_hover_refresh_20260711.png`
+  - press: `/tmp/shadow_admin_gui_final2_press_refresh_20260711.png`
+  - safe click `Обновить профили` прошёл без падения панели
 - Unified `public_phones` flow теперь согласован в helper, GUI, history и `INDEX.md`:
   - `phones_found` = total unique phones
   - `private_phones_found` = private-only split
   - overlap rule = `public wins`
 - Полный suite зелёный:
-  - `python3 -m unittest discover -s tests -p 'test_*.py'` -> `319 tests OK`, `2 skipped`
+  - `python3 -m unittest discover -s tests -p 'test_*.py'` -> `324 tests OK`, `2 skipped`
 - Базовые runtime-check команды зелёные:
   - `python3 -m webcontrol --help`
   - `python3 -m webcontrol browser --help`
@@ -46,6 +72,10 @@
 
 ## Что осталось
 
+- Optional packaging check перед внешней передачей:
+  - выполнить реальный `sudo apt install ./dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb` на чистой/тестовой Ubuntu-среде
+  - запустить установленный `telegram-username-collector --doctor`
+  - открыть GUI из desktop launcher
 - Если нужен следующий live-pass без recovery-работ, идти уже через ready source `TG_CONTACT 4`:
   - либо анализировать текущие `145` номеров,
   - либо брать следующий чат тем же direct helper/API path
