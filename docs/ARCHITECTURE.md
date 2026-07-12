@@ -142,7 +142,7 @@ tab-level API   content.js -> DOM страницы
 - `GET /api/clients` — какие клиенты подключены.
 - `GET /api/state` — полное состояние.
 - `GET /api/commands/{id}` — подробности конкретной команды.
-- `python -m webcontrol runtime-env --format json --no-create` — эффективный runtime mode, token source и реальные пути до state/log/token.
+- `python -m webcontrol runtime-env --format json --no-create` — эффективный runtime mode, token source и реальные пути до state/log/token; сам `SITECTL_TOKEN` в JSON редактируется по умолчанию.
 
 ## Роли Компонентов
 

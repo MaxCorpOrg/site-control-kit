@@ -1,15 +1,26 @@
 # Next Steps
 
-Дата: 2026-07-11
+Дата: 2026-07-12
 
 ## Текущий baseline
 
 - Ветка: `main`
 - Готовый desktop package:
   - `/home/max/site-control-kit/dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`
-  - sha256: `57f4d9ea88c20b1cb67762a9ce0e1e7b200ca9a89ff07a42aef55dc8a5a73736`
+  - sha256: `121572953110c23d69354e7438dde86d2b5ffa507fc5833a178cd248e6bb6aa5`
+- Готовая папка для переноса на другой ПК:
+  - `/home/max/Рабочий стол/telegram-username-collector-install-kit/`
+  - внутри `.deb`, `.sha256`, `INSTALL_RU.md`
 - Основной запуск после установки:
   - `telegram-username-collector`
+- Installed-mode wrapper исправлен:
+  - `/usr/bin/telegram-username-collector` и `/usr/bin/sitectl` делают `cd "$APP_ROOT"` перед `python -m ...`
+- JSON diagnostics безопаснее:
+  - `python3 -m webcontrol runtime-env --format json` редактирует `SITECTL_TOKEN` по умолчанию
+  - для реального JSON-секрета нужен явный `--show-secrets`
+- GUI action-log теперь появляется даже без экспорта:
+  - `app_started`
+  - `profiles_refreshed accounts=... ready=...`
 - Визуальный baseline:
   - Shadow Admin тёмная pixel/mono тема из `/home/max/Shadow_Admin/Shadow_Admin_Design_Guide_v1.0.pdf`
   - логотип `resources/branding/shadow-admin-logo-mark.png`
@@ -29,22 +40,38 @@
 
 ## Что уже подтверждено
 
-- `.deb` собран и проверен через `dpkg-deb --info` / `dpkg-deb --contents`
+- `.deb` собран и проверен через `dpkg-deb --info` / `dpkg-deb --contents` / `dpkg-deb -x`
+- Package content содержит текущие fixes:
+  - `cd "$APP_ROOT"`
+  - `SITECTL_TOKEN_REDACTED`
+  - `app_started`
+  - `profiles_refreshed`
 - Repo GUI smoke на `DISPLAY=:0` с `--ui-scale 1.15` поднимает окно `Telegram Username Collector`
 - Extracted `.deb` smoke:
   - `--help` работает
   - `--doctor` работает
   - `hub_reachable=0` был ожидаемым warning, потому что хаб в smoke не запускался
+- Build-root installed-mode `--doctor`:
+  - `gtk_runtime=ok`
+  - `extension_zip_ready=1`
+  - `project_root=.../opt/telegram-username-collector/app`
 - Live panel smoke:
-  - hover: `/tmp/shadow_admin_gui_final2_hover_refresh_20260711.png`
-  - press: `/tmp/shadow_admin_gui_final2_press_refresh_20260711.png`
+  - final folder: `/home/max/Рабочий стол/telegram-program-live-smoke-20260712T065625Z-final`
+  - hover screenshot: `/home/max/Рабочий стол/telegram-program-live-smoke-20260712T065625Z-final/screenshot-hover-refresh.png`
   - safe click `Обновить профили` прошёл без падения панели
+  - action log: `/home/max/.local/share/site-control-kit/telegram_workspace/logs/gui_actions_20260712T065533Z.log`
+  - action log содержит `app_started` и `profiles_refreshed`
+- Ctrl+C smoke:
+  - код `130`
+  - без traceback
 - Unified `public_phones` flow теперь согласован в helper, GUI, history и `INDEX.md`:
   - `phones_found` = total unique phones
   - `private_phones_found` = private-only split
   - overlap rule = `public wins`
 - Полный suite зелёный:
-  - `python3 -m unittest discover -s tests -p 'test_*.py'` -> `324 tests OK`, `2 skipped`
+  - `python3 -m unittest discover -s tests -p 'test_*.py'` -> `330 tests OK`, `2 skipped`
+- Общий verify:
+  - `./scripts/verify.sh` -> OK
 - Базовые runtime-check команды зелёные:
   - `python3 -m webcontrol --help`
   - `python3 -m webcontrol browser --help`
@@ -73,9 +100,10 @@
 ## Что осталось
 
 - Optional packaging check перед внешней передачей:
-  - выполнить реальный `sudo apt install ./dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb` на чистой/тестовой Ubuntu-среде
+  - выполнить реальный `sudo apt install ./telegram-username-collector_0.1.0_amd64.deb` из папки `/home/max/Рабочий стол/telegram-username-collector-install-kit/` на чистой/тестовой Ubuntu-среде
   - запустить установленный `telegram-username-collector --doctor`
   - открыть GUI из desktop launcher
+  - на текущем хосте `sudo -n apt install ...` был заблокирован паролем, поэтому этот пункт остаётся только ручным/отдельным smoke
 - Если нужен следующий live-pass без recovery-работ, идти уже через ready source `TG_CONTACT 4`:
   - либо анализировать текущие `145` номеров,
   - либо брать следующий чат тем же direct helper/API path

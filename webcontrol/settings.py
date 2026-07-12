@@ -22,6 +22,7 @@ LEGACY_HOME_DIRNAME = ".site-control-kit"
 LEGACY_INSECURE_TOKEN = "local-bridge-quickstart-2026"
 PRODUCT_MODE_ENV = "SITECTL_PRODUCT_MODE"
 INSTALLED_PRODUCT_MODE = "installed"
+REDACTED_SECRET_VALUE = "<redacted>"
 
 
 @dataclass(frozen=True, slots=True)
@@ -346,8 +347,12 @@ def format_runtime_env(
     token: str | None = None,
     token_source: str | None = None,
     shell: str = "shell",
+    redact_secrets: bool = False,
 ) -> str:
     rows = settings.env_map(token=token, token_source=token_source)
+    if redact_secrets and "SITECTL_TOKEN" in rows:
+        rows["SITECTL_TOKEN"] = REDACTED_SECRET_VALUE
+        rows["SITECTL_TOKEN_REDACTED"] = "1"
     if shell == "json":
         import json
 

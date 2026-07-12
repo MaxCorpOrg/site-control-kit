@@ -10,12 +10,19 @@
 
 ## Текущий Статус Проекта
 
-Актуальная рабочая точка на 2026-07-11:
+Актуальная рабочая точка на 2026-07-12:
 - собран готовый Linux desktop package для оператора:
   - `dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`
   - размер: около `52M`;
-  - актуальный sha256 фиксируется в checkpoint/handoff-файлах после сборки;
+  - sha256: `121572953110c23d69354e7438dde86d2b5ffa507fc5833a178cd248e6bb6aa5`;
+- готовая папка установщика для переноса на другой ПК:
+  - `/home/max/Рабочий стол/telegram-username-collector-install-kit/`;
 - установщик кладёт программу в `/opt/telegram-username-collector`, wrapper в `/usr/bin/telegram-username-collector`, desktop entry в `/usr/share/applications/telegram-username-collector.desktop`;
+- installed wrapper больше не зависит от текущей папки запуска: `/usr/bin/telegram-username-collector` и `/usr/bin/sitectl` переходят в `/opt/telegram-username-collector/app` перед запуском Python;
+- JSON-диагностика `runtime-env` по умолчанию редактирует `SITECTL_TOKEN`; для явного локального вывода секрета нужен `--show-secrets`;
+- GUI action-log теперь фиксирует старт и refresh профилей:
+  - `app_started`
+  - `profiles_refreshed accounts=... ready=...`;
 - верхняя часть GTK-панели приведена к Shadow Admin design guide:
   - источник: `/home/max/Shadow_Admin/Shadow_Admin_Design_Guide_v1.0.pdf`
   - logo asset: `resources/branding/shadow-admin-logo-mark.png`
@@ -41,14 +48,17 @@
 - рядом с обычными `*_phones.txt/json` теперь сохраняются и `*.private.txt/json`, если найдены private-only номера.
 
 Что уже подтверждено:
-- полный `unittest` suite: `324 tests OK`, `2 skipped`;
+- полный `unittest` suite: `330 tests OK`, `2 skipped`;
+- `./scripts/verify.sh` -> OK;
 - `python3 -m webcontrol --help` -> OK;
 - `python3 -m webcontrol browser --help` -> OK;
-- `dpkg-deb --info` и `dpkg-deb --contents` по `.deb` -> OK;
+- `dpkg-deb --info`, `dpkg-deb --contents` и `dpkg-deb -x` по `.deb` -> OK;
 - extracted `.deb` smoke: `--help` и `--doctor` -> OK;
+- build-root installed-mode `--doctor`: `gtk_runtime=ok`, `extension_zip_ready=1`, `project_root=.../opt/telegram-username-collector/app`;
 - live panel hover/press smoke:
-  - `/tmp/shadow_admin_gui_final2_hover_refresh_20260711.png`
-  - `/tmp/shadow_admin_gui_final2_press_refresh_20260711.png`;
+  - `/home/max/Рабочий стол/telegram-program-live-smoke-20260712T065625Z-final/screenshot-hover-refresh.png`
+  - `/home/max/.local/share/site-control-kit/telegram_workspace/logs/gui_actions_20260712T065533Z.log`;
+- Ctrl+C smoke завершает launcher кодом `130` без traceback;
 - GTK GUI видим на `DISPLAY=:0`;
 - живой GTK smoke на текущем хосте снова поднимает окно `Telegram Username Collector`;
 - live `Quick Check` unified-flow на авторизованном `Primary tdata` source `/home/max/site-control-kit/TG_CONTACT/4/tdata-003/tdata` уже дал private-only hit:
@@ -211,6 +221,8 @@ CLI (sitectl) <----HTTP----> Локальный хаб (Python) <----HTTP poll--
 python3 -m webcontrol runtime-env --format json
 ```
 
+JSON-вывод по умолчанию редактирует `SITECTL_TOKEN`, чтобы его можно было безопасно прикладывать к логам и диагностике. Если нужен реальный токен в локальной приватной сессии, используйте `--show-secrets`; wrapper-форматы `shell` и `powershell` по-прежнему отдают токен для стартовых скриптов.
+
 ## Где лежат данные, логи и отчёты
 
 - базовый runtime: `./var/site-control-kit`;
@@ -278,7 +290,7 @@ telegram-username-collector
 Ожидаемый результат:
 - хаб поднимается без traceback;
 - `browser.cmd status` и `browser.cmd tabs` отрабатывают через текущий runtime; до подключения extension первый ответ уровня `No connected browser clients...` допустим и сам по себе не blocker;
-- `runtime-env` показывает корректные runtime paths и token source;
+- `runtime-env` показывает корректные runtime paths и token source без раскрытия токена в JSON;
 - в fresh checkout автоматически создаются runtime-каталоги;
 - UTF-8 пути и русский текст не ломаются в stdout/stderr;
 - `telegram-username-collector` не пытается стартовать GTK GUI на Windows, а честно завершает запуск понятным fast-fail сообщением, что Windows GTK GUI не входит в v1.

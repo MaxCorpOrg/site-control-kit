@@ -1,5 +1,34 @@
 # Changelog
 
+## 2026-07-12
+
+### Product Package Stabilization And Safe Diagnostics
+
+- Исправлен installed-mode wrapper:
+  - `/usr/bin/telegram-username-collector` и `/usr/bin/sitectl` теперь делают `cd "$APP_ROOT"` перед запуском Python;
+  - установленная программа больше не зависит от текущей папки запуска.
+- `telegram-username-collector --doctor` в installed-mode теперь использует `SITECTL_PRODUCT_APP_ROOT` как product root.
+- `webcontrol runtime-env --format json` теперь по умолчанию редактирует `SITECTL_TOKEN`; реальный JSON secret-output доступен только через `--show-secrets`.
+- GUI action-log стал полезнее для smoke/поддержки:
+  - `app_started` при старте;
+  - `profiles_refreshed accounts=... ready=...` при загрузке/обновлении профилей.
+- Launcher теперь обрабатывает Ctrl+C без traceback и возвращает код `130`.
+- Финальный `.deb` пересобран:
+  - `/home/max/site-control-kit/dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`
+  - sha256: `121572953110c23d69354e7438dde86d2b5ffa507fc5833a178cd248e6bb6aa5`
+- Install-kit обновлён:
+  - `/home/max/Рабочий стол/telegram-username-collector-install-kit/`
+- Проверки:
+  - `python3 -m unittest discover -s tests -p 'test_*.py'` -> `330 tests OK`, `2 skipped`
+  - `./scripts/verify.sh` -> OK
+  - `python3 -m webcontrol --help` -> OK
+  - `python3 -m webcontrol browser --help` -> OK
+  - package content check via `dpkg-deb -x` -> OK
+  - build-root installed-mode `--doctor` -> OK with expected `hub_reachable=0`
+  - live GUI smoke -> `/home/max/Рабочий стол/telegram-program-live-smoke-20260712T065625Z-final`
+- Ограничение:
+  - реальный local `sudo apt install` не выполнен: passwordless sudo недоступен в текущей Codex-сессии.
+
 ## 2026-07-11
 
 ### Ready Desktop Product Package, Shadow Admin Theme, GTK Scaling

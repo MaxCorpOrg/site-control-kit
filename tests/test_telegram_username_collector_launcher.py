@@ -45,6 +45,19 @@ class TelegramUsernameCollectorLauncherTests(unittest.TestCase):
 
         self.assertEqual(exit_code, 7)
 
+    def test_launcher_handles_keyboard_interrupt_without_traceback(self) -> None:
+        fake_gui_app = SimpleNamespace(main=lambda: (_ for _ in ()).throw(KeyboardInterrupt()))
+        stderr = io.StringIO()
+        with (
+            patch.object(mod, "_is_windows_platform", return_value=False),
+            patch.object(importlib, "import_module", return_value=fake_gui_app),
+            contextlib.redirect_stderr(stderr),
+        ):
+            exit_code = mod.main()
+
+        self.assertEqual(exit_code, 130)
+        self.assertIn("interrupted by user", stderr.getvalue())
+
     def test_launcher_applies_ui_scale_before_gui_import(self) -> None:
         fake_gui_app = SimpleNamespace(main=lambda: 0)
         with (

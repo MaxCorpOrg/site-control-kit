@@ -1,5 +1,56 @@
 # CODEX_STATE
 
+## 2026-07-12 (Product package stabilization: installed root, safe diagnostics, live action log)
+
+- Scope:
+  - analyzed the current packaged Telegram Username Collector program, collected live GUI logs/screenshots, and fixed the issues that made installed-mode diagnostics misleading
+  - kept Telegram account/export semantics unchanged
+- Code changes:
+  - `packaging/linux/telegram-username-collector.wrapper.sh` and `packaging/linux/sitectl.wrapper.sh` now `cd "$APP_ROOT"` before executing Python, so installed commands do not import modules from the caller's current directory
+  - `scripts/telegram_product_runtime.py` uses `SITECTL_PRODUCT_APP_ROOT` as doctor project root in installed mode when no explicit project root is passed
+  - `webcontrol runtime-env --format json` now redacts `SITECTL_TOKEN` by default and emits `SITECTL_TOKEN_REDACTED=1`; `--show-secrets` is required for explicit JSON secret output, while shell/powershell wrapper formats keep the token unless `--redact-secrets` is used
+  - `scripts/telegram_gui/app.py` writes `app_started` to the GUI action log on startup
+  - `scripts/telegram_gui/backend.py` writes `profiles_refreshed accounts=... ready=...` whenever accounts/profiles are loaded or refreshed
+  - `scripts/telegram_username_collector_launcher.py` handles Ctrl+C as a clean exit code `130` without traceback
+- Installer artifact:
+  - `/home/max/site-control-kit/dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`
+  - sha256: `121572953110c23d69354e7438dde86d2b5ffa507fc5833a178cd248e6bb6aa5`
+  - desktop install kit:
+    - `/home/max/Рабочий стол/telegram-username-collector-install-kit/telegram-username-collector_0.1.0_amd64.deb`
+    - `/home/max/Рабочий стол/telegram-username-collector-install-kit/telegram-username-collector_0.1.0_amd64.deb.sha256`
+    - `/home/max/Рабочий стол/telegram-username-collector-install-kit/INSTALL_RU.md`
+- Live/package smoke:
+  - package content check confirmed:
+    - `cd "$APP_ROOT"` in both `/usr/bin` wrappers
+    - `SITECTL_TOKEN_REDACTED`
+    - `app_started`
+    - `profiles_refreshed`
+    - Shadow Admin logo asset
+  - installed-mode `--doctor` from build-root:
+    - `mode=installed`
+    - `gtk_runtime=ok`
+    - `extension_zip_ready=1`
+    - `project_root=.../opt/telegram-username-collector/app`
+    - `hub_reachable=0` only because hub was not started
+  - final GUI smoke folder:
+    - `/home/max/Рабочий стол/telegram-program-live-smoke-20260712T065625Z-final`
+  - final smoke action log:
+    - `/home/max/.local/share/site-control-kit/telegram_workspace/logs/gui_actions_20260712T065533Z.log`
+    - contains `app_started` and two `profiles_refreshed` events
+  - hover screenshot:
+    - `/home/max/Рабочий стол/telegram-program-live-smoke-20260712T065625Z-final/screenshot-hover-refresh.png`
+  - Ctrl+C smoke returned code `130` and printed `INFO: telegram GUI interrupted by user.` without traceback
+- Verify:
+  - `python3 -m unittest discover -s tests -p 'test_*.py'` -> `330 tests OK`, `2 skipped`
+  - `./scripts/verify.sh` -> OK
+  - `python3 -m webcontrol --help` -> OK
+  - `python3 -m webcontrol browser --help` -> OK
+  - `python3 -m py_compile webcontrol/settings.py webcontrol/cli.py scripts/telegram_product_runtime.py scripts/telegram_username_collector_launcher.py scripts/telegram_gui/app.py scripts/telegram_gui/backend.py` -> OK
+  - `python3 -m webcontrol runtime-env --format json --no-create` -> token redaction OK
+- Limitation:
+  - real local reinstall with `sudo apt install ./dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb` was blocked because passwordless sudo is not available in this Codex session
+  - package was validated via `dpkg-deb -x` and build-root installed-mode execution instead
+
 ## 2026-07-11 (Ready desktop product: GTK panel, installer, UI scaling)
 
 - Scope:

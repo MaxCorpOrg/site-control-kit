@@ -1636,6 +1636,10 @@ def main() -> int:
     ACTION_LOG_DIR.mkdir(parents=True, exist_ok=True)
     action_log_path = ACTION_LOG_DIR / f"gui_actions_{_utc_timestamp()}.log"
     backend = TelegramGuiBackend(action_log_path=action_log_path)
+    backend._log_action(
+        f"app_started mode={PRODUCT_MODE} workspace={TELEGRAM_WORKSPACE_ROOT} "
+        f"helper_python={TELEGRAM_API_COLLECTOR_PYTHON}"
+    )
     app = TelegramMembersExportApp(backend)
     exit_code = app.run(sys.argv)
     lock.release()

@@ -637,12 +637,14 @@ def cmd_serve(args: argparse.Namespace) -> int:
 def cmd_runtime_env(args: argparse.Namespace) -> int:
     settings = load_runtime_settings(mutate=not args.no_create)
     token, token_source = resolve_hub_token_with_source(settings, mutate=not args.no_create)
+    redact_secrets = bool(args.redact_secrets or (args.format == "json" and not args.show_secrets))
     sys.stdout.write(
         format_runtime_env(
             settings,
             token=token or None,
             token_source=token_source,
             shell=args.format,
+            redact_secrets=redact_secrets,
         )
     )
     return 0
@@ -838,6 +840,20 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-create",
         action="store_true",
         help="Do not create local runtime directories, token file, or legacy pointer while resolving settings",
+    )
+    secret_output = runtime_env.add_mutually_exclusive_group()
+    secret_output.add_argument(
+        "--show-secrets",
+        action="store_true",
+        help=(
+            "Include SITECTL_TOKEN in JSON output. Shell wrapper formats include it by default "
+            "unless --redact-secrets is used."
+        ),
+    )
+    secret_output.add_argument(
+        "--redact-secrets",
+        action="store_true",
+        help="Redact SITECTL_TOKEN in any output format; intended for diagnostics and logs.",
     )
     runtime_env.set_defaults(func=cmd_runtime_env)
 

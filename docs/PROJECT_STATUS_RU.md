@@ -1,6 +1,6 @@
 # Project Status RU
 
-Последнее обновление: 2026-07-11
+Последнее обновление: 2026-07-12
 
 Этот файл нужен как точка входа для любого нового чата и любого нового агента.
 Перед новой задачей его нужно прочитать целиком.
@@ -11,6 +11,40 @@ Repo-root entrypoint для любого агента: `AGENT_START_HERE.md`.
 Читать его нужно по номерам файлов, начиная с `00_START_HERE.md`.
 
 ## Сделано
+
+### Обновление 2026-07-12 (Стабилизация установленной программы и безопасной диагностики)
+- Исправлен installed-mode запуск:
+  - `/usr/bin/telegram-username-collector` и `/usr/bin/sitectl` теперь переходят в `/opt/telegram-username-collector/app` перед запуском Python;
+  - `--doctor` в installed-mode больше не зависит от текущей папки и берёт product root из `SITECTL_PRODUCT_APP_ROOT`.
+- Диагностика стала безопаснее:
+  - `python3 -m webcontrol runtime-env --format json` по умолчанию редактирует `SITECTL_TOKEN`;
+  - для явного JSON-вывода секрета нужен `--show-secrets`;
+  - shell/powershell wrapper-форматы оставлены совместимыми со стартовыми скриптами.
+- GUI теперь оставляет понятный action-log даже без запуска экспорта:
+  - при старте пишется `app_started`;
+  - `Обновить профили` пишет `profiles_refreshed accounts=... ready=...`;
+  - финальный smoke-log: `/home/max/.local/share/site-control-kit/telegram_workspace/logs/gui_actions_20260712T065533Z.log`.
+- Ctrl+C для launcher теперь завершает GUI без traceback:
+  - сообщение: `INFO: telegram GUI interrupted by user.`
+  - код: `130`.
+- Финальный установочный артефакт:
+  - `/home/max/site-control-kit/dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`
+  - sha256: `121572953110c23d69354e7438dde86d2b5ffa507fc5833a178cd248e6bb6aa5`
+  - install-kit на рабочем столе: `/home/max/Рабочий стол/telegram-username-collector-install-kit/`
+- Проверено:
+  - `python3 -m unittest discover -s tests -p 'test_*.py'` -> `330 tests OK`, `2 skipped`
+  - `./scripts/verify.sh` -> OK
+  - `python3 -m webcontrol --help` -> OK
+  - `python3 -m webcontrol browser --help` -> OK
+  - `python3 -m py_compile` по изменённым runtime/GUI файлам -> OK
+  - package content check через `dpkg-deb -x` -> OK
+  - build-root installed-mode `--doctor` -> `gtk_runtime=ok`, `extension_zip_ready=1`
+  - live GUI smoke на `DISPLAY=:0`:
+    - `/home/max/Рабочий стол/telegram-program-live-smoke-20260712T065625Z-final`
+    - X11 scroll/hover/click по `Обновить профили` прошли
+    - hover screenshot: `/home/max/Рабочий стол/telegram-program-live-smoke-20260712T065625Z-final/screenshot-hover-refresh.png`
+- Ограничение:
+  - локальный `sudo apt install` не выполнен, потому что `sudo -n` запросил пароль; проверка сделана через package extraction/build-root installed-mode.
 
 ### Обновление 2026-07-11 (Готовая desktop-программа, установщик, масштабирование)
 - Подготовлен готовый Linux desktop contour для `Telegram Username Collector`:

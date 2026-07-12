@@ -74,6 +74,26 @@ find /home/max/telegram_contact_batches/chat_-1002465948544/chains -maxdepth 2 -
 - какой следующий технический приоритет уже очевиден.
 
 ## Что Сейчас Самое Важное
+Новый верхний факт на 2026-07-12:
+- готовый Linux `.deb` пересобран после package-stabilization pass:
+  - `/home/max/site-control-kit/dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`
+  - sha256: `121572953110c23d69354e7438dde86d2b5ffa507fc5833a178cd248e6bb6aa5`
+  - install-kit: `/home/max/Рабочий стол/telegram-username-collector-install-kit/`
+- fixed installed-mode:
+  - `/usr/bin/telegram-username-collector` и `/usr/bin/sitectl` теперь `cd "$APP_ROOT"` перед Python;
+  - `--doctor` берёт product root из `SITECTL_PRODUCT_APP_ROOT`;
+  - `runtime-env --format json` редактирует `SITECTL_TOKEN` по умолчанию;
+  - GUI пишет `app_started` и `profiles_refreshed` в `telegram_workspace/logs/gui_actions_*.log`;
+  - Ctrl+C больше не печатает traceback.
+- final live smoke:
+  - `/home/max/Рабочий стол/telegram-program-live-smoke-20260712T065625Z-final`
+  - `/home/max/.local/share/site-control-kit/telegram_workspace/logs/gui_actions_20260712T065533Z.log`
+- verify:
+  - `./scripts/verify.sh` -> OK
+  - full suite -> `330 tests OK`, `2 skipped`
+- limitation:
+  - реальный local `sudo apt install` не выполнен, потому что passwordless sudo недоступен; package проверен через `dpkg-deb -x` и build-root installed-mode smoke.
+
 Новый publish-control факт на 2026-05-12 уже такой:
 - старый Linux installed-mode gate на `b740d66` исторически закрыт со статусом `PASS with warning`;
 - closing transcript: `/tmp/tgcollector-smoke-logs/install-and-smoke-20260512-091934.log`;

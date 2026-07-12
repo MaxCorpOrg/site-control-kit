@@ -1,6 +1,27 @@
 # Known Issues And Live Findings
 
 ## Самый Новый Product Packaging Finding
+Новый самый свежий факт на 2026-07-12:
+- `.deb` пересобран после installed-mode/security/logging stabilization:
+  - `/home/max/site-control-kit/dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`
+  - sha256: `121572953110c23d69354e7438dde86d2b5ffa507fc5833a178cd248e6bb6aa5`
+  - desktop kit: `/home/max/Рабочий стол/telegram-username-collector-install-kit/`
+- package now contains:
+  - `cd "$APP_ROOT"` in both Linux wrappers;
+  - default JSON token redaction for `runtime-env`;
+  - GUI action-log events `app_started` and `profiles_refreshed`;
+  - clean Ctrl+C handling without traceback.
+- final GUI smoke:
+  - `/home/max/Рабочий стол/telegram-program-live-smoke-20260712T065625Z-final`
+  - hover screenshot: `/home/max/Рабочий стол/telegram-program-live-smoke-20260712T065625Z-final/screenshot-hover-refresh.png`
+  - action log: `/home/max/.local/share/site-control-kit/telegram_workspace/logs/gui_actions_20260712T065533Z.log`
+- verify:
+  - full suite -> `330 tests OK`, `2 skipped`
+  - `./scripts/verify.sh` -> OK
+  - package extraction/build-root installed-mode `--doctor` -> OK with expected `hub_reachable=0`
+- remaining limitation:
+  - real `sudo apt install` on this host was blocked by sudo password; run that as a separate manual/clean Ubuntu smoke before external delivery if needed.
+
 Новый самый свежий факт на 2026-07-11 уже не про Telegram access, а про готовый desktop product contour:
 - собран локальный Linux `.deb`:
   - `/home/max/site-control-kit/dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`

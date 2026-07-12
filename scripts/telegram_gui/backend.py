@@ -1759,6 +1759,14 @@ class TelegramGuiBackend:
             )
 
         enriched.sort(key=lambda item: item.sort_key)
+        ready_count = sum(1 for item in enriched if item.availability_state == "ready")
+        self._log_action(
+            "profiles_refreshed "
+            f"accounts={len(enriched)} "
+            f"auto_profiles={len(auto_profiles)} "
+            f"registry_users={len(registry_mod.list_users(registry))} "
+            f"ready={ready_count}"
+        )
         return enriched
 
     def ensure_connected(self, account: AccountOption, *, launch_browser: bool = True) -> BrowserTarget:

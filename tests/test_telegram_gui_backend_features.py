@@ -348,6 +348,7 @@ class TelegramGuiBackendFeatureTests(unittest.TestCase):
                 self.assertTrue(secret_files)
                 self.assertTrue(any(path.read_text(encoding="utf-8").strip() == "slot-secure-token-12345" for path in secret_files))
                 action_log = (root / "logs" / "actions.log").read_text(encoding="utf-8")
+                self.assertIn("profiles_refreshed", action_log)
                 self.assertNotIn("slot-secure-token-12345", action_log)
         finally:
             mod.TELEGRAM_WORKSPACE_ROOT = old_root
@@ -381,6 +382,7 @@ class TelegramGuiBackendFeatureTests(unittest.TestCase):
                 registry_text = mod.USER_REGISTRY_PATH.read_text(encoding="utf-8")
                 self.assertNotIn("legacy-slot-token-12345", registry_text)
                 action_log = (root / "logs" / "actions.log").read_text(encoding="utf-8")
+                self.assertIn("profiles_refreshed", action_log)
                 self.assertNotIn("legacy-slot-token-12345", action_log)
         finally:
             mod.TELEGRAM_WORKSPACE_ROOT = old_root

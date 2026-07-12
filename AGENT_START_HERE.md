@@ -29,6 +29,47 @@
 - Ближайший контекст: новый пакет собран локально в `dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`; не тащить runtime/generated артефакты в commit без отдельного решения
 
 ## Где Мы Закончили Работу
+- На 2026-07-12 выполнен стабилизационный pass по готовой desktop-программе и package/installed-mode:
+  - исправлен installed wrapper для `/usr/bin/telegram-username-collector` и `/usr/bin/sitectl`:
+    - оба wrapper-а теперь делают `cd "$APP_ROOT"` перед `python -m ...`;
+    - это убирает зависимость установленной программы от текущей папки запуска и не даёт из repo-cwd случайно подхватывать исходники из `/home/max/site-control-kit`;
+  - `telegram-username-collector --doctor` в installed-mode теперь использует `SITECTL_PRODUCT_APP_ROOT` как product root, даже если запуск сделан из другой папки;
+  - `python3 -m webcontrol runtime-env --format json` теперь по умолчанию редактирует `SITECTL_TOKEN`:
+    - JSON показывает `SITECTL_TOKEN=<redacted>` и `SITECTL_TOKEN_REDACTED=1`;
+    - реальные shell/powershell wrapper-выводы сохранены для стартовых скриптов;
+    - реальный токен в JSON можно получить только явно через `--show-secrets`;
+  - GUI action logging усилен:
+    - при старте пишется `app_started`;
+    - `Обновить профили`/`load_accounts()` пишет `profiles_refreshed accounts=... ready=...`;
+    - лог находится в installed workspace:
+      - `/home/max/.local/share/site-control-kit/telegram_workspace/logs/gui_actions_20260712T065533Z.log`;
+  - Ctrl+C для `telegram-username-collector` теперь завершает GUI с коротким сообщением и кодом `130`, без traceback;
+  - финальный `.deb` пересобран:
+    - `/home/max/site-control-kit/dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`
+    - sha256: `121572953110c23d69354e7438dde86d2b5ffa507fc5833a178cd248e6bb6aa5`;
+  - install-kit обновлён на рабочем столе:
+    - `/home/max/Рабочий стол/telegram-username-collector-install-kit/telegram-username-collector_0.1.0_amd64.deb`
+    - `/home/max/Рабочий стол/telegram-username-collector-install-kit/telegram-username-collector_0.1.0_amd64.deb.sha256`
+    - `/home/max/Рабочий стол/telegram-username-collector-install-kit/INSTALL_RU.md`;
+  - финальный GUI smoke из свежего package build-root:
+    - diag folder: `/home/max/Рабочий стол/telegram-program-live-smoke-20260712T065625Z-final`
+    - `--doctor` в installed-mode: `gtk_runtime=ok`, `extension_zip_ready=1`, `project_root=.../opt/telegram-username-collector/app`
+    - live window на `DISPLAY=:0` поднялось;
+    - X11 scroll/hover/click по `Обновить профили` прошли;
+    - hover screenshot: `/home/max/Рабочий стол/telegram-program-live-smoke-20260712T065625Z-final/screenshot-hover-refresh.png`;
+    - action log содержит:
+      - `app_started mode=installed ...`
+      - `profiles_refreshed accounts=1 auto_profiles=0 registry_users=1 ready=1`;
+  - verify:
+    - `python3 -m unittest discover -s tests -p 'test_*.py'` -> `330 tests OK`, `2 skipped`
+    - `./scripts/verify.sh` -> OK
+    - `python3 -m webcontrol --help` -> OK
+    - `python3 -m webcontrol browser --help` -> OK
+    - `python3 -m py_compile` по изменённым runtime/GUI files -> OK
+    - `python3 -m webcontrol runtime-env --format json --no-create` -> redacted OK;
+  - ограничение:
+    - локальный `sudo apt install ./dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb` не выполнен, потому что `sudo -n` запросил пароль;
+    - вместо этого package проверен через `dpkg-deb -x`/build-root installed-mode smoke.
 - На 2026-07-11 собран готовый рабочий desktop-контур программы:
   - GTK-панель осталась основным операторским интерфейсом;
   - в launcher добавлен параметр `--ui-scale`;

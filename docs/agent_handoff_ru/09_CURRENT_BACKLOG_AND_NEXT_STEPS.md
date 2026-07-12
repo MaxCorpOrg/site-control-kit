@@ -1,5 +1,36 @@
 # Current Backlog And Next Steps
 
+## Обновление 2026-07-12 (Product package stabilization)
+- Новый текущий статус:
+  - готовый package пересобран и install-kit обновлён;
+  - installed-mode больше не зависит от текущей папки;
+  - JSON diagnostics больше не светят `SITECTL_TOKEN` по умолчанию;
+  - GUI оставляет action-log уже на старте и refresh-профилей.
+- Что уже проверено:
+  - `.deb`:
+    - `/home/max/site-control-kit/dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`
+    - sha256: `121572953110c23d69354e7438dde86d2b5ffa507fc5833a178cd248e6bb6aa5`
+  - install-kit:
+    - `/home/max/Рабочий стол/telegram-username-collector-install-kit/`
+  - final live smoke:
+    - `/home/max/Рабочий стол/telegram-program-live-smoke-20260712T065625Z-final`
+    - `/home/max/.local/share/site-control-kit/telegram_workspace/logs/gui_actions_20260712T065533Z.log`
+  - full suite -> `330 tests OK`, `2 skipped`
+  - `./scripts/verify.sh` -> OK
+  - build-root installed-mode `--doctor` -> OK
+  - Ctrl+C -> code `130`, no traceback
+- Новый ближайший следующий шаг:
+  - если нужно реально установить на текущем хосте, пользователь должен выполнить:
+    - `cd "/home/max/Рабочий стол/telegram-username-collector-install-kit"`
+    - `sudo apt install ./telegram-username-collector_0.1.0_amd64.deb`
+  - затем проверить:
+    - `cd /tmp && telegram-username-collector --doctor`
+    - запуск из меню/ярлыка.
+- Что важно не перепутать:
+  - `dist/` остаётся ignored build artifact;
+  - `sudo -n apt install ...` в Codex-сессии был заблокирован паролем, это не defect package-а;
+  - старый installed `/opt` на этой машине может оставаться stale до ручной переустановки.
+
 ## Обновление 2026-07-11 (Ready desktop program package)
 - Новый текущий статус:
   - готовый Linux desktop package собран;

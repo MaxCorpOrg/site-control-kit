@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import contextlib
+import io
+import json
 import unittest
+from types import SimpleNamespace
+from unittest import mock
 
-from webcontrol.cli import _extract_command_result, _parse_xwininfo_windows, _pick_client, build_parser
+from webcontrol.cli import _extract_command_result, _parse_xwininfo_windows, _pick_client, build_parser, cmd_runtime_env
 
 
 class BrowserCliHelperTests(unittest.TestCase):
@@ -65,6 +70,38 @@ class BrowserCliHelperTests(unittest.TestCase):
         self.assertAlmostEqual(args.x_ratio, 0.5)
         self.assertAlmostEqual(args.y_ratio, 0.75)
         self.assertEqual(args.button, 1)
+
+    def test_runtime_env_json_redacts_token_by_default(self) -> None:
+        settings = SimpleNamespace(env_map=lambda **kwargs: {"SITECTL_TOKEN": kwargs["token"]})
+        stdout = io.StringIO()
+        args = SimpleNamespace(format="json", no_create=True, show_secrets=False, redact_secrets=False)
+        with (
+            mock.patch("webcontrol.cli.load_runtime_settings", return_value=settings),
+            mock.patch("webcontrol.cli.resolve_hub_token_with_source", return_value=("secret-token", "token_file")),
+            contextlib.redirect_stdout(stdout),
+        ):
+            exit_code = cmd_runtime_env(args)
+
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertNotEqual(payload["SITECTL_TOKEN"], "secret-token")
+        self.assertEqual(payload["SITECTL_TOKEN_REDACTED"], "1")
+
+    def test_runtime_env_json_can_show_token_explicitly(self) -> None:
+        settings = SimpleNamespace(env_map=lambda **kwargs: {"SITECTL_TOKEN": kwargs["token"]})
+        stdout = io.StringIO()
+        args = SimpleNamespace(format="json", no_create=True, show_secrets=True, redact_secrets=False)
+        with (
+            mock.patch("webcontrol.cli.load_runtime_settings", return_value=settings),
+            mock.patch("webcontrol.cli.resolve_hub_token_with_source", return_value=("secret-token", "token_file")),
+            contextlib.redirect_stdout(stdout),
+        ):
+            exit_code = cmd_runtime_env(args)
+
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["SITECTL_TOKEN"], "secret-token")
+        self.assertNotIn("SITECTL_TOKEN_REDACTED", payload)
 
 
 if __name__ == "__main__":

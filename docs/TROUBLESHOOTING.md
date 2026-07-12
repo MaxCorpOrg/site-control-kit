@@ -94,7 +94,8 @@
 
 ## Ошибка авторизации (`401 unauthorized`)
 - Токен CLI/расширения не совпадает с токеном хаба.
-- Проверьте `python3 -m webcontrol runtime-env --format json`: там видно текущий runtime root и resolved token source.
+- Проверьте `python3 -m webcontrol runtime-env --format json`: там видно текущий runtime root и resolved token source; сам токен в JSON по умолчанию редактируется.
+- Для локальной приватной проверки точного значения используйте `--show-secrets`, но не прикладывайте такой вывод к логам.
 
 ## `telegram-username-collector` завершился с ошибкой про GTK
 - Это не падение бизнес-логики, а проблема Python/GTK окружения.

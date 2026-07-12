@@ -168,7 +168,7 @@ def create_desktop_shortcut(*, destination: Path | None = None) -> Path:
 
 
 def gather_doctor_report(*, project_root: Path | None = None, mutate: bool = True) -> ProductDoctorReport:
-    settings = load_runtime_settings(project_root=project_root, mutate=mutate)
+    settings = load_runtime_settings(project_root=_doctor_project_root(project_root), mutate=mutate)
     product_paths = resolve_product_paths(settings=settings)
     token = resolve_hub_token(settings, mutate=mutate)
     helper_source, helper_python = _detect_helper_python(settings, product_paths)
@@ -201,6 +201,17 @@ def gather_doctor_report(*, project_root: Path | None = None, mutate: bool = Tru
         hub_url=settings.server_url,
         hub_reachable=hub_reachable,
     )
+
+
+def _doctor_project_root(project_root: Path | None) -> Path | None:
+    if project_root is not None:
+        return project_root
+    if not is_installed_product_mode():
+        return None
+    raw_app_root = str(os.getenv(PRODUCT_APP_ROOT_ENV, "") or "").strip()
+    if not raw_app_root:
+        return None
+    return Path(raw_app_root).expanduser().resolve()
 
 
 def format_doctor_report(report: ProductDoctorReport) -> str:

@@ -106,6 +106,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         sys.argv = [original_argv[0], *remaining]
         return int(gui_app.main())
+    except KeyboardInterrupt:
+        print("INFO: telegram GUI interrupted by user.", file=sys.stderr)
+        return 130
     finally:
         sys.argv = original_argv
 

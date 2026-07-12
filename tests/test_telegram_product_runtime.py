@@ -136,6 +136,62 @@ class ProductRuntimeTests(unittest.TestCase):
         self.assertTrue((fake_home / ".config" / "site-control-kit").is_dir())
         self.assertFalse((root / ".site-control-kit").exists())
 
+    def test_gather_doctor_report_installed_mode_uses_product_app_root(self) -> None:
+        app_root = self._make_project()
+        fake_home = Path(tempfile.mkdtemp())
+        helper_python = app_root / "venv" / "bin" / "python"
+        helper_python.parent.mkdir(parents=True, exist_ok=True)
+        helper_python.write_text("#!/bin/sh\n", encoding="utf-8")
+        helper_python.chmod(0o755)
+        with mock.patch.dict(
+            os.environ,
+            {
+                mod.PRODUCT_MODE_ENV: mod.INSTALLED_PRODUCT_MODE,
+                mod.PRODUCT_APP_ROOT_ENV: str(app_root),
+                mod.PRODUCT_VENV_ENV: str(app_root / "venv"),
+                "HOME": str(fake_home),
+                "XDG_CONFIG_HOME": str(fake_home / ".config"),
+                "XDG_DATA_HOME": str(fake_home / ".local" / "share"),
+                "XDG_STATE_HOME": str(fake_home / ".local" / "state"),
+                "SITECTL_RUNTIME_ROOT": str(fake_home / ".local" / "share" / "site-control-kit"),
+                "SITECTL_STATE_FILE": str(fake_home / ".local" / "share" / "site-control-kit" / "state" / "state.json"),
+                "SITECTL_REPORTS_ROOT": str(fake_home / ".local" / "share" / "site-control-kit" / "reports"),
+                "SITECTL_LOG_DIR": str(fake_home / ".local" / "state" / "site-control-kit" / "logs"),
+                "SITECTL_RUNTIME_EVENTS_LOG": str(fake_home / ".local" / "state" / "site-control-kit" / "logs" / "runtime_events.jsonl"),
+                "SITECTL_RUNTIME_ERRORS_LOG": str(fake_home / ".local" / "state" / "site-control-kit" / "logs" / "runtime_errors.jsonl"),
+                "SITECTL_BROWSER_PROFILE": str(fake_home / ".local" / "share" / "site-control-kit" / "browser-profile"),
+                "SITECTL_FIREFOX_PROFILE": str(fake_home / ".local" / "share" / "site-control-kit" / "firefox-profile"),
+                "SITECTL_TOKEN_FILE": str(fake_home / ".config" / "site-control-kit" / "generated_token.txt"),
+                "SITECTL_LOCAL_CONFIG_PATH": str(fake_home / ".config" / "site-control-kit" / "local.yaml"),
+                "TELEGRAM_WORKSPACE_ROOT": str(fake_home / ".local" / "share" / "site-control-kit" / "telegram_workspace"),
+                "TELEGRAM_USERS_REGISTRY_FILE": str(fake_home / ".local" / "share" / "site-control-kit" / "telegram_workspace" / "registry" / "users.json"),
+                "TELEGRAM_API_ACCOUNTS_FILE": str(fake_home / ".local" / "share" / "site-control-kit" / "telegram_workspace" / "registry" / "api_accounts.json"),
+                "TELEGRAM_MANAGED_HELPER_ROOT": str(fake_home / ".local" / "share" / "site-control-kit" / "telegram_workspace" / "managed_helper"),
+                "TELEGRAM_DEFAULT_OUTPUT_DIR": str(fake_home / ".local" / "share" / "site-control-kit" / "reports" / "telegram_exports"),
+            },
+            clear=True,
+        ):
+            with (
+                mock.patch.object(mod, "_gtk_runtime_status", return_value="ok"),
+                mock.patch.object(mod, "_hub_reachable", return_value=False),
+            ):
+                report = mod.gather_doctor_report(mutate=True)
+
+        self.assertEqual(report.project_root, app_root)
+        self.assertEqual(report.helper_source, "product")
+        self.assertEqual(report.helper_python, helper_python)
+        self.assertFalse((app_root / ".site-control-kit").exists())
+
+    def test_linux_wrappers_change_to_app_root_before_exec(self) -> None:
+        repo_root = Path(__file__).resolve().parents[1]
+        for relative_path in (
+            "packaging/linux/telegram-username-collector.wrapper.sh",
+            "packaging/linux/sitectl.wrapper.sh",
+        ):
+            text = (repo_root / relative_path).read_text(encoding="utf-8")
+            self.assertIn('cd "$APP_ROOT"', text)
+            self.assertRegex(text, r'cd "\$APP_ROOT"\nexec "\$PYTHON_BIN"')
+
 
 if __name__ == "__main__":
     unittest.main()

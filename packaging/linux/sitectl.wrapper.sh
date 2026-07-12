@@ -41,4 +41,5 @@ export TELEGRAM_MANAGED_HELPER_ROOT="$DATA_ROOT/telegram_workspace/managed_helpe
 export TELEGRAM_DEFAULT_OUTPUT_DIR="$DATA_ROOT/reports/telegram_exports"
 export TELEGRAM_API_COLLECTOR_PYTHON="$PYTHON_BIN"
 
+cd "$APP_ROOT"
 exec "$PYTHON_BIN" -m webcontrol "$@"

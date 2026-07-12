@@ -40,6 +40,8 @@ cd <repo-root>
 python3 -m webcontrol runtime-env --format json
 ```
 
+JSON-вывод редактирует `SITECTL_TOKEN` по умолчанию, поэтому его можно прикладывать к диагностике. Реальный токен в JSON показывается только по явному `--show-secrets`.
+
 ## 4. Установка
 
 ### Linux
@@ -52,6 +54,17 @@ bash scripts/build_linux_deb.sh
 sudo apt install ./dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb
 telegram-username-collector --doctor
 ```
+
+На текущем хосте готовый install-kit уже собран здесь:
+
+```bash
+cd "/home/max/Рабочий стол/telegram-username-collector-install-kit"
+sha256sum -c telegram-username-collector_0.1.0_amd64.deb.sha256
+sudo apt install ./telegram-username-collector_0.1.0_amd64.deb
+telegram-username-collector --doctor
+```
+
+Ожидаемый sha256 пакета: `121572953110c23d69354e7438dde86d2b5ffa507fc5833a178cd248e6bb6aa5`.
 
 Repo checkout для разработки:
 
