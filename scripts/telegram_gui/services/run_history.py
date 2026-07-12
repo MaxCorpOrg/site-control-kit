@@ -15,6 +15,7 @@ class RunHistoryService:
         self.index_path = self.runs_dir / "index.jsonl"
         self.last_session_path = self.state_dir / "last_session.json"
         self.pinned_chats_path = self.state_dir / "pinned_chats.json"
+        self.quick_chats_path = self.state_dir / "quick_chats.json"
 
     def ensure(self) -> None:
         self.runs_dir.mkdir(parents=True, exist_ok=True)
@@ -101,5 +102,52 @@ class RunHistoryService:
         self.ensure()
         self.pinned_chats_path.write_text(
             json.dumps({"pinned_chats": rows}, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+
+    def load_quick_chat_settings(self) -> dict[str, list[dict[str, str]] | list[str]]:
+        self.ensure()
+        if not self.quick_chats_path.exists():
+            return {"custom_chats": [], "hidden_default_targets": []}
+        try:
+            payload = json.loads(self.quick_chats_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {"custom_chats": [], "hidden_default_targets": []}
+        if not isinstance(payload, dict):
+            return {"custom_chats": [], "hidden_default_targets": []}
+        custom_rows = payload.get("custom_chats")
+        hidden_targets = payload.get("hidden_default_targets")
+        return {
+            "custom_chats": [row for row in custom_rows if isinstance(row, dict)] if isinstance(custom_rows, list) else [],
+            "hidden_default_targets": [
+                str(item).strip() for item in hidden_targets if str(item or "").strip()
+            ]
+            if isinstance(hidden_targets, list)
+            else [],
+        }
+
+    def save_quick_chat_settings(self, payload: dict[str, list[dict[str, str]] | list[str]]) -> None:
+        self.ensure()
+        custom_rows = payload.get("custom_chats")
+        hidden_targets = payload.get("hidden_default_targets")
+        sanitized = {
+            "custom_chats": [
+                {
+                    "chat_title": str(row.get("chat_title") or "").strip(),
+                    "chat_target": str(row.get("chat_target") or "").strip(),
+                }
+                for row in custom_rows
+                if isinstance(row, dict) and str(row.get("chat_target") or "").strip()
+            ]
+            if isinstance(custom_rows, list)
+            else [],
+            "hidden_default_targets": [
+                str(item).strip() for item in hidden_targets if str(item or "").strip()
+            ]
+            if isinstance(hidden_targets, list)
+            else [],
+        }
+        self.quick_chats_path.write_text(
+            json.dumps(sanitized, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
         )

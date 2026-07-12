@@ -8,6 +8,7 @@
 ## Scope
 - Stabilized the ready `Telegram Username Collector` desktop package after live GUI/log analysis.
 - Added GUI import for Telegram API ID/Hash for selected slot/TG_CONTACT profiles.
+- Added manageable quick chat templates so built-in cosmetology shortcuts are not confused with live account access.
 - Kept Telegram collection/export semantics unchanged.
 - Rebuilt the ignored `.deb` artifact and refreshed the desktop install kit.
 
@@ -31,6 +32,14 @@
 - Backend passes saved credentials to tdata helper as `--api-id/--api-hash`.
 - `scripts/telegram_tdata_helper.py` accepts optional `--api-id/--api-hash` and only uses custom `APIData` when both are present.
 - API Hash is not logged to action logs.
+- Quick chat UX:
+  - templates are labelled as local shortcuts, not access proof;
+  - `Добавить шаблон`;
+  - `Скрыть стандартные` / `Показать стандартные`;
+  - `Сбросить стандартные`;
+  - per-standard-row `Скрыть`;
+  - per-pinned-row `Открепить`;
+  - settings stored in `telegram_workspace/state/quick_chats.json`.
 
 ## Installer Artifacts
 - Repo build artifact:
@@ -40,7 +49,7 @@
   - `/home/max/Рабочий стол/telegram-username-collector-install-kit/telegram-username-collector_0.1.0_amd64.deb.sha256`
   - `/home/max/Рабочий стол/telegram-username-collector-install-kit/INSTALL_RU.md`
 - SHA256:
-  - `60bc24b08e1088a17e480b526ad5db1af5c6b60b684326131151cc629dc24b00`
+  - `624676f1ae4489019b1056847441e2549df5270ee1f70820ffa6cdfe2fa55d97`
 
 ## Live Smoke
 - Final smoke folder:
@@ -57,11 +66,12 @@
   - Ctrl+C exits with code `130` and no traceback
 
 ## Verify
-- `python3 -m unittest discover -s tests -p 'test_*.py'` -> `332 tests OK`, `2 skipped`
+- `python3 -m unittest discover -s tests -p 'test_*.py'` -> `335 tests OK`, `2 skipped`
 - `./scripts/verify.sh` -> OK
 - `python3 -m webcontrol --help` -> OK
 - `python3 -m webcontrol browser --help` -> OK
 - `python3 -m unittest tests.test_telegram_gui_backend_features tests.test_telegram_tdata_helper -v` -> `54 tests OK`
+- `python3 -m unittest tests.test_telegram_gui_run_history tests.test_telegram_members_export_gui -v` -> targeted quick-chat coverage OK
 - `python3 -m py_compile scripts/telegram_tdata_helper.py scripts/telegram_gui/backend.py scripts/telegram_gui/ui/window.py` -> OK
 - `python3 -m py_compile webcontrol/settings.py webcontrol/cli.py scripts/telegram_product_runtime.py scripts/telegram_username_collector_launcher.py scripts/telegram_gui/app.py scripts/telegram_gui/backend.py` -> OK
 - `python3 -m webcontrol runtime-env --format json --no-create` -> redaction OK
@@ -91,7 +101,13 @@
     - `/tmp/tg_gui_api_import_smoke_20260712/window-fresh-profile.png`
   - API import dialog opened:
     - `/tmp/tg_gui_api_import_smoke_20260712/api-dialog-root-2.png`
-  - latest action log: `/home/max/.local/share/site-control-kit/telegram_workspace/logs/gui_actions_20260712T102832Z.log`
+  - quick chat management visible:
+    - `/tmp/tg_gui_quick_chats_smoke_20260712T111139Z/quick-chats-2.png`
+  - add-template dialog opened:
+    - `/tmp/tg_gui_quick_chats_smoke_20260712T111139Z/add-dialog-3.png`
+  - hide-standard flow checked:
+    - `/tmp/tg_gui_quick_chats_smoke_20260712T111139Z/hidden-standard.png`
+  - latest action log: `/home/max/.local/share/site-control-kit/telegram_workspace/logs/gui_actions_20260712T111129Z.log`
 
 ## Limits And Risks
 - External clean Ubuntu install smoke is still optional before wider distribution.

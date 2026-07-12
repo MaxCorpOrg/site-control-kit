@@ -12,6 +12,34 @@ Repo-root entrypoint для любого агента: `AGENT_START_HERE.md`.
 
 ## Сделано
 
+### Обновление 2026-07-12 (Управляемые быстрые чаты)
+- Исправлен confusing UX в секции `2. Чат`:
+  - косметологические чаты больше не подаются как будто они найдены текущим аккаунтом;
+  - блок теперь явно пишет: это локальные шаблоны, а не проверка доступа аккаунта.
+- Добавлено управление прямо в панели:
+  - `Добавить шаблон`;
+  - `Скрыть стандартные` / `Показать стандартные`;
+  - `Сбросить стандартные`;
+  - `Скрыть` у стандартных шаблонов;
+  - `Открепить` у закреплённых чатов.
+- Настройки сохраняются локально:
+  - `telegram_workspace/state/quick_chats.json`
+- Проверено:
+  - `python3 -m unittest discover -s tests -p 'test_*.py'` -> `335 tests OK`, `2 skipped`
+  - `./scripts/verify.sh` -> OK
+  - `python3 -m webcontrol --help` -> OK
+  - `python3 -m webcontrol browser --help` -> OK
+  - `git diff --check` -> OK
+- Пакет:
+  - `/home/max/site-control-kit/dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`
+  - sha256: `624676f1ae4489019b1056847441e2549df5270ee1f70820ffa6cdfe2fa55d97`
+  - install-kit обновлён: `/home/max/Рабочий стол/telegram-username-collector-install-kit/`
+  - локальная переустановка выполнена.
+- Installed GUI smoke:
+  - `/tmp/tg_gui_quick_chats_smoke_20260712T111139Z/quick-chats-2.png`
+  - `/tmp/tg_gui_quick_chats_smoke_20260712T111139Z/add-dialog-3.png`
+  - `/tmp/tg_gui_quick_chats_smoke_20260712T111139Z/hidden-standard.png`
+
 ### Обновление 2026-07-12 (Импорт Telegram API ID/Hash в GUI)
 - В GTK-панель добавлена кнопка `Импорт API` в секции `1. Профиль`.
 - Диалог сохраняет Telegram `api_id` и `api_hash` локально в выбранный slot:
@@ -36,7 +64,7 @@ Repo-root entrypoint для любого агента: `AGENT_START_HERE.md`.
 - Пакет и установленная панель:
   - `.deb` пересобран:
     - `/home/max/site-control-kit/dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`
-    - sha256: `60bc24b08e1088a17e480b526ad5db1af5c6b60b684326131151cc629dc24b00`
+    - sha256: `624676f1ae4489019b1056847441e2549df5270ee1f70820ffa6cdfe2fa55d97`
   - install-kit обновлён:
     - `/home/max/Рабочий стол/telegram-username-collector-install-kit/`
   - текущий хост переустановлен через `sudo apt install -y --reinstall ...`
@@ -64,7 +92,7 @@ Repo-root entrypoint для любого агента: `AGENT_START_HERE.md`.
   - код: `130`.
 - Финальный установочный артефакт:
   - `/home/max/site-control-kit/dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`
-  - sha256: `60bc24b08e1088a17e480b526ad5db1af5c6b60b684326131151cc629dc24b00`
+  - sha256: `624676f1ae4489019b1056847441e2549df5270ee1f70820ffa6cdfe2fa55d97`
   - install-kit на рабочем столе: `/home/max/Рабочий стол/telegram-username-collector-install-kit/`
 - Проверено:
   - `python3 -m unittest discover -s tests -p 'test_*.py'` -> `330 tests OK`, `2 skipped`

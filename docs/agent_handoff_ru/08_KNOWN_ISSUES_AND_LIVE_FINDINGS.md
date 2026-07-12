@@ -1,5 +1,32 @@
 # Known Issues And Live Findings
 
+## Самый Новый Quick Chat UX Finding
+Новый самый свежий факт на 2026-07-12:
+- список `Готовые чаты: косметология` больше не должен восприниматься как live-доступ аккаунта;
+- GUI теперь показывает пояснение: это локальные шаблоны, а не проверка доступа;
+- оператор может:
+  - добавить свой шаблон;
+  - скрыть все стандартные;
+  - показать стандартные обратно;
+  - сбросить стандартные;
+  - скрыть отдельную стандартную строку;
+  - открепить закреплённый чат;
+- настройки хранятся локально:
+  - `telegram_workspace/state/quick_chats.json`.
+
+Verify/package:
+- full suite -> `335 tests OK`, `2 skipped`;
+- `./scripts/verify.sh` -> OK;
+- `.deb` sha256: `624676f1ae4489019b1056847441e2549df5270ee1f70820ffa6cdfe2fa55d97`;
+- installed smoke screenshots:
+  - `/tmp/tg_gui_quick_chats_smoke_20260712T111139Z/quick-chats-2.png`
+  - `/tmp/tg_gui_quick_chats_smoke_20260712T111139Z/add-dialog-3.png`
+  - `/tmp/tg_gui_quick_chats_smoke_20260712T111139Z/hidden-standard.png`
+
+Ограничение:
+- это UX/storage fix, не Telegram-auth fix;
+- если profile/tdata не авторизован, шаблон можно нажать, но helper всё равно не сможет читать чат до восстановления аккаунта.
+
 ## Самый Новый GUI API Import Finding
 Новый самый свежий факт на 2026-07-12:
 - в профиле GTK-панели появилась кнопка `Импорт API`;
@@ -26,7 +53,7 @@ Verify:
 Package/install smoke:
 - `.deb` rebuilt:
   - `/home/max/site-control-kit/dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`
-  - sha256: `60bc24b08e1088a17e480b526ad5db1af5c6b60b684326131151cc629dc24b00`
+  - sha256: `624676f1ae4489019b1056847441e2549df5270ee1f70820ffa6cdfe2fa55d97`
 - desktop install-kit updated:
   - `/home/max/Рабочий стол/telegram-username-collector-install-kit/`
 - local reinstall completed and installed payload contains:
@@ -43,7 +70,7 @@ Package/install smoke:
 Новый самый свежий факт на 2026-07-12:
 - `.deb` пересобран после installed-mode/security/logging stabilization:
   - `/home/max/site-control-kit/dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`
-  - sha256: `60bc24b08e1088a17e480b526ad5db1af5c6b60b684326131151cc629dc24b00`
+  - sha256: `624676f1ae4489019b1056847441e2549df5270ee1f70820ffa6cdfe2fa55d97`
   - desktop kit: `/home/max/Рабочий стол/telegram-username-collector-install-kit/`
 - package now contains:
   - `cd "$APP_ROOT"` in both Linux wrappers;

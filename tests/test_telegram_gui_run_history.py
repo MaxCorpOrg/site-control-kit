@@ -123,6 +123,29 @@ class RunHistoryServiceTests(unittest.TestCase):
 
         self.assertEqual(loaded, rows)
 
+    def test_save_and_load_quick_chat_settings(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            service = RunHistoryService(Path(td))
+            payload = {
+                "custom_chats": [
+                    {"chat_title": "Мой чат", "chat_target": "@my_chat"},
+                    {"chat_title": "Без цели", "chat_target": ""},
+                ],
+                "hidden_default_targets": ["@cosmetologi_chat", ""],
+            }
+            service.save_quick_chat_settings(payload)
+            loaded = service.load_quick_chat_settings()
+
+        self.assertEqual(loaded["custom_chats"], [{"chat_title": "Мой чат", "chat_target": "@my_chat"}])
+        self.assertEqual(loaded["hidden_default_targets"], ["@cosmetologi_chat"])
+
+    def test_load_quick_chat_settings_tolerates_missing_or_invalid_file(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            service = RunHistoryService(Path(td))
+            self.assertEqual(service.load_quick_chat_settings(), {"custom_chats": [], "hidden_default_targets": []})
+            service.quick_chats_path.write_text("{bad json", encoding="utf-8")
+            self.assertEqual(service.load_quick_chat_settings(), {"custom_chats": [], "hidden_default_targets": []})
+
     def test_write_run_summary_and_artifacts_files(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             service = RunHistoryService(Path(td))

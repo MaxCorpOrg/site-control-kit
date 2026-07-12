@@ -653,6 +653,43 @@ class TelegramMembersExportGuiTests(unittest.TestCase):
         self.assertEqual(resolved, [True])
         self.assertIn("Готовая цель: Косметология / @cosmetologi_chat", logs)
 
+    def test_quick_chat_template_management_updates_persistent_settings(self) -> None:
+        saved_payloads: list[dict[str, object]] = []
+        refreshed: list[bool] = []
+        logs: list[str] = []
+        fake_window = types.SimpleNamespace(
+            quick_chat_settings={"custom_chats": [], "hidden_default_targets": []},
+            backend=types.SimpleNamespace(
+                run_history=types.SimpleNamespace(save_quick_chat_settings=lambda payload: saved_payloads.append(dict(payload)))
+            ),
+            _refresh_quick_chats=lambda: refreshed.append(True),
+            _append_log=lambda message: logs.append(message),
+        )
+        fake_window._custom_quick_chat_templates = lambda: mod.TelegramMembersExportWindow._custom_quick_chat_templates(
+            fake_window
+        )
+        fake_window._hidden_default_quick_chat_targets = (
+            lambda: mod.TelegramMembersExportWindow._hidden_default_quick_chat_targets(fake_window)
+        )
+        fake_window._save_quick_chat_settings = lambda: mod.TelegramMembersExportWindow._save_quick_chat_settings(
+            fake_window
+        )
+
+        mod.TelegramMembersExportWindow._add_quick_chat_template(fake_window, "Мой чат", "@my_chat")
+        self.assertEqual(fake_window.quick_chat_settings["custom_chats"], [{"chat_title": "Мой чат", "chat_target": "@my_chat"}])
+        self.assertEqual(len(saved_payloads), 1)
+        self.assertIn("Шаблон добавлен", logs[-1])
+
+        mod.TelegramMembersExportWindow._remove_custom_quick_chat_template(fake_window, "@my_chat")
+        self.assertEqual(fake_window.quick_chat_settings["custom_chats"], [])
+        self.assertIn("Шаблон убран", logs[-1])
+
+        mod.TelegramMembersExportWindow._hide_default_quick_chat_template(fake_window, "@cosmetologi_chat")
+        self.assertEqual(fake_window.quick_chat_settings["hidden_default_targets"], ["@cosmetologi_chat"])
+        mod.TelegramMembersExportWindow._reset_default_quick_chat_templates(fake_window)
+        self.assertEqual(fake_window.quick_chat_settings["hidden_default_targets"], [])
+        self.assertGreaterEqual(len(refreshed), 4)
+
     def test_run_export_operation_coerces_phone_output_path(self) -> None:
         class FakeEntry:
             def __init__(self, value: str) -> None:

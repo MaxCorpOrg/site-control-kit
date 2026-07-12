@@ -1,5 +1,28 @@
 # Current Backlog And Next Steps
 
+## Обновление 2026-07-12 (Управляемые quick chat templates)
+- Новый текущий статус:
+  - косметологические быстрые чаты больше не выглядят как live-найденные;
+  - GUI явно называет их локальными шаблонами;
+  - стандартные шаблоны можно скрыть/показать/сбросить;
+  - пользователь может добавить свои шаблоны;
+  - закреплённые чаты можно открепить.
+- Что уже проверено:
+  - targeted history/GUI tests -> `11 tests OK`;
+  - full suite -> `335 tests OK`, `2 skipped`;
+  - `./scripts/verify.sh` -> OK;
+  - installed GUI smoke -> кнопки и диалог видны.
+- Пакет:
+  - `/home/max/site-control-kit/dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`
+  - sha256: `624676f1ae4489019b1056847441e2549df5270ee1f70820ffa6cdfe2fa55d97`
+  - install-kit: `/home/max/Рабочий стол/telegram-username-collector-install-kit/`
+- Новый ближайший следующий шаг:
+  - если пользователь хочет убрать косметологические шаблоны из панели, нажать `Скрыть стандартные`;
+  - если нужен свой чат, нажать `Добавить шаблон` и указать название + `@username`/ссылку/peer id.
+- Что важно не перепутать:
+  - quick template не означает, что аккаунт видит чат;
+  - для реального сбора всё ещё нужен авторизованный рабочий `tdata`.
+
 ## Обновление 2026-07-12 (Импорт Telegram API ID/Hash в панели)
 - Новый текущий статус:
   - в GUI добавлен `Импорт API`;
@@ -15,7 +38,7 @@
 - Пакет/установка:
   - `.deb` пересобран:
     - `/home/max/site-control-kit/dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`
-    - sha256: `60bc24b08e1088a17e480b526ad5db1af5c6b60b684326131151cc629dc24b00`
+    - sha256: `624676f1ae4489019b1056847441e2549df5270ee1f70820ffa6cdfe2fa55d97`
   - install-kit обновлён:
     - `/home/max/Рабочий стол/telegram-username-collector-install-kit/`
   - локальная переустановка выполнена;
@@ -38,7 +61,7 @@
 - Что уже проверено:
   - `.deb`:
     - `/home/max/site-control-kit/dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`
-    - sha256: `60bc24b08e1088a17e480b526ad5db1af5c6b60b684326131151cc629dc24b00`
+    - sha256: `624676f1ae4489019b1056847441e2549df5270ee1f70820ffa6cdfe2fa55d97`
   - install-kit:
     - `/home/max/Рабочий стол/telegram-username-collector-install-kit/`
   - final live smoke:

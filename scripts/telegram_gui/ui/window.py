@@ -25,6 +25,10 @@ SUGGESTED_CHAT_TARGETS: tuple[tuple[str, str], ...] = (
 )
 
 
+def _quick_chat_target_key(value: object) -> str:
+    return str(value or "").strip().lower()
+
+
 def _refresh_next_step_hint_if_available(window: object) -> None:
     refresh = getattr(window, "_refresh_next_step_hint", None)
     if callable(refresh):
@@ -89,6 +93,7 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
         self.recent_runs: list[RunRecord] = []
         self.history_filter = "all"
         self.pinned_chats = self.backend.run_history.load_pinned_chats()
+        self.quick_chat_settings = self.backend.run_history.load_quick_chat_settings()
         self.ui_tasks = UiTaskService(idle_add=GLib.idle_add)
         self.preflight_info: PreflightInfo | None = None
         self._bootstrap_started = False
@@ -408,7 +413,7 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
         actions.append(self._button("Закрепить чат", self._pin_selected_chat))
         box.append(actions)
 
-        quick_title = self._meta_label("Быстрый выбор: закреплённые и последние чаты")
+        quick_title = self._meta_label("Быстрый выбор: локальные шаблоны, закреплённые и последние чаты")
         box.append(quick_title)
         self.quick_chat_box.add_css_class("dim-box")
         box.append(self.quick_chat_box)
@@ -1776,45 +1781,290 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
             if child is None:
                 break
             self.quick_chat_box.remove(child)
-        if SUGGESTED_CHAT_TARGETS:
-            self.quick_chat_box.append(self._meta_label("Готовые чаты: косметология"))
-            for chat_title, chat_target in SUGGESTED_CHAT_TARGETS:
-                button = Gtk.Button(label=chat_title)
-                button.add_css_class("subtle-button")
-                attach_button_feedback(button)
-                button.set_tooltip_text(f"Быстро резолвить и открыть: {chat_target}")
-                button.connect(
-                    "clicked",
-                    lambda _btn, target=chat_target, title=chat_title: self._resolve_suggested_chat_target(target, title),
+        self.quick_chat_box.append(
+            self._meta_label(
+                "Шаблоны ниже не означают доступ аккаунта. Это локальные ярлыки: их можно добавить, скрыть или убрать."
+            )
+        )
+
+        controls = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        add_button = Gtk.Button(label="Добавить шаблон")
+        add_button.add_css_class("subtle-button")
+        attach_button_feedback(add_button)
+        add_button.connect("clicked", lambda *_args: self._show_add_quick_chat_dialog())
+        controls.append(add_button)
+
+        hidden_defaults = set(self._hidden_default_quick_chat_targets())
+        default_targets = {_quick_chat_target_key(target) for _title, target in SUGGESTED_CHAT_TARGETS}
+        hide_all = Gtk.Button(
+            label="Показать стандартные" if default_targets and default_targets.issubset(hidden_defaults) else "Скрыть стандартные"
+        )
+        hide_all.add_css_class("subtle-button")
+        attach_button_feedback(hide_all)
+        hide_all.connect("clicked", lambda *_args: self._toggle_default_quick_chat_templates())
+        controls.append(hide_all)
+
+        reset_button = Gtk.Button(label="Сбросить стандартные")
+        reset_button.add_css_class("subtle-button")
+        attach_button_feedback(reset_button)
+        reset_button.connect("clicked", lambda *_args: self._reset_default_quick_chat_templates())
+        controls.append(reset_button)
+        self.quick_chat_box.append(controls)
+
+        visible_defaults = [
+            (title, target)
+            for title, target in SUGGESTED_CHAT_TARGETS
+            if _quick_chat_target_key(target) not in hidden_defaults
+        ]
+        if visible_defaults:
+            self.quick_chat_box.append(self._meta_label("Стандартные шаблоны: косметология"))
+            for chat_title, chat_target in visible_defaults:
+                self.quick_chat_box.append(
+                    self._build_quick_chat_template_row(
+                        chat_title,
+                        chat_target,
+                        remove_label="Скрыть",
+                        remove_callback=lambda target=chat_target: self._hide_default_quick_chat_template(target),
+                    )
                 )
-                self.quick_chat_box.append(button)
-        rows: list[tuple[str, str, str]] = []
+        custom_chats = self._custom_quick_chat_templates()
+        if custom_chats:
+            self.quick_chat_box.append(self._meta_label("Мои шаблоны"))
+            for row in custom_chats:
+                chat_title = str(row.get("chat_title") or row.get("chat_target") or "").strip()
+                chat_target = str(row.get("chat_target") or "").strip()
+                self.quick_chat_box.append(
+                    self._build_quick_chat_template_row(
+                        chat_title,
+                        chat_target,
+                        remove_label="Убрать",
+                        remove_callback=lambda target=chat_target: self._remove_custom_quick_chat_template(target),
+                    )
+                )
+        rows: list[tuple[str, str, str, str]] = []
         seen: set[tuple[str, str]] = set()
         for row in self.pinned_chats:
             key = (str(row.get("account_key") or ""), str(row.get("chat_ref") or ""))
             if key in seen:
                 continue
             seen.add(key)
-            rows.append((str(row.get("account_key") or ""), str(row.get("chat_ref") or ""), str(row.get("chat_title") or "")))
+            rows.append(
+                (
+                    str(row.get("account_key") or ""),
+                    str(row.get("chat_ref") or ""),
+                    str(row.get("chat_title") or ""),
+                    "pinned",
+                )
+            )
         for run in self.recent_runs:
             key = (run.account_key, run.chat_ref)
             if key in seen:
                 continue
             seen.add(key)
-            rows.append((run.account_key, run.chat_ref, run.chat_title))
+            rows.append((run.account_key, run.chat_ref, run.chat_title, "recent"))
             if len(rows) >= 6:
                 break
         if not rows:
-            if not SUGGESTED_CHAT_TARGETS:
-                self.quick_chat_box.append(self._meta_label("Быстрые чаты появятся после первых запусков или закрепления."))
+            if not visible_defaults and not custom_chats:
+                self.quick_chat_box.append(self._meta_label("Список пуст. Добавьте шаблон или покажите стандартные."))
             return
-        self.quick_chat_box.append(self._meta_label("Pinned / recent"))
-        for account_key, chat_ref, chat_title in rows:
-            button = Gtk.Button(label=chat_title or chat_ref)
-            button.add_css_class("subtle-button")
-            attach_button_feedback(button)
-            button.connect("clicked", lambda _btn, a=account_key, c=chat_ref, t=chat_title: self._select_quick_chat(a, c, t))
-            self.quick_chat_box.append(button)
+        self.quick_chat_box.append(self._meta_label("Закреплённые / последние"))
+        for account_key, chat_ref, chat_title, source in rows:
+            if source == "pinned":
+                self.quick_chat_box.append(self._build_pinned_quick_chat_row(account_key, chat_ref, chat_title))
+            else:
+                button = Gtk.Button(label=chat_title or chat_ref)
+                button.add_css_class("subtle-button")
+                attach_button_feedback(button)
+                button.set_tooltip_text("Последний запуск. Это история, а не проверка текущего доступа.")
+                button.connect("clicked", lambda _btn, a=account_key, c=chat_ref, t=chat_title: self._select_quick_chat(a, c, t))
+                self.quick_chat_box.append(button)
+
+    def _build_pinned_quick_chat_row(self, account_key: str, chat_ref: str, chat_title: str) -> Gtk.Widget:
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        button = Gtk.Button(label=chat_title or chat_ref)
+        button.set_hexpand(True)
+        button.add_css_class("subtle-button")
+        attach_button_feedback(button)
+        button.set_tooltip_text("Закреплённый чат. Можно открепить.")
+        button.connect("clicked", lambda _btn, a=account_key, c=chat_ref, t=chat_title: self._select_quick_chat(a, c, t))
+        remove_button = Gtk.Button(label="Открепить")
+        remove_button.add_css_class("subtle-button")
+        attach_button_feedback(remove_button)
+        remove_button.connect("clicked", lambda *_args: self._unpin_quick_chat(account_key, chat_ref))
+        row.append(button)
+        row.append(remove_button)
+        return row
+
+    def _unpin_quick_chat(self, account_key: str, chat_ref: str) -> None:
+        before = len(self.pinned_chats)
+        self.pinned_chats = [
+            row
+            for row in self.pinned_chats
+            if not (str(row.get("account_key") or "") == account_key and str(row.get("chat_ref") or "") == chat_ref)
+        ]
+        if len(self.pinned_chats) != before:
+            self.backend.run_history.save_pinned_chats(self.pinned_chats)
+            self._refresh_quick_chats()
+            self._append_log(f"Чат откреплён: {chat_ref}")
+
+    def _build_quick_chat_template_row(
+        self,
+        chat_title: str,
+        chat_target: str,
+        *,
+        remove_label: str,
+        remove_callback: Callable[[], None],
+    ) -> Gtk.Widget:
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        button = Gtk.Button(label=chat_title or chat_target)
+        button.set_hexpand(True)
+        button.add_css_class("subtle-button")
+        attach_button_feedback(button)
+        button.set_tooltip_text(f"Локальный шаблон, не проверка доступа: {chat_target}")
+        button.connect(
+            "clicked",
+            lambda _btn, target=chat_target, title=chat_title: self._resolve_suggested_chat_target(target, title),
+        )
+        remove_button = Gtk.Button(label=remove_label)
+        remove_button.add_css_class("subtle-button")
+        attach_button_feedback(remove_button)
+        remove_button.connect("clicked", lambda *_args: remove_callback())
+        row.append(button)
+        row.append(remove_button)
+        return row
+
+    def _custom_quick_chat_templates(self) -> list[dict[str, str]]:
+        rows = self.quick_chat_settings.get("custom_chats") if isinstance(self.quick_chat_settings, dict) else []
+        return [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
+
+    def _hidden_default_quick_chat_targets(self) -> list[str]:
+        rows = self.quick_chat_settings.get("hidden_default_targets") if isinstance(self.quick_chat_settings, dict) else []
+        return [_quick_chat_target_key(row) for row in rows if _quick_chat_target_key(row)] if isinstance(rows, list) else []
+
+    def _save_quick_chat_settings(self) -> None:
+        self.backend.run_history.save_quick_chat_settings(self.quick_chat_settings)
+
+    def _hide_default_quick_chat_template(self, chat_target: str) -> None:
+        target_key = _quick_chat_target_key(chat_target)
+        hidden = set(self._hidden_default_quick_chat_targets())
+        if target_key:
+            hidden.add(target_key)
+        self.quick_chat_settings["hidden_default_targets"] = sorted(hidden)
+        self._save_quick_chat_settings()
+        self._refresh_quick_chats()
+        self._append_log(f"Стандартный шаблон скрыт: {chat_target}")
+
+    def _remove_custom_quick_chat_template(self, chat_target: str) -> None:
+        target_key = _quick_chat_target_key(chat_target)
+        self.quick_chat_settings["custom_chats"] = [
+            row for row in self._custom_quick_chat_templates() if _quick_chat_target_key(row.get("chat_target")) != target_key
+        ]
+        self._save_quick_chat_settings()
+        self._refresh_quick_chats()
+        self._append_log(f"Шаблон убран: {chat_target}")
+
+    def _toggle_default_quick_chat_templates(self) -> None:
+        default_targets = {_quick_chat_target_key(target) for _title, target in SUGGESTED_CHAT_TARGETS}
+        hidden = set(self._hidden_default_quick_chat_targets())
+        if default_targets and default_targets.issubset(hidden):
+            hidden.difference_update(default_targets)
+            action = "показаны"
+        else:
+            hidden.update(default_targets)
+            action = "скрыты"
+        self.quick_chat_settings["hidden_default_targets"] = sorted(hidden)
+        self._save_quick_chat_settings()
+        self._refresh_quick_chats()
+        self._append_log(f"Стандартные шаблоны {action}.")
+
+    def _reset_default_quick_chat_templates(self) -> None:
+        default_targets = {_quick_chat_target_key(target) for _title, target in SUGGESTED_CHAT_TARGETS}
+        hidden = [target for target in self._hidden_default_quick_chat_targets() if target not in default_targets]
+        self.quick_chat_settings["hidden_default_targets"] = hidden
+        self._save_quick_chat_settings()
+        self._refresh_quick_chats()
+        self._append_log("Стандартные шаблоны снова показаны.")
+
+    def _add_quick_chat_template(self, chat_title: str, chat_target: str) -> None:
+        title = str(chat_title or "").strip()
+        target = str(chat_target or "").strip()
+        target_key = _quick_chat_target_key(target)
+        if not target_key:
+            raise ValueError("Введите ссылку, @username или peer id.")
+        if any(_quick_chat_target_key(default_target) == target_key for _default_title, default_target in SUGGESTED_CHAT_TARGETS):
+            hidden = set(self._hidden_default_quick_chat_targets())
+            hidden.discard(target_key)
+            self.quick_chat_settings["hidden_default_targets"] = sorted(hidden)
+        else:
+            rows = [row for row in self._custom_quick_chat_templates() if _quick_chat_target_key(row.get("chat_target")) != target_key]
+            rows.insert(0, {"chat_title": title or target, "chat_target": target})
+            self.quick_chat_settings["custom_chats"] = rows[:20]
+        self._save_quick_chat_settings()
+        self._refresh_quick_chats()
+        self._append_log(f"Шаблон добавлен: {title or target} / {target}")
+
+    def _show_add_quick_chat_dialog(self) -> None:
+        dialog = Gtk.Dialog(title="Добавить быстрый чат", transient_for=self, modal=True)
+        dialog.add_button("Отмена", Gtk.ResponseType.CANCEL)
+        dialog.add_button("Добавить", Gtk.ResponseType.ACCEPT)
+        dialog.set_default_response(Gtk.ResponseType.ACCEPT)
+
+        content = dialog.get_content_area()
+        content.set_spacing(10)
+        content.set_margin_top(12)
+        content.set_margin_bottom(12)
+        content.set_margin_start(12)
+        content.set_margin_end(12)
+
+        note = Gtk.Label(label="Это локальный шаблон. Он не означает, что текущий аккаунт уже видит чат.")
+        note.set_xalign(0)
+        note.set_wrap(True)
+        note.add_css_class("meta")
+        content.append(note)
+
+        grid = Gtk.Grid(row_spacing=8, column_spacing=10)
+        title_entry = Gtk.Entry()
+        title_entry.set_hexpand(True)
+        title_entry.set_placeholder_text("Название кнопки")
+        target_entry = Gtk.Entry()
+        target_entry.set_hexpand(True)
+        target_entry.set_placeholder_text("@username, ссылка или peer id")
+        current_target = self.chat_target_entry.get_text().strip()
+        if current_target:
+            target_entry.set_text(current_target)
+        current_title = self.chat_title_label.get_label().strip()
+        if current_title and current_title not in {"Чат не выбран", "Результат экспорта появится здесь"}:
+            title_entry.set_text(current_title)
+
+        title_label = Gtk.Label(label="Название")
+        title_label.set_xalign(0)
+        target_label = Gtk.Label(label="Цель")
+        target_label.set_xalign(0)
+        grid.attach(title_label, 0, 0, 1, 1)
+        grid.attach(title_entry, 1, 0, 1, 1)
+        grid.attach(target_label, 0, 1, 1, 1)
+        grid.attach(target_entry, 1, 1, 1, 1)
+        content.append(grid)
+
+        def accept_dialog(*_args: object) -> None:
+            dialog.response(Gtk.ResponseType.ACCEPT)
+
+        title_entry.connect("activate", accept_dialog)
+        target_entry.connect("activate", accept_dialog)
+
+        def on_response(native: Gtk.Dialog, response: int) -> None:
+            if response == Gtk.ResponseType.ACCEPT:
+                try:
+                    self._add_quick_chat_template(title_entry.get_text(), target_entry.get_text())
+                except Exception as exc:
+                    native.destroy()
+                    self._show_error(str(exc))
+                    return
+            native.destroy()
+
+        dialog.connect("response", on_response)
+        dialog.show()
 
     def _select_quick_chat(self, account_key: str, chat_ref: str, chat_title: str) -> None:
         for index, account in enumerate(self.accounts):

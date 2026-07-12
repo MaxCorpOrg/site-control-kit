@@ -75,6 +75,24 @@ find /home/max/telegram_contact_batches/chat_-1002465948544/chains -maxdepth 2 -
 
 ## Что Сейчас Самое Важное
 Новый верхний факт на 2026-07-12:
+- быстрые косметологические чаты в GUI теперь управляемые локальные шаблоны:
+  - блок явно пишет, что шаблоны не означают доступ аккаунта;
+  - есть `Добавить шаблон`, `Скрыть стандартные`, `Показать стандартные`, `Сбросить стандартные`;
+  - стандартные строки можно скрывать;
+  - закреплённые строки можно откреплять;
+  - настройки хранятся в `telegram_workspace/state/quick_chats.json`.
+- verify:
+  - full suite -> `335 tests OK`, `2 skipped`;
+  - `./scripts/verify.sh` -> OK.
+- `.deb` пересобран и установлен локально:
+  - sha256: `624676f1ae4489019b1056847441e2549df5270ee1f70820ffa6cdfe2fa55d97`
+  - install-kit: `/home/max/Рабочий стол/telegram-username-collector-install-kit/`
+  - installed GUI smoke:
+    - `/tmp/tg_gui_quick_chats_smoke_20260712T111139Z/quick-chats-2.png`
+    - `/tmp/tg_gui_quick_chats_smoke_20260712T111139Z/add-dialog-3.png`
+    - `/tmp/tg_gui_quick_chats_smoke_20260712T111139Z/hidden-standard.png`
+
+Новый верхний факт на 2026-07-12:
 - в GTK-панели добавлен `Импорт API` для Telegram API ID/Hash:
   - сохраняет `accounts/<N>/keys/api_id.txt` и `api_hash.txt`;
   - поддерживает workspace slots и repo-local `TG_CONTACT N`;
@@ -85,7 +103,7 @@ find /home/max/telegram_contact_batches/chat_-1002465948544/chains -maxdepth 2 -
   - full suite -> `332 tests OK`, `2 skipped`
   - `./scripts/verify.sh` -> OK
 - `.deb` пересобран и установлен локально:
-  - sha256: `60bc24b08e1088a17e480b526ad5db1af5c6b60b684326131151cc629dc24b00`
+  - sha256: `624676f1ae4489019b1056847441e2549df5270ee1f70820ffa6cdfe2fa55d97`
   - install-kit: `/home/max/Рабочий стол/telegram-username-collector-install-kit/`
   - installed GUI smoke screenshots:
     - `/tmp/tg_gui_api_import_smoke_20260712/window-fresh-profile.png`
@@ -94,7 +112,7 @@ find /home/max/telegram_contact_batches/chat_-1002465948544/chains -maxdepth 2 -
 Новый верхний факт на 2026-07-12:
 - готовый Linux `.deb` пересобран после package-stabilization pass:
   - `/home/max/site-control-kit/dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`
-  - sha256: `60bc24b08e1088a17e480b526ad5db1af5c6b60b684326131151cc629dc24b00`
+  - sha256: `624676f1ae4489019b1056847441e2549df5270ee1f70820ffa6cdfe2fa55d97`
   - install-kit: `/home/max/Рабочий стол/telegram-username-collector-install-kit/`
 - fixed installed-mode:
   - `/usr/bin/telegram-username-collector` и `/usr/bin/sitectl` теперь `cd "$APP_ROOT"` перед Python;

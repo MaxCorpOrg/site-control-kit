@@ -29,6 +29,33 @@
 - Ближайший контекст: новый пакет собран локально в `dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`; не тащить runtime/generated артефакты в commit без отдельного решения
 
 ## Где Мы Закончили Работу
+- На 2026-07-12 исправлен UX быстрых чатов:
+  - косметологические чаты больше не выглядят как “найденные аккаунтом”; блок теперь прямо пишет, что это локальные шаблоны, а не проверка доступа;
+  - добавлено управление шаблонами прямо в GUI:
+    - `Добавить шаблон`;
+    - `Скрыть стандартные` / `Показать стандартные`;
+    - `Сбросить стандартные`;
+    - `Скрыть` у стандартных строк;
+    - `Открепить` у закреплённых строк;
+  - пользовательские шаблоны и скрытые стандартные цели сохраняются локально:
+    - `telegram_workspace/state/quick_chats.json`;
+  - live smoke не оставил пользовательских настроек: до smoke `quick_chats.json` отсутствовал, после проверки файл удалён обратно;
+  - `.deb` пересобран и install-kit обновлён:
+    - `/home/max/site-control-kit/dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`
+    - sha256: `624676f1ae4489019b1056847441e2549df5270ee1f70820ffa6cdfe2fa55d97`
+    - `/home/max/Рабочий стол/telegram-username-collector-install-kit/`;
+  - локальная переустановка выполнена через `sudo apt install -y --reinstall ...`;
+  - installed smoke:
+    - `cd /tmp && telegram-username-collector --doctor` -> OK, `hub_reachable=0` ожидаемо без hub;
+    - кнопки управления видны: `/tmp/tg_gui_quick_chats_smoke_20260712T111139Z/quick-chats-2.png`;
+    - диалог добавления открыт: `/tmp/tg_gui_quick_chats_smoke_20260712T111139Z/add-dialog-3.png`;
+    - скрытие стандартных проверено: `/tmp/tg_gui_quick_chats_smoke_20260712T111139Z/hidden-standard.png`;
+  - verify:
+    - `python3 -m unittest discover -s tests -p 'test_*.py'` -> `335 tests OK`, `2 skipped`;
+    - `./scripts/verify.sh` -> OK;
+    - `python3 -m webcontrol --help` -> OK;
+    - `python3 -m webcontrol browser --help` -> OK;
+    - `git diff --check` -> OK.
 - На 2026-07-12 добавлен операторский импорт Telegram API ID/Hash в GUI:
   - в секции `1. Профиль` появилась кнопка `Импорт API`;
   - диалог сохраняет `api_id.txt` и `api_hash.txt` в выбранный workspace slot `accounts/<N>/keys/`;
@@ -49,7 +76,7 @@
 - Package/install smoke после API-import pass:
   - `.deb` пересобран:
     - `/home/max/site-control-kit/dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`
-    - sha256: `60bc24b08e1088a17e480b526ad5db1af5c6b60b684326131151cc629dc24b00`;
+    - sha256: `624676f1ae4489019b1056847441e2549df5270ee1f70820ffa6cdfe2fa55d97`;
   - install-kit обновлён:
     - `/home/max/Рабочий стол/telegram-username-collector-install-kit/`;
   - локальная переустановка выполнена:
@@ -81,7 +108,7 @@
   - Ctrl+C для `telegram-username-collector` теперь завершает GUI с коротким сообщением и кодом `130`, без traceback;
   - финальный `.deb` пересобран:
     - `/home/max/site-control-kit/dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`
-    - sha256: `60bc24b08e1088a17e480b526ad5db1af5c6b60b684326131151cc629dc24b00`;
+    - sha256: `624676f1ae4489019b1056847441e2549df5270ee1f70820ffa6cdfe2fa55d97`;
   - install-kit обновлён на рабочем столе:
     - `/home/max/Рабочий стол/telegram-username-collector-install-kit/telegram-username-collector_0.1.0_amd64.deb`
     - `/home/max/Рабочий стол/telegram-username-collector-install-kit/telegram-username-collector_0.1.0_amd64.deb.sha256`

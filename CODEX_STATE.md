@@ -1,5 +1,44 @@
 # CODEX_STATE
 
+## 2026-07-12 (Manageable quick chat templates)
+
+- Scope:
+  - fixed the confusing UX where cosmetology chat shortcuts stayed visible even when the selected profile was not usable
+  - kept shortcuts available as local templates, but made their semantics explicit: they are not proof of account access
+- Code changes:
+  - `scripts/telegram_gui/ui/window.py` now labels quick chats as local templates and adds management controls:
+    - `Добавить шаблон`
+    - `Скрыть стандартные` / `Показать стандартные`
+    - `Сбросить стандартные`
+    - per-standard-row `Скрыть`
+    - per-pinned-row `Открепить`
+  - `scripts/telegram_gui/services/run_history.py` stores quick chat template settings in:
+    - `telegram_workspace/state/quick_chats.json`
+  - user-hidden default templates and custom templates persist locally; recent runs remain history-derived and are not deleted from this quick block
+  - tests cover storage roundtrip and window-level add/remove/hide/reset behavior
+- Verify:
+  - `python3 -m py_compile scripts/telegram_gui/services/run_history.py scripts/telegram_gui/ui/window.py tests/test_telegram_members_export_gui.py tests/test_telegram_gui_run_history.py` -> OK
+  - targeted GUI/history tests -> `11 tests OK`
+  - `python3 -m unittest discover -s tests -p 'test_*.py'` -> `335 tests OK`, `2 skipped`
+  - `./scripts/verify.sh` -> OK
+  - `python3 -m webcontrol --help` -> OK
+  - `python3 -m webcontrol browser --help` -> OK
+  - `git diff --check` -> OK
+- Package/install smoke:
+  - rebuilt `.deb`: `/home/max/site-control-kit/dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`
+  - sha256: `624676f1ae4489019b1056847441e2549df5270ee1f70820ffa6cdfe2fa55d97`
+  - desktop install kit updated: `/home/max/Рабочий стол/telegram-username-collector-install-kit/`
+  - local reinstall completed with `sudo apt install -y --reinstall ...`
+  - installed payload in `/opt` contains `Добавить шаблон`, `Скрыть стандартные`, `quick_chats.json`
+  - `cd /tmp && telegram-username-collector --doctor` -> OK, expected `hub_reachable=0`
+  - installed GUI smoke screenshots:
+    - `/tmp/tg_gui_quick_chats_smoke_20260712T111139Z/quick-chats-2.png`
+    - `/tmp/tg_gui_quick_chats_smoke_20260712T111139Z/add-dialog-3.png`
+    - `/tmp/tg_gui_quick_chats_smoke_20260712T111139Z/hidden-standard.png`
+  - smoke restored user settings: `quick_chats.json` was absent before smoke and removed after smoke
+- Remaining:
+  - live Telegram export still depends on a valid authorized `tdata`; this quick-template UX change does not fix broken profile auth
+
 ## 2026-07-12 (GUI Telegram API import for tdata helper)
 
 - Scope:
@@ -22,7 +61,7 @@
   - `git diff --check` -> OK
 - Package/install smoke:
   - rebuilt `.deb`: `/home/max/site-control-kit/dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`
-  - sha256: `60bc24b08e1088a17e480b526ad5db1af5c6b60b684326131151cc629dc24b00`
+  - sha256: `624676f1ae4489019b1056847441e2549df5270ee1f70820ffa6cdfe2fa55d97`
   - desktop install kit updated: `/home/max/Рабочий стол/telegram-username-collector-install-kit/`
   - local reinstall completed with `sudo apt install -y --reinstall ...`
   - installed payload in `/opt/telegram-username-collector/app` contains `Импорт API`, `api_credentials_saved`, and helper `--api-id`
@@ -47,7 +86,7 @@
   - `scripts/telegram_username_collector_launcher.py` handles Ctrl+C as a clean exit code `130` without traceback
 - Installer artifact:
   - `/home/max/site-control-kit/dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`
-  - sha256: `60bc24b08e1088a17e480b526ad5db1af5c6b60b684326131151cc629dc24b00`
+  - sha256: `624676f1ae4489019b1056847441e2549df5270ee1f70820ffa6cdfe2fa55d97`
   - desktop install kit:
     - `/home/max/Рабочий стол/telegram-username-collector-install-kit/telegram-username-collector_0.1.0_amd64.deb`
     - `/home/max/Рабочий стол/telegram-username-collector-install-kit/telegram-username-collector_0.1.0_amd64.deb.sha256`
