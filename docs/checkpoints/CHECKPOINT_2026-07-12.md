@@ -7,6 +7,7 @@
 
 ## Scope
 - Stabilized the ready `Telegram Username Collector` desktop package after live GUI/log analysis.
+- Added GUI import for Telegram API ID/Hash for selected slot/TG_CONTACT profiles.
 - Kept Telegram collection/export semantics unchanged.
 - Rebuilt the ignored `.deb` artifact and refreshed the desktop install kit.
 
@@ -22,6 +23,14 @@
 - Launcher handles Ctrl+C as a clean interrupt:
   - exit code `130`
   - no traceback.
+- GTK profile section now has `Импорт API`.
+- API import saves Telegram API credentials locally:
+  - `telegram_workspace/accounts/<N>/keys/api_id.txt`
+  - `telegram_workspace/accounts/<N>/keys/api_hash.txt`
+- Backend resolves slots from workspace paths and `TG_CONTACT N` labels.
+- Backend passes saved credentials to tdata helper as `--api-id/--api-hash`.
+- `scripts/telegram_tdata_helper.py` accepts optional `--api-id/--api-hash` and only uses custom `APIData` when both are present.
+- API Hash is not logged to action logs.
 
 ## Installer Artifacts
 - Repo build artifact:
@@ -31,7 +40,7 @@
   - `/home/max/Рабочий стол/telegram-username-collector-install-kit/telegram-username-collector_0.1.0_amd64.deb.sha256`
   - `/home/max/Рабочий стол/telegram-username-collector-install-kit/INSTALL_RU.md`
 - SHA256:
-  - `121572953110c23d69354e7438dde86d2b5ffa507fc5833a178cd248e6bb6aa5`
+  - `60bc24b08e1088a17e480b526ad5db1af5c6b60b684326131151cc629dc24b00`
 
 ## Live Smoke
 - Final smoke folder:
@@ -48,10 +57,12 @@
   - Ctrl+C exits with code `130` and no traceback
 
 ## Verify
-- `python3 -m unittest discover -s tests -p 'test_*.py'` -> `330 tests OK`, `2 skipped`
+- `python3 -m unittest discover -s tests -p 'test_*.py'` -> `332 tests OK`, `2 skipped`
 - `./scripts/verify.sh` -> OK
 - `python3 -m webcontrol --help` -> OK
 - `python3 -m webcontrol browser --help` -> OK
+- `python3 -m unittest tests.test_telegram_gui_backend_features tests.test_telegram_tdata_helper -v` -> `54 tests OK`
+- `python3 -m py_compile scripts/telegram_tdata_helper.py scripts/telegram_gui/backend.py scripts/telegram_gui/ui/window.py` -> OK
 - `python3 -m py_compile webcontrol/settings.py webcontrol/cli.py scripts/telegram_product_runtime.py scripts/telegram_username_collector_launcher.py scripts/telegram_gui/app.py scripts/telegram_gui/backend.py` -> OK
 - `python3 -m webcontrol runtime-env --format json --no-create` -> redaction OK
 - `dpkg-deb -x` package content check -> OK
@@ -69,10 +80,18 @@
   - `gtk_runtime=ok`
   - `extension_zip_ready=1`
   - `hub_reachable=0` because hub was not started
+- Verified installed payload after API-import rebuild:
+  - `/opt/telegram-username-collector/app/scripts/telegram_gui/ui/window.py` contains `Импорт API`
+  - `/opt/telegram-username-collector/app/scripts/telegram_gui/backend.py` contains `api_credentials_saved`
+  - `/opt/telegram-username-collector/app/scripts/telegram_tdata_helper.py` contains `--api-id`
 - Verified installed GUI:
   - `telegram-username-collector --ui-scale 1.15`
   - window opened in `Installed .deb mode`
-  - action log: `/home/max/.local/share/site-control-kit/telegram_workspace/logs/gui_actions_20260712T081230Z.log`
+  - API import button visible:
+    - `/tmp/tg_gui_api_import_smoke_20260712/window-fresh-profile.png`
+  - API import dialog opened:
+    - `/tmp/tg_gui_api_import_smoke_20260712/api-dialog-root-2.png`
+  - latest action log: `/home/max/.local/share/site-control-kit/telegram_workspace/logs/gui_actions_20260712T102832Z.log`
 
 ## Limits And Risks
 - External clean Ubuntu install smoke is still optional before wider distribution.

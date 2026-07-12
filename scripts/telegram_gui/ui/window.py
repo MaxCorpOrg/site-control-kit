@@ -373,6 +373,7 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
         actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         actions.append(self._button("1. Подключить Telegram", self._connect_selected_account, accent=True))
         actions.append(self._button("Импортировать tdata.zip", self._choose_portable_zip))
+        actions.append(self._button("Импорт API", self._show_api_import_dialog))
         actions.append(self._button("Обновить профили", self._load_accounts_into_ui))
         box.append(actions)
 
@@ -1371,6 +1372,93 @@ class TelegramMembersExportWindow(Gtk.ApplicationWindow):
 
         chooser.connect("response", on_response)
         chooser.show()
+
+    def _show_api_import_dialog(self) -> None:
+        account = self._selected_account()
+        if account is None:
+            self._show_error("Сначала выберите профиль.")
+            return
+        status = self.backend.api_credentials_status(account)
+        slot_number = str(status.get("slot_number") or "").strip()
+        if not slot_number:
+            self._show_error("API можно импортировать только для профиля TG_CONTACT N или workspace slot.")
+            return
+
+        dialog = Gtk.Dialog(title="Импорт Telegram API", transient_for=self, modal=True)
+        dialog.add_button("Отмена", Gtk.ResponseType.CANCEL)
+        dialog.add_button("Сохранить API", Gtk.ResponseType.ACCEPT)
+        dialog.set_default_response(Gtk.ResponseType.ACCEPT)
+
+        content = dialog.get_content_area()
+        content.set_spacing(10)
+        content.set_margin_top(12)
+        content.set_margin_bottom(12)
+        content.set_margin_start(12)
+        content.set_margin_end(12)
+
+        title = Gtk.Label(label=f"Профиль: {account.label} | slot {slot_number}")
+        title.set_xalign(0)
+        title.add_css_class("card-title")
+        content.append(title)
+
+        note = Gtk.Label(
+            label=(
+                "Введите Telegram API ID и API Hash. Это не авторизация аккаунта и не SITECTL token; "
+                "tdata всё равно должен быть рабочим и авторизованным."
+            )
+        )
+        note.set_xalign(0)
+        note.set_wrap(True)
+        note.add_css_class("meta")
+        content.append(note)
+
+        grid = Gtk.Grid(row_spacing=8, column_spacing=10)
+        api_id_entry = Gtk.Entry()
+        api_id_entry.set_hexpand(True)
+        api_id_entry.set_placeholder_text("например 123456")
+        if status.get("api_id"):
+            api_id_entry.set_text(str(status.get("api_id") or ""))
+        api_hash_entry = Gtk.Entry()
+        api_hash_entry.set_hexpand(True)
+        api_hash_entry.set_visibility(False)
+        api_hash_entry.set_placeholder_text("api_hash")
+
+        api_id_label = Gtk.Label(label="API ID")
+        api_id_label.set_xalign(0)
+        api_hash_label = Gtk.Label(label="API Hash")
+        api_hash_label.set_xalign(0)
+        grid.attach(api_id_label, 0, 0, 1, 1)
+        grid.attach(api_id_entry, 1, 0, 1, 1)
+        grid.attach(api_hash_label, 0, 1, 1, 1)
+        grid.attach(api_hash_entry, 1, 1, 1, 1)
+        content.append(grid)
+
+        def accept_dialog(*_args: object) -> None:
+            dialog.response(Gtk.ResponseType.ACCEPT)
+
+        api_id_entry.connect("activate", accept_dialog)
+        api_hash_entry.connect("activate", accept_dialog)
+
+        def on_response(native: Gtk.Dialog, response: int) -> None:
+            if response == Gtk.ResponseType.ACCEPT:
+                try:
+                    result = self.backend.save_api_credentials(
+                        account,
+                        api_id=api_id_entry.get_text(),
+                        api_hash=api_hash_entry.get_text(),
+                    )
+                except Exception as exc:
+                    native.destroy()
+                    self._show_error(str(exc))
+                    return
+                saved_slot = str(result.get("slot_number") or slot_number)
+                self.portable_feedback_label.set_label(f"Telegram API сохранён для slot {saved_slot}.")
+                self._append_log(f"Telegram API сохранён для slot {saved_slot}.")
+                self._refresh_preflight(schedule_deep=True)
+            native.destroy()
+
+        dialog.connect("response", on_response)
+        dialog.show()
 
     def _choose_existing_portable_folder(self) -> None:
         chooser = Gtk.FileChooserDialog(

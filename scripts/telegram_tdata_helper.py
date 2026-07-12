@@ -12,9 +12,10 @@ from pathlib import Path
 from typing import Any
 
 try:
-    from opentele.api import UseCurrentSession
+    from opentele.api import APIData, UseCurrentSession
     from opentele.td import TDesktop
 except ImportError:
+    APIData = None
     UseCurrentSession = None
     TDesktop = None
 
@@ -71,6 +72,8 @@ def build_parser() -> argparse.ArgumentParser:
     common.add_argument("--tdata", required=True, help="Path to Telegram Desktop tdata directory.")
     common.add_argument("--session", required=True, help="Path to a Telethon session file.")
     common.add_argument("--passcode", default=None, help="Local Telegram Desktop passcode if configured.")
+    common.add_argument("--api-id", default="", help="Optional Telegram API ID override.")
+    common.add_argument("--api-hash", default="", help="Optional Telegram API hash override.")
 
     list_parser = subparsers.add_parser("list-chats", parents=[common], help="List dialogs from imported tdata session.")
     list_parser.add_argument("--limit", type=int, default=200, help="Maximum number of dialogs to list.")
@@ -431,13 +434,29 @@ def _resolve_access_state(exc: Exception) -> str:
     return "not_found"
 
 
-async def _open_client(tdata_path: str, session_path: str, passcode: str | None):
+async def _open_client(
+    tdata_path: str,
+    session_path: str,
+    passcode: str | None,
+    *,
+    api_id: str | int | None = None,
+    api_hash: str | None = None,
+):
     if TDesktop is None or UseCurrentSession is None:
         raise SystemExit("Missing opentele dependency. Run this helper via the collector venv.")
     tdesk = TDesktop(basePath=tdata_path, passcode=passcode)
     if not tdesk.isLoaded():
         raise SystemExit("Failed to load tdata session.")
-    client = await tdesk.ToTelethon(session=session_path, flag=UseCurrentSession)
+    api_id_text = str(api_id or "").strip()
+    api_hash_text = str(api_hash or "").strip()
+    kwargs: dict[str, Any] = {}
+    if api_id_text or api_hash_text:
+        if APIData is None:
+            raise SystemExit("Missing opentele APIData dependency. Run this helper via the collector venv.")
+        if not api_id_text.isdigit() or not api_hash_text:
+            raise SystemExit("Both --api-id and --api-hash are required for Telegram API override.")
+        kwargs["api"] = APIData(api_id=int(api_id_text), api_hash=api_hash_text)
+    client = await tdesk.ToTelethon(session=session_path, flag=UseCurrentSession, **kwargs)
     await client.connect()
     if not await client.is_user_authorized():
         await client.disconnect()
@@ -445,8 +464,16 @@ async def _open_client(tdata_path: str, session_path: str, passcode: str | None)
     return client
 
 
-async def list_chats(*, tdata_path: str, session_path: str, passcode: str | None, limit: int) -> dict[str, Any]:
-    client = await _open_client(tdata_path, session_path, passcode)
+async def list_chats(
+    *,
+    tdata_path: str,
+    session_path: str,
+    passcode: str | None,
+    api_id: str = "",
+    api_hash: str = "",
+    limit: int,
+) -> dict[str, Any]:
+    client = await _open_client(tdata_path, session_path, passcode, api_id=api_id, api_hash=api_hash)
     items: list[dict[str, Any]] = []
     try:
         async for dialog in client.iter_dialogs(limit=max(limit, 1)):
@@ -459,7 +486,15 @@ async def list_chats(*, tdata_path: str, session_path: str, passcode: str | None
     return {"ok": True, "items": items}
 
 
-async def resolve_chat(*, tdata_path: str, session_path: str, passcode: str | None, chat: str) -> dict[str, Any]:
+async def resolve_chat(
+    *,
+    tdata_path: str,
+    session_path: str,
+    passcode: str | None,
+    api_id: str = "",
+    api_hash: str = "",
+    chat: str,
+) -> dict[str, Any]:
     raw_target = _compact(chat)
     normalized = _public_chat_ref_from_value(raw_target)
     if not normalized:
@@ -476,7 +511,7 @@ async def resolve_chat(*, tdata_path: str, session_path: str, passcode: str | No
             "detail": detail,
         }
 
-    client = await _open_client(tdata_path, session_path, passcode)
+    client = await _open_client(tdata_path, session_path, passcode, api_id=api_id, api_hash=api_hash)
     try:
         try:
             entity = await client.get_entity(int(normalized) if normalized.lstrip("-").isdigit() else normalized)
@@ -510,14 +545,22 @@ async def resolve_chat(*, tdata_path: str, session_path: str, passcode: str | No
         await client.disconnect()
 
 
-async def join_invite(*, tdata_path: str, session_path: str, passcode: str | None, invite_link: str) -> dict[str, Any]:
+async def join_invite(
+    *,
+    tdata_path: str,
+    session_path: str,
+    passcode: str | None,
+    api_id: str = "",
+    api_hash: str = "",
+    invite_link: str,
+) -> dict[str, Any]:
     if CheckChatInviteRequest is None or ImportChatInviteRequest is None:
         raise SystemExit("Missing Telethon invite dependency. Run this helper via the collector venv.")
     invite_hash = _invite_hash_from_value(invite_link)
     if not invite_hash:
         raise SystemExit(f"Unsupported Telegram invite link: {invite_link}")
 
-    client = await _open_client(tdata_path, session_path, passcode)
+    client = await _open_client(tdata_path, session_path, passcode, api_id=api_id, api_hash=api_hash)
     try:
         preview = await client(CheckChatInviteRequest(invite_hash))
         entity = getattr(preview, "chat", None)
@@ -771,6 +814,8 @@ async def export_chat(
     tdata_path: str,
     session_path: str,
     passcode: str | None,
+    api_id: str = "",
+    api_hash: str = "",
     chat_ref: str,
     source: str,
     participants_limit: int,
@@ -779,7 +824,7 @@ async def export_chat(
     include_bots: bool,
     stop_state: Any | None = None,
 ) -> dict[str, Any]:
-    client = await _open_client(tdata_path, session_path, passcode)
+    client = await _open_client(tdata_path, session_path, passcode, api_id=api_id, api_hash=api_hash)
     rows_by_peer: dict[str, dict[str, str]] = {}
     sender_cache: dict[int, Any | None] = {}
     interrupted = False
@@ -894,12 +939,14 @@ async def export_public_phones(
     tdata_path: str,
     session_path: str,
     passcode: str | None,
+    api_id: str = "",
+    api_hash: str = "",
     chat_ref: str,
     history_limit: int,
     progress_every: int,
     stop_state: Any | None = None,
 ) -> dict[str, Any]:
-    client = await _open_client(tdata_path, session_path, passcode)
+    client = await _open_client(tdata_path, session_path, passcode, api_id=api_id, api_hash=api_hash)
     rows_by_phone: dict[str, dict[str, Any]] = {}
     sender_cache: dict[int, Any | None] = {}
     user_about_scanned: set[str] = set()
@@ -1054,6 +1101,8 @@ async def _async_main(args: argparse.Namespace) -> dict[str, Any]:
             tdata_path=tdata_path,
             session_path=session_path,
             passcode=args.passcode,
+            api_id=str(args.api_id or ""),
+            api_hash=str(args.api_hash or ""),
             limit=int(args.limit),
         )
     if args.command == "resolve-chat":
@@ -1061,6 +1110,8 @@ async def _async_main(args: argparse.Namespace) -> dict[str, Any]:
             tdata_path=tdata_path,
             session_path=session_path,
             passcode=args.passcode,
+            api_id=str(args.api_id or ""),
+            api_hash=str(args.api_hash or ""),
             chat=str(args.chat),
         )
     if args.command == "join-invite":
@@ -1068,6 +1119,8 @@ async def _async_main(args: argparse.Namespace) -> dict[str, Any]:
             tdata_path=tdata_path,
             session_path=session_path,
             passcode=args.passcode,
+            api_id=str(args.api_id or ""),
+            api_hash=str(args.api_hash or ""),
             invite_link=str(args.invite_link),
         )
     if args.command == "export-chat":
@@ -1075,6 +1128,8 @@ async def _async_main(args: argparse.Namespace) -> dict[str, Any]:
             tdata_path=tdata_path,
             session_path=session_path,
             passcode=args.passcode,
+            api_id=str(args.api_id or ""),
+            api_hash=str(args.api_hash or ""),
             chat_ref=str(args.chat_ref),
             source=str(args.source),
             participants_limit=int(args.participants_limit),
@@ -1088,6 +1143,8 @@ async def _async_main(args: argparse.Namespace) -> dict[str, Any]:
             tdata_path=tdata_path,
             session_path=session_path,
             passcode=args.passcode,
+            api_id=str(args.api_id or ""),
+            api_hash=str(args.api_hash or ""),
             chat_ref=str(args.chat_ref),
             history_limit=int(args.history_limit),
             progress_every=int(args.progress_every),

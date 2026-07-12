@@ -1,10 +1,49 @@
 # Known Issues And Live Findings
 
+## Самый Новый GUI API Import Finding
+Новый самый свежий факт на 2026-07-12:
+- в профиле GTK-панели появилась кнопка `Импорт API`;
+- оператор может сохранить Telegram `api_id/api_hash` для выбранного slot-профиля;
+- backend хранит значения локально:
+  - `telegram_workspace/accounts/<N>/keys/api_id.txt`
+  - `telegram_workspace/accounts/<N>/keys/api_hash.txt`
+- для `TG_CONTACT N` slot определяется по label/path, поэтому прямой `TG_CONTACT 4` contour поддерживается;
+- tdata-helper теперь принимает `--api-id/--api-hash`, а backend подставляет их автоматически, когда они сохранены;
+- если API ID/Hash не сохранены, helper продолжает старый `UseCurrentSession` path;
+- API Hash не попадает в action log.
+
+Ограничение:
+- импорт API не авторизует Telegram-аккаунт и не чинит сам по себе broken/unauthorized `tdata`;
+- при ошибке вида `tdata helper timed out after 12s: list-chats` всё ещё нужно проверять готовность/авторизацию portable или прямого tdata-профиля.
+
+Verify:
+- `python3 -m unittest discover -s tests -p 'test_*.py'` -> `332 tests OK`, `2 skipped`;
+- `./scripts/verify.sh` -> OK;
+- `python3 -m webcontrol --help` -> OK;
+- `python3 -m webcontrol browser --help` -> OK;
+- `git diff --check` -> OK.
+
+Package/install smoke:
+- `.deb` rebuilt:
+  - `/home/max/site-control-kit/dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`
+  - sha256: `60bc24b08e1088a17e480b526ad5db1af5c6b60b684326131151cc629dc24b00`
+- desktop install-kit updated:
+  - `/home/max/Рабочий стол/telegram-username-collector-install-kit/`
+- local reinstall completed and installed payload contains:
+  - `Импорт API`
+  - `api_credentials_saved`
+  - helper `--api-id`
+- installed GUI smoke screenshots:
+  - `/tmp/tg_gui_api_import_smoke_20260712/window-fresh-profile.png`
+  - `/tmp/tg_gui_api_import_smoke_20260712/api-dialog-root-2.png`
+- action log:
+  - `/home/max/.local/share/site-control-kit/telegram_workspace/logs/gui_actions_20260712T102832Z.log`
+
 ## Самый Новый Product Packaging Finding
 Новый самый свежий факт на 2026-07-12:
 - `.deb` пересобран после installed-mode/security/logging stabilization:
   - `/home/max/site-control-kit/dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`
-  - sha256: `121572953110c23d69354e7438dde86d2b5ffa507fc5833a178cd248e6bb6aa5`
+  - sha256: `60bc24b08e1088a17e480b526ad5db1af5c6b60b684326131151cc629dc24b00`
   - desktop kit: `/home/max/Рабочий стол/telegram-username-collector-install-kit/`
 - package now contains:
   - `cd "$APP_ROOT"` in both Linux wrappers;

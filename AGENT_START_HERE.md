@@ -25,10 +25,45 @@
 ## Что Это За Ветка
 - Репозиторий: `site-control-kit`
 - Ветка: `main`
-- Активная тема: готовый Linux desktop product build для `Telegram Username Collector` с Shadow Admin GTK-панелью, `.deb`-установщиком и масштабированием UI
+- Активная тема: готовый Linux desktop product build для `Telegram Username Collector` с Shadow Admin GTK-панелью, `.deb`-установщиком, масштабированием UI и импортом Telegram API ID/Hash из панели
 - Ближайший контекст: новый пакет собран локально в `dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`; не тащить runtime/generated артефакты в commit без отдельного решения
 
 ## Где Мы Закончили Работу
+- На 2026-07-12 добавлен операторский импорт Telegram API ID/Hash в GUI:
+  - в секции `1. Профиль` появилась кнопка `Импорт API`;
+  - диалог сохраняет `api_id.txt` и `api_hash.txt` в выбранный workspace slot `accounts/<N>/keys/`;
+  - для repo-local профилей вида `TG_CONTACT N` slot определяется по label/path, поэтому текущий прямой контур `TG_CONTACT 4` тоже поддерживается;
+  - `scripts/telegram_tdata_helper.py` теперь принимает `--api-id` и `--api-hash`;
+  - backend автоматически добавляет эти аргументы к tdata-helper run, если для slot есть сохранённые API ID/Hash;
+  - если API ID/Hash не импортированы, helper идёт старым `UseCurrentSession` path без изменения поведения;
+  - API Hash не пишется в action log; лог содержит только `api_credentials_saved slot=N api_id=present api_hash=present`;
+  - это не авторизация Telegram-аккаунта и не SITECTL token: `tdata` всё равно должен быть рабочим и авторизованным.
+- Проверено для API-import pass:
+  - `python3 -m py_compile scripts/telegram_tdata_helper.py scripts/telegram_gui/backend.py scripts/telegram_gui/ui/window.py` -> OK;
+  - `python3 -m unittest tests.test_telegram_gui_backend_features tests.test_telegram_tdata_helper -v` -> `54 tests OK`;
+  - `python3 -m unittest discover -s tests -p 'test_*.py'` -> `332 tests OK`, `2 skipped`;
+  - `./scripts/verify.sh` -> OK;
+  - `python3 -m webcontrol --help` -> OK;
+  - `python3 -m webcontrol browser --help` -> OK;
+  - `git diff --check` -> OK.
+- Package/install smoke после API-import pass:
+  - `.deb` пересобран:
+    - `/home/max/site-control-kit/dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`
+    - sha256: `60bc24b08e1088a17e480b526ad5db1af5c6b60b684326131151cc629dc24b00`;
+  - install-kit обновлён:
+    - `/home/max/Рабочий стол/telegram-username-collector-install-kit/`;
+  - локальная переустановка выполнена:
+    - `sudo apt install -y --reinstall ...`;
+  - installed payload `/opt/telegram-username-collector/app` содержит:
+    - кнопку `Импорт API`;
+    - `api_credentials_saved`;
+    - helper flag `--api-id`;
+  - `cd /tmp && telegram-username-collector --doctor` -> installed mode OK, `hub_reachable=0` ожидаемо без запущенного hub;
+  - installed GUI smoke:
+    - action log: `/home/max/.local/share/site-control-kit/telegram_workspace/logs/gui_actions_20260712T102832Z.log`;
+    - кнопка видна: `/tmp/tg_gui_api_import_smoke_20260712/window-fresh-profile.png`;
+    - диалог открылся: `/tmp/tg_gui_api_import_smoke_20260712/api-dialog-root-2.png`;
+  - GUI smoke-процесс закрыт.
 - На 2026-07-12 выполнен стабилизационный pass по готовой desktop-программе и package/installed-mode:
   - исправлен installed wrapper для `/usr/bin/telegram-username-collector` и `/usr/bin/sitectl`:
     - оба wrapper-а теперь делают `cd "$APP_ROOT"` перед `python -m ...`;
@@ -46,7 +81,7 @@
   - Ctrl+C для `telegram-username-collector` теперь завершает GUI с коротким сообщением и кодом `130`, без traceback;
   - финальный `.deb` пересобран:
     - `/home/max/site-control-kit/dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`
-    - sha256: `121572953110c23d69354e7438dde86d2b5ffa507fc5833a178cd248e6bb6aa5`;
+    - sha256: `60bc24b08e1088a17e480b526ad5db1af5c6b60b684326131151cc629dc24b00`;
   - install-kit обновлён на рабочем столе:
     - `/home/max/Рабочий стол/telegram-username-collector-install-kit/telegram-username-collector_0.1.0_amd64.deb`
     - `/home/max/Рабочий стол/telegram-username-collector-install-kit/telegram-username-collector_0.1.0_amd64.deb.sha256`

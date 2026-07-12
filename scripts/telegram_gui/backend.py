@@ -1368,6 +1368,78 @@ class TelegramGuiBackend:
         token_path = TELEGRAM_WORKSPACE_ROOT / "accounts" / slot_number / "keys" / "api_token.txt"
         self.secret_store.save_registry_file(token_path, "")
 
+    def save_api_credentials(self, account: AccountOption, *, api_id: str, api_hash: str) -> dict[str, str]:
+        slot_number = self._slot_number_for_api_credentials(account)
+        if not slot_number:
+            raise ValueError("Для импорта API нужен профиль TG_CONTACT N или workspace slot.")
+        api_id_text = str(api_id or "").strip()
+        api_hash_text = str(api_hash or "").strip()
+        if not api_id_text.isdigit():
+            raise ValueError("API ID должен быть числом.")
+        if not api_hash_text:
+            raise ValueError("Введите API Hash.")
+        if any(char.isspace() for char in api_hash_text):
+            raise ValueError("API Hash не должен содержать пробелы.")
+        keys_dir = TELEGRAM_WORKSPACE_ROOT / "accounts" / slot_number / "keys"
+        self.secret_store.save_registry_file(keys_dir / "api_id.txt", api_id_text + "\n")
+        self.secret_store.save_registry_file(keys_dir / "api_hash.txt", api_hash_text + "\n")
+        self._log_action(f"api_credentials_saved slot={slot_number} api_id=present api_hash=present")
+        return {"slot_number": slot_number, "api_id": api_id_text, "api_hash": api_hash_text}
+
+    def api_credentials_status(self, account: AccountOption) -> dict[str, str | bool]:
+        slot_number = self._slot_number_for_api_credentials(account)
+        api_id, api_hash = self._slot_api_credentials(slot_number)
+        return {
+            "slot_number": slot_number,
+            "api_id": api_id,
+            "has_api_hash": bool(api_hash),
+        }
+
+    def _slot_number_for_api_credentials(self, account: AccountOption) -> str:
+        for candidate in (
+            account.slot_number,
+            _slot_number_from_source(account.profile_source),
+            _tg_contact_slot_from_label(account.label),
+            _tg_contact_slot_from_label(account.name),
+            _tg_contact_slot_from_label(account.key),
+        ):
+            slot_number = str(candidate or "").strip()
+            if slot_number.isdigit() and int(slot_number) >= 1:
+                return slot_number
+        return ""
+
+    def _slot_api_credentials(self, slot_number: str) -> tuple[str, str]:
+        slot = str(slot_number or "").strip()
+        if not slot:
+            return "", ""
+        keys_dir = TELEGRAM_WORKSPACE_ROOT / "accounts" / slot / "keys"
+        try:
+            api_id = (keys_dir / "api_id.txt").read_text(encoding="utf-8", errors="ignore").strip()
+        except OSError:
+            api_id = ""
+        try:
+            api_hash = (keys_dir / "api_hash.txt").read_text(encoding="utf-8", errors="ignore").strip()
+        except OSError:
+            api_hash = ""
+        if not api_id.isdigit() or not api_hash:
+            return "", ""
+        return api_id, api_hash
+
+    def _slot_number_from_tdata_dir(self, tdata_dir: Path) -> str:
+        text = str(tdata_dir.expanduser()).replace("\\", "/")
+        for pattern in (r"/accounts/(\d+)/", r"/TG_CONTACT/(\d+)(?:/|$)", r"tg-contact-(\d+)"):
+            match = re.search(pattern, text, flags=re.I)
+            if match:
+                return match.group(1)
+        return ""
+
+    def _tdata_helper_api_args(self, tdata_dir: Path) -> list[str]:
+        slot_number = self._slot_number_from_tdata_dir(tdata_dir)
+        api_id, api_hash = self._slot_api_credentials(slot_number)
+        if not api_id or not api_hash:
+            return []
+        return ["--api-id", api_id, "--api-hash", api_hash]
+
     def restart_owned_hub_with_token(self, token: str) -> None:
         hub_state = self._inspect_hub_token_state(token)
         if str(hub_state.get("state") or "") != "owned_mismatch":
@@ -2552,6 +2624,7 @@ class TelegramGuiBackend:
             "--session",
             str(session_path),
         ]
+        args.extend(self._tdata_helper_api_args(tdata_dir))
         if extra_args:
             args.extend(extra_args)
         effective_timeout = timeout_sec if timeout_sec is not None else _tdata_helper_timeout_seconds(command)

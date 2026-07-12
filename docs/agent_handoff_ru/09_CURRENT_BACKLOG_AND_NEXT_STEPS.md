@@ -1,5 +1,34 @@
 # Current Backlog And Next Steps
 
+## Обновление 2026-07-12 (Импорт Telegram API ID/Hash в панели)
+- Новый текущий статус:
+  - в GUI добавлен `Импорт API`;
+  - `api_id/api_hash` сохраняются в `telegram_workspace/accounts/<N>/keys/`;
+  - backend подставляет сохранённые значения в tdata-helper;
+  - старый tdata path без API override сохранён.
+- Что уже проверено:
+  - targeted backend/helper tests -> `54 tests OK`
+  - full suite -> `332 tests OK`, `2 skipped`
+  - `./scripts/verify.sh` -> OK
+  - CLI help -> OK
+  - `git diff --check` -> OK
+- Пакет/установка:
+  - `.deb` пересобран:
+    - `/home/max/site-control-kit/dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`
+    - sha256: `60bc24b08e1088a17e480b526ad5db1af5c6b60b684326131151cc629dc24b00`
+  - install-kit обновлён:
+    - `/home/max/Рабочий стол/telegram-username-collector-install-kit/`
+  - локальная переустановка выполнена;
+  - installed GUI smoke подтвердил кнопку и диалог:
+    - `/tmp/tg_gui_api_import_smoke_20260712/window-fresh-profile.png`
+    - `/tmp/tg_gui_api_import_smoke_20260712/api-dialog-root-2.png`
+- Новый ближайший следующий шаг:
+  - если пользователь хочет реально использовать импорт, вставить реальные Telegram API ID/Hash через кнопку `Импорт API` и затем повторить `Подключить Telegram` на рабочем tdata-профиле.
+- Что важно не перепутать:
+  - это Telegram API ID/Hash, а не SITECTL token;
+  - импорт API не заменяет авторизованный `tdata`;
+  - секретный `api_hash` нельзя выводить в user-facing логи или docs.
+
 ## Обновление 2026-07-12 (Product package stabilization)
 - Новый текущий статус:
   - готовый package пересобран и install-kit обновлён;
@@ -9,7 +38,7 @@
 - Что уже проверено:
   - `.deb`:
     - `/home/max/site-control-kit/dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`
-    - sha256: `121572953110c23d69354e7438dde86d2b5ffa507fc5833a178cd248e6bb6aa5`
+    - sha256: `60bc24b08e1088a17e480b526ad5db1af5c6b60b684326131151cc629dc24b00`
   - install-kit:
     - `/home/max/Рабочий стол/telegram-username-collector-install-kit/`
   - final live smoke:

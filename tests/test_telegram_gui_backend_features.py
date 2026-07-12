@@ -389,6 +389,80 @@ class TelegramGuiBackendFeatureTests(unittest.TestCase):
             mod.USER_REGISTRY_PATH = old_registry
             mod.DEFAULT_PROFILE_DIR = old_default_profile
 
+    def test_save_api_credentials_writes_slot_keys_without_leaking_hash_to_action_log(self) -> None:
+        old_root = mod.TELEGRAM_WORKSPACE_ROOT
+        old_registry = mod.USER_REGISTRY_PATH
+        old_default_profile = mod.DEFAULT_PROFILE_DIR
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                root = Path(td) / "telegram_workspace"
+                mod.TELEGRAM_WORKSPACE_ROOT = root
+                mod.USER_REGISTRY_PATH = root / "registry" / "users.json"
+                mod.DEFAULT_PROFILE_DIR = root / "profiles" / "default"
+                mod.layout_mod.ensure_workspace(root, slots=4)
+                profile_dir = root / "accounts" / "4" / "profile"
+                (profile_dir / "Default").mkdir(parents=True)
+
+                backend = mod.TelegramGuiBackend(action_log_path=root / "logs" / "actions.log")
+                account = backend.load_accounts()[0]
+                result = backend.save_api_credentials(
+                    account,
+                    api_id="123456",
+                    api_hash="abcdef1234567890abcdef1234567890",
+                )
+
+                keys_dir = root / "accounts" / "4" / "keys"
+                self.assertEqual(result["slot_number"], "4")
+                self.assertEqual((keys_dir / "api_id.txt").read_text(encoding="utf-8").strip(), "123456")
+                self.assertEqual(
+                    (keys_dir / "api_hash.txt").read_text(encoding="utf-8").strip(),
+                    "abcdef1234567890abcdef1234567890",
+                )
+                self.assertEqual(
+                    backend._tdata_helper_api_args(root / "accounts" / "4" / "runtime" / "portable_tdata"),
+                    ["--api-id", "123456", "--api-hash", "abcdef1234567890abcdef1234567890"],
+                )
+                status = backend.api_credentials_status(account)
+                self.assertEqual(status["slot_number"], "4")
+                self.assertEqual(status["api_id"], "123456")
+                self.assertTrue(status["has_api_hash"])
+                action_log = (root / "logs" / "actions.log").read_text(encoding="utf-8")
+                self.assertIn("api_credentials_saved slot=4", action_log)
+                self.assertNotIn("abcdef1234567890abcdef1234567890", action_log)
+        finally:
+            mod.TELEGRAM_WORKSPACE_ROOT = old_root
+            mod.USER_REGISTRY_PATH = old_registry
+            mod.DEFAULT_PROFILE_DIR = old_default_profile
+
+    def test_save_api_credentials_rejects_missing_slot_and_invalid_values(self) -> None:
+        backend = mod.TelegramGuiBackend(action_log_path=Path("/tmp/gui-actions.log"))
+        account = mod.AccountOption(
+            key="registry:alice",
+            label="alice",
+            name="alice",
+            token="token",
+            profile_source="/tmp/profile",
+            source_kind="registry",
+            sort_key=(0, "alice", "/tmp/profile"),
+        )
+
+        with self.assertRaisesRegex(ValueError, "TG_CONTACT N"):
+            backend.save_api_credentials(account, api_id="123456", api_hash="abcdef")
+
+        slot_account = mod.AccountOption(
+            key="auto:slot",
+            label="TG_CONTACT 4",
+            name="TG_CONTACT 4",
+            token="token",
+            profile_source="/tmp/profile",
+            source_kind="auto",
+            sort_key=(0, "tg", "/tmp/profile"),
+        )
+        with self.assertRaisesRegex(ValueError, "числом"):
+            backend.save_api_credentials(slot_account, api_id="abc", api_hash="abcdef")
+        with self.assertRaisesRegex(ValueError, "API Hash"):
+            backend.save_api_credentials(slot_account, api_id="123456", api_hash="")
+
     def test_load_accounts_dedupes_auto_slot_when_registry_row_uses_runtime_path(self) -> None:
         old_root = mod.TELEGRAM_WORKSPACE_ROOT
         old_registry = mod.USER_REGISTRY_PATH

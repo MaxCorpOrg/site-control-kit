@@ -12,6 +12,41 @@ Repo-root entrypoint для любого агента: `AGENT_START_HERE.md`.
 
 ## Сделано
 
+### Обновление 2026-07-12 (Импорт Telegram API ID/Hash в GUI)
+- В GTK-панель добавлена кнопка `Импорт API` в секции `1. Профиль`.
+- Диалог сохраняет Telegram `api_id` и `api_hash` локально в выбранный slot:
+  - `telegram_workspace/accounts/<N>/keys/api_id.txt`
+  - `telegram_workspace/accounts/<N>/keys/api_hash.txt`
+- Для repo-local профилей `TG_CONTACT N` slot определяется по label/path, поэтому текущий прямой контур `TG_CONTACT 4` поддерживается.
+- `scripts/telegram_tdata_helper.py` теперь принимает `--api-id` и `--api-hash`.
+- Backend автоматически передаёт сохранённые API ID/Hash в tdata-helper, если они есть для slot.
+- Если API ID/Hash не импортированы, старый `UseCurrentSession` path остаётся без изменений.
+- Безопасность:
+  - API Hash не пишется в action-log;
+  - в лог пишется только факт `api_credentials_saved slot=N api_id=present api_hash=present`;
+  - это не SITECTL token и не Telegram-авторизация: `tdata` всё равно должен быть рабочим и авторизованным.
+- Проверено:
+  - `python3 -m py_compile scripts/telegram_tdata_helper.py scripts/telegram_gui/backend.py scripts/telegram_gui/ui/window.py` -> OK
+  - `python3 -m unittest tests.test_telegram_gui_backend_features tests.test_telegram_tdata_helper -v` -> `54 tests OK`
+  - `python3 -m unittest discover -s tests -p 'test_*.py'` -> `332 tests OK`, `2 skipped`
+  - `./scripts/verify.sh` -> OK
+  - `python3 -m webcontrol --help` -> OK
+  - `python3 -m webcontrol browser --help` -> OK
+  - `git diff --check` -> OK
+- Пакет и установленная панель:
+  - `.deb` пересобран:
+    - `/home/max/site-control-kit/dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`
+    - sha256: `60bc24b08e1088a17e480b526ad5db1af5c6b60b684326131151cc629dc24b00`
+  - install-kit обновлён:
+    - `/home/max/Рабочий стол/telegram-username-collector-install-kit/`
+  - текущий хост переустановлен через `sudo apt install -y --reinstall ...`
+  - installed payload `/opt/telegram-username-collector/app` содержит новую кнопку и helper API flags
+  - `cd /tmp && telegram-username-collector --doctor` -> installed mode OK, `hub_reachable=0` ожидаемо без hub
+  - installed GUI smoke:
+    - action log: `/home/max/.local/share/site-control-kit/telegram_workspace/logs/gui_actions_20260712T102832Z.log`
+    - кнопка `Импорт API`: `/tmp/tg_gui_api_import_smoke_20260712/window-fresh-profile.png`
+    - диалог `Импорт Telegram API`: `/tmp/tg_gui_api_import_smoke_20260712/api-dialog-root-2.png`
+
 ### Обновление 2026-07-12 (Стабилизация установленной программы и безопасной диагностики)
 - Исправлен installed-mode запуск:
   - `/usr/bin/telegram-username-collector` и `/usr/bin/sitectl` теперь переходят в `/opt/telegram-username-collector/app` перед запуском Python;
@@ -29,7 +64,7 @@ Repo-root entrypoint для любого агента: `AGENT_START_HERE.md`.
   - код: `130`.
 - Финальный установочный артефакт:
   - `/home/max/site-control-kit/dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`
-  - sha256: `121572953110c23d69354e7438dde86d2b5ffa507fc5833a178cd248e6bb6aa5`
+  - sha256: `60bc24b08e1088a17e480b526ad5db1af5c6b60b684326131151cc629dc24b00`
   - install-kit на рабочем столе: `/home/max/Рабочий стол/telegram-username-collector-install-kit/`
 - Проверено:
   - `python3 -m unittest discover -s tests -p 'test_*.py'` -> `330 tests OK`, `2 skipped`

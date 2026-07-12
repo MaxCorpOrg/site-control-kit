@@ -1,5 +1,38 @@
 # CODEX_STATE
 
+## 2026-07-12 (GUI Telegram API import for tdata helper)
+
+- Scope:
+  - added an operator-facing Telegram API ID/Hash import path to the GTK panel
+  - kept existing `UseCurrentSession` tdata behavior as the default when no API credentials are saved
+  - did not change Telegram authorization semantics: imported API ID/Hash do not replace a working authorized `tdata`
+- Code changes:
+  - `scripts/telegram_gui/ui/window.py` adds `Импорт API` in the profile action row and opens a modal dialog for Telegram `api_id/api_hash`
+  - `scripts/telegram_gui/backend.py` saves credentials to `telegram_workspace/accounts/<N>/keys/api_id.txt` and `api_hash.txt`, resolves slots from workspace paths or `TG_CONTACT N` labels, and avoids logging secret values
+  - `scripts/telegram_gui/backend.py` appends `--api-id/--api-hash` to tdata-helper calls when saved credentials exist for the target slot
+  - `scripts/telegram_tdata_helper.py` accepts optional `--api-id/--api-hash` and passes a custom `APIData` object to opentele only when both values are present
+  - `tests/test_telegram_gui_backend_features.py` covers slot key writes, no API hash leakage to action logs, status readback, and validation errors
+- Verify:
+  - `python3 -m py_compile scripts/telegram_tdata_helper.py scripts/telegram_gui/backend.py scripts/telegram_gui/ui/window.py` -> OK
+  - `python3 -m unittest tests.test_telegram_gui_backend_features tests.test_telegram_tdata_helper -v` -> `54 tests OK`
+  - `python3 -m unittest discover -s tests -p 'test_*.py'` -> `332 tests OK`, `2 skipped`
+  - `./scripts/verify.sh` -> OK
+  - `python3 -m webcontrol --help` -> OK
+  - `python3 -m webcontrol browser --help` -> OK
+  - `git diff --check` -> OK
+- Package/install smoke:
+  - rebuilt `.deb`: `/home/max/site-control-kit/dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`
+  - sha256: `60bc24b08e1088a17e480b526ad5db1af5c6b60b684326131151cc629dc24b00`
+  - desktop install kit updated: `/home/max/Рабочий стол/telegram-username-collector-install-kit/`
+  - local reinstall completed with `sudo apt install -y --reinstall ...`
+  - installed payload in `/opt/telegram-username-collector/app` contains `Импорт API`, `api_credentials_saved`, and helper `--api-id`
+  - `cd /tmp && telegram-username-collector --doctor` -> installed mode OK, expected `hub_reachable=0`
+  - installed GUI smoke:
+    - action log: `/home/max/.local/share/site-control-kit/telegram_workspace/logs/gui_actions_20260712T102832Z.log`
+    - button screenshot: `/tmp/tg_gui_api_import_smoke_20260712/window-fresh-profile.png`
+    - dialog screenshot: `/tmp/tg_gui_api_import_smoke_20260712/api-dialog-root-2.png`
+  - GUI process was closed after smoke
+
 ## 2026-07-12 (Product package stabilization: installed root, safe diagnostics, live action log)
 
 - Scope:
@@ -14,7 +47,7 @@
   - `scripts/telegram_username_collector_launcher.py` handles Ctrl+C as a clean exit code `130` without traceback
 - Installer artifact:
   - `/home/max/site-control-kit/dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`
-  - sha256: `121572953110c23d69354e7438dde86d2b5ffa507fc5833a178cd248e6bb6aa5`
+  - sha256: `60bc24b08e1088a17e480b526ad5db1af5c6b60b684326131151cc629dc24b00`
   - desktop install kit:
     - `/home/max/Рабочий стол/telegram-username-collector-install-kit/telegram-username-collector_0.1.0_amd64.deb`
     - `/home/max/Рабочий стол/telegram-username-collector-install-kit/telegram-username-collector_0.1.0_amd64.deb.sha256`

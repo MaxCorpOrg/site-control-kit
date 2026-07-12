@@ -75,9 +75,26 @@ find /home/max/telegram_contact_batches/chat_-1002465948544/chains -maxdepth 2 -
 
 ## Что Сейчас Самое Важное
 Новый верхний факт на 2026-07-12:
+- в GTK-панели добавлен `Импорт API` для Telegram API ID/Hash:
+  - сохраняет `accounts/<N>/keys/api_id.txt` и `api_hash.txt`;
+  - поддерживает workspace slots и repo-local `TG_CONTACT N`;
+  - tdata-helper автоматически получает `--api-id/--api-hash`, если они сохранены;
+  - без сохранённых API ID/Hash поведение остаётся старым `UseCurrentSession`;
+  - API Hash не пишется в action log.
+- verify:
+  - full suite -> `332 tests OK`, `2 skipped`
+  - `./scripts/verify.sh` -> OK
+- `.deb` пересобран и установлен локально:
+  - sha256: `60bc24b08e1088a17e480b526ad5db1af5c6b60b684326131151cc629dc24b00`
+  - install-kit: `/home/max/Рабочий стол/telegram-username-collector-install-kit/`
+  - installed GUI smoke screenshots:
+    - `/tmp/tg_gui_api_import_smoke_20260712/window-fresh-profile.png`
+    - `/tmp/tg_gui_api_import_smoke_20260712/api-dialog-root-2.png`
+
+Новый верхний факт на 2026-07-12:
 - готовый Linux `.deb` пересобран после package-stabilization pass:
   - `/home/max/site-control-kit/dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`
-  - sha256: `121572953110c23d69354e7438dde86d2b5ffa507fc5833a178cd248e6bb6aa5`
+  - sha256: `60bc24b08e1088a17e480b526ad5db1af5c6b60b684326131151cc629dc24b00`
   - install-kit: `/home/max/Рабочий стол/telegram-username-collector-install-kit/`
 - fixed installed-mode:
   - `/usr/bin/telegram-username-collector` и `/usr/bin/sitectl` теперь `cd "$APP_ROOT"` перед Python;
