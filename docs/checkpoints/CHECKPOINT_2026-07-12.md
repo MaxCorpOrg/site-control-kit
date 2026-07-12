@@ -57,10 +57,26 @@
 - `dpkg-deb -x` package content check -> OK
 - build-root installed-mode `telegram-username-collector --doctor` -> OK with expected `hub_reachable=0`
 
+## Installed Smoke After Sudo Access
+- Real local reinstall is now complete:
+  - `sudo apt install -y --reinstall ./telegram-username-collector_0.1.0_amd64.deb`
+- Verified `/opt` payload:
+  - wrappers contain `cd "$APP_ROOT"`
+  - app contains `SITECTL_TOKEN_REDACTED`, `app_started`, `profiles_refreshed`, and the Shadow Admin logo asset
+- Verified installed runtime:
+  - `cd /tmp && telegram-username-collector --doctor`
+  - `project_root=/opt/telegram-username-collector/app`
+  - `gtk_runtime=ok`
+  - `extension_zip_ready=1`
+  - `hub_reachable=0` because hub was not started
+- Verified installed GUI:
+  - `telegram-username-collector --ui-scale 1.15`
+  - window opened in `Installed .deb mode`
+  - action log: `/home/max/.local/share/site-control-kit/telegram_workspace/logs/gui_actions_20260712T081230Z.log`
+
 ## Limits And Risks
-- Real local reinstall was not performed because `sudo -n apt install ...` required a password.
-- The package itself was validated through `dpkg-deb -x` and build-root installed-mode execution.
-- Current system `/opt/telegram-username-collector` may remain stale until the user runs the install command manually.
+- External clean Ubuntu install smoke is still optional before wider distribution.
+- The local desktop was cleaned after smoke; temporary `telegram-installed-smoke-*` folder was moved to trash.
 - Do not commit ignored/generated artifacts:
   - `dist/`
   - `.site-control-kit/`
@@ -76,7 +92,7 @@
   - `ПРОКСИ/`
 
 ## Next Step
-- If the user wants the package installed on this host:
+- If the user wants to install on another host:
   - `cd "/home/max/Рабочий стол/telegram-username-collector-install-kit"`
   - `sha256sum -c telegram-username-collector_0.1.0_amd64.deb.sha256`
   - `sudo apt install ./telegram-username-collector_0.1.0_amd64.deb`

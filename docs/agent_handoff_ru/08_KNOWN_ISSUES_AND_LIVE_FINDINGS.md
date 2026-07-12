@@ -19,8 +19,12 @@
   - full suite -> `330 tests OK`, `2 skipped`
   - `./scripts/verify.sh` -> OK
   - package extraction/build-root installed-mode `--doctor` -> OK with expected `hub_reachable=0`
-- remaining limitation:
-  - real `sudo apt install` on this host was blocked by sudo password; run that as a separate manual/clean Ubuntu smoke before external delivery if needed.
+- actual local installed `/opt` smoke after sudo access:
+  - package reinstalled with `sudo apt install -y --reinstall ./telegram-username-collector_0.1.0_amd64.deb`
+  - `/opt` payload contains current fixes
+  - `cd /tmp && telegram-username-collector --doctor` -> `project_root=/opt/telegram-username-collector/app`, `gtk_runtime=ok`, `extension_zip_ready=1`, expected `hub_reachable=0`
+  - installed GUI command opened in `Installed .deb mode`
+  - action log: `/home/max/.local/share/site-control-kit/telegram_workspace/logs/gui_actions_20260712T081230Z.log`
 
 Новый самый свежий факт на 2026-07-11 уже не про Telegram access, а про готовый desktop product contour:
 - собран локальный Linux `.deb`:

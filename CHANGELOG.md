@@ -26,8 +26,12 @@
   - package content check via `dpkg-deb -x` -> OK
   - build-root installed-mode `--doctor` -> OK with expected `hub_reachable=0`
   - live GUI smoke -> `/home/max/Рабочий стол/telegram-program-live-smoke-20260712T065625Z-final`
-- Ограничение:
-  - реальный local `sudo apt install` не выполнен: passwordless sudo недоступен в текущей Codex-сессии.
+- После выдачи sudo-доступа выполнен реальный local reinstall:
+  - `sudo apt install -y --reinstall ./telegram-username-collector_0.1.0_amd64.deb`
+  - `/opt` payload содержит текущие фиксы;
+  - `cd /tmp && telegram-username-collector --doctor` -> OK with expected `hub_reachable=0`;
+  - установленная GUI-команда открылась в `Installed .deb mode`;
+  - action log: `/home/max/.local/share/site-control-kit/telegram_workspace/logs/gui_actions_20260712T081230Z.log`.
 
 ## 2026-07-11
 

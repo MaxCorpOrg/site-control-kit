@@ -67,9 +67,13 @@
     - `python3 -m webcontrol browser --help` -> OK
     - `python3 -m py_compile` по изменённым runtime/GUI files -> OK
     - `python3 -m webcontrol runtime-env --format json --no-create` -> redacted OK;
-  - ограничение:
-    - локальный `sudo apt install ./dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb` не выполнен, потому что `sudo -n` запросил пароль;
-    - вместо этого package проверен через `dpkg-deb -x`/build-root installed-mode smoke.
+  - после этого пользователь дал sudo-доступ и реальная локальная переустановка уже выполнена:
+    - `sudo apt install -y --reinstall ./telegram-username-collector_0.1.0_amd64.deb`
+    - installed `/opt` проверен по маркерам `cd "$APP_ROOT"`, `SITECTL_TOKEN_REDACTED`, `app_started`, `profiles_refreshed`;
+    - `cd /tmp && telegram-username-collector --doctor` -> `project_root=/opt/telegram-username-collector/app`, `gtk_runtime=ok`, `extension_zip_ready=1`, `hub_reachable=0`;
+    - установленная GUI-команда `telegram-username-collector --ui-scale 1.15` реально открыла окно `Installed .deb mode`;
+    - action log: `/home/max/.local/share/site-control-kit/telegram_workspace/logs/gui_actions_20260712T081230Z.log`;
+    - временная smoke-папка на рабочем столе убрана в корзину, чтобы не захламлять Desktop.
 - На 2026-07-11 собран готовый рабочий desktop-контур программы:
   - GTK-панель осталась основным операторским интерфейсом;
   - в launcher добавлен параметр `--ui-scale`;

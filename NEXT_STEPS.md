@@ -64,6 +64,12 @@
 - Ctrl+C smoke:
   - код `130`
   - без traceback
+- Реальная локальная переустановка уже выполнена:
+  - `sudo apt install -y --reinstall ./telegram-username-collector_0.1.0_amd64.deb`
+  - `/opt/telegram-username-collector/app` проверен и содержит текущие фиксы
+  - `cd /tmp && telegram-username-collector --doctor` -> `project_root=/opt/telegram-username-collector/app`, `gtk_runtime=ok`, `extension_zip_ready=1`
+  - `telegram-username-collector --ui-scale 1.15` открыл GUI в `Installed .deb mode`
+  - installed action log: `/home/max/.local/share/site-control-kit/telegram_workspace/logs/gui_actions_20260712T081230Z.log`
 - Unified `public_phones` flow теперь согласован в helper, GUI, history и `INDEX.md`:
   - `phones_found` = total unique phones
   - `private_phones_found` = private-only split
@@ -99,11 +105,10 @@
 
 ## Что осталось
 
-- Optional packaging check перед внешней передачей:
-  - выполнить реальный `sudo apt install ./telegram-username-collector_0.1.0_amd64.deb` из папки `/home/max/Рабочий стол/telegram-username-collector-install-kit/` на чистой/тестовой Ubuntu-среде
-  - запустить установленный `telegram-username-collector --doctor`
-  - открыть GUI из desktop launcher
-  - на текущем хосте `sudo -n apt install ...` был заблокирован паролем, поэтому этот пункт остаётся только ручным/отдельным smoke
+- Optional packaging check перед внешней передачей на другой ПК:
+  - повторить установку из `/home/max/Рабочий стол/telegram-username-collector-install-kit/` на чистой/тестовой Ubuntu-среде
+  - запустить `cd /tmp && telegram-username-collector --doctor`
+  - открыть GUI из desktop launcher / меню приложений
 - Если нужен следующий live-pass без recovery-работ, идти уже через ready source `TG_CONTACT 4`:
   - либо анализировать текущие `145` номеров,
   - либо брать следующий чат тем же direct helper/API path

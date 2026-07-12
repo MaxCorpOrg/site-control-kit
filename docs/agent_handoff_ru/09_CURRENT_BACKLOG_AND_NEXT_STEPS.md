@@ -19,17 +19,17 @@
   - `./scripts/verify.sh` -> OK
   - build-root installed-mode `--doctor` -> OK
   - Ctrl+C -> code `130`, no traceback
+- Установка на текущем хосте уже выполнена после sudo-доступа:
+  - `sudo apt install -y --reinstall ./telegram-username-collector_0.1.0_amd64.deb`
+  - `cd /tmp && telegram-username-collector --doctor` -> `project_root=/opt/telegram-username-collector/app`, `gtk_runtime=ok`, `extension_zip_ready=1`
+  - `telegram-username-collector --ui-scale 1.15` открыл GUI в `Installed .deb mode`
+  - action log: `/home/max/.local/share/site-control-kit/telegram_workspace/logs/gui_actions_20260712T081230Z.log`
 - Новый ближайший следующий шаг:
-  - если нужно реально установить на текущем хосте, пользователь должен выполнить:
-    - `cd "/home/max/Рабочий стол/telegram-username-collector-install-kit"`
-    - `sudo apt install ./telegram-username-collector_0.1.0_amd64.deb`
-  - затем проверить:
-    - `cd /tmp && telegram-username-collector --doctor`
-    - запуск из меню/ярлыка.
+  - если нужно проверить переносимость, повторить install-kit на другом Ubuntu ПК.
 - Что важно не перепутать:
   - `dist/` остаётся ignored build artifact;
-  - `sudo -n apt install ...` в Codex-сессии был заблокирован паролем, это не defect package-а;
-  - старый installed `/opt` на этой машине может оставаться stale до ручной переустановки.
+  - старый installed `/opt` на этой машине уже обновлён после `--reinstall`;
+  - `hub_reachable=0` в `--doctor` означает только, что hub не запущен.
 
 ## Обновление 2026-07-11 (Ready desktop program package)
 - Новый текущий статус:

@@ -43,8 +43,12 @@ Repo-root entrypoint для любого агента: `AGENT_START_HERE.md`.
     - `/home/max/Рабочий стол/telegram-program-live-smoke-20260712T065625Z-final`
     - X11 scroll/hover/click по `Обновить профили` прошли
     - hover screenshot: `/home/max/Рабочий стол/telegram-program-live-smoke-20260712T065625Z-final/screenshot-hover-refresh.png`
-- Ограничение:
-  - локальный `sudo apt install` не выполнен, потому что `sudo -n` запросил пароль; проверка сделана через package extraction/build-root installed-mode.
+- После выдачи sudo-доступа выполнена реальная локальная переустановка:
+  - `sudo apt install -y --reinstall ./telegram-username-collector_0.1.0_amd64.deb`
+  - `/opt/telegram-username-collector/app` содержит текущие фиксы;
+  - `cd /tmp && telegram-username-collector --doctor` -> `project_root=/opt/telegram-username-collector/app`, `gtk_runtime=ok`, `extension_zip_ready=1`;
+  - `telegram-username-collector --ui-scale 1.15` открыл установленную GUI-панель в `Installed .deb mode`;
+  - action-log установленной версии: `/home/max/.local/share/site-control-kit/telegram_workspace/logs/gui_actions_20260712T081230Z.log`.
 
 ### Обновление 2026-07-11 (Готовая desktop-программа, установщик, масштабирование)
 - Подготовлен готовый Linux desktop contour для `Telegram Username Collector`:

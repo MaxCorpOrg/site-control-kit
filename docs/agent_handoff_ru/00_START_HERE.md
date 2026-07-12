@@ -91,8 +91,11 @@ find /home/max/telegram_contact_batches/chat_-1002465948544/chains -maxdepth 2 -
 - verify:
   - `./scripts/verify.sh` -> OK
   - full suite -> `330 tests OK`, `2 skipped`
-- limitation:
-  - реальный local `sudo apt install` не выполнен, потому что passwordless sudo недоступен; package проверен через `dpkg-deb -x` и build-root installed-mode smoke.
+- actual local install is now also verified after sudo access:
+  - `sudo apt install -y --reinstall ./telegram-username-collector_0.1.0_amd64.deb`
+  - `cd /tmp && telegram-username-collector --doctor` -> `project_root=/opt/telegram-username-collector/app`, `gtk_runtime=ok`, `extension_zip_ready=1`, expected `hub_reachable=0`
+  - installed GUI command opened in `Installed .deb mode`
+  - action log: `/home/max/.local/share/site-control-kit/telegram_workspace/logs/gui_actions_20260712T081230Z.log`
 
 Новый publish-control факт на 2026-05-12 уже такой:
 - старый Linux installed-mode gate на `b740d66` исторически закрыт со статусом `PASS with warning`;
@@ -220,7 +223,7 @@ find /home/max/telegram_contact_batches/chat_-1002465948544/chains -maxdepth 2 -
 Предыдущий верхний handoff-факт на 2026-05-11:
 - выполнен `Clean Ubuntu .deb Smoke Attempt` после push `main`;
 - current host: `Ubuntu 24.04.4 LTS`, GNOME/X11, `Python 3.12.3`, но это не подтверждённая clean VM;
-- `sudo -n true` и `sudo -n apt install ...telegram-username-collector_0.1.0_amd64.deb` вернули `sudo: a password is required`, поэтому настоящий system install smoke ещё не закрыт;
+- исторически `sudo -n true` и `sudo -n apt install ...telegram-username-collector_0.1.0_amd64.deb` вернули `sudo: a password is required`; этот старый blocker superseded фактом 2026-07-12, где local reinstall через `sudo apt install --reinstall` уже выполнен и проверен;
 - fresh clone path: `/home/max/site-control-kit-product-smoke-20260511-164357`;
 - fresh clone evidence:
   - `HEAD` -> `3412ccd26d5ebcd3710a50b8f6c0b5b9696a6447`

@@ -40,6 +40,22 @@
   - hover screenshot:
     - `/home/max/Рабочий стол/telegram-program-live-smoke-20260712T065625Z-final/screenshot-hover-refresh.png`
   - Ctrl+C smoke returned code `130` and printed `INFO: telegram GUI interrupted by user.` without traceback
+- Installed `/opt` smoke after sudo access:
+  - local reinstall completed with:
+    - `sudo apt install -y --reinstall ./telegram-username-collector_0.1.0_amd64.deb`
+  - `/usr/bin/telegram-username-collector` and `/usr/bin/sitectl` contain `cd "$APP_ROOT"`
+  - `/opt/telegram-username-collector/app` contains `SITECTL_TOKEN_REDACTED`, `app_started`, `profiles_refreshed`, and the Shadow Admin logo asset
+  - `cd /tmp && telegram-username-collector --doctor`:
+    - `mode=installed`
+    - `project_root=/opt/telegram-username-collector/app`
+    - `gtk_runtime=ok`
+    - `extension_zip_ready=1`
+    - `hub_reachable=0` because hub was not started
+  - installed GUI command launched successfully:
+    - `telegram-username-collector --ui-scale 1.15`
+    - visible window showed `Installed .deb mode`
+    - action log: `/home/max/.local/share/site-control-kit/telegram_workspace/logs/gui_actions_20260712T081230Z.log`
+  - temporary installed-smoke Desktop folder was moved to trash after verification
 - Verify:
   - `python3 -m unittest discover -s tests -p 'test_*.py'` -> `330 tests OK`, `2 skipped`
   - `./scripts/verify.sh` -> OK
@@ -47,9 +63,9 @@
   - `python3 -m webcontrol browser --help` -> OK
   - `python3 -m py_compile webcontrol/settings.py webcontrol/cli.py scripts/telegram_product_runtime.py scripts/telegram_username_collector_launcher.py scripts/telegram_gui/app.py scripts/telegram_gui/backend.py` -> OK
   - `python3 -m webcontrol runtime-env --format json --no-create` -> token redaction OK
-- Limitation:
-  - real local reinstall with `sudo apt install ./dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb` was blocked because passwordless sudo is not available in this Codex session
-  - package was validated via `dpkg-deb -x` and build-root installed-mode execution instead
+- Remaining limitation:
+  - `hub_reachable=0` is still expected when the hub is not running
+  - external clean-machine Ubuntu install smoke is still optional before broader distribution
 
 ## 2026-07-11 (Ready desktop product: GTK panel, installer, UI scaling)
 
