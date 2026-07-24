@@ -1,175 +1,50 @@
-# Browser Quickstart
+# Быстрый старт браузерного контура
 
-Короткий вход в `site-control-kit` как в локальный инструмент управления браузером.
+Полная инструкция находится в [руководстве пользователя](USER_GUIDE_RU.md).
+Здесь только минимальный рабочий путь.
 
-## Что Это
-Инструмент состоит из трёх частей:
-- локальный Python-хаб, который принимает и раздаёт команды;
-- CLI и Windows-обёртки, через которые агент или оператор работает с браузером;
-- браузерное расширение, которое исполняет команды во вкладках.
-
-Если репозиторий открыт в рабочей папке, считайте этот инструмент основным способом управления браузером.
-
-## Runtime
-
-- runtime root по умолчанию: `./var/site-control-kit`;
-- precedence настроек: `env` -> `.env` -> `.site-control-kit/local.yaml` -> `config/default.yaml`;
-- если найден legacy runtime `~/.site-control-kit`, wrappers не переносят его автоматически, а работают через локальный pointer-config;
-- если токен не задан, локальный runtime создаёт `.site-control-kit/generated_token.txt`;
-- machine-readable runtime logs:
-  - `logs/runtime_events.jsonl`
-  - `logs/runtime_errors.jsonl`
-- первый безопасный probe:
+## Запуск
 
 ```bash
-python3 -m webcontrol runtime-env --format json
+PYTHONPATH="$PWD" python3 -m webcontrol serve
 ```
 
-Этот JSON теперь полезен не только для путей, но и для диагностики режима:
-- `SITECTL_RUNTIME_MODE`
-- `SITECTL_LEGACY_RUNTIME_DETECTED`
-- `SITECTL_TOKEN_SOURCE`
-
-## Быстрый Старт
-
-Нужно, чтобы:
-- расширение Chrome или Edge уже было загружено из `extension/`;
-- в настройках расширения стоял `http://127.0.0.1:8765`;
-- токен расширения совпадал с токеном хаба.
-
-Запуск из корня репозитория:
-
-```cmd
-start-hub.cmd
-browser.cmd status
-browser.cmd tabs
-```
-
-Если вы запускаете команды из чистого PowerShell и bare `browser.cmd` не находится, используйте `.\browser.cmd ...` или временно добавьте корень репозитория в `PATH`.
-
-Если `status` показывает клиента, контур готов к работе.
-
-Для Linux есть единый запускной вход:
+После установки расширения:
 
 ```bash
-cd <repo-root>
-python3 -m pip install -r requirements.txt
-python3 -m pip install -e .
-./start-browser.sh
-./browser.sh status
-./browser.sh tabs
+sitectl browser status
+sitectl browser tabs
+sitectl browser open https://example.com
+sitectl browser snapshot
 ```
 
-Скрипт `start-browser.sh` сам поднимет хаб и попытается запустить совместимый браузерный клиент.
-Если токен не задан через `SITECTL_TOKEN` или `.env`, локальный runtime сгенерирует `.site-control-kit/generated_token.txt`.
+Ожидается онлайн‑клиент, вкладка `example.com` и семантические строки с `ref`.
 
-## Базовые Команды
+## Действия
 
-Открыть страницу:
-
-```cmd
-browser.cmd open https://example.com
-browser.cmd new-tab https://example.com
+```bash
+sitectl browser smart-click --role link --name "More information..." --exact
+sitectl browser set-text --label "Имя" "Анна"
+sitectl browser wait-for --text "Готово" --state visible --exact
+sitectl browser screenshot --full-page
 ```
 
-Клик, ввод, фокус, клавиши:
+Для iframe передайте `--frame-id` перед подкомандой:
 
-```cmd
-browser.cmd click "button[type='submit']"
-browser.cmd context-click ".item"
-browser.cmd clear "#editable-message-text"
-browser.cmd fill "#email" "user@example.com"
-browser.cmd focus "#search"
-browser.cmd press Enter
+```bash
+sitectl browser --frame-id 3 smart-click --role button --name "Сохранить" --exact
 ```
 
-Чтение данных страницы:
+## Безопасный порядок агента
 
-```cmd
-browser.cmd page-url
-browser.cmd text body
-browser.cmd html main
-browser.cmd attr "a.login" href
-```
+1. Проверить `status` и `tabs`.
+2. Создать сессию.
+3. Заблокировать точную вкладку.
+4. Получить `snapshot`.
+5. Выполнить действие с проверкой результата.
+6. Закрыть сессию.
 
-Ожидание и прокрутка:
+Никогда не повторяйте опасный клик после `running`, если неизвестно, был ли он
+выполнен. Сначала прочитайте состояние страницы.
 
-```cmd
-browser.cmd wait "#app"
-browser.cmd scroll --selector "#footer"
-browser.cmd scroll-by --dy 1200
-```
-
-Скриншот:
-
-```cmd
-browser.cmd screenshot --output .\dist\shot.png
-```
-
-Запуск JavaScript на странице:
-
-```cmd
-browser.cmd js "return { title: document.title, href: location.href };"
-```
-
-## Выбор Клиента И Вкладки
-
-По умолчанию инструмент:
-- берёт самый свежий онлайн браузерный клиент;
-- работает с активной вкладкой, если не задано иное.
-
-Если онлайн-клиентов несколько и вы работаете через low-level `send`, лучше всегда указывать `--client-id` или `--broadcast`. Без явного target команда будет автоматически направлена только когда онлайн-клиент ровно один.
-
-Работа по URL-фрагменту:
-
-```cmd
-browser.cmd --url-pattern example.com text h1
-```
-
-Работа по `tab_id`:
-
-```cmd
-browser.cmd --tab-id 150000238 screenshot --output .\dist\tab.png
-```
-
-Работа по `client_id`:
-
-```cmd
-browser.cmd --client-id client-REPLACE tabs
-```
-
-## Как Должен Работать Агент
-
-Перед реальной задачей:
-1. Запустить `start-hub.cmd`, если хаб ещё не работает.
-2. Проверить `browser.cmd status`.
-3. Проверить `browser.cmd tabs`.
-4. Только после этого выполнять рабочие действия.
-
-Если что-то не работает:
-1. Перезагрузить расширение.
-2. Снова проверить `browser.cmd status`.
-3. Проверить, что токен и URL в настройках расширения совпадают с хабом.
-
-Если на Linux доступен только branded `google-chrome`, учтите:
-1. current Chrome builds могут игнорировать `--load-extension` и `--disable-extensions-except`;
-2. в этом случае `./start-browser.sh` откроет выделенный профиль на `chrome://extensions`;
-3. unpacked extension нужно загрузить один раз вручную из папки `extension/`;
-4. после этого дальше можно работать обычными командами `./browser.sh ...`.
-
-## Ограничения
-- `chrome://*` и похожие системные страницы недоступны для content script.
-- `run_script` может блокироваться CSP конкретного сайта.
-- После обновления расширения всегда сначала делайте `browser.cmd status`.
-
-## Telegram Quick Note
-- Для sticky-author username path использовать правый клик по нижней прилипшей 34px иконке автора через `telegram_sticky_author`; не кликать по тексту сообщения и не открывать профиль левой кнопкой.
-- В текущем Telegram Web отсутствие `Mention` в context menu является нормальным сценарием; если export-лог пишет `No visible menu item found by text`, текущий pipeline должен сам уйти в helper fallback.
-- Чисто числовые значения вида `@1291639730` не считать валидными username: на состоянии от 2026-04-23 они фильтруются как peer-id артефакты.
-
-## Что Обновлять При Изменениях
-- `docs/API.md` — если меняется протокол или payload команд.
-- `docs/EXTENSION.md` — если меняются background/content возможности.
-- `docs/ARCHITECTURE.md` — если меняется поток команд или маршрутизация.
-- `examples/` — если добавляются новые команды.
-- `AGENTS.md` и `docs/AI_MAINTAINER_GUIDE.md` — если меняется агентный workflow.
+API и состояния доставки описаны в [контракте протокола](docs/API.md).

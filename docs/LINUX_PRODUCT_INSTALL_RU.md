@@ -1,154 +1,117 @@
-# Linux Product Install
+# Установка готового продукта в Linux
 
-Документ описывает именно готовый Linux-first продукт `Telegram Username Collector`, а не dev-checkout репозитория.
+Документ относится к прикладному продукту Telegram Username Collector для
+Ubuntu 24.04. Это отдельный контур поверх Site Control Kit, а не способ
+разработки браузерного ядра.
 
-Целевая система v1: `Ubuntu 24.04`.
+## Что устанавливается
 
-## 1. Что получает пользователь
+- приложение в `/opt/telegram-username-collector`;
+- команды `telegram-username-collector` и `sitectl`;
+- пункт меню приложений;
+- распакованное браузерное расширение и его ZIP-архив;
+- GTK 4 — библиотека графического интерфейса.
 
-После установки `.deb`:
+Рабочие данные пишутся в пользовательские XDG-каталоги, а не в `/opt`.
 
-- программа ставится в `/opt/telegram-username-collector`
-- в меню приложений появляется `Telegram Username Collector`
-- доступна команда `telegram-username-collector`
-- доступна команда диагностики `telegram-username-collector --doctor`
-- можно создать ярлык на рабочем столе через `telegram-username-collector --create-desktop-shortcut`
-- рабочие данные пишутся не в `/opt/...`, а в пользовательские XDG-каталоги
-
-## 2. Сборка `.deb`
-
-Из корня репозитория:
+## Сборка
 
 ```bash
-cd <repo-root>
 bash scripts/build_linux_deb.sh
 ```
 
-Результат:
+Ожидаемый пакет:
 
-- пакет: `dist/linux-deb/telegram-username-collector_<version>_<arch>.deb`
-- bundled extension zip внутри пакета: `/opt/telegram-username-collector/app/resources/site-control-bridge-extension.zip`
-
-## 3. Установка
-
-На Ubuntu 24.04:
-
-```bash
-cd <repo-root>
-sudo apt install ./dist/linux-deb/telegram-username-collector_<version>_<arch>.deb
+```text
+dist/linux-deb/telegram-username-collector_<версия>_<архитектура>.deb
 ```
 
-Системные зависимости, на которые рассчитан пакет:
+Готовый `.deb` — сборочный артефакт. Его не следует коммитить; публикуйте
+пакет в GitHub Releases или хранилище артефактов.
 
-- `python3`
-- `python3-gi`
-- `gir1.2-gtk-4.0`
-- `libgtk-4-1`
-- `xdg-utils`
-- `zip`
+## Установка
 
-## 4. Куда пишутся данные
+```bash
+sudo apt install ./dist/linux-deb/telegram-username-collector_<версия>_<архитектура>.deb
+```
 
-Установленная версия использует XDG-пути:
+Пакет рассчитан на системные зависимости Python 3, GTK 4, `xdg-utils` и
+`zip`. Если сборщик сообщает об отсутствующей программе, установите
+перечисленную зависимость и повторите сборку в чистом каталоге.
 
-- config/token: `${XDG_CONFIG_HOME:-~/.config}/site-control-kit`
-- runtime/workspace/reports: `${XDG_DATA_HOME:-~/.local/share}/site-control-kit`
-- logs: `${XDG_STATE_HOME:-~/.local/state}/site-control-kit/logs`
+## Пользовательские данные
 
-Практически это значит:
+- конфиг и токен: `${XDG_CONFIG_HOME:-~/.config}/site-control-kit`;
+- состояние, отчёты и Telegram workspace:
+  `${XDG_DATA_HOME:-~/.local/share}/site-control-kit`;
+- журналы: `${XDG_STATE_HOME:-~/.local/state}/site-control-kit/logs`;
+- SQLite: `~/.local/share/site-control-kit/state/state.sqlite3`;
+- совместимый JSON-снимок:
+  `~/.local/share/site-control-kit/state/state.json`;
+- браузерный профиль:
+  `~/.local/share/site-control-kit/browser-profile`.
 
-- token file: `~/.config/site-control-kit/generated_token.txt`
-- workspace: `~/.local/share/site-control-kit/telegram_workspace`
-- reports: `~/.local/share/site-control-kit/reports/telegram_exports`
-- state: `~/.local/share/site-control-kit/state/state.json`
-- browser profiles: `~/.local/share/site-control-kit/browser-profile`
+Удаление пакета намеренно не стирает эти данные.
 
-Удаление пакета не удаляет эти пользовательские данные автоматически.
-
-## 5. Первый запуск
-
-Сразу после установки выполните:
+## Первый запуск
 
 ```bash
 telegram-username-collector --doctor
-```
-
-Что проверяет `--doctor`:
-
-- GTK runtime
-- resolved runtime paths
-- наличие token file
-- готовность helper python
-- путь к extension zip
-- desktop file
-- доступность hub health endpoint
-
-Запуск GUI:
-
-```bash
 telegram-username-collector
 ```
 
-Создание ярлыка на рабочем столе:
+Диагностика проверяет GTK, пути, токен, Python-помощник, расширение,
+desktop-файл и здоровье хаба. `hub_reachable=0` означает, что хаб не запущен
+или недоступен; это не всегда ошибка Telegram-сценария.
+
+Ярлык на рабочем столе:
 
 ```bash
 telegram-username-collector --create-desktop-shortcut
 ```
 
-## 6. Браузерное расширение
+## Браузерное расширение
 
-В этой версии расширение не публикуется в Store.
-Используется one-time unpacked setup.
+Расширение пока не публикуется в Chrome Web Store. Один раз выполните:
 
-Что есть в установленном продукте:
+1. откройте `chrome://extensions`;
+2. включите режим разработчика;
+3. нажмите «Загрузить распакованное расширение»;
+4. выберите `/opt/telegram-username-collector/app/extension`;
+5. в настройках укажите `http://127.0.0.1:8765` и токен из
+   `~/.config/site-control-kit/generated_token.txt`.
 
-- unpacked folder: `/opt/telegram-username-collector/app/extension`
-- zip archive: `/opt/telegram-username-collector/app/resources/site-control-bridge-extension.zip`
+Расширение — дополнительный браузерный контур. Основной Telegram-сбор через
+`tdata` не должен зависеть от его наличия.
 
-One-time setup:
-
-1. Откройте `chrome://extensions` или `edge://extensions`.
-2. Включите `Developer mode`.
-3. Нажмите `Load unpacked`.
-4. Выберите `/opt/telegram-username-collector/app/extension`.
-5. В `Options` расширения укажите:
-   - `Server URL`: `http://127.0.0.1:8765`
-   - `Access Token`: значение из `~/.config/site-control-kit/generated_token.txt`
-
-Важно:
-
-- расширение остаётся companion-контуром;
-- основной Linux workflow продукта остаётся `GTK GUI + tdata-history-authors`;
-- отсутствие extension не должно ломать основной `tdata`-сценарий.
-
-## 7. Обновление
-
-Соберите новый `.deb` и установите его поверх:
+## Обновление
 
 ```bash
-cd <repo-root>
 bash scripts/build_linux_deb.sh
-sudo apt install ./dist/linux-deb/telegram-username-collector_<version>_<arch>.deb
+sudo apt install ./dist/linux-deb/telegram-username-collector_<версия>_<архитектура>.deb
+telegram-username-collector --doctor
 ```
 
-Пользовательские данные в XDG-каталогах сохраняются.
+XDG-данные сохраняются. Перед крупным обновлением сделайте резервную копию
+Telegram workspace и SQLite.
 
-## 8. Удаление
+## Удаление
 
 ```bash
 sudo apt remove telegram-username-collector
 ```
 
-Это удалит системные файлы пакета, но не удалит автоматически:
+После резервной копии пользователь может отдельно удалить:
 
-- `~/.config/site-control-kit`
-- `~/.local/share/site-control-kit`
-- `~/.local/state/site-control-kit`
+```text
+~/.config/site-control-kit
+~/.local/share/site-control-kit
+~/.local/state/site-control-kit
+```
 
-## 9. Что не входит в этот релиз
+## Ограничения
 
-- полноценный Windows-продукт
-- Windows GTK GUI для `telegram-username-collector`
-- публикация расширения в Chrome Web Store / Edge Add-ons
-
-Windows в текущей версии остаётся secondary platform для core/browser smoke и fast-fail launcher contract.
+- отдельный готовый Windows GUI не входит в этот пакет;
+- расширение устанавливается вручную;
+- пакет нужно проверять на чистой Ubuntu перед широкой публикацией;
+- готовые бинарные сборки не входят в обычную историю Git.

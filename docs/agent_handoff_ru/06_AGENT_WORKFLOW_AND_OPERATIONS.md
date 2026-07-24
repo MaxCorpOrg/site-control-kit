@@ -1,87 +1,20 @@
-# Agent Workflow And Operations
+# Рабочий порядок агента
 
-## Обязательный Старт Любой Сессии
-```bash
-cd /home/max/site-control-kit
-git status --short --branch
-git log --oneline -n 15
-```
+1. Проверьте ветку, diff и последние коммиты.
+2. Сверьте задачу с `PROJECT_STATUS_RU.md`.
+3. Выберите одну подсистему и прочитайте её `AGENTS.md`.
+4. Зафиксируйте текущее поведение тестом.
+5. Сделайте минимальное совместимое изменение.
+6. Запустите профильную и полную проверку.
+7. Обновите источник правды и статус.
+8. Сделайте понятный русский коммит.
 
-После этого:
-1. прочитать `AGENTS.md`;
-2. прочитать `docs/PROJECT_WORKFLOW_RU.md`;
-3. прочитать `docs/PROJECT_STATUS_RU.md`;
-4. только потом идти в код.
-
-## Telegram Старт
-Перед Telegram-правками обязательно просмотреть:
+Для живого браузера сначала выполните:
 
 ```bash
-ls -la /home/max/telegram_contact_batches/chat_-2465948544
-find /home/max/telegram_contact_batches/chat_-2465948544/runs -maxdepth 2 -name run.json | sort | tail -n 3
+sitectl browser status
+sitectl browser tabs
 ```
 
-И потом открыть:
-- последний `run.json`
-- последний `export.log`
-- последний `export_stats.json`
-- `identity_history.json`
-- `discovery_state.json`
-
-## Browser Smoke Перед Реальной Работой
-```bash
-PYTHONPATH="$PWD" python3 -m webcontrol clients
-PYTHONPATH="$PWD" python3 -m webcontrol browser tabs
-```
-
-## Базовые Полезные Команды
-### Один batch-run
-```bash
-./scripts/collect_new_telegram_contacts.sh "https://web.telegram.org/k/#-2465948544"
-```
-
-### Chain-runner
-```bash
-./scripts/collect_new_telegram_contacts_chain.sh \
-  "https://web.telegram.org/k/#-2465948544" \
-  "/home/max/telegram_contact_batches" \
-  --profile deep \
-  --runs 3
-```
-
-### Явный forced tab
-```bash
-env CHAT_TAB_ID=614278127 ./scripts/collect_new_telegram_contacts_chain.sh \
-  "https://web.telegram.org/k/#-2465948544" \
-  "/tmp/tg_chain_profile_deep" \
-  --profile deep --runs 1
-```
-
-## Как Думать О Проблеме
-Не начинать с предположения "Telegram сломан".
-Сначала определить слой:
-- browser bridge delivery;
-- tab targeting;
-- discovery;
-- mention deep;
-- URL fallback;
-- backfill;
-- safe layer;
-- batch layer.
-
-## Как Вести Изменения
-Правильный порядок:
-1. локализовать узкий момент;
-2. изменить один логический блок;
-3. прогнать тесты;
-4. записать live evidence;
-5. обновить status docs;
-6. только потом коммитить.
-
-## Что Считать Хорошим Handoff
-Хороший handoff отвечает на вопросы:
-- что сделали;
-- что проверили;
-- где лежат артефакты;
-- что сломано;
-- что делать следующим шагом.
+Не повторяйте опасную команду после неопределённого результата. Полные правила
+и команды проверки — в [рабочем процессе](../PROJECT_WORKFLOW_RU.md).

@@ -1,132 +1,76 @@
-# Project Workflow RU
+# Порядок работы с проектом
 
-Этот документ задаёт обязательный порядок работы для любого агента и любого нового чата в репозитории `site-control-kit`.
-
-## Цель
-Нельзя работать с проектом как с разрозненным набором скриптов. Работа всегда должна идти по одному и тому же циклу:
-- сначала понять текущее состояние;
-- потом посмотреть, что уже сделано;
-- потом менять код;
-- потом прогонять проверки;
-- потом обновлять handoff-документацию.
-
-## Обязательный Порядок Чтения Перед Работой
-Прочитать в таком порядке:
-1. `AGENTS.md`
-2. `docs/agent_handoff_ru/00_START_HERE.md`
-3. весь пакет `docs/agent_handoff_ru/` по порядку
-4. `docs/PROJECT_WORKFLOW_RU.md`
-5. `docs/PROJECT_STATUS_RU.md`
-6. `README.md`
-7. `BROWSER_QUICKSTART.md`
-8. `docs/AI_MAINTAINER_GUIDE.md`
-9. Для Telegram-задач: `docs/TELEGRAM_CLIENT_ROADMAP_RU.md`
-
-Если задача затрагивает browser bridge, после чтения документации обязательно посмотреть последние изменения и текущее дерево.
-
-## Старт Любой Задачи
-Перед правками выполнить:
+## Перед правкой
 
 ```bash
-cd /home/max/site-control-kit
 git status --short --branch
 git log --oneline -n 15
 ```
 
-После этого просмотреть `docs/PROJECT_STATUS_RU.md` и понять:
-- что уже закрыто;
-- что ещё открыто;
-- где текущий риск;
-- какой следующий приоритет уже намечен.
+Прочитайте:
 
-## Telegram-Старт Перед Любой Диагностикой
-Если задача связана с Telegram-экспортом, до изменения кода нужно просмотреть:
+1. корневой `AGENTS.md`;
+2. `START_HERE_AGENT_RU.md`;
+3. `docs/PROJECT_STATUS_RU.md`;
+4. `AGENTS.md` рабочей папки;
+5. источник правды по теме.
 
-```bash
-# примеры путей; chat-id подставляется по факту
-/home/max/telegram_contact_batches/chat_<id>/latest_full.md
-/home/max/telegram_contact_batches/chat_<id>/latest_safe.md
-/home/max/telegram_contact_batches/chat_<id>/identity_history.json
-/home/max/telegram_contact_batches/chat_<id>/discovery_state.json
-/home/max/telegram_contact_batches/chat_<id>/runs/<latest>/run.json
-/home/max/telegram_contact_batches/chat_<id>/runs/<latest>/export.log
-/home/max/telegram_contact_batches/chat_<id>/runs/<latest>/export_stats.json
-```
+Не переносите старую ветку целиком. Новая работа начинается от актуального
+`main`, а изменения делятся по подсистемам.
 
-Нельзя делать вывод по одному `latest_full.txt`. Нужно понять, на каком уровне проблема:
-- discovery/scroll;
-- sticky-author right-click по нижней прилипшей 34px иконке автора через `telegram_sticky_author`;
-- deep (`mention` / `url` / `profile`);
-- history backfill;
-- safe/quarantine layer;
-- batch layer.
+## Во время работы
 
-## Обязательный Цикл После Каждой Завершённой Правки
-После каждой законченной задачи агент обязан:
-1. Прогнать проверки.
-2. Просмотреть результат прогонов.
-3. Если задача затрагивала Telegram или browser bridge, просмотреть живые артефакты (`run.json`, `export.log`, `export_stats.json`).
-4. Обновить `docs/PROJECT_STATUS_RU.md`.
-5. Только потом считать задачу завершённой.
+- одна задача — один понятный блок;
+- одна новая возможность — контракт, код, пример и тест;
+- протокол меняется только с версией;
+- крупная зависимость добавляется только после сравнения альтернатив;
+- опасное действие не повторяется вслепую;
+- старые пользовательские изменения в рабочем дереве не удаляются.
 
-## Обязательные Проверки
-Всегда запускать из корня репозитория:
+## После Python‑изменения
 
 ```bash
+python3 -m py_compile <изменённые-файлы.py>
 PYTHONPATH="$PWD" python3 -m unittest discover -s tests -p 'test_*.py'
 ```
 
-Дополнительно:
+## После JavaScript‑изменения
 
-### Если менялись Python-файлы
 ```bash
-python3 -m py_compile <изменённые_python_файлы>
+node --check extension/agent_dom.js
+node --check extension/content.js
+node --check extension/background.js
+node --test tests/js/agent_dom.test.mjs
 ```
 
-### Если менялись shell-скрипты
+Если изменился реальный браузерный контур, нужен `scripts/browser_e2e.py`.
+
+## После shell‑изменения
+
 ```bash
-bash -n <изменённые_shell_скрипты>
+bash -n <изменённый-скрипт.sh>
 ```
 
-### Если меняется CLI
+## Документация и безопасность
+
 ```bash
-PYTHONPATH="$PWD" python3 -m webcontrol --help
-PYTHONPATH="$PWD" python3 -m webcontrol browser --help
+python3 scripts/check_docs.py
+python3 scripts/check_repository.py --base origin/main
+git diff --check
 ```
 
-### Если меняется живой browser/Telegram контур
-Нужен хотя бы один живой smoke с артефактами. Минимум нужно сохранить ссылку на:
-- `run.json`
-- `export.log`
-- если есть, `export_stats.json`
+Документы пишутся по‑русски. Английский термин используется только там, где
+он нужен для API или поиска, и объясняется через `docs/TERMS_RU.md`.
 
-## Правило Завершённых Задач
-Любой агент должен перед новой задачей просмотреть, что уже завершено.
-Источник истины для этого проекта:
-1. `docs/PROJECT_STATUS_RU.md`
-2. последние коммиты `git log --oneline -n 15`
-3. для Telegram — последние `runs/<timestamp>/run.json`
+## Коммиты и PR
 
-Если задача уже была частично закрыта раньше, нельзя начинать с нуля. Нужно сначала встроиться в существующее состояние.
+- сообщение коммита — по‑русски;
+- один коммит решает одну задачу;
+- browser core, docs и Telegram идут отдельными PR;
+- перед push проверить `git diff --cached` и происхождение ветки;
+- после push дождаться CI и исправить все ошибки.
 
-## Правило Handoff
-После любого заметного блока работы в `docs/PROJECT_STATUS_RU.md` нужно обновить:
-- `Сделано`
-- `Проверено`
-- `Текущие проблемы`
-- `Следующий приоритет`
+## Завершение
 
-Новый агент должен иметь возможность открыть только `AGENTS.md` и `docs/PROJECT_STATUS_RU.md`, чтобы сразу понять, что происходит в проекте.
-
-## Правило Коммитов
-Если задача дошла до коммита:
-- писать сообщение коммита по-русски;
-- коммит должен отражать один логический блок, а не смесь несвязанных изменений.
-
-## Что Считать Нарушением Workflow
-Нарушением считается:
-- менять код без просмотра `docs/PROJECT_STATUS_RU.md`;
-- завершать задачу без тестов;
-- не обновить handoff после серьёзных изменений;
-- по Telegram делать выводы без просмотра `run.json` и `export.log`;
-- игнорировать уже существующую историю `identity_history.json` и `discovery_state.json` при анализе проблемы.
+Обновите `docs/PROJECT_STATUS_RU.md`: результат, доказательства, риск,
+следующий приоритет. Не добавляйте туда длинную хронологию.
