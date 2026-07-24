@@ -1,261 +1,550 @@
-# API и протокол команд
+# API и протокол браузерного ядра
 
-Базовый URL: `http://127.0.0.1:8765`
+Базовый адрес по умолчанию: `http://127.0.0.1:8765`.
 
-## Аутентификация
-Поддерживаются заголовки:
-- `X-Access-Token: <token>`
-- `Authorization: Bearer <token>`
+Версия протокола: `2.0`.
 
-Быстрый локальный токен по умолчанию:
-- `local-bridge-quickstart-2026`
+Версия агентного API: `1.1`.
 
-Все `/api/*` endpoints требуют токен.
+Версия расширения: `0.2.0`.
 
-## Health
+## Общие правила
 
-`GET /health`
+Все маршруты `/api/*` требуют токен в одном из заголовков:
 
-Ответ:
-```json
-{ "ok": true, "service": "site-control-hub", "version": "0.1" }
+```http
+X-Access-Token: <token>
 ```
 
-## Клиенты
+или:
 
-## `POST /api/clients/heartbeat`
-Запрашивается расширением.
+```http
+Authorization: Bearer <token>
+```
 
-Пример запроса:
+Токен в URL или теле JSON запрещён. Хаб вернёт соответственно
+`token_in_url_forbidden` или `token_in_body_forbidden`. Заголовок `Origin`
+проверяется по списку разрешённых источников.
+
+Успешный ответ всегда содержит `"ok": true`. Ошибка содержит:
+
 ```json
 {
-  "client_id": "client-123",
-  "extension_version": "0.1.0",
-  "user_agent": "...",
-  "tabs": [
-    { "id": 12, "windowId": 1, "active": true, "title": "...", "url": "https://..." }
-  ],
-  "meta": { "extension": "site-control-bridge", "platform": "Linux" }
+  "ok": false,
+  "error": "понятное описание",
+  "error_code": "стабильный_машинный_код"
 }
 ```
 
-Ответ:
-```json
-{ "ok": true, "client": { "client_id": "client-123", "last_seen": "..." } }
+## Состояния доставки
+
+Одна команда может иметь несколько доставок — по одной на браузерный клиент.
+Жизненный цикл доставки:
+
+```text
+queued -> leased -> acknowledged -> running
+   |          |            |           |
+   +----------+------------+-----------+--> completed
+                                      +--> failed
+                                      +--> cancelled
+                                      +--> expired
+                                      +--> dead_letter
 ```
 
-## `GET /api/clients`
-Ответ:
+Пояснения:
+
+- `queued` — стоит в очереди;
+- `leased` — временно выдана расширению в аренду;
+- `acknowledged` — расширение подтвердило получение;
+- `running` — действие началось;
+- `completed` — результат принят;
+- `failed` — расширение вернуло ошибку;
+- `expired` — истёк срок команды;
+- `dead_letter` — безопасный автоматический повтор невозможен;
+- `cancelled` — команда отменена.
+
+Для доставки используются четыре разных идентификатора:
+
+- `command_id` — постоянный идентификатор команды;
+- `delivery_id` — постоянный идентификатор доставки одному клиенту;
+- `lease_token` — одноразовый токен текущей аренды;
+- `idempotency_key` — ключ идемпотентности, защищающий от повторной постановки
+  одинаковой команды.
+
+Старый результат без `delivery_id` и `lease_token` временно принимается только
+при наличии активной аренды. В принятом результате это видно по
+`legacy_delivery_identifiers: true`.
+
+## Политики повторов
+
+- `never_retry` — никогда не повторять автоматически;
+- `retry_if_not_started` — повторять, только если действие не дошло до
+  `running`;
+- `retry_with_verification` — повторять после внешней проверки постусловия;
+- `safe_retry` — безопасный повтор чтения или ожидания.
+
+По умолчанию чтение получает `safe_retry`, ввод текста —
+`retry_if_not_started`, опасные действия — `never_retry`.
+
+Если аренда опасного действия истекла после `running`, доставка переходит в
+`dead_letter`: хаб не рискует выполнить клик или отправку формы второй раз.
+Результат со старым `lease_token` получает HTTP `409` и код `stale_lease`.
+
+## Служебные маршруты
+
+### `GET /health`
+
+Не требует токен.
+
 ```json
-{ "ok": true, "clients": [ ... ] }
+{
+  "ok": true,
+  "service": "site-control-hub",
+  "version": "0.1"
+}
 ```
 
-Каждый клиент может содержать служебное поле:
-- `is_online` — есть ли свежий heartbeat и можно ли безопасно использовать клиента по умолчанию.
+### `GET /api/agent/schema`
+
+Возвращает машиночитаемую схему агентного API: версии, маршруты, состояния,
+локаторы, ожидания и новые типы команд.
+
+### `GET /api/state`
+
+Возвращает диагностическое представление клиентов, очередей, команд, сессий и
+блокировок. Источником правды является SQLite; `state.json` остаётся удобным
+для ручного чтения зеркалом.
+
+### `GET /api/storage/journal?limit=100`
+
+Возвращает хвост журнала переходов состояния.
+
+### `POST /api/storage/backup`
+
+Создаёт согласованную резервную копию SQLite.
+
+```json
+{
+  "destination": "необязательный/путь/к/копии.sqlite3"
+}
+```
+
+Если путь не передан, хаб создаёт имя рядом с рабочей базой.
+
+## Браузерные клиенты
+
+### `POST /api/clients/heartbeat`
+
+Расширение сообщает, что оно живо, перечисляет вкладки и возможности:
+
+```json
+{
+  "client_id": "client-123",
+  "extension_version": "0.2.0",
+  "user_agent": "Mozilla/5.0 ...",
+  "tabs": [
+    {
+      "id": 12,
+      "windowId": 1,
+      "active": true,
+      "title": "Пример",
+      "url": "https://example.com/"
+    }
+  ],
+  "meta": {
+    "extension": "site-control-bridge",
+    "protocol_version": "2.0",
+    "capabilities": ["delivery_ack", "sessions", "iframes", "semantic_snapshot"]
+  }
+}
+```
+
+### `GET /api/clients`
+
+Возвращает все известные клиенты. Поле `is_online` означает, что heartbeat
+достаточно свежий для безопасного автовыбора.
+
+## Постановка и доставка команды
+
+### `POST /api/commands`
+
+```json
+{
+  "issued_by": "agent-1",
+  "session_id": "необязательный-uuid",
+  "idempotency_key": "уникальный-ключ-операции",
+  "retry_policy": "safe_retry",
+  "timeout_ms": 20000,
+  "lease_duration_ms": 60000,
+  "max_attempts": 3,
+  "confirmation": {
+    "confirmed": true,
+    "reason": "оператор подтвердил отправку"
+  },
+  "target": {
+    "client_id": "client-123",
+    "tab_id": 12
+  },
+  "command": {
+    "type": "snapshot",
+    "include_frames": true
+  }
+}
+```
+
+Правила цели:
+
+- `client_id` — один клиент;
+- `client_ids` — список клиентов;
+- `broadcast: true` — все известные клиенты;
+- без цели хаб выбирает единственный онлайн-клиент;
+- при нескольких онлайн-клиентах неявный выбор отклоняется.
+
+Команда внутри сессии обязана явно задавать один `client_id` и `tab_id`.
+Сессия должна владеть блокировкой этой вкладки.
+
+Повтор того же `idempotency_key` с тем же отпечатком возвращает существующую
+команду и `idempotency_reused: true`. Другой payload с тем же ключом получает
+HTTP `409` и `idempotency_conflict`.
+
+### `GET /api/commands/next?client_id=<id>`
+
+Расширение получает аренду следующей команды:
+
+```json
+{
+  "ok": true,
+  "command": {
+    "id": "command-uuid",
+    "delivery_id": "delivery-uuid",
+    "lease_token": "одноразовый-токен",
+    "attempt_number": 1,
+    "lease_expires_at": "2026-07-24T09:00:00+00:00",
+    "session_id": "session-uuid",
+    "target": {
+      "client_id": "client-123",
+      "tab_id": 12
+    },
+    "command": {
+      "type": "snapshot"
+    }
+  }
+}
+```
+
+Пустая очередь возвращает `"command": null`.
+
+### `POST /api/commands/{command_id}/ack`
+
+Подтверждает получение аренды:
+
+```json
+{
+  "client_id": "client-123",
+  "delivery_id": "delivery-uuid",
+  "lease_token": "одноразовый-токен"
+}
+```
+
+### `POST /api/commands/{command_id}/status`
+
+Расширение сообщает о начале выполнения:
+
+```json
+{
+  "client_id": "client-123",
+  "delivery_id": "delivery-uuid",
+  "lease_token": "одноразовый-токен",
+  "status": "running",
+  "reason": "browser_action_started"
+}
+```
+
+### `POST /api/commands/{command_id}/result`
+
+```json
+{
+  "client_id": "client-123",
+  "delivery_id": "delivery-uuid",
+  "lease_token": "одноразовый-токен",
+  "result_id": "result-uuid",
+  "finished_at": "2026-07-24T09:00:01Z",
+  "ok": true,
+  "status": "completed",
+  "data": {
+    "text": "результат"
+  },
+  "error": null,
+  "logs": [],
+  "diagnostics": {
+    "console_tail": [],
+    "network_errors": []
+  }
+}
+```
+
+Повтор полностью одинакового результата безопасен. Другой терминальный
+результат для уже завершённой доставки получает HTTP `409` и
+`result_conflict`.
+
+### `GET /api/commands/{command_id}`
+
+Возвращает карточку команды со всеми доставками, переходами, попытками и
+результатами.
+
+### `POST /api/commands/{command_id}/cancel`
+
+Переводит незавершённые доставки в `cancelled`.
+
+## Сессии и блокировки вкладок
+
+Сессия связывает владельца, браузерный клиент, политику безопасности,
+блокировки вкладок и артефакты одного сценария.
+
+### `POST /api/sessions`
+
+```json
+{
+  "owner_id": "agent-1",
+  "client_id": "client-123",
+  "ttl_seconds": 300,
+  "policy": {
+    "allowed_domains": ["example.com"],
+    "denied_domains": [],
+    "read_only": false,
+    "allow_input": true,
+    "allow_file_upload": false,
+    "allow_form_submit": false,
+    "allow_download": false,
+    "allow_cdp": false,
+    "max_tabs": 3,
+    "max_session_duration_seconds": 900,
+    "require_dangerous_confirmation": true,
+    "capture_screenshots": true,
+    "capture_console": false,
+    "capture_network": false,
+    "capture_har": false,
+    "capture_trace": false,
+    "capture_video": false,
+    "secrets": ["строка-для-маскирования"]
+  }
+}
+```
+
+CDP — Chrome DevTools Protocol, протокол инструментов разработчика Chrome.
+Захват консоли, сети, HAR и трассировки требует `allow_cdp: true`.
+Поля HAR, trace и video зарезервированы политикой, но полноценная запись этих
+форматов ещё не реализована.
+
+### `GET /api/sessions`
+
+Возвращает список сессий.
+
+### `GET /api/sessions/{session_id}`
+
+Возвращает одну сессию.
+
+### `POST /api/sessions/{session_id}/heartbeat`
+
+Продлевает срок жизни сессии и её блокировок.
+
+### `POST /api/sessions/{session_id}/close`
+
+```json
+{
+  "reason": "scenario_finished"
+}
+```
+
+Закрывает сессию и освобождает её блокировки.
+
+### `POST /api/sessions/{session_id}/locks`
+
+```json
+{
+  "client_id": "client-123",
+  "tab_id": 12,
+  "lock_mode": "exclusive"
+}
+```
+
+Режимы:
+
+- `exclusive` — только эта сессия;
+- `shared_read` — несколько сессий могут читать, изменение запрещено;
+- `operator_override` — явный операторский перехват с записью события.
+
+### `POST /api/sessions/{session_id}/locks/release`
+
+```json
+{
+  "client_id": "client-123",
+  "tab_id": 12
+}
+```
+
+## Семантический снимок и локаторы
+
+Команда `snapshot` возвращает краткое представление доступных элементов:
+
+```json
+{
+  "type": "snapshot",
+  "include_frames": true,
+  "include_hidden": false,
+  "limit": 200
+}
+```
+
+Элемент содержит `ref`, `frame_id`, `role`, доступное имя `name`, `value`,
+`placeholder`, видимость, доступность и редактируемость. Ссылка имеет вид
+`f3:e7`: первая часть задаёт фрейм, вторая — элемент.
+
+Стратегии локатора:
+
+- `ref` — ссылка из снимка;
+- `role` — семантическая роль и необязательное доступное имя;
+- `label` — подпись поля;
+- `placeholder` — подсказка поля;
+- `test_id` — `data-testid`, `data-test-id` или `data-test`;
+- `text` — текст;
+- `css` — CSS-селектор как низкоуровневый запасной путь.
+
+Общие поля:
+
+```json
+{
+  "strategy": "role",
+  "value": "button",
+  "name": "Сохранить",
+  "exact": true,
+  "nth": 0,
+  "root_selector": "#dialog",
+  "frame_id": 3
+}
+```
+
+`nth` применяется только явно. Неоднозначный локатор завершается ошибкой
+`ambiguous_match` с количеством и кратким списком кандидатов.
+
+Если элемент по `ref` был заменён в DOM, расширение ищет единственного
+кандидата по `id`, тестовому идентификатору, роли и имени или `placeholder`.
+Неоднозначное восстановление запрещено.
+
+Открытые Shadow DOM поддерживаются. Закрытый Shadow DOM через обычные
+DOM-команды недоступен.
+
+## Агентные DOM-команды
+
+### `smart_click`
+
+```json
+{
+  "type": "smart_click",
+  "locator": {
+    "strategy": "role",
+    "value": "button",
+    "name": "Сохранить",
+    "exact": true
+  },
+  "timeout_ms": 10000,
+  "proof": {
+    "expected_text": "Готово",
+    "expected_url": "https://example.com/done",
+    "timeout_ms": 5000
+  }
+}
+```
+
+До клика проверяются наличие, видимость, доступность, стабильность и
+возможность получить событие. Поле `proof` задаёт проверку результата.
+
+### `set_editable_text`
+
+```json
+{
+  "type": "set_editable_text",
+  "locator": {
+    "strategy": "label",
+    "value": "Имя"
+  },
+  "value": "Анна"
+}
+```
+
+Использует нативный setter значения и события `input`/`change`, поэтому
+совместим с контролируемыми полями React и похожих библиотек.
+
+### `wait_for`
+
+```json
+{
+  "type": "wait_for",
+  "locator": {
+    "strategy": "text",
+    "value": "Готово",
+    "exact": true
+  },
+  "state": "visible",
+  "timeout_ms": 10000
+}
+```
+
+Состояния: `attached`, `detached`, `visible`, `hidden`, `enabled`, `editable`,
+`stable`, `actionable`, `text`, `value`.
+
+### Выбор фрейма
+
+`frame_id` берётся из снимка. Для прямого выбора также поддерживаются:
+
+- точный идентификатор `frame_id`;
+- подстрока URL;
+- имя фрейма;
+- CSS-селектор элемента `iframe` в родительском документе.
+
+Работают вложенные и кросс-доменные iframe, если URL фрейма разрешён
+`host_permissions` расширения.
+
+## Фоновые команды
+
+- `navigate`: `url`, необязательные ожидания;
+- `new_tab`: `url`, `active`, ожидания;
+- `reload`: `ignore_cache`;
+- `activate_tab`;
+- `close_tab`;
+- `screenshot`: `full_page`;
+- `set_file_input_files`: установка файлов через CDP.
+
+Для навигации можно ждать загрузку документа, совпадение URL, тишину DOM,
+сетевой покой или исчезновение индикатора загрузки. CDP‑ожидания требуют
+разрешения сессии.
+
+## Совместимые старые команды
+
+Сохранены существующие CSS-команды:
+
+- `click`, `context_click`, `click_text`, `click_menu_text`;
+- `clear_editable`, `fill`, `focus`, `upload_file`;
+- `extract_text`, `get_html`, `get_attribute`, `get_page_url`;
+- `wait_selector`, `scroll`, `scroll_by`, `wheel`;
+- `back`, `forward`, `press_key`, `run_script`;
+- `telegram_sticky_author`.
+
+Они нужны для обратной совместимости, но новым агентным сценариям следует
+использовать `snapshot`, `smart_click`, `set_editable_text` и `wait_for`.
 
 ## Telegram webhook
 
-## `POST /api/telegram/webhook`
-Принимает Telegram Bot API update и сохраняет identity пользователя из `message.from` или `callback_query.from`.
+`POST /api/telegram/webhook` сохранён без изменения. Он извлекает
+`message.from` или `callback_query.from` и делает upsert полей
+`telegram_id`/`username`.
 
-Сохраняемые поля:
-- `telegram_id = from.id`
-- `username = from.username ? "@<username>" : null`
+## Ограничения
 
-Повторный update для того же `telegram_id` делает upsert и обновляет `username`, если пользователь сменил его или удалил.
-
-Пример запроса:
-```json
-{
-  "update_id": 1,
-  "message": {
-    "message_id": 10,
-    "from": { "id": 123456, "username": "alice" },
-    "text": "/start"
-  }
-}
-```
-
-Ответ:
-```json
-{
-  "ok": true,
-  "source": "message.from",
-  "telegram_user": {
-    "telegram_id": 123456,
-    "username": "@alice",
-    "created_at": "...",
-    "updated_at": "...",
-    "changed": true
-  }
-}
-```
-
-## Команды
-
-## `POST /api/commands`
-Создаёт команду и ставит в очередь.
-
-Пример запроса:
-```json
-{
-  "issued_by": "cli",
-  "timeout_ms": 20000,
-  "target": {
-    "client_id": "client-123",
-    "tab_id": 12,
-    "url_pattern": "example.com",
-    "active": true,
-    "broadcast": false,
-    "client_ids": ["client-a", "client-b"]
-  },
-  "command": {
-    "type": "click",
-    "selector": "button.submit"
-  }
-}
-```
-
-Ответ:
-```json
-{
-  "ok": true,
-  "command_id": "uuid",
-  "status": "pending",
-  "target_client_ids": ["client-123"],
-  "error": null
-}
-```
-
-Правила target:
-- `client_id` — отправить одному известному клиенту;
-- `client_ids` — отправить известным клиентам из списка;
-- `broadcast=true` — отправить всем известным клиентам;
-- если target не задан и онлайн-клиент ровно один, команда будет направлена ему автоматически;
-- если target не задан и онлайн-клиентов несколько, команда будет отклонена со `status: "rejected"`.
-
-## `GET /api/commands/next?client_id=<id>`
-Выдаёт следующую команду клиенту.
-
-Ответ с командой:
-```json
-{
-  "ok": true,
-  "command": {
-    "id": "uuid",
-    "created_at": "...",
-    "timeout_ms": 20000,
-    "target": { "client_id": "client-123" },
-    "command": { "type": "click", "selector": "button" }
-  }
-}
-```
-
-Если команд нет:
-```json
-{ "ok": true, "command": null }
-```
-
-## `POST /api/commands/{id}/result`
-Расширение отправляет результат выполнения.
-
-Пример запроса:
-```json
-{
-  "client_id": "client-123",
-  "ok": true,
-  "status": "completed",
-  "data": { "text": "..." },
-  "error": null,
-  "logs": []
-}
-```
-
-Ответ:
-```json
-{ "ok": true, "command": { "id": "...", "status": "completed", "deliveries": { ... } } }
-```
-
-## `GET /api/commands/{id}`
-Получить полную карточку команды.
-
-## `POST /api/commands/{id}/cancel`
-Отмена команды (активные доставки переводятся в `cancelled`).
-
-## Снимок состояния
-
-## `GET /api/state`
-```json
-{
-  "ok": true,
-  "state": {
-    "version": 1,
-    "clients": [...],
-    "telegram_users": {"123456": {"telegram_id": 123456, "username": "@alice"}},
-    "queue_sizes": {"client-123": 0},
-    "commands": [...]
-  }
-}
-```
-
-## Поддерживаемые `command.type`
-
-- `navigate`
-  - поля: `url`
-- `new_tab`
-  - поля: `url`, опционально `active`
-- `click`
-  - поля: `selector`
-- `context_click`
-  - поля: `selector`
-- `click_text`
-  - поля: `text`, опционально `root_selector`, `near_last_context`
-- `telegram_sticky_author`
-  - поля: опционально `expected_peer_id`, `click`, `context_click`
-  - возвращает нижний sticky author avatar Telegram Web: `peer_id`, `name`, `role`, `username`, `source`, `point`, `rect`, `candidates`
-  - `context_click=true` открывает context menu правой кнопкой только на большой 34px avatar, найденной нижней `elementsFromPoint`-пробой; fallback на текст сообщения для клика не используется
-  - если `expected_peer_id` задан и такой нижней point-avatar сейчас нет, команда возвращает `found=false`, чтобы exporter не кликал не туда
-- `clear_editable`
-  - поля: `selectors` — массив CSS-селекторов, проверяемых по очереди
-- `fill`
-  - поля: `selector`, `value`
-- `focus`
-  - поля: `selector`
-- `extract_text`
-  - опционально: `selector`
-- `get_html`
-  - опционально: `selector`
-- `get_page_url`
-  - без обязательных полей
-- `get_attribute`
-  - поля: `selector`, `attribute`
-- `wait_selector`
-  - поля: `selector`, опционально `timeout_ms`, `visible_only`
-- `scroll`
-  - или `selector`, или координаты `x`, `y`
-- `scroll_by`
-  - поля: `delta_x`, `delta_y`, опционально `selector`
-- `back`
-  - без обязательных полей
-- `forward`
-  - без обязательных полей
-- `reload`
-  - опционально: `ignore_cache`
-- `activate_tab`
-  - без обязательных полей
-- `close_tab`
-  - без обязательных полей
-- `press_key`
-  - поля: `key`, опционально `selector`, `ctrl`, `alt`, `shift`, `meta`
-- `run_script`
-  - поля: `script`, опционально `args`
-- `screenshot`
-  - без обязательных полей
-
-## Контракт результата
-Расширение возвращает:
-- `ok` — boolean
-- `status` — обычно `completed` или `failed`
-- `data` — полезные данные
-- `error` — ошибка (если есть)
-- `logs` — массив строк (опционально)
+- `chrome://*` и другие защищённые страницы недоступны content script;
+- произвольный `run_script` может блокироваться CSP — политикой безопасности
+  содержимого сайта;
+- закрытый Shadow DOM не доступен через DOM API;
+- автоматический повтор опасного действия после начала выполнения запрещён;
+- старые клиенты без ack поддерживаются только как переходный режим и не дают
+  полной гарантии протокола 2.0.
