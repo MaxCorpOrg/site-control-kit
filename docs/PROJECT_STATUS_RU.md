@@ -30,6 +30,9 @@
 Отчёт:
 `docs/reports/LONG_POLL_ACCEPTANCE_2026-07-24_RU.md`.
 
+Черновой P1-PR:
+`https://github.com/MaxCorpOrg/site-control-kit/pull/4`.
+
 ## Предыдущая базовая стабилизация
 
 Браузерное ядро стабилизировано в чистой ветке
@@ -84,6 +87,8 @@
   без замечаний;
 - PR‑A: `https://github.com/MaxCorpOrg/site-control-kit/pull/2`.
 - PR‑B: `https://github.com/MaxCorpOrg/site-control-kit/pull/3`.
+- P1-сервисы и долгий запрос:
+  `https://github.com/MaxCorpOrg/site-control-kit/pull/4`.
 
 Полный локальный отчёт: `docs/reports/BROWSER_CORE_ACCEPTANCE_2026-07-24_RU.md`.
 Итоговая матрица всех 18 критериев:
