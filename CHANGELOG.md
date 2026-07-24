@@ -1,8 +1,29 @@
-# Changelog
+# История изменений
+
+## 2026-07-24
+
+### Стабилизация браузерной платформы
+
+- создана чистая ветка от `main`; старые накопленные коммиты не переносились;
+- добавлены аренда и подтверждение команд, безопасные повторы,
+  идемпотентность и `dead_letter` — изолятор неопределённых команд;
+- состояние перенесено в SQLite с WAL — журналом предзаписи, миграцией и
+  резервным копированием;
+- добавлены сессии агентов, TTL — срок жизни — и блокировки вкладок;
+- добавлены семантические локаторы, строгий поиск, восстановление `ref`,
+  iframe, вложенные iframe и открытый Shadow DOM;
+- расширение сохраняет неподтверждённые результаты в локальной очереди;
+- добавлены диагностические пакеты, сокрытие секретов и ограничения CDP;
+- добавлены обязательные проверки GitHub Actions и настоящий Chrome E2E;
+- пользовательская, агентная и архитектурная документация сведена к русским
+  источникам правды.
+
+Доказательства и точные метрики находятся в
+[`docs/reports/BROWSER_CORE_ACCEPTANCE_2026-07-24_RU.md`](docs/reports/BROWSER_CORE_ACCEPTANCE_2026-07-24_RU.md).
 
 ## 2026-07-12
 
-### Product Package Stabilization And Safe Diagnostics
+### Стабилизация пакета и безопасная диагностика
 
 - Исправлен installed-mode wrapper:
   - `/usr/bin/telegram-username-collector` и `/usr/bin/sitectl` теперь делают `cd "$APP_ROOT"` перед запуском Python;
@@ -35,7 +56,7 @@
 
 ## 2026-07-11
 
-### Ready Desktop Product Package, Shadow Admin Theme, GTK Scaling
+### Готовый настольный пакет, тема Shadow Admin и масштаб GTK
 
 - Подготовлен готовый Linux desktop contour для `Telegram Username Collector`:
   - GTK-панель остаётся основным операторским интерфейсом;
@@ -77,7 +98,7 @@
 
 ## 2026-06-06
 
-### GUI / Program Contour Fixed To Ready `TG_CONTACT 4`
+### Графический контур закреплён на готовом `TG_CONTACT 4`
 
 - Зафиксирован именно текущий рабочий contour внутри программы и GTK GUI:
   - stale registry row `TG_CONTACT N` теперь может автоматически перейти на repo-local `REPO_ROOT/TG_CONTACT/N`, если там есть рабочий `tdata-*`
@@ -92,7 +113,7 @@
   - targeted GUI/backend tests -> `83 tests OK`, `2 skipped`
   - full suite -> `322 tests OK`, `2 skipped`
 
-### Unified `public_phones` Flow And TG_CONTACT 4 Full-History Verify
+### Единый поток `public_phones` и полная проверка истории TG_CONTACT 4
 
 - Завершён unified pass для `public_phones` без введения нового operation kind:
   - `phones_found` теперь трактуется как total unique phones;
@@ -131,7 +152,7 @@
 
 ## 2026-06-03
 
-### AK2 Live Goal: `30` Unique Public Phones Closed
+### Достигнута цель AK2: 30 уникальных открытых телефонов
 
 - Через текущий операторский путь `GTK GUI -> Primary tdata -> Full History -> Сбор открытых номеров` закрыта live-цель `30` уникальных открытых номеров.
 - Использовался профиль `AK2 live 959756539365`; `default_user` не менялся.
@@ -174,7 +195,7 @@
 
 ## 2026-05-11
 
-### Windows Core Smoke And End-Of-Day Checkpoint
+### Проверка ядра Windows и итоговая контрольная точка
 
 - Подтверждён narrow Windows smoke для `telegram-username-collector` и core/browser wrappers на `C:\site-control-kit-win-smoke`.
 - `scripts\start_hub.cmd` снова поднимает hub на Windows без traceback.
@@ -218,7 +239,7 @@
 
 ## 2026-05-10
 
-### Windows Core Smoke + Release Confidence
+### Проверка ядра Windows и готовность к выпуску
 
 - Починен Windows PowerShell hub launcher path.
 - Усилен runtime/config слой и диагностика `runtime-env`.

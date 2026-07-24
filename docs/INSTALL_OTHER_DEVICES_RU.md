@@ -1,242 +1,131 @@
-# Запуск на других устройствах
+# Установка на другом устройстве
 
-Документ описывает перенос `site-control-kit` на новую машину без ручной правки кода.
+Этот документ описывает перенос браузерного ядра на Linux или Windows.
+Пошаговый первый запуск находится в
+[`USER_GUIDE_RU.md`](../USER_GUIDE_RU.md).
 
-## 1. Поддерживаемая модель v1
+## Что поддерживается
 
-- Linux:
-  - production-ready `hub + browser + telegram-username-collector`
-  - есть Linux-first product path в виде Ubuntu `.deb`
-  - GTK GUI работает только через системный `python3` с установленными GTK bindings
-- Windows:
-  - production-ready `hub + browser + wrappers + docs`
-  - GTK GUI не входит в Windows v1
+- Linux: хаб, CLI и расширение Chromium; отдельно доступен Telegram GTK GUI;
+- Windows: хаб, CLI, расширение и `.cmd`/PowerShell wrappers;
+- macOS: Python-хаб и расширение можно запускать из исходников, но отдельный
+  пакет пока не проверен.
 
-## 2. Что нужно заранее
+Нужно установить Python 3.10+, Git и Chrome, Chromium или Edge.
 
-- Python `3.10+`, рекомендовано `3.11+`
-- git
-- Chromium-совместимый браузер для `extension/`
-- для Linux Telegram GUI:
-  - системный `python3`
-  - рабочий `python3-gi`
-  - GTK 4 runtime
-
-## 3. Базовый runtime-контракт
-
-- runtime root по умолчанию: `./var/site-control-kit`
-- precedence настроек:
-  - `env`
-  - `.env`
-  - `.site-control-kit/local.yaml`
-  - `config/default.yaml`
-- если на машине уже есть legacy runtime `~/.site-control-kit`, проект не переносит его автоматически
-- вместо переноса создаётся `.site-control-kit/local.yaml`, который явно указывает на существующий runtime
-
-Проверка:
+## Установка из исходников
 
 ```bash
-cd <repo-root>
-python3 -m webcontrol runtime-env --format json
-```
-
-JSON-вывод редактирует `SITECTL_TOKEN` по умолчанию, поэтому его можно прикладывать к диагностике. Реальный токен в JSON показывается только по явному `--show-secrets`.
-
-## 4. Установка
-
-### Linux
-
-Готовый продукт для Ubuntu 24.04:
-
-```bash
-cd <repo-root>
-bash scripts/build_linux_deb.sh
-sudo apt install ./dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb
-telegram-username-collector --doctor
-```
-
-На текущем хосте готовый install-kit уже собран здесь:
-
-```bash
-cd "/home/max/Рабочий стол/telegram-username-collector-install-kit"
-sha256sum -c telegram-username-collector_0.1.0_amd64.deb.sha256
-sudo apt install ./telegram-username-collector_0.1.0_amd64.deb
-telegram-username-collector --doctor
-```
-
-Ожидаемый sha256 пакета: `121572953110c23d69354e7438dde86d2b5ffa507fc5833a178cd248e6bb6aa5`.
-
-Repo checkout для разработки:
-
-```bash
-git clone <repo-url> site-control-kit
+git clone https://github.com/MaxCorpOrg/site-control-kit.git
 cd site-control-kit
-python3 -m pip install -r requirements.txt
+python3 -m venv .venv
+. .venv/bin/activate
 python3 -m pip install -e .
 ```
 
-Telegram GUI Linux preflight:
-
-```bash
-cd <repo-root>
-bash scripts/bootstrap_telegram_workstation.sh --doctor
-```
-
-Linux product install/update/uninstall flow, desktop shortcut и XDG runtime dirs: [docs/LINUX_PRODUCT_INSTALL_RU.md](LINUX_PRODUCT_INSTALL_RU.md).
-
-### Windows
+На Windows:
 
 ```powershell
-git clone <repo-url> site-control-kit
+git clone https://github.com/MaxCorpOrg/site-control-kit.git
 cd site-control-kit
-py -3.11 -m pip install -r requirements.txt
-py -3.11 -m pip install -e .
+py -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -e .
 ```
 
-## 5. Токен и конфиги
+Ожидается установленная команда `sitectl`. Если активация PowerShell
+запрещена, временно разрешите локальные сценарии согласно политике вашей
+организации или вызывайте `.\.venv\Scripts\python.exe -m webcontrol`.
 
-- пример env: `.env.example`
-- базовый конфиг: `config/default.yaml`
-- если `SITECTL_TOKEN` не задан, локальный runtime создаёт `.site-control-kit/generated_token.txt`
-- для shared/remote сценариев используйте явный `SITECTL_TOKEN`, а не generated token
+## Настройки и рабочие данные
 
-## 6. Запуск хаба
+Приоритет настроек:
 
-### Linux
+1. переменные процесса;
+2. `.env`;
+3. `.site-control-kit/local.yaml`;
+4. `config/default.yaml`.
+
+Точный путь без создания файлов:
 
 ```bash
-cd <repo-root>
+python3 -m webcontrol runtime-env --format json --no-create
+```
+
+По умолчанию рабочие данные находятся в `var/site-control-kit`. Хаб создаёт
+SQLite-файл рядом с совместимым JSON-снимком, журналы и артефакты. Не
+переносите браузерный профиль или токен через Git.
+
+## Токен
+
+Если `SITECTL_TOKEN` не задан, первый запуск создаёт случайный локальный токен
+в `.site-control-kit/generated_token.txt`. Посмотреть разрешённый для ручной
+настройки вывод можно так:
+
+```bash
+python3 -m webcontrol runtime-env --format json --show-secrets
+```
+
+Не прикладывайте этот вывод к issue или логу: он содержит секрет. Для
+диагностики используйте ту же команду без `--show-secrets`.
+
+Для общей или удалённой машины задайте отдельный длинный токен через менеджер
+секретов либо `SITECTL_TOKEN`. Токен передаётся только HTTP-заголовком.
+
+## Запуск
+
+Linux:
+
+```bash
 ./scripts/start_hub.sh
-```
-
-### Windows
-
-```cmd
-cd <repo-root>
-scripts\start_hub.cmd
-```
-
-## 7. Запуск browser-контура
-
-После старта хаба:
-
-### Linux
-
-```bash
-cd <repo-root>
 ./browser.sh status
 ./browser.sh tabs
 ```
 
-### Windows
+Windows:
 
 ```cmd
-cd <repo-root>
-browser.cmd status
-browser.cmd tabs
-```
-
-Если расширение ещё не загружено:
-
-1. Откройте страницу расширений браузера.
-2. Включите `Developer mode`.
-3. Нажмите `Load unpacked`.
-4. Выберите `<repo-root>/extension`.
-5. В `Options` расширения задайте:
-   - `Server URL`: `http://127.0.0.1:8765`
-   - `Access Token`: тот же токен, что использует хаб
-
-## 8. Запуск Telegram GUI
-
-### Linux
-
-```bash
-cd <repo-root>
-bash scripts/bootstrap_telegram_workstation.sh
-telegram-username-collector
-```
-
-Если launcher запущен в Python-окружении без GTK bindings, он завершится понятной ошибкой и отправит в `bootstrap_telegram_workstation.sh --doctor`.
-
-### Windows
-
-GTK GUI не входит в Windows v1.
-Используйте Windows только для core/browser-контура или запускайте Telegram GUI на Linux workstation.
-
-## 9. Где лежат данные и логи
-
-В project-local режиме:
-
-- `var/site-control-kit/state/state.json`
-- `var/site-control-kit/logs/hub.log`
-- `var/site-control-kit/logs/runtime_events.jsonl`
-- `var/site-control-kit/logs/runtime_errors.jsonl`
-- `var/site-control-kit/reports/`
-- `var/site-control-kit/telegram_workspace/`
-
-В adopted legacy режиме те же каталоги будут жить под `~/.site-control-kit/...`, а `.site-control-kit/local.yaml` внутри репозитория будет только pointer-файлом.
-
-В установленном `.deb` режиме runtime-контракт другой:
-
-- config/token: `${XDG_CONFIG_HOME:-~/.config}/site-control-kit`
-- data/workspace/reports/state: `${XDG_DATA_HOME:-~/.local/share}/site-control-kit`
-- logs: `${XDG_STATE_HOME:-~/.local/state}/site-control-kit/logs`
-
-## 10. Минимальная проверка
-
-### Linux
-
-```bash
-cd <repo-root>
-python3 -m unittest discover -s tests -p 'test_*.py'
-python3 -m webcontrol --help
-python3 -m webcontrol browser --help
-bash scripts/bootstrap_telegram_workstation.sh --doctor
-```
-
-### Windows
-
-```powershell
-cd <repo-root>
-python -m unittest discover -s tests -p "test_*.py"
-python -m webcontrol --help
-python -m webcontrol browser --help
-```
-
-## 11. Windows core smoke checklist
-
-Этот checklist обязателен для следующего production-checkpoint на реальной Windows-машине:
-
-```cmd
-cd <repo-root>
 scripts\start_hub.cmd
 browser.cmd status
 browser.cmd tabs
-python -m webcontrol --help
-python -m webcontrol browser --help
-python -m webcontrol runtime-env --format json --no-create
-telegram-username-collector
 ```
 
-Что нужно подтвердить:
-- в fresh checkout runtime-каталоги создаются автоматически;
-- `browser.cmd` использует resolved runtime, а не machine-specific path;
-- UTF-8 пути и русский текст читаемы в console output;
-- `telegram-username-collector` на Windows завершает запуск понятным fast-fail сообщением, а не traceback, потому что GTK GUI не входит в Windows v1.
+После установки распакованного расширения из `extension/` укажите адрес хаба
+и тот же токен. Ожидается хотя бы один онлайн-клиент.
 
-Подробный runbook для этого Windows smoke, включая shell choice, допустимый первый fail без heartbeat, runtime dirs, UTF-8 probe и report format: [docs/WINDOWS_SMOKE_HANDOFF_RU.md](WINDOWS_SMOKE_HANDOFF_RU.md).
+## Локальная сеть
 
-Важно:
-- `bash scripts/bootstrap_telegram_workstation.sh --doctor` не входит в этот Windows smoke;
-- широкий multi-platform verify-pass не нужно смешивать с этим handoff, если отдельно не попросили проверить всю платформу.
+Хаб намеренно слушает только `127.0.0.1`. Для доступа с другой машины не
+открывайте порт напрямую. Используйте SSH-туннель, ограниченный список Origin,
+отдельный токен и правила межсетевого экрана. Практический вариант описан в
+[`SERVER_BROWSER_ACCESS.md`](SERVER_BROWSER_ACCESS.md).
 
-Практические замечания по последнему локальному Windows rerun:
-- existing `%USERPROFILE%\.site-control-kit` переводит такой host в `legacy-adopted`; это само по себе не blocker;
-- если в PowerShell bare `.cmd` не резолвится из текущего каталога, используйте `.\browser.cmd` и `.\telegram-username-collector.cmd`;
-- для Git Bash helper на Windows есть `bash.cmd`, который подбирает установленный `bash.exe`.
+## Проверка новой машины
 
-## 12. Что не делать
+```bash
+PYTHONPATH="$PWD" python3 -m unittest discover -s tests -p 'test_*.py'
+python3 scripts/check_docs.py
+python3 -m webcontrol --help
+python3 -m webcontrol browser --help
+sitectl health
+sitectl browser status
+sitectl browser tabs
+```
 
-- не хардкодить токен в локальных скриптах
-- не переносить вручную `~/.site-control-kit` внутрь репозитория без отдельного решения
-- не считать Windows GTK GUI поддержанным в v1
+На Windows используйте `python` вместо `python3`, если именно так называется
+интерпретатор.
+
+## Telegram и Linux-пакет
+
+Telegram GTK GUI и `.deb` — отдельная прикладная подсистема. Её установка
+описана в [`LINUX_PRODUCT_INSTALL_RU.md`](LINUX_PRODUCT_INSTALL_RU.md). Не
+смешивайте проверку Telegram-пакета с приёмкой браузерного протокола.
+
+## Удаление
+
+1. остановите хаб;
+2. удалите расширение;
+3. выполните `python3 -m pip uninstall site-control-kit`;
+4. после резервной копии удалите runtime-каталог, показанный `runtime-env`.
+
+Удаление исходников не удаляет пользовательские данные автоматически.

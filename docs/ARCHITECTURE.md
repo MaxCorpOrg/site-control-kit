@@ -1,313 +1,197 @@
-# Архитектура
+# Архитектура Site Control Kit
 
 ## Назначение
-`site-control-kit` — локальная система управления браузером.
-Она связывает CLI, хаб и браузерное расширение в один предсказуемый контур выполнения команд.
+
+Платформа принимает команды оператора или ИИ-агента, безопасно доставляет их в
+реальный браузер и сохраняет доказуемый результат.
+
+```text
+CLI / HTTP API
+      |
+      v
+Python-хаб
+  | протокол и политики
+  | SQLite WAL и журнал
+  | сессии и блокировки
+      |
+      v
+MV3-расширение Chrome
+  | фоновые команды и CDP
+  | маршрутизация вкладки/iframe
+      |
+      v
+agent_dom.js + content.js
+      |
+      v
+DOM страницы
+```
 
 ## Компоненты
 
-### 1. `webcontrol` (Python)
-Содержит:
-- HTTP API сервер;
-- хранилище состояния и очередь команд;
-- CLI для оператора, скриптов и агентов.
+### Хаб `webcontrol/`
 
-Ключевые файлы:
-- `webcontrol/server.py`
-- `webcontrol/store.py`
-- `webcontrol/cli.py`
-- `webcontrol/protocol.py` — версии, состояния и классы повторов;
-- `webcontrol/state_backend.py` — транзакционное SQLite‑хранилище;
-- `webcontrol/artifacts.py` — сессионные артефакты и маскирование;
-- `webcontrol/browser_agent.py` — схема API и построение локаторов.
+- `server.py` — HTTP, токен, CORS и маршруты;
+- `store.py` — команды, аренды, сессии и политики;
+- `protocol.py` — версии, состояния и классы повторов;
+- `state_backend.py` — SQLite WAL, миграция, журнал и backup;
+- `artifacts.py` — JSONL-потоки, диагностический пакет ошибки и маскирование;
+- `browser_agent.py` — схема агентного API и локаторы;
+- `cli.py` — `sitectl` и операторские команды.
 
-### 2. Расширение браузера (`extension/`)
-Содержит:
-- `background.js` — heartbeat, аренда/ack, outbox результатов, вкладки, фреймы
-  и CDP;
-- `agent_dom.js` — семантический снимок, локаторы и ожидания;
-- `content.js` — DOM-команды внутри страницы;
-- `manifest.json`, `options.*`, `popup.*` — настройки и диагностика.
+Хаб — единственный источник правды. Расширение не решает, можно ли повторить
+команду, и не выдаёт блокировки вкладок.
 
-### 3. Windows-обёртки и скрипты
-Содержит:
-- `start-hub.cmd`, `start-hub.ps1`
-- `browser.cmd`, `browser.ps1`
-- `scripts/*.cmd`, `scripts/*.ps1`
+### Расширение `extension/`
 
-Назначение:
-- упростить запуск;
-- убрать лишние ручные аргументы;
-- дать агенту и пользователю короткий путь к живому браузеру.
+- `background.js` — heartbeat, polling, ack, outbox, вкладки, iframe и CDP;
+- `agent_dom.js` — семантический снимок, строгий поиск, ожидания и
+  восстановление `ref`;
+- `content.js` — DOM‑действия и старые совместимые команды;
+- `manifest.json` — разрешения и версия.
 
-### 4. Runtime-layer и launcher contracts
-Содержит:
-- `webcontrol/settings.py` — единое разрешение runtime root, token source и лог-путей;
-- `scripts/start_hub.ps1` — Windows wrapper над `python -m webcontrol serve`;
-- `scripts/telegram_username_collector_launcher.py` и `telegram-username-collector.cmd` — startup contract для Telegram GUI entrypoint.
+MV3 service worker непостоянен. Поэтому фоновые операции не должны хранить
+критическое состояние только в памяти.
 
-Назначение:
-- держать один источник правды по runtime mode (`project-local` vs `legacy-adopted`);
-- не допускать silent quickstart fallback для токена;
-- на Windows давать controlled fast-fail там, где production v1 сознательно Linux-only.
+### Операторские сценарии `scripts/`
 
-### 5. Telegram GTK operator contour
-Содержит:
-- `scripts/telegram_members_export_gui.py` — основной GTK entrypoint;
-- `scripts/telegram_gui/ui/window.py` — операторское окно и orchestration;
-- `scripts/telegram_gui/backend.py` — routing между GUI и helper/runtime слоями;
-- `scripts/telegram_tdata_helper.py` — direct `Primary tdata` list/resolve/export path.
+Здесь находятся E2E браузера, запуск, диагностика, Telegram‑процессы и
+вспомогательные сценарии. Прикладной Telegram‑код не меняет контракт доставки
+молча и не встраивается в браузерное ядро.
 
-Назначение:
-- держать текущий рабочий операторский путь в одном контуре:
-  - `GTK GUI -> Primary tdata`;
-- отделять `public_phones` от старого bridge/CDP/web fallback;
-- сохранять progress, stop-path и отдельные sidecar-артефакты для длинных history-run;
-- при stale registry row `TG_CONTACT N` уметь автоматически перейти на repo-local `REPO_ROOT/TG_CONTACT/N`, если там уже есть рабочий direct `tdata-*` source.
+### Упаковка `packaging/`
 
-### 6. Unified `public_phones` result contract
-Содержит:
-- один `operation_kind=public_phones` для всего phone-flow;
-- `phones_found` как total unique phones;
-- `private_phones_found` как private-only split;
-- sidecars:
-  - `*_phones.md`
-  - `*_phones.txt`
-  - `*_phones.json`
-  - `*.private.txt`
-  - `*.private.json` при наличии private-only номеров.
+Содержит воспроизводимые исходники Linux‑пакета. Готовые `.deb`, `.exe` и
+другие бинарные результаты публикуются как артефакты выпуска, а не как обычные
+файлы исходного кода.
 
-Назначение:
-- держать одинаковую total/public/private семантику в helper, markdown/json, GUI, run history и `artifacts/telegram_exports/INDEX.md`;
-- применять правило `public wins`, если один и тот же нормализованный номер найден и публично, и в `user.phone`.
+## Жизненный цикл команды
 
-### 7. Desktop product packaging and UI scaling
-Содержит:
-- `scripts/build_linux_deb.sh` — сборка Linux `.deb`-пакета;
-- `packaging/linux/telegram-username-collector.wrapper.sh` — installed-mode wrapper;
-- `scripts/telegram_username_collector_launcher.py` — product launcher, doctor и desktop shortcut path;
-- `scripts/telegram_gui/app.py` и `scripts/telegram_gui/ui/styles.py` — масштабируемый GTK startup/style layer.
-- `resources/branding/shadow-admin-logo-mark.png` — Shadow Admin logo asset, extracted from the user-provided PDF design guide.
+1. Агент отправляет `POST /api/commands` с ключом идемпотентности.
+2. Хаб проверяет цель, сессию, блокировку и policy — политику безопасности.
+3. Доставка получает `queued`.
+4. Расширение получает аренду: `leased`.
+5. Расширение подтверждает получение: `acknowledged`.
+6. Перед действием сообщает `running`.
+7. Результат сохраняется в `chrome.storage.local`.
+8. Расширение отправляет результат хабу до подтверждения приёма.
+9. Хаб проверяет `delivery_id` и текущий `lease_token`.
+10. Терминальное состояние и событие журнала сохраняются одной транзакцией.
 
-Назначение:
-- дать оператору готовую программу, а не только repo-run сценарий;
-- устанавливать desktop product в `/opt/telegram-username-collector`;
-- публиковать entrypoint `/usr/bin/telegram-username-collector`;
-- держать пользовательские runtime-данные в XDG config/data/state директориях;
-- поддерживать масштабирование через:
-  - GUI selector `Масштаб интерфейса`;
-  - `telegram-username-collector --ui-scale FACTOR`;
-  - `TELEGRAM_GUI_SCALE`.
-- показывать оператору следующий понятный шаг прямо в верхнем hero-блоке, а технические пути держать в компактном виде.
-- давать явную визуальную отдачу у кнопок при hover/press, чтобы оператор сразу видел, что кнопка активна.
+Безопасное чтение можно выдать повторно. Опасное действие после `running`
+автоматически не повторяется.
 
-## Схема Потока
+## Сессии и владение вкладкой
 
-```text
-browser.cmd / sitectl browser
-            |
-            v
-      webcontrol/cli.py
-            |
-            v
-     HTTP API локального хаба
-            |
-            v
- SQLite WAL + очередь + аренды + сессии
-            |
-            v
-  browser extension background.js
-            |
-   +--------+--------+
-   |                 |
-   v                 v
-tab-level API   content.js + agent_dom.js
-```
+Сессия содержит:
 
-## Поток Данных
+- владельца;
+- браузерный клиент;
+- срок жизни и heartbeat;
+- блокировки вкладок;
+- разрешения доменов и действий;
+- настройки диагностики;
+- путь к артефактам.
 
-### A. Регистрация Клиента
-1. Расширение стартует.
-2. Отправляет `POST /api/clients/heartbeat`.
-3. Хаб обновляет клиента, его вкладки и метаданные.
+`exclusive` даёт одного владельца, `shared_read` разрешает совместное чтение,
+`operator_override` явно перехватывает вкладку с записью события.
 
-### B. Жизненный Цикл Команды
-1. Оператор или агент вызывает `browser.cmd ...` или `sitectl browser ...`.
-2. CLI превращает это в payload команды.
-3. Хаб принимает `POST /api/commands`.
-4. Команда кладётся в очередь нужного клиента или клиентов.
-5. Расширение получает временную аренду через
-   `GET /api/commands/next?client_id=...`.
-6. Расширение подтверждает аренду через `ack`, затем сообщает `running`.
-7. Получив команду, расширение исполняет её:
-   - либо в `background.js`,
-   - либо через `content.js` во вкладке.
-8. Результат сначала сохраняется в локальном outbox расширения, затем
-   отправляется в `POST /api/commands/{id}/result`.
-9. Хаб принимает только результат активной аренды, обновляет доставки и
-   агрегированный статус.
+Истечение TTL — срока жизни — освобождает блокировки и переводит
+незавершённые команды в безопасное терминальное состояние.
 
-Опасное действие после перехода в `running` автоматически не повторяется. При
-неопределённом исходе оно попадает в `dead_letter`.
+## Поиск элемента
 
-### C. Сессия агента
+`snapshot` формирует компактное представление доступных элементов. Полный HTML
+не передаётся без явной команды.
 
-1. Агент создаёт сессию с ограничениями доменов и действий.
-2. Сессия блокирует точную пару браузерного клиента и вкладки.
-3. Каждая команда содержит `session_id`, `client_id` и `tab_id`.
-4. Heartbeat продлевает сессию и блокировки.
-5. Закрытие или истечение сессии освобождает вкладки.
+Приоритет нового API:
 
-### D. Диагностика
-- `GET /health` — жив ли хаб.
-- `GET /api/clients` — какие клиенты подключены.
-- `GET /api/state` — полное состояние.
-- `GET /api/commands/{id}` — подробности конкретной команды.
-- `GET /api/sessions` — активные и завершённые сессии.
-- `GET /api/storage/journal` — хвост транзакционного журнала.
-- `python -m webcontrol runtime-env --format json --no-create` — эффективный runtime mode, token source и реальные пути до state/log/token; сам `SITECTL_TOKEN` в JSON редактируется по умолчанию.
+1. `ref` из свежего снимка;
+2. роль и доступное имя;
+3. label, placeholder или test id;
+4. точный текст;
+5. CSS как низкоуровневый запасной путь.
 
-## Роли Компонентов
+Ноль и несколько совпадений — ошибки. `nth` применяется только по явному
+указанию. После перерисовки `ref` восстанавливается только при единственном
+совпадении по устойчивым признакам.
 
-### Хаб
-Должен:
-- быть единственным источником правды;
-- хранить историю, очереди, аренды, сессии и блокировки;
-- не зависеть от того, жив ли service worker в данный момент.
-
-### CLI
-Должен:
-- быть коротким и удобным;
-- прятать низкоуровневый `send --type ...` за понятными командами;
-- давать безопасные значения по умолчанию.
-
-### Расширение
-Должно:
-- уметь периодически просыпаться и опрашивать хаб;
-- подтверждать аренду до запуска действия;
-- сохранять неотправленные результаты между перезапусками;
-- корректно выбирать вкладку;
-- возвращать единый формат результата и ошибок.
+Фоновый слой добавляет к локальному `eN` идентификатор документа:
+`f<frame_id>:eN`. Поэтому ссылки разных iframe не смешиваются.
 
 ## Хранилище
 
-Источником правды является SQLite в режиме WAL — с журналом предзаписи.
-Рядом сохраняется диагностическое зеркало `state.json`.
+Авторитетное состояние находится в SQLite с режимом WAL — журналом
+предзаписи. Текущая схема хранит согласованный документ состояния и добавочный
+журнал переходов. `state.json` — только атомарно обновляемое диагностическое
+зеркало и источник первичной миграции.
 
-Основные разделы:
-- `clients` — подключённые браузерные клиенты;
-- `queues` — FIFO-очереди по клиентам;
-- `commands` — карточки команд, доставки и результаты.
-- `sessions` — владельцы, политики и срок жизни;
-- `tab_locks` — блокировки вкладок.
+Ограничение текущего решения: один процесс хаба является единственным
+писателем. Горизонтальное масштабирование потребует другого backend‑адаптера.
 
-Изменение состояния и запись события журнала выполняются одной транзакцией.
-JSON обновляется через временный файл, `fsync` и атомарную замену. Старая база
-`state.json` импортируется автоматически и сохраняется перед миграцией.
+## Диагностика
 
-## Runtime Resolution
+Каждая сессия может иметь:
 
-Runtime теперь резолвится так:
+- `commands.jsonl`;
+- `events.jsonl`;
+- `errors.jsonl`;
+- `console.jsonl`;
+- `network.jsonl`;
+- диагностический пакет ошибки со снимком, кандидатами и семантическим
+  состоянием.
 
-1. `env`
-2. `.env`
-3. `.site-control-kit/local.yaml`
-4. `config/default.yaml`
+Перед записью маскируются секретные ключи, Bearer‑токены, cookies, пароли,
+номера карт и значения из `policy.secrets`.
 
-При этом:
+## Безопасность
 
-- canonical default runtime root — `./var/site-control-kit`;
-- для текущего Telegram operator flow long full-history export живёт на отдельном export-timeout path, а не на list-timeout;
-- фактический live baseline на 2026-06-06:
-  - ready direct `Primary tdata` source на этом хосте:
-    - `/home/max/site-control-kit/TG_CONTACT/4/tdata-003/tdata`
-  - unified `public_phones` full-history run `20260606T092821Z` уже подтвердил:
-    - `history_messages_scanned=187923`
-    - `phones_found=145`
-    - `public_phones=62`
-    - `private_phones_found=83`
-  - GUI contour на этом же baseline теперь тоже зафиксирован:
-    - stale registry/default portable rows не считаются единственным источником истины для `TG_CONTACT N`;
-    - initial account selection предпочитает самый актуальный ready `TG_CONTACT` direct `Primary tdata` contour;
-    - в текущем окружении это приводит к выбору `TG_CONTACT 4` с source `/home/max/site-control-kit/TG_CONTACT/4`;
-  - `AK2 live 959756539365` остаётся valid operator target, но его portable helper-clone перед следующим export ещё требует readiness refresh;
-- если на машине уже есть `%USERPROFILE%\.site-control-kit`, проект уходит в `legacy-adopted`, а repo-local `.site-control-kit/local.yaml` указывает на существующий runtime;
-- generated local token живёт в `.site-control-kit/generated_token.txt`, если явный `SITECTL_TOKEN` не задан.
+- токен принимается только в HTTP‑заголовке;
+- CORS ограничен разрешёнными источниками;
+- сессионная команда обязана указать точную вкладку;
+- домены и классы действий ограничиваются policy;
+- CDP выключен по умолчанию;
+- произвольный `run_script` считается повышенным риском;
+- runtime‑данные, профили и артефакты исключены из Git.
 
-Для следующего агента это значит:
+Полный контракт — в [документе безопасности](SECURITY.md).
 
-- не спорить с `runtime-env`, а брать пути и token source только оттуда;
-- отсутствие repo-local `var/site-control-kit` на adopted-legacy машине не считать поломкой само по себе.
+## Текущие границы модульности
 
-## Маршрутизация
+Python‑слой уже разделяет протокол, backend, агентную схему и артефакты. Но
+`store.py` и `background.js` пока крупнее желаемого. Следующий безопасный
+рефакторинг должен выделить интерфейсы без изменения внешнего API:
 
-Цель команды может задаваться так:
-- `client_id` — один клиент;
-- `client_ids` — список клиентов;
-- `broadcast=true` — всем клиентам.
+```text
+CommandService
+SessionService
+PolicyEngine
+StateRepository
+ArtifactSink
 
-Без явного target:
-- если онлайн-клиент ровно один, хаб может безопасно направить команду ему;
-- если онлайн-клиентов несколько, команда должна быть отклонена как неоднозначная.
+BrowserTransport
+TabRouter
+FrameRouter
+CdpAdapter
+DomAdapter
+ResultOutbox
+```
 
-Выбор вкладки внутри клиента:
-1. `target.tab_id`
-2. `target.url_pattern`
-3. активная вкладка
-4. первая доступная вкладка
+Новый браузерный адаптер должен реализовывать общий `BrowserAdapter`, а не
+добавлять проверки конкретного браузера во все слои. План выделения модулей —
+в [дорожной карте](ROADMAP_RU.md).
 
-Для `sitectl browser` важно сохранять этот порядок предсказуемым.
+## Прикладной Telegram‑контур
 
-## Типы Выполнения
+Telegram‑экспорт и GTK‑программа используют собственные скрипты, runtime и
+артефакты. Для них действуют отдельные тесты и инструкции в `scripts/`.
+Браузерное ядро не знает о конкретных чатах, пользователях или бизнес‑правилах.
 
-### Background-команды
-Выполняются на уровне вкладки или браузера:
-- `navigate`
-- `new_tab`
-- `reload`
-- `activate_tab`
-- `close_tab`
-- `screenshot`
+## Инварианты
 
-### DOM-команды
-Выполняются внутри страницы через `content.js`:
-- `click`
-- `context_click`
-- `click_text`
-- `clear_editable`
-- `fill`
-- `focus`
-- `extract_text`
-- `get_html`
-- `get_page_url`
-- `get_attribute`
-- `wait_selector`
-- `scroll`
-- `scroll_by`
-- `back`
-- `forward`
-- `press_key`
-- `run_script`
-
-## Устойчивость
-- MV3 service worker не постоянный.
-- Поэтому используются:
-  - `setInterval`
-  - `chrome.alarms`
-- Очередь и история сохраняются на стороне хаба.
-- Результат до подтверждения хаба хранится в `chrome.storage.local`.
-- Истёкшая аренда получает новый токен; старый токен не может изменить
-  терминальное состояние.
-- Две сессии не могут незаметно менять одну вкладку.
-
-## Ограничения
-- `chrome://*` и похожие системные страницы не доступны для content script.
-- Некоторые сайты запрещают `run_script` через CSP.
-- На чувствительных сайтах часть действий нужно делать через DOM-команды вместо произвольного JS.
-- `telegram-username-collector` в production v1 не является Windows GUI launcher: на Windows его контракт — быстрый понятный отказ без traceback и без GTK окна.
-
-## Принципы Развития
-- сохранять обратную совместимость по API, где это возможно;
-- развивать `sitectl browser` как основной операторский интерфейс;
-- добавлять короткие команды и хорошие defaults;
-- синхронно обновлять документацию, примеры и smoke-проверки.
+- идентификатор команды постоянен;
+- активная аренда имеет уникальный токен;
+- старый результат не меняет актуальное состояние;
+- один опасный сценарий не повторяется вслепую;
+- хаб остаётся источником правды;
+- совместимые CSS‑команды не удаляются без периода миграции;
+- изменение протокола всегда меняет версию, API, пример и тест.

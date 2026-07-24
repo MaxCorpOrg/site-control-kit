@@ -1,731 +1,99 @@
 # Site Control Kit
 
-Локальный набор инструментов для управления сайтами через браузерное расширение и локальный хаб-команд.
+Site Control Kit — локальная платформа управления настоящим браузером из
+командной строки и через HTTP API. Она рассчитана на операторов, скрипты и
+ИИ-агентов.
 
-## Что внутри
-- Локальный HTTP-хаб управления (`webcontrol`) с очередью команд и сохранением состояния.
-- CLI (`sitectl` / `python3 -m webcontrol`) для отправки команд и диагностики.
-- Расширение браузера (Manifest V3) для выполнения команд в реальных вкладках.
-- Подробная документация для пользователя и ИИ-агентов сопровождения.
+Основной контур состоит из трёх частей:
 
-## Текущий Статус Проекта
+- Python‑хаб хранит команды, результаты, сессии и блокировки;
+- расширение Chrome/Chromium исполняет действия в реальных вкладках;
+- `sitectl` даёт короткие команды человеку и агенту.
 
-Актуальная рабочая точка на 2026-07-12:
-- собран готовый Linux desktop package для оператора:
-  - `dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb`
-  - размер: около `52M`;
-  - sha256: `121572953110c23d69354e7438dde86d2b5ffa507fc5833a178cd248e6bb6aa5`;
-- готовая папка установщика для переноса на другой ПК:
-  - `/home/max/Рабочий стол/telegram-username-collector-install-kit/`;
-- установщик кладёт программу в `/opt/telegram-username-collector`, wrapper в `/usr/bin/telegram-username-collector`, desktop entry в `/usr/share/applications/telegram-username-collector.desktop`;
-- installed wrapper больше не зависит от текущей папки запуска: `/usr/bin/telegram-username-collector` и `/usr/bin/sitectl` переходят в `/opt/telegram-username-collector/app` перед запуском Python;
-- JSON-диагностика `runtime-env` по умолчанию редактирует `SITECTL_TOKEN`; для явного локального вывода секрета нужен `--show-secrets`;
-- GUI action-log теперь фиксирует старт и refresh профилей:
-  - `app_started`
-  - `profiles_refreshed accounts=... ready=...`;
-- верхняя часть GTK-панели приведена к Shadow Admin design guide:
-  - источник: `/home/max/Shadow_Admin/Shadow_Admin_Design_Guide_v1.0.pdf`
-  - logo asset: `resources/branding/shadow-admin-logo-mark.png`
-  - тёмная pixel/mono тема и зелёные accent-состояния
-  - заметная отдача кнопок при наведении и нажатии
-  - плашка `Следующий шаг`
-  - русские status badges
-  - короткая product-сводка без длинных технических путей;
-- GTK-панель поддерживает масштаб интерфейса:
-  - через поле `Масштаб интерфейса` в самой панели;
-  - через launcher option `--ui-scale`, например `telegram-username-collector --ui-scale 1.25`;
-  - через env `TELEGRAM_GUI_SCALE`;
-- основной Telegram-операторский путь: `GTK GUI -> Primary tdata`;
-- в GUI есть два основных действия:
-  - `Собрать @username`
-  - `Сбор открытых номеров`;
-- unified `public_phones` flow теперь собирает:
-  - `chat about`
-  - `pinned/history` message text
-  - `public bio/about`
-  - private-only номера из `user.phone`;
-- один и тот же номер из public-source и `user.phone` считается `public`;
-- рядом с обычными `*_phones.txt/json` теперь сохраняются и `*.private.txt/json`, если найдены private-only номера.
+Начиная с протокола `2.0`, хаб использует аренду команд, подтверждение
+получения, безопасные повторы, SQLite WAL и локальную очередь результатов
+расширения. Два агента не могут незаметно менять одну заблокированную вкладку.
 
-Что уже подтверждено:
-- полный `unittest` suite: `330 tests OK`, `2 skipped`;
-- `./scripts/verify.sh` -> OK;
-- `python3 -m webcontrol --help` -> OK;
-- `python3 -m webcontrol browser --help` -> OK;
-- `dpkg-deb --info`, `dpkg-deb --contents` и `dpkg-deb -x` по `.deb` -> OK;
-- extracted `.deb` smoke: `--help` и `--doctor` -> OK;
-- build-root installed-mode `--doctor`: `gtk_runtime=ok`, `extension_zip_ready=1`, `project_root=.../opt/telegram-username-collector/app`;
-- live panel hover/press smoke:
-  - `/home/max/Рабочий стол/telegram-program-live-smoke-20260712T065625Z-final/screenshot-hover-refresh.png`
-  - `/home/max/.local/share/site-control-kit/telegram_workspace/logs/gui_actions_20260712T065533Z.log`;
-- Ctrl+C smoke завершает launcher кодом `130` без traceback;
-- GTK GUI видим на `DISPLAY=:0`;
-- живой GTK smoke на текущем хосте снова поднимает окно `Telegram Username Collector`;
-- live `Quick Check` unified-flow на авторизованном `Primary tdata` source `/home/max/site-control-kit/TG_CONTACT/4/tdata-003/tdata` уже дал private-only hit:
-  - run `20260606T074214Z`
-  - чат `-1002465948544`
-  - `phones_found=1`
-  - `private_phones_found=1`
-  - артефакты: `/tmp/site-control-live-private-phones-1_phones.{md,txt,json,private.txt,private.json}`
-  - run history: `/home/max/.site-control-kit/telegram_workspace/runs/20260606T074214Z/{summary.json,artifacts.json,events.jsonl}`
-  - `artifacts/telegram_exports/INDEX.md` уже содержит entry с `Private Phones TXT/JSON`;
-- direct helper/API `Full History` на том же ready source уже завершён до `done`:
-  - run `20260606T092821Z`
-  - чат `НаДопинге 2.0 ЧАТ | Бодибилдинг | Фитнес | Спорт Фармакология`
-  - `history_messages_scanned=187923`
-  - `phones_found=145`
-  - `public_count=62`
-  - `private_phones_found=83`
-  - артефакты: `/tmp/tg4_nadopinge_full_history_phones_20260606_phones.{md,txt,json,private.txt,private.json}`
-  - run history: `/home/max/.site-control-kit/telegram_workspace/runs/20260606T092821Z/{summary.json,artifacts.json,events.jsonl}`;
-- GUI contour теперь тоже зафиксирован на этом ready source:
-  - stale registry row `TG_CONTACT 4` автоматически переводится в repo-local `/home/max/site-control-kit/TG_CONTACT/4`
-  - GTK account selection теперь предпочитает этот ready `Primary tdata` contour
-  - portable card для него пишет direct helper/API path, а не требует portable profile;
-- live цель `30` уникальных открытых номеров уже закрыта на `AK2 live 959756539365`:
-  - rerun `@chatkosmetologa`
-  - `status=done`
-  - `phones_found=25`
-  - `history_messages_scanned=7373`
-  - cumulative total: `37` unique phones;
-- узкий live smoke `export-public-phones` на AK2 через collector venv:
-  - `history_messages_scanned=50`
-  - `public_phones_kept=3`
-  - `chat_about_scanned=1`
-  - `pinned_messages_scanned=1`
-  - `user_about_scanned=31`
-  - артефакты: `/tmp/ak2_public_phones_smoke_20260603.{json,log,session}`.
+## С чего начать
 
-Что осталось:
-- если нужен live-run именно на `AK2 live 959756539365`, сначала вернуть helper-клон этого portable-профиля в состояние `ready for export`: сейчас он виден, но helper пишет, что сессия ещё не открывается;
-- если нужен следующий live-pass, идти уже не за целью `30`, а за дополнительным покрытием target-ов:
-  - `@kosmetologi_chat_ru`
-  - `@cosmetologna`
-  - `@cosmochatrussia`;
-- `public_phones` V1 по-прежнему доступен только для `Primary tdata`.
+Если вы впервые запускаете программу, откройте
+[руководство пользователя](USER_GUIDE_RU.md). Там есть установка, первый
+снимок страницы, клик, ввод текста, остановка, обновление и удаление.
 
-Подробные checkpoints:
-- [docs/checkpoints/CHECKPOINT_2026-07-11_READY_GUI_INSTALLER_SCALE.md](docs/checkpoints/CHECKPOINT_2026-07-11_READY_GUI_INSTALLER_SCALE.md)
-- [docs/checkpoints/CHECKPOINT_2026-06-03_СТАБИЛИЗАЦИЯ_PUBLIC_PHONES.md](docs/checkpoints/CHECKPOINT_2026-06-03_СТАБИЛИЗАЦИЯ_PUBLIC_PHONES.md)
-- [docs/checkpoints/CHECKPOINT_2026-06-03_AK2_30_UNIQUE_PUBLIC_PHONES.md](docs/checkpoints/CHECKPOINT_2026-06-03_AK2_30_UNIQUE_PUBLIC_PHONES.md)
-- [docs/checkpoints/CHECKPOINT_2026-06-06_UNIFIED_PUBLIC_PHONES_TG_CONTACT4.md](docs/checkpoints/CHECKPOINT_2026-06-06_UNIFIED_PUBLIC_PHONES_TG_CONTACT4.md)
-- [docs/checkpoints/CHECKPOINT_2026-06-06_GUI_CONTOUR_TG_CONTACT4.md](docs/checkpoints/CHECKPOINT_2026-06-06_GUI_CONTOUR_TG_CONTACT4.md)
+Если с репозиторием работает ИИ-агент, начните с
+[короткого руководства агента](START_HERE_AGENT_RU.md), затем прочитайте
+`AGENTS.md` в папке, которую собираетесь менять.
 
-## Быстрый Вход В Браузерный Контур
+## Быстрая проверка
 
-Кратчайший поддерживаемый сценарий: [BROWSER_QUICKSTART.md](BROWSER_QUICKSTART.md)
-
-Из корня репозитория на Windows:
-
-```cmd
-start-hub.cmd
-browser.cmd status
-browser.cmd tabs
-browser.cmd open https://example.com
-```
-
-## Быстрый Вход В Telegram GUI
-
-Текущий операторский запуск:
+Запустите хаб:
 
 ```bash
-cd /home/max/site-control-kit
-TELEGRAM_API_COLLECTOR_PYTHON=/home/max/telegram-api-collector/.venv/bin/python DISPLAY=:0 python3 scripts/telegram_members_export_gui.py
+PYTHONPATH="$PWD" python3 -m webcontrol serve
 ```
 
-Что важно:
-- не менять `default_user` без явной причины;
-- для live `tdata` helper-path использовать collector venv, а не голый системный `python3`;
-- текущий ready direct helper source на этом хосте: `/home/max/site-control-kit/TG_CONTACT/4/tdata-003/tdata`;
-- portable helper-clone для `AK2 live 959756539365` перед следующим export ещё требует readiness refresh.
-
-Прямой helper smoke для `public_phones`:
+В другом терминале:
 
 ```bash
-cd /home/max/site-control-kit
-/home/max/telegram-api-collector/.venv/bin/python scripts/telegram_tdata_helper.py export-public-phones \
-  --tdata "/home/max/site-control-kit/TG_CONTACT/4/tdata-003/tdata" \
-  --session /tmp/tg4_public_phones_smoke.session \
-  --chat-ref -1002465948544 \
-  --history-limit 50 \
-  --progress-every 25
+PYTHONPATH="$PWD" python3 -m webcontrol health
+PYTHONPATH="$PWD" python3 -m webcontrol browser status
+PYTHONPATH="$PWD" python3 -m webcontrol browser tabs
 ```
 
-## Для Агентов И Автоматизации
+Ожидаемый результат: хаб отвечает `ok: true`, а после установки расширения
+появляется хотя бы один онлайн‑клиент и его вкладки.
 
-Если репозиторий открыт в рабочей папке агента, считайте `site-control-kit` основным локальным инструментом управления браузером.
+## Возможности браузерного ядра
 
-Что читать агенту:
-- [AGENT_START_HERE.md](AGENT_START_HERE.md) — repo-root handoff: где мы остановились и откуда продолжать.
-- [CODEX_STATE.md](CODEX_STATE.md) — последний зафиксированный state/handoff по текущей ветке работ.
-- [NEXT_STEPS.md](NEXT_STEPS.md) — короткий список ближайших безопасных шагов.
-- [CHANGELOG.md](CHANGELOG.md) — high-level журнал зафиксированных изменений.
-- [AUTOPILOT.yaml](AUTOPILOT.yaml) — repo-local автопилот: как действовать без лишних подтверждений и чем проверять результат.
-- [BROWSER_QUICKSTART.md](BROWSER_QUICKSTART.md) — короткий вход и рабочие команды.
-- [AGENTS.md](AGENTS.md) — правила и политика использования инструмента в репозитории.
-- [docs/AI_MAINTAINER_GUIDE.md](docs/AI_MAINTAINER_GUIDE.md) — как использовать, изменять и улучшать инструмент.
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — поток команд и роли компонентов.
-- [docs/API.md](docs/API.md) — контракт команд и результатов.
+- семантический снимок вместо передачи полного HTML;
+- поиск по роли, имени, подписи, тексту, `placeholder`, тестовому
+  идентификатору, `ref` или CSS;
+- умные ожидания видимости, доступности, стабильности и результата действия;
+- открытый Shadow DOM, iframe и вложенные iframe;
+- сессии агентов и блокировки вкладок;
+- устойчивое выполнение после сна service worker и перезапуска хаба;
+- полноразмерные снимки, консоль, сетевые ошибки и диагностические пакеты;
+- маскирование токенов, cookies, паролей и номеров карт;
+- совместимость со старыми CSS‑командами.
 
-Практическое правило:
-1. Запустить хаб.
-2. Проверить `browser.cmd status`.
-3. Проверить `browser.cmd tabs`.
-4. Только потом выполнять реальную задачу в браузере.
+## Прикладные подсистемы
 
-## Важные Точки Входа
+В репозитории также есть Telegram‑экспорт, GTK‑интерфейс, упаковка Linux и
+операторские сценарии. Эти подсистемы используют общую инфраструктуру, но
+развиваются отдельно от браузерного протокола. Их нельзя смешивать с изменением
+браузерного ядра в одном PR.
 
-- [AGENT_START_HERE.md](AGENT_START_HERE.md) — короткая repo-root точка продолжения.
-- [CODEX_STATE.md](CODEX_STATE.md) — последний handoff по факту.
-- [docs/PROJECT_STATUS_RU.md](docs/PROJECT_STATUS_RU.md) — сводка текущего состояния на русском.
-- `scripts/telegram_members_export_gui.py` — основной GTK GUI операторский вход.
-- `scripts/telegram_tdata_helper.py` — прямой `tdata` helper для `list/resolve/export`.
-- `scripts/export_telegram_members_non_pii.py` — sidecar/markdown export contract.
-- [NEXT_STEPS.md](NEXT_STEPS.md) — что делать следующим узким шагом.
+## Главные документы
 
-## Основные сценарии
-- Открывать нужные URL во вкладках.
-- Кликать по элементам, заполнять поля, ждать появления селекторов.
-- Извлекать текст/HTML, делать скриншоты вкладок.
-- Управлять несколькими клиентами (браузерами) через `client_id`.
+- [руководство пользователя](USER_GUIDE_RU.md);
+- [быстрый старт агента](START_HERE_AGENT_RU.md);
+- [архитектура](docs/ARCHITECTURE.md);
+- [API](docs/API.md);
+- [безопасность](docs/SECURITY.md);
+- [диагностика](docs/TROUBLESHOOTING.md);
+- [актуальное состояние](docs/PROJECT_STATUS_RU.md);
+- [дорожная карта](docs/ROADMAP_RU.md);
+- [сравнение с аналогами](docs/research/ANALOGS_AUDIT_RU.md);
+- [аудит документации](docs/DOCUMENTATION_AUDIT_RU.md);
+- [словарь терминов](docs/TERMS_RU.md).
 
-## Архитектура
+История изменений хранится в `CHANGELOG.md`, Git‑коммитах и GitHub Releases.
+Сырые runtime‑данные, профили браузера и собранные программы в обычный коммит
+не входят.
 
-```text
-CLI (sitectl) <----HTTP----> Локальный хаб (Python) <----HTTP poll----> Расширение браузера
-                                                                      |
-                                                                      +--> Content Script -> DOM-действия
-```
-
-Хаб — единый источник правды: клиенты, очередь команд, результаты выполнения.
-
-## Runtime И Конфиги
-
-С этого пакета стабилизации у проекта есть единый runtime-layer:
-
-- runtime root по умолчанию: `./var/site-control-kit`;
-- precedence настроек: `env` -> `.env` -> `.site-control-kit/local.yaml` -> `config/default.yaml`;
-- пример переменных: [.env.example](.env.example);
-- базовый конфиг: [config/default.yaml](config/default.yaml);
-- shell/PowerShell wrappers больше не держат hardcoded quickstart token.
-
-Что происходит при первом запуске:
-
-- если legacy runtime `~/.site-control-kit` не найден, проект создаёт локальные каталоги внутри `./var/site-control-kit`;
-- если legacy runtime уже существует, проект не переносит его автоматически, а создаёт pointer-файл `.site-control-kit/local.yaml` внутри репозитория;
-- если токен хаба не задан через `SITECTL_TOKEN` или `.env`, локальный runtime генерирует `.site-control-kit/generated_token.txt`.
-
-Проверить итоговое разрешение путей можно так:
+## Проверка перед коммитом
 
 ```bash
-python3 -m webcontrol runtime-env --format json
+PYTHONPATH="$PWD" python3 -m unittest discover -s tests -p 'test_*.py'
+python3 scripts/check_docs.py
+python3 scripts/check_repository.py --base origin/main
 ```
 
-JSON-вывод по умолчанию редактирует `SITECTL_TOKEN`, чтобы его можно было безопасно прикладывать к логам и диагностике. Если нужен реальный токен в локальной приватной сессии, используйте `--show-secrets`; wrapper-форматы `shell` и `powershell` по-прежнему отдают токен для стартовых скриптов.
-
-## Где лежат данные, логи и отчёты
-
-- базовый runtime: `./var/site-control-kit`;
-- legacy adoption, если найден `~/.site-control-kit`: `.site-control-kit/local.yaml`;
-- локально сгенерированный токен по умолчанию: `.site-control-kit/generated_token.txt`;
-- состояние хаба: `state/state.json`;
-- текстовый лог хаба: `logs/hub.log`;
-- machine-readable runtime logs:
-  - `logs/runtime_events.jsonl`
-  - `logs/runtime_errors.jsonl`
-- browser/core отчёты: `reports/`;
-- Telegram workspace:
-  - `telegram_workspace/registry/users.json`
-  - `telegram_workspace/registry/api_accounts.json`
-  - `telegram_workspace/registry/secrets/`
-  - `telegram_workspace/accounts/<N>/`
-  - `telegram_workspace/logs/`
-  - `telegram_workspace/runs/<run_id>/summary.json`
-  - `telegram_workspace/runs/<run_id>/events.jsonl`
-  - `telegram_workspace/runs/<run_id>/artifacts.json`
-- Telegram export reports по умолчанию: `reports/telegram_exports`
-
-## Быстрый старт
-
-### Windows
-
-1. Откройте PowerShell в корне проекта.
-2. Установите зависимости и пакет:
-
-```powershell
-py -3.11 -m pip install -r requirements.txt
-py -3.11 -m pip install -e .
-```
-
-3. При необходимости создайте `.env` на основе `.env.example`.
-4. Запустите хаб:
-
-```cmd
-scripts\start_hub.cmd
-```
-
-5. В Chrome/Edge откройте `chrome://extensions` или `edge://extensions`.
-6. Включите `Developer mode`.
-7. Нажмите `Load unpacked`.
-8. Выберите папку `<repo-root>\extension`.
-9. Откройте `Options` расширения и задайте:
-   - `Server URL`: `http://127.0.0.1:8765`
-   - `Access Token`: тот же токен, что у хаба или в `.site-control-kit\generated_token.txt`.
-
-### Windows Core Smoke Checklist
-
-Перед release или publish-checkpoint на Windows нужно пройти именно этот набор:
-
-```cmd
-cd <repo-root>
-scripts\start_hub.cmd
-browser.cmd status
-browser.cmd tabs
-python -m webcontrol --help
-python -m webcontrol browser --help
-python -m webcontrol runtime-env --format json --no-create
-telegram-username-collector
-```
-
-Ожидаемый результат:
-- хаб поднимается без traceback;
-- `browser.cmd status` и `browser.cmd tabs` отрабатывают через текущий runtime; до подключения extension первый ответ уровня `No connected browser clients...` допустим и сам по себе не blocker;
-- `runtime-env` показывает корректные runtime paths и token source без раскрытия токена в JSON;
-- в fresh checkout автоматически создаются runtime-каталоги;
-- UTF-8 пути и русский текст не ломаются в stdout/stderr;
-- `telegram-username-collector` не пытается стартовать GTK GUI на Windows, а честно завершает запуск понятным fast-fail сообщением, что Windows GTK GUI не входит в v1.
-
-Полный пошаговый handoff для этого smoke, включая `Terminal A` / `Terminal B`, runtime artifacts, UTF-8 probe и формат отчёта: [docs/WINDOWS_SMOKE_HANDOFF_RU.md](docs/WINDOWS_SMOKE_HANDOFF_RU.md).
-
-Практические замечания по последнему локальному Windows rerun:
-- в PowerShell bare `.cmd` удобнее вызывать как `.\browser.cmd` и `.\telegram-username-collector.cmd`;
-- existing `%USERPROFILE%\.site-control-kit` переводит этот host в `legacy-adopted`, поэтому отсутствие repo-local `var\site-control-kit` в таком сценарии не blocker;
-- для Git Bash helper на Windows есть `bash.cmd`, который подбирает установленный `bash.exe` и не упирается в WindowsApps stub.
-
-### Упаковка расширения в Windows
-
-```cmd
-scripts\package_extension.cmd
-```
-
-Готовый архив: `dist\site-control-bridge-extension.zip`
-
-### Linux/macOS
-
-### Ubuntu `.deb` product path
-
-Если нужен не repo checkout, а готовая программа для Ubuntu 24.04:
+Для реального браузерного E2E используется официальный Chrome for Testing:
 
 ```bash
-cd <repo-root>
-bash scripts/build_linux_deb.sh
-sudo apt install ./dist/linux-deb/telegram-username-collector_0.1.0_amd64.deb
-telegram-username-collector --doctor
-telegram-username-collector
+chrome_path="$(python3 scripts/install_chrome_for_testing.py)"
+python3 scripts/browser_e2e.py --chrome "$chrome_path" --headed
 ```
 
-Дополнительно:
-
-```bash
-telegram-username-collector --create-desktop-shortcut
-```
-
-Что делает установленная версия:
-- ставит приложение в `/opt/telegram-username-collector`;
-- добавляет launcher в меню приложений;
-- хранит token/config в `${XDG_CONFIG_HOME:-~/.config}/site-control-kit`;
-- хранит workspace/reports/state в `${XDG_DATA_HOME:-~/.local/share}/site-control-kit`;
-- хранит логи в `${XDG_STATE_HOME:-~/.local/state}/site-control-kit/logs`;
-- кладёт companion extension zip в `/opt/telegram-username-collector/app/resources/site-control-bridge-extension.zip`.
-
-Подробный install/update/uninstall flow: [docs/LINUX_PRODUCT_INSTALL_RU.md](docs/LINUX_PRODUCT_INSTALL_RU.md).
-
-## 1) Запуск хаба
-
-```bash
-cd <repo-root>
-python3 -m pip install -r requirements.txt
-python3 -m pip install -e .
-./scripts/start_hub.sh
-```
-
-GTK GUI на Linux не ставится через `pip`.
-Для него нужен системный `python3` с рабочими GTK bindings.
-Проверка окружения:
-
-```bash
-cd <repo-root>
-bash scripts/bootstrap_telegram_workstation.sh --doctor
-```
-
-На Ubuntu 24.04 минимум нужен рабочий `python3-gi` и GTK 4 runtime.
-
-На первом запуске хаб:
-- создаёт `./var/site-control-kit`, если нет legacy runtime;
-- или использует `.site-control-kit/local.yaml`, если найден существующий `~/.site-control-kit`;
-- генерирует локальный токен в `.site-control-kit/generated_token.txt`, если вы заранее не задали `SITECTL_TOKEN`.
-
-## 2) Установка расширения (без публикации в Store)
-1. Откройте `chrome://extensions`.
-2. Включите `Developer mode`.
-3. Нажмите `Load unpacked`.
-4. Выберите папку: `<repo-root>/extension`.
-5. Откройте `Options` расширения и проверьте:
-- `Server URL`: `http://127.0.0.1:8765`
-- `Access Token`: тот же, что у хаба.
-
-Упаковка в zip:
-
-```bash
-cd <repo-root>
-./scripts/package_extension.sh
-```
-
-Готовый архив: `dist/site-control-bridge-extension.zip`
-
-### Быстрый запуск рабочего контура на Linux
-
-Если нужен один вход в рабочий контур, используйте:
-
-```bash
-cd <repo-root>
-./start-browser.sh
-```
-
-Что делает скрипт:
-- поднимает хаб автоматически, если он ещё не запущен;
-- предпочитает Chromium-совместимый браузер, где можно загрузить unpacked extension флагами;
-- если доступен только branded `google-chrome`, открывает выделенный профиль и даёт one-time шаги для ручной загрузки `extension/`.
-
-Если branded Chrome мешает, есть отдельный Firefox dev-path:
-
-```bash
-cd <repo-root>
-./start-firefox.sh --url https://web.telegram.org/a/
-```
-
-Что делает этот запуск:
-- поднимает хаб;
-- на обычном Firefox запускает `web-ext run` и ставит `extension/` автоматически;
-- на snap Firefox честно падает в `about:debugging` temporary-add-on path;
-- использует выделенный debug-profile, чтобы Telegram cookies/session не терялись между прогонами.
-
-Важно:
-- это именно dev/debug-контур;
-- temporary add-on поднимается заново на каждом запуске `start-firefox.sh`;
-- на этой машине snap Firefox не даёт `web-ext` надёжно подключиться к debugger port, поэтому manual fallback для snap-сборки ожидаем.
-
-После этого рабочие команды:
-
-```bash
-cd <repo-root>
-./browser.sh status
-./browser.sh tabs
-./browser.sh open https://example.com
-```
-
-## 3) Проверка связи
-
-```bash
-cd <repo-root>
-python3 -m webcontrol health
-python3 -m webcontrol clients
-```
-
-## Простое управление браузером
-
-После установки расширения и запуска хаба можно использовать упрощённую команду:
-
-```cmd
-scripts\browser.cmd status
-scripts\browser.cmd tabs
-scripts\browser.cmd open https://example.com
-scripts\browser.cmd click "button[type='submit']"
-scripts\browser.cmd context-click ".item"
-scripts\browser.cmd clear "#editable-message-text"
-scripts\browser.cmd fill "#email" "user@example.com"
-scripts\browser.cmd text main
-scripts\browser.cmd screenshot --output .\shot.png
-```
-
-Если онлайн-клиент один, он выбирается автоматически. Для реальных действий `browser ...` берёт самый свежий онлайн-клиент. Если онлайн-клиентов несколько, по умолчанию берётся самый свежий, либо можно указать `--client-id`.
-
-CLI внутри Python-пакета:
-
-```bash
-sitectl browser status
-sitectl browser open https://example.com
-sitectl browser clear "#editable-message-text"
-sitectl browser press Enter
-```
-
-Linux-обёртка:
-
-```bash
-./browser.sh status
-./browser.sh text body
-```
-
-## Telegram Workflow
-
-Для Telegram Web есть отдельный рабочий вход:
-
-```bash
-cd <repo-root>
-./start-telegram.sh
-```
-
-Firefox-вариант для Telegram:
-
-```bash
-cd <repo-root>
-./start-telegram-firefox.sh
-```
-
-Что делает этот запуск:
-- поднимает хаб;
-- открывает браузерный профиль на `web.telegram.org`;
-- если bridge-клиента ещё нет, Telegram export-скрипты сами попытаются открыть этот профиль повторно.
-
-CLI-экспорт:
-
-```bash
-cd <repo-root>
-./telegram-export.sh --source both --deep-usernames
-```
-
-Примечание:
-- `--force-navigate` теперь умеет переживать Telegram redirect в `web.telegram.org/k/` и сам доводит вкладку до реального открытого диалога;
-- если Telegram Web не даёт автоматически открыть `Group Info -> Members`, режим `--source both` теперь не падает, а продолжает выгрузку через `chat` fallback;
-- если Telegram Web в `Group Info` отдаёт только preview админов/модераторов вместо полного каталога участников, экспортёр теперь помечает это как `info-preview` и рекомендует `--source both`;
-- если `Group Info -> Members` открылся, но в DOM загружена только часть списка, экспортёр честно предупредит сколько участников видно сейчас и какой общий hint вернул Telegram;
-- направление скролла тут важно только для `chat`-режима: чат читается прокруткой вверх, а `info`-режим использует прокрутку вниз только когда Telegram реально отдал список участников; в `info-preview` смена направления колеса обычно ничего не меняет;
-- в текущем Telegram Web chat-проход больше не опирается на старые `.bubbles`-селектора: инструмент умеет листать историю через новый `MessageList/backwards-trigger` DOM и реально поднимать новых авторов из истории;
-- chat-проход теперь может автоматически продлеваться после `--chat-scroll-steps`, пока реально появляются новые авторы; лимит задаётся через `--chat-auto-extra-steps`;
-- каждый экспорт дополнительно архивируется в [artifacts/telegram_exports](artifacts/telegram_exports) и записывается в индекс [INDEX.md](artifacts/telegram_exports/INDEX.md);
-- рядом с каждым экспортом теперь автоматически пишутся отдельные sidecar-файлы `*_usernames.txt` и `*_usernames.json`, чтобы собранные `@username` можно было брать без парсинга markdown-таблицы;
-- экспортёр теперь автоматически ведёт per-chat history в [artifacts/telegram_exports/state](artifacts/telegram_exports/state) и при следующем прогоне поднимает уже известные `@username` из прошлых archived sidecars;
-- sticky-author path теперь работает через `telegram_sticky_author`: правый клик делается по нижней прилипшей 34px иконке автора, а не по тексту сообщения и не через открытие профиля левой кнопкой;
-- `--deep-usernames` больше не должен уводить основную групповую вкладку в личные диалоги: usernames дочитываются через временные helper tabs;
-- если текущий Telegram Web отвечает `No visible menu item found by text`, это теперь трактуется как честный признак отсутствия `Mention` в текущем menu-path: exporter сразу уходит в helper-only path и не тратит оставшийся deep-step на пустые retry;
-- exporter и safe/batch слой теперь отфильтровывают ложные `@username`, состоящие только из цифр: артефакты вида `@1291639730` больше не должны попадать в новые `latest_safe.*`, `identity_history.json` и numbered batches;
-- `--deep-usernames` в `info`-режиме может работать заметно дольше обычного запуска, потому что Telegram последовательно открывает видимые профили;
-- live baseline на 2026-04-23 для чата `https://web.telegram.org/a/#-1002465948544`: `fast` batch-run `20260423T173223Z` дошёл до `27` visible members и `10` safe usernames, а `latest_full.*` и `latest_safe.*` были обновлены на этот run;
-- для максимально полного списка участников всё равно лучше вручную открыть `Group Info -> Members` перед повторным запуском.
-
-GUI-экспорт:
-
-```bash
-cd <repo-root>
-./scripts/telegram_members_export_gui.sh
-```
-
-Новый Linux-first install/run path для этого GUI:
-
-```bash
-cd <repo-root>
-bash scripts/bootstrap_telegram_workstation.sh --doctor
-bash scripts/bootstrap_telegram_workstation.sh
-telegram-username-collector
-```
-
-Что это даёт:
-- `telegram-username-collector --doctor` теперь даёт product/runtime диагностику без запуска GTK окна;
-- `telegram-username-collector --create-desktop-shortcut` создаёт ярлык текущему Linux-пользователю;
-- `bootstrap_telegram_workstation.sh --doctor` проверяет `gi/GTK`, `python3`, helper requirements и текущий helper source;
-- `--doctor` теперь также печатает resolved runtime root, logs root, reports root и JSONL-логи;
-- обычный `bootstrap_telegram_workstation.sh` поднимает managed helper venv в `./var/site-control-kit/telegram_workspace/managed_helper/.venv`;
-- launcher `telegram-username-collector` идёт из `pyproject.toml` и поднимает тот же single-window GUI;
-- внутренний ownership GUI теперь разделён так: `scripts/telegram_gui/app.py` = thin launcher/composition, `scripts/telegram_gui/backend.py` = backend owner, `scripts/telegram_gui/ui/window.py` = window/app owner;
-- если launcher запущен из Python-окружения без GTK bindings, он теперь завершается понятной ошибкой и отправляет в `bootstrap_telegram_workstation.sh --doctor`, а не падает build/import traceback;
-- helper discovery order теперь такой: `TELEGRAM_API_COLLECTOR_PYTHON` -> managed helper venv -> legacy external collector path;
-- если уже существует legacy workspace `~/.site-control-kit/telegram_workspace`, bootstrap остаётся на нём через `.site-control-kit/local.yaml`, а не переносит данные автоматически.
-
-Что умеет GUI теперь:
-- отдельное GTK-приложение вместо `zenity`-формы;
-- единый Telegram workspace по умолчанию: `./var/site-control-kit/telegram_workspace`;
-- при наличии legacy runtime тот же GUI может работать поверх `~/.site-control-kit/telegram_workspace` через локальный pointer-config;
-- реестр пользователей (имя + профиль + API token): `telegram_workspace/registry/users.json`;
-- слоты пользователей `1..10`: `telegram_workspace/accounts/<N>/`:
-  - `profile/` (данные профиля, включая `tdata`/portable browser data),
-  - `imports/` (zip-архивы профилей),
-  - `keys/` (`api_token.txt`, `api_id.txt`, `api_hash.txt`);
-- в списке профилей показываются только реальные профили/zip, пустые auto-slots больше не засоряют UI;
-- если в выбранном профиле найден `tdata` или matching `tdata-*.zip`, GUI сначала ищет живую Telegram Desktop session через API, включая импортированный portable `tdata`, без экрана авторизации;
-- в `tdata`-режиме GUI не должен запускать внешний portable Telegram автоматически: сбор и список чатов идут напрямую через API/helper, чтобы не ломать импортированную сессию;
-- в GUI `tdata`-экспорт теперь идёт по авторам сообщений из chat history (`history-only`), а не по общему списку `participants`;
-- в `history-only` path фильтруются bots, non-user sender'ы и записи без валидного `@username`;
-- глубина history настраивается через `TELEGRAM_TDATA_HISTORY_LIMIT` (`0` по умолчанию = весь доступный history), шаг progress через `TELEGRAM_TDATA_PROGRESS_EVERY`;
-- timeout для helper тоже настраивается:
-  - `TELEGRAM_TDATA_LIST_TIMEOUT_SEC` для чтения списка чатов;
-  - `TELEGRAM_TDATA_EXPORT_TIMEOUT_SEC` для длинного history-export;
-- progress helper теперь попадает в live-log GUI строками вида `PROGRESS chat=... messages=... usernames=...`;
-- каждый запуск дополнительно получает machine-readable sidecars:
-  - `telegram_workspace/runs/<run_id>/summary.json`
-  - `telegram_workspace/runs/<run_id>/artifacts.json`
-  - `telegram_workspace/runs/<run_id>/events.jsonl`;
-- если `tdata` недоступен, GUI падает обратно на старый Telegram Web path;
-- список чатов и групп показывается внутри приложения;
-- выбранный чат можно открыть прямо в Telegram из GUI перед запуском;
-- итоговый `.md` выбирается через системный `Save As` диалог: там задаются и папка, и имя файла;
-- экспорт принудительно открывает выбранный чат перед сбором, поэтому не требует заранее открытого URL.
-
-Быстрый сбор именно `@username`, встречающихся в chat history/mentions:
-
-```bash
-cd <repo-root>
-python3 scripts/export_telegram_chat_mentions.py --target-count 40
-```
-
-Этот режим не пытается привязать username к карточке участника. Он просто листает историю чата и сохраняет найденные `@username` в `*.txt` / `*.json`.
-
-Разовый CLI-сценарий для chat-mode:
-
-```bash
-cd <repo-root>
-./scripts/run_chat_export_once.sh "$SITECTL_TOKEN"
-```
-
-Принудительный таргет на конкретный клиент/вкладку:
-
-```bash
-./scripts/run_chat_export_once.sh "$SITECTL_TOKEN" "/tmp/chat_export.md" "https://web.telegram.org/a/#-1002465948544" 20 10 12 180 mention 0 "client-REPLACE_ME" "123456789"
-```
-
-Важно:
-- если на Linux доступен только branded `google-chrome`, one-time загрузите unpacked extension из `extension/` в выделенном профиле;
-- после этого Telegram-скрипты будут использовать уже этот профиль и искать Telegram-вкладку по всем живым клиентам, а не только по первому найденному.
-
-## 4) Примеры команд
-
-```bash
-# Открыть страницу в активной вкладке клиента
-python3 -m webcontrol send \
-  --type navigate \
-  --client-id client-REPLACE_ME \
-  --url "https://example.com" \
-  --wait 20
-```
-
-```bash
-# Заполнить поле и кликнуть кнопку
-python3 -m webcontrol send --type fill --client-id client-REPLACE_ME --selector "#email" --value "user@example.com"
-python3 -m webcontrol send --type click --client-id client-REPLACE_ME --selector "button[type='submit']"
-```
-
-```bash
-# Подождать селектор
-python3 -m webcontrol send --type wait_selector --client-id client-REPLACE_ME --selector "body" --wait 20
-```
-
-```bash
-# Извлечь текст
-python3 -m webcontrol send --type extract_text --client-id client-REPLACE_ME --selector "main" --wait 20
-```
-
-Важно:
-- `send` без явного target теперь безопаснее: если онлайн-клиент ровно один, он выбирается автоматически.
-- Если онлайн-клиентов несколько, команда без `--client-id`, `--client-ids` или `--broadcast` будет отклонена хабом.
-
-## 5) Просмотр состояния хаба
-
-```bash
-python3 -m webcontrol state
-```
-
-## 6) Автоматическая Проверка
-
-Базовый verify-контур одной командой:
-
-```bash
-cd <repo-root>
-./scripts/verify.sh
-```
-
-Если уже есть живой браузерный клиент и нужно прогнать live smoke:
-
-```bash
-cd <repo-root>
-./scripts/verify.sh --live-browser
-```
-
-## Установка CLI как команды `sitectl`
-
-```bash
-cd <repo-root>
-python3 -m pip install -e .
-```
-
-После этого можно использовать:
-
-```bash
-sitectl clients
-sitectl state
-sitectl send --type navigate --client-id client-... --url https://example.com --wait 20
-```
-
-## Работа на других устройствах
-Подробно: [INSTALL_OTHER_DEVICES_RU.md](docs/INSTALL_OTHER_DEVICES_RU.md)
-
-Коротко:
-1. Скопировать репозиторий на устройство.
-2. Запустить хаб.
-3. Загрузить расширение в браузер.
-4. Указать URL/токен.
-5. Проверить `clients`.
-
-Поддерживаемые браузеры для загрузки unpacked-расширения:
-- Google Chrome
-- Microsoft Edge
-- Brave
-- Chromium
-- Opera
-- Яндекс Браузер
-
-Отдельно для локальной отладки:
-- Firefox через `web-ext run` и временную установку расширения
-
-## Документация
-- [CHANGES_RU.md](docs/CHANGES_RU.md) — полный перечень реализованных изменений.
-- [ARCHITECTURE.md](docs/ARCHITECTURE.md) — архитектура и жизненный цикл команд.
-- [API.md](docs/API.md) — API и контракт команд.
-- [EXTENSION.md](docs/EXTENSION.md) — внутренняя логика расширения.
-- [SECURITY.md](docs/SECURITY.md) — безопасность и рекомендации.
-- [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) — диагностика проблем.
-- [AI_MAINTAINER_GUIDE.md](docs/AI_MAINTAINER_GUIDE.md) — как агенту использовать, изменять и улучшать инструмент.
-- [AGENTS.md](AGENTS.md) — правила для ИИ-агентов и политика применения `site-control-kit` как основного браузерного инструмента.
-
-## Структура проекта
-
-```text
-webcontrol/         # Python: сервер, очередь, CLI
-extension/          # Расширение браузера (MV3)
-scripts/            # Вспомогательные скрипты запуска/упаковки/экспорта
-docs/               # Полная документация
-examples/           # Примеры payload-команд
-tests/              # Автотесты
-```
-
-## Важные ограничения
-- `run_script` может блокироваться CSP сайта (`unsafe-eval`), это нормально.
-- На служебных страницах (`chrome://*`) content script не работает.
-- Manifest V3 service worker может «засыпать», поэтому есть polling + alarms.
-
-## Правовые границы
-Используйте инструмент только для сайтов и систем, где у вас есть разрешение на автоматизацию.
-
-## Публикация на GitHub
-
-```bash
-cd <repo-root>
-git config user.name "Ваше имя в GitHub"
-git config user.email "ваш_email@example.com"
-git add .
-git commit -m "Стартовая версия: локальный хаб, расширение и документация (RU)"
-git remote add origin https://github.com/<ВАШ_ЛОГИН>/site-control-kit.git
-git push -u origin main
-```
-
-Если репозиторий `site-control-kit` ещё не создан в GitHub:
-1. Откройте GitHub и создайте пустой репозиторий `site-control-kit` без README/.gitignore.
-2. Выполните команды выше для первого push.
+Подробности — в [правилах разработки](docs/PROJECT_WORKFLOW_RU.md).
