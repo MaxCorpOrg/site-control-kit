@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 
-from webcontrol.store import ControlStore, MAX_PERSISTED_TERMINAL_COMMANDS
+from webcontrol.store import MAX_PERSISTED_TERMINAL_COMMANDS, ControlStore
 
 
 class ControlStoreTests(unittest.TestCase):
@@ -35,7 +35,7 @@ class ControlStoreTests(unittest.TestCase):
             timeout_ms=5000,
             issued_by="test",
         )
-        self.assertEqual(record["status"], "pending")
+        self.assertEqual(record["status"], "queued")
 
         envelope = self.store.pop_next_command("c1")
         self.assertIsNotNone(envelope)
@@ -127,7 +127,7 @@ class ControlStoreTests(unittest.TestCase):
             issued_by="test",
         )
 
-        self.assertEqual(record["status"], "pending")
+        self.assertEqual(record["status"], "queued")
         self.assertEqual(record["target_client_ids"], ["c1"])
         self.assertIsNone(record["rejection_reason"])
 
@@ -226,7 +226,7 @@ class ControlStoreTests(unittest.TestCase):
             command = self.store.get_command(record["id"])
 
         self.assertIsNotNone(command)
-        self.assertEqual(command["status"], "pending")
+        self.assertEqual(command["status"], "queued")
         save_mock.assert_not_called()
 
     def test_get_command_saves_when_status_changes_due_to_expiration(self) -> None:
@@ -365,19 +365,21 @@ class ControlStoreTests(unittest.TestCase):
             "queues": {"c1": ["cmd-000", "pending-1", "missing-cmd"]},
             "telegram_users": {},
         }
-        self.state_file.write_text(json.dumps(payload), encoding="utf-8")
+        legacy_state_file = Path(self.tmp.name) / "legacy-state.json"
+        legacy_state_file.write_text(json.dumps(payload), encoding="utf-8")
 
-        pruned_store = ControlStore(self.state_file)
+        pruned_store = ControlStore(legacy_state_file)
 
-        persisted = json.loads(self.state_file.read_text(encoding="utf-8"))
+        persisted = json.loads(legacy_state_file.read_text(encoding="utf-8"))
         persisted_commands = persisted["commands"]
         self.assertEqual(
-            len([item for item in persisted_commands.values() if item["status"] in {"completed", "failed", "partial", "cancelled", "expired", "rejected"}]),
+            len([item for item in persisted_commands.values() if item["status"] in {"completed", "failed", "partial", "cancelled", "expired", "dead_letter", "rejected"}]),
             MAX_PERSISTED_TERMINAL_COMMANDS,
         )
         self.assertIn("pending-1", persisted_commands)
         self.assertNotIn("cmd-000", persisted_commands)
-        self.assertEqual(persisted["queues"]["c1"], ["pending-1"])
+        self.assertEqual(persisted["queues"]["c1"], [])
+        self.assertEqual(persisted_commands["pending-1"]["status"], "expired")
         self.assertIsNotNone(pruned_store.get_command("pending-1"))
 
 
