@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import importlib
 import io
 import json
 import re
@@ -292,10 +293,16 @@ def _subcommand_names(parser: argparse.ArgumentParser) -> set[str]:
     return set()
 
 
-def check_required_cli_commands() -> list[dict[str, str | int]]:
-    from webcontrol.cli import build_parser
+def _build_cli_parser() -> argparse.ArgumentParser:
+    cli_module = importlib.import_module("webcontrol.cli")
+    parser = cli_module.build_parser()
+    if not isinstance(parser, argparse.ArgumentParser):
+        raise TypeError("webcontrol.cli.build_parser() must return ArgumentParser")
+    return parser
 
-    parser = build_parser()
+
+def check_required_cli_commands() -> list[dict[str, str | int]]:
+    parser = _build_cli_parser()
     root_commands = _subcommand_names(parser)
     browser_parser = next(
         action.choices["browser"]
@@ -356,9 +363,7 @@ def _cli_args_from_line(line: str) -> list[str] | None:
 
 
 def check_documented_cli_syntax() -> list[dict[str, str | int]]:
-    from webcontrol.cli import build_parser
-
-    parser = build_parser()
+    parser = _build_cli_parser()
     findings: list[dict[str, str | int]] = []
     for relative in CLI_DOCUMENTS:
         path = ROOT / relative
