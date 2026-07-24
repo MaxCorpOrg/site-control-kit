@@ -1,4 +1,4 @@
-# Telegram Export
+# Экспорт участников Telegram
 
 Видимая папка Telegram export pipeline внутри `tools/telegram/`.
 
@@ -42,4 +42,3 @@ tool_manifest.json
 
 - `../../../docs/TELEGRAM_CLIENT_ROADMAP_RU.md`
 - `../../../docs/PROJECT_STATUS_RU.md`
-

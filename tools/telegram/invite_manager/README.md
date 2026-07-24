@@ -1,4 +1,4 @@
-# Telegram Invite Manager
+# Менеджер приглашений Telegram
 
 Видимая папка инструмента внутри `site-control-kit`.
 
@@ -69,7 +69,7 @@ cd /home/max/site-control-kit/tools/telegram/invite_manager
   --consent yes
 ```
 
-## Live Add Одного Контакта
+## Живое добавление одного контакта
 
 Executor теперь умеет отдельный однопользовательский UI-path через Telegram Web `Add Members`.
 Финальное действие защищено флагом `--confirm-add`.
@@ -93,7 +93,7 @@ cd /home/max/site-control-kit/tools/telegram/invite_manager
 Если before/after проверка не подтверждает появление выбранного `peer_id` в видимом member list или рост `member_count`, результат записывается как `requested`, а не как `joined`.
 Сводка before/after теперь живёт прямо в `execution_record.json` в блоке `verification`.
 
-## Batch Добавление В Личные Контакты
+## Пакетное добавление в личные контакты
 
 Для простого сценария "взять `.txt` и добавить username себе в контакты" теперь есть отдельная batch-команда:
 
@@ -114,7 +114,7 @@ cd /home/max/site-control-kit/tools/telegram/invite_manager
 - запускает `desktop-add-contact-profile` на каждого пользователя;
 - после успешного live add переводит пользователя в `contact_added`.
 
-## Portable Actor Для Telegram Desktop
+## Переносимый профиль-исполнитель Telegram Desktop
 
 Если приглашения должны идти из Telegram Desktop portable-аккаунта, сначала привяжите actor к job:
 

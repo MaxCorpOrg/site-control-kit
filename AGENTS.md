@@ -1,4 +1,4 @@
-# AGENTS.md
+# Правила работы агента
 
 Этот файл задаёт правила для ИИ-агентов, которые работают с репозиторием `site-control-kit`.
 
@@ -6,20 +6,20 @@
 `site-control-kit` — локальный инструмент управления браузером.
 Внутри него:
 - Python-хаб с HTTP API, очередью команд и хранением состояния.
-- CLI `sitectl` и удобный слой `sitectl browser`.
+- интерфейс командной строки (CLI) `sitectl` и удобный слой `sitectl browser`.
 - браузерное MV3-расширение, которое исполняет команды в реальных вкладках.
 - Windows-обёртки `browser.cmd` и `start-hub.cmd` для быстрого старта.
-- registry-driven platform layer для отдельных operator tools и графической панели управления.
+- платформа с реестром для отдельных операторских инструментов и графической панели управления.
 
 Используйте этот репозиторий как основной локальный инструмент браузерной автоматизации, когда он доступен в рабочей папке.
 
 ## Что Проект Реально Умеет Сейчас
 Новый агент должен понимать проект не как "браузер с парой скриптов", а как набор рабочих подсистем.
 
-### 1. Browser bridge platform
+### 1. Платформа связи с браузером
 Проект уже умеет:
 - поднимать локальный HTTP-хаб;
-- принимать heartbeat от browser clients;
+- принимать сигнал активности от браузерных клиентов;
 - хранить клиентов, вкладки, очереди и результаты в `state.json`;
 - выдавать команды браузеру и принимать результаты обратно;
 - работать как единый источник правды по клиентам и командам.
@@ -30,10 +30,10 @@
 - `webcontrol/config.py`
 - `webcontrol/utils.py`
 
-### 2. User-facing CLI и wrappers
+### 2. Командный интерфейс и обёртки
 Проект уже умеет давать короткий операторский интерфейс поверх хаба.
 
-CLI сейчас покрывает:
+Командный интерфейс сейчас покрывает:
 - `serve`, `health`, `state`, `clients`, `send`, `wait`, `cancel`;
 - `browser status`, `clients`, `tabs`;
 - `browser open`, `new-tab`, `click`, `click-text`, `fill`, `focus`;
@@ -41,7 +41,7 @@ CLI сейчас покрывает:
 - `browser wait`, `text`, `html`, `attr`, `page-url`;
 - `browser back`, `forward`, `reload`, `activate`, `close-tab`;
 - `browser scroll`, `scroll-by`, `press`, `js`, `screenshot`;
-- Linux fallback: `browser x11-click`, `browser x11-keys`.
+- запасной путь Linux: `browser x11-click`, `browser x11-keys`.
 
 Основные файлы:
 - `webcontrol/cli.py`
@@ -50,16 +50,16 @@ CLI сейчас покрывает:
 - `scripts/browser.cmd`, `scripts/browser.ps1`
 - `scripts/start_hub.sh`, `scripts/start_hub.cmd`, `scripts/start_hub.ps1`
 
-### 3. Browser extension
+### 3. Расширение браузера
 Расширение уже умеет:
-- heartbeat и polling;
-- background-команды уровня вкладки;
-- auto-inject `content.js`, если message channel потерялся;
-- capability advertisement в heartbeat `meta.capabilities`;
-- screenshot;
+- сигнал активности и периодический опрос;
+- фоновые команды уровня вкладки;
+- автоматическое внедрение `content.js`, если канал сообщений потерялся;
+- объявление возможностей в `meta.capabilities` сигнала активности;
+- снимок экрана;
 - DOM-действия внутри страницы.
 
-Background-команды:
+Фоновые команды:
 - `navigate`
 - `new_tab`
 - `reload`
@@ -85,14 +85,14 @@ DOM-команды:
 - `extension/options.*`
 - `extension/popup.*`
 
-### 4. Browser operator helpers
-Кроме базового bridge, проект уже содержит operator/debug инструменты:
-- `scripts/reload_bridge_extension.sh` — self-reload и X11 fallback для unpacked extension;
+### 4. Операторские помощники браузера
+Кроме базового моста, проект уже содержит операторские и диагностические инструменты:
+- `scripts/reload_bridge_extension.sh` — самостоятельная перезагрузка и запасной путь X11 для распакованного расширения;
 - `scripts/start_browser_novnc.sh` / `scripts/stop_browser_novnc.sh` — noVNC поверх X11 для визуального контроля браузера;
-- `scripts/package_extension.*` — упаковка extension;
-- `examples/*.json` — примеры payload-команд.
+- `scripts/package_extension.*` — упаковка расширения;
+- `examples/*.json` — примеры данных команд.
 
-### 5. Telegram export stack
+### 5. Контур экспорта Telegram
 Это сейчас самая развитая прикладная часть проекта.
 
 Проект уже умеет:
@@ -118,8 +118,8 @@ DOM-команды:
 - `scripts/telegram_members_export_app.sh`
 - `scripts/telegram_members_export_gui.sh`
 
-### 6. Telegram invite stack
-Это отдельный безопасный operator-assisted трек поверх browser bridge.
+### 6. Контур приглашений Telegram
+Это отдельный безопасный сценарий с участием оператора поверх браузерного моста.
 
 Проект уже умеет:
 - хранить state согласованных пользователей;
@@ -140,7 +140,7 @@ DOM-команды:
 - `scripts/telegram_invite_gui_common.sh`
 - `tools/telegram/invite_manager/*`
 
-### 7. Telegram Desktop portable stack
+### 7. Переносимые профили Telegram Desktop
 Проект уже умеет:
 - брать `zip` с `tdata`;
 - поднимать отдельный Linux Telegram Desktop portable-profile;
@@ -160,8 +160,8 @@ DOM-команды:
 - `telegram_members_export_exe/` — готовая Windows GUI-упаковка для Telegram export сценария.
 - `dist/` — операторские артефакты, скриншоты, собранный zip расширения и следы упаковочных/ручных smoke-сценариев.
 
-### 9. Unified tool platform
-Проект теперь умеет держать отдельные Telegram workflow как самостоятельные единицы и одновременно подключать их в общий control layer.
+### 9. Единая платформа инструментов
+Проект умеет держать отдельные рабочие сценарии Telegram как самостоятельные единицы и подключать их в общий слой управления.
 
 Сейчас этот слой уже умеет:
 - читать manifests подключённых инструментов;
@@ -179,7 +179,7 @@ DOM-команды:
 - `tools/telegram/platform/*`
 - `tools/telegram/invite_manager/tool_manifest.json`
 
-### 10. Документация и operator knowledge base
+### 10. Документация и операторская база знаний
 Помимо кода, в проекте уже есть рабочая база знаний, по которой агент должен быстро понять нужный контур:
 - `README.md` и `BROWSER_QUICKSTART.md` — быстрый практический вход;
 - `docs/API.md`, `docs/ARCHITECTURE.md`, `docs/EXTENSION.md` — технический контракт и слои;
@@ -187,8 +187,8 @@ DOM-команды:
 - `docs/TELEGRAM_*` — отдельные дорожные карты и operator-инструкции для Telegram export / invite / portable;
 - `docs/agent_handoff_ru/*` и `docs/PROJECT_STATUS_RU.md` — continuity layer между агентами и чатами.
 
-### 11. Тесты и regression coverage
-Проект уже имеет unit coverage для ключевых слоёв:
+### 11. Регрессионные и модульные тесты
+Проект уже имеет модульное покрытие ключевых слоёв:
 - `tests/test_store.py`
 - `tests/test_cli_browser_helpers.py`
 - `tests/test_telegram_export_parser.py`
@@ -245,21 +245,32 @@ DOM-команды:
 ## С Чего Начинать Агенту
 Перед любой работой прочитать в таком порядке:
 1. `AGENTS.md` — этот файл, без пропусков.
-2. `START_HERE_AGENT_RU.md` — короткая входная точка, чтобы агент не начал работу "с нуля" и сразу продолжал с последней подтверждённой точки.
-3. `docs/agent_handoff_ru/00_START_HERE.md` — единая точка входа для нового агента.
-4. Весь пакет `docs/agent_handoff_ru/` по порядку файлов `00..10`.
-5. `docs/PROJECT_WORKFLOW_RU.md` — обязательный порядок работы, проверки и handoff.
-6. `docs/PROJECT_STATUS_RU.md` — что уже сделано, что проверено, что сломано, что делать дальше.
-7. `BROWSER_QUICKSTART.md` — короткий путь запуска и базовые команды.
-8. `docs/AI_MAINTAINER_GUIDE.md` — как агенту использовать и развивать инструмент.
-9. `docs/API.md` — протокол, типы команд, контракт результата.
-10. `docs/ARCHITECTURE.md` — поток команд, роли компонентов, маршрутизация.
-11. `docs/EXTENSION.md` — где реализованы background- и DOM-команды.
-12. Для Telegram-задач дополнительно: `docs/TELEGRAM_CLIENT_ROADMAP_RU.md`.
-13. Для задач про Linux Telegram Desktop portable-профили и `tdata.zip` дополнительно: `docs/TELEGRAM_PORTABLE_RU.md`.
-14. Для задач про unified tool platform дополнительно: `tools/telegram/platform/README_RU.md` и `tools/telegram/platform/AGENT_GUIDE_RU.md`.
-15. Для Telegram-operator структуры в целом дополнительно: `tools/telegram/README_RU.md` и `tools/telegram/AGENT_GUIDE_RU.md`.
-16. Для текущего Telegram control plane дополнительно: `tools/telegram/agent_pack/README_RU.md`, `tools/telegram/agent_pack/VERIFICATION_MATRIX_RU.md`, `tools/telegram/agent_pack/agent_state.template.json` и runtime state `~/.site-control-kit/telegram/agent/agent_state.json`.
+2. `docs/AGENT_SIMPLE_GUIDE_RU.md` — самый простой практический путеводитель.
+3. `START_HERE_AGENT_RU.md` — короткая входная точка, чтобы агент не начал работу "с нуля" и сразу продолжал с последней подтверждённой точки.
+4. `docs/agent_handoff_ru/00_START_HERE.md` — единая точка входа для нового агента.
+5. Весь пакет `docs/agent_handoff_ru/` по порядку файлов `00..10`.
+6. `docs/PROJECT_WORKFLOW_RU.md` — обязательный порядок работы, проверки и передачи контекста.
+7. `docs/PROJECT_STATUS_RU.md` — что уже сделано, что проверено, что сломано, что делать дальше.
+8. `BROWSER_QUICKSTART.md` — короткий путь запуска и базовые команды.
+9. `docs/AI_MAINTAINER_GUIDE.md` — как агенту использовать и развивать инструмент.
+10. `docs/API.md` — протокол, типы команд, контракт результата.
+11. `docs/ARCHITECTURE.md` — поток команд, роли компонентов, маршрутизация.
+12. `docs/EXTENSION.md` — где реализованы фоновые и DOM-команды.
+13. Для задач Telegram дополнительно: `docs/TELEGRAM_CLIENT_ROADMAP_RU.md`.
+14. Для задач про переносимые профили Telegram Desktop и `tdata.zip` дополнительно: `docs/TELEGRAM_PORTABLE_RU.md`.
+15. Для задач про единую платформу инструментов дополнительно: `tools/telegram/platform/README_RU.md` и `tools/telegram/platform/AGENT_GUIDE_RU.md`.
+16. Для операторской структуры Telegram в целом дополнительно: `tools/telegram/README_RU.md` и `tools/telegram/AGENT_GUIDE_RU.md`.
+17. Для текущего слоя управления Telegram дополнительно: `tools/telegram/agent_pack/README_RU.md`, `tools/telegram/agent_pack/VERIFICATION_MATRIX_RU.md`, `tools/telegram/agent_pack/agent_state.template.json` и рабочее состояние `~/.site-control-kit/telegram/agent/agent_state.json`.
+
+Внутри каждой рабочей папки сначала прочитать ближайший `AGENTS.md`: он объясняет назначение каталога, порядок работы, ограничения и частые ошибки.
+
+## Язык документации
+
+- Вся документация и инструкции для агента пишутся по-русски.
+- Английское слово допустимо, если это имя продукта, команда, путь, ключ протокола или термин без короткого точного перевода.
+- Необходимый английский термин при первом употреблении поясняется по-русски; общий словарь находится в `docs/TERMS_RU.md`.
+- Имена команд, ключи JSON и идентификаторы в коде не переводятся.
+- Новый или изменённый документ проверяется на понятность без знания внутренней истории проекта.
 
 Запрещено начинать изменения в коде, не просмотрев `docs/PROJECT_STATUS_RU.md`. Этот файл нужен, чтобы новый чат или новый агент не дублировал уже закрытые задачи и видел текущие дыры.
 
@@ -372,7 +383,7 @@ DOM-команды:
 3. Если новый прогон дал результат хуже исторического, отдельно проверить, не затёр ли он полезные safe/raw-артефакты.
 4. Перед следующей правкой явно зафиксировать в `docs/PROJECT_STATUS_RU.md`, что именно сейчас является узким местом.
 
-## Правило Коммитов И Handoff
+## Правило коммитов и передачи контекста
 - Коммиты для проектной работы писать осмысленно и по-русски.
 - После серии изменений агент обязан оставить в `docs/PROJECT_STATUS_RU.md` короткий handoff:
   - последний завершённый блок;

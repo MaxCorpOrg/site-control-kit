@@ -1,4 +1,4 @@
-# Telegram Export Pipeline
+# Процесс экспорта Telegram
 
 ## Основная Цепочка
 Полный pipeline выглядит так:
@@ -12,7 +12,7 @@ collect_new_telegram_contacts_chain.sh
           -> run artifacts + latest snapshots + batch files
 ```
 
-## Что Делает Exporter По Шагам
+## Что делает экспортёр по шагам
 1. Проверяет целевую вкладку Telegram.
 2. Загружает `identity_history.json`.
 3. Загружает `discovery_state.json`.
@@ -24,7 +24,7 @@ collect_new_telegram_contacts_chain.sh
 9. Применяет sanitize/history restore.
 10. Пишет telemetry в `export_stats.json`.
 
-## Discovery
+## Поиск участников
 Discovery отвечает за:
 - scroll вверх;
 - фиксацию signatures видимого слоя;
@@ -37,14 +37,14 @@ Discovery отвечает за:
 - jump scroll;
 - revisited-view detection.
 
-## Deep
+## Углублённый сбор
 Deep отвечает за извлечение `@username`.
 Основные режимы:
 - `mention`
 - `url`
 - `full`
 
-### Mention Path
+### Путь через упоминание
 Работает так:
 1. найти anchor/avatar current peer;
 2. открыть context menu;
@@ -52,28 +52,28 @@ Deep отвечает за извлечение `@username`.
 4. прочитать composer;
 5. извлечь `@username`.
 
-### URL Fallback
+### Запасной путь через URL
 Если mention не дал username:
 1. открыть профиль/peer path;
 2. извлечь username через URL/profile context;
 3. вернуться в group dialog.
 
-## History Backfill
+## Восстановление из истории
 History backfill восстанавливает уже известные `peer_id -> @username` до extra-deep.
 Это нужно, чтобы повторный run не выглядел пустым, если текущий runtime не успел заново пройти всех известных peer.
 
-## Safe Layer
+## Безопасный слой
 Safe layer строится поверх raw snapshot.
 Он нужен, чтобы:
 - не выпускать конфликтные usernames в numbered batch;
 - держать отдельный `latest_safe.*`;
 - складывать спорные случаи в `review.txt` и `conflicts.json`.
 
-## Latest Guard
+## Защита последнего лучшего снимка
 Слабый run не должен затирать хороший previous snapshot.
 Поэтому wrapper сравнивает candidate/baseline и может оставить лучший historical snapshot как `latest_full` и `latest_safe`.
 
-## Profiles
+## Профили запуска
 Теперь profile presets влияют на pipeline целиком.
 
 ### `fast`

@@ -1,4 +1,4 @@
-# Telegram Session Runner
+# Планировщик сессий Telegram
 
 Видимая папка session-runner инструмента внутри `site-control-kit`.
 

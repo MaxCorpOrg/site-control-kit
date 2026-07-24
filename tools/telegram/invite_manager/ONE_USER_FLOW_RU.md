@@ -1,4 +1,4 @@
-# One User Flow RU
+# Сценарий для одного пользователя
 
 Сценарий для проверки одного пользователя через `Telegram Invite Manager`.
 
@@ -41,7 +41,7 @@ cd /home/max/site-control-kit/tools/telegram/invite_manager
   --to-status checked
 ```
 
-## 3. Настроить Invite Link
+## 3. Настроить ссылку-приглашение
 
 ```bash
 ./bin/telegram-invite-executor configure \
@@ -54,7 +54,7 @@ cd /home/max/site-control-kit/tools/telegram/invite_manager
   --requires-approval
 ```
 
-## 4. Проверить Portable Actor
+## 4. Проверить переносимый профиль-исполнитель
 
 Если invite-flow должен выполняться из Telegram Desktop portable-аккаунта, сначала проверьте профиль:
 
@@ -96,7 +96,7 @@ cd /home/max/site-control-kit/tools/telegram/invite_manager
 $JOB_DIR/executions/<timestamp>/execution_plan.json
 ```
 
-## 6. Отправить Invite Link Через Telegram Desktop Portable
+## 6. Отправить ссылку через переносимый Telegram Desktop
 
 Сначала dry-run:
 
@@ -121,7 +121,7 @@ $JOB_DIR/executions/<timestamp>/execution_plan.json
 Без `--confirm-send` Enter в Telegram Desktop не нажимается.
 После успешного `--confirm-send --record-result` пользователь переходит в `sent`.
 
-## 7. Открыть Чат Через Site Control
+## 7. Открыть чат через Site Control
 
 Сначала dry-run:
 
@@ -189,7 +189,7 @@ $JOB_DIR/executions/<timestamp>/execution_plan.json
   --reason joined_confirmed
 ```
 
-## 8A. Live Add Через `Add Members`
+## 8A. Живое добавление через `Add Members`
 
 Этот путь использовать только для одного consented пользователя из `invite_state.json`.
 Он нужен для проверки реального UI Telegram Web, а не для массового инвайтинга.
@@ -254,7 +254,7 @@ $JOB_DIR/executions/<timestamp>/execution_plan.json
 - `open-chat` открыл или активировал нужный Telegram chat.
 - После ручного действия статус записан через `record`.
 
-## Последний Smoke
+## Последняя быстрая проверка
 
 Дата: `2026-04-24`
 
@@ -285,7 +285,7 @@ $JOB_DIR/executions/<timestamp>/execution_plan.json
 /home/max/telegram_invite_jobs/chat_-2465948544/executions/20260424T123800Z/execution_record.json
 ```
 
-## Live Test: `@Kamaz_master1`
+## Живая проверка: `@Kamaz_master1`
 
 Дата: `2026-04-24`
 
@@ -295,7 +295,7 @@ $JOB_DIR/executions/<timestamp>/execution_plan.json
 https://t.me/Zhirotop_shop
 ```
 
-Job:
+Задание:
 
 ```text
 /home/max/telegram_invite_jobs/chat_Zhirotop_shop/
@@ -338,7 +338,7 @@ cd /home/max/site-control-kit/tools/telegram/invite_manager
   --reason manual_link_sent
 ```
 
-## Live Add Test: `@Kamaz_master1`
+## Живая проверка добавления: `@Kamaz_master1`
 
 Дата: `2026-04-25`
 
@@ -370,7 +370,7 @@ cd /home/max/site-control-kit/tools/telegram/invite_manager
 /home/max/telegram_invite_jobs/chat_Zhirotop_shop/executions/20260425T052501Z/execution_record.json
 ```
 
-## Live Add Test: `@olegoleg48`
+## Живая проверка добавления: `@olegoleg48`
 
 Дата: `2026-04-25`
 
@@ -383,7 +383,7 @@ cd /home/max/site-control-kit/tools/telegram/invite_manager
 Проверка перед live add:
 - `inspect-chat` показал `2 440 members`.
 
-Live add:
+Живое добавление:
 - `add-user` создал запись `@olegoleg48`;
 - `mark --status checked` перевёл её в `checked`;
 - `add-contact --confirm-add --record-result` нашёл пользователя как `Oleg S`, `data-peer-id="1410391920"`;
@@ -400,7 +400,7 @@ Live add:
 - рост счётчика участников не подтверждён;
 - для таких кейсов не писать `joined`, пока Telegram не даст отдельного подтверждения.
 
-## Safe Smoke: `inspect-chat` после `t.me -> web.telegram`
+## Безопасная быстрая проверка: `inspect-chat` после `t.me` → `web.telegram`
 
 Дата: `2026-04-25`
 

@@ -1,4 +1,4 @@
-# Telegram Agent Pack
+# Пакет правил для агента Telegram
 
 Этот пакет нужен не оператору, а следующему агенту.
 
@@ -21,7 +21,7 @@
 6. persistent runtime state:
    - `~/.site-control-kit/telegram/agent/agent_state.json`
 
-## Что хранится в persistent agent state
+## Что хранится в постоянном состоянии агента
 
 - `current_priority`
 - `active_risks`
@@ -32,7 +32,7 @@
 Этот JSON не заменяет human docs.
 Он нужен как короткий machine-readable checkpoint для следующего агента.
 
-## Как думать о роли agent-pack
+## Роль пакета агента
 
 Это не отдельный ИИ-сервис.
 
@@ -53,7 +53,7 @@
 - `agent_state.template.json` — versioned machine-readable defaults прямо в репозитории;
 - `~/.site-control-kit/telegram/agent/agent_state.json` — живая persistent копия state этой машины.
 
-## Базовые defaults
+## Базовые значения
 
 - current model: `runbook_plus_orchestration`
 - platform strategy: `tiered`

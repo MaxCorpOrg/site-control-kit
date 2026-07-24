@@ -10,9 +10,9 @@
 Быстрый локальный токен по умолчанию:
 - `local-bridge-quickstart-2026`
 
-Все `/api/*` endpoints требуют токен.
+Все адреса `/api/*` требуют токен.
 
-## Health
+## Проверка работоспособности
 
 `GET /health`
 
@@ -51,6 +51,10 @@
 - `click_menu_text`
 - `extract_text`
 - `get_html`
+- `snapshot`
+- `smart_click`
+- `set_editable_text`
+- `wait_for`
 - `wait_selector`
 
 Ответ:
@@ -62,6 +66,17 @@
 Ответ:
 ```json
 { "ok": true, "clients": [ ... ] }
+```
+
+## `GET /api/agent/schema`
+
+Возвращает версионированный машиночитаемый контракт команд агента,
+стратегий локатора, состояний ожидания и цели. Текущая версия: `1.0`.
+
+CLI-эквивалент:
+
+```bash
+sitectl browser schema
 ```
 
 ## Команды
@@ -132,7 +147,8 @@
   "status": "completed",
   "data": { "text": "..." },
   "error": null,
-  "logs": []
+  "logs": [],
+  "finished_at": "2026-07-24T06:52:14.000Z"
 }
 ```
 
@@ -140,6 +156,14 @@
 ```json
 { "ok": true, "command": { "id": "...", "status": "completed", "deliveries": { ... } } }
 ```
+
+Хаб принимает результат клиента только со статусом `completed` или `failed` и
+только от клиента, которому назначена доставка. Повторная отправка конечного
+результата идемпотентна: существующий результат не перезаписывается. Расширение
+сохраняет выполненный результат в локальной очереди до подтверждённой отправки.
+`ok=true` должен соответствовать `completed`, а `ok=false` — `failed`.
+В сохранённом результате `finished_at` означает время окончания в браузерном
+клиенте, а `received_at` — время подтверждённого приёма хабом.
 
 ## `GET /api/commands/{id}`
 Получить полную карточку команды.
@@ -170,10 +194,20 @@
   - поля: `url`, опционально `active`
 - `click`
   - поля: `selector`
+- `snapshot`
+  - опционально: `root_selector`, `limit` (1..1000), `include_hidden`
+  - возвращает `lines`, `elements`, `url`, `title`; каждый элемент имеет
+    ссылку `ref`, действующую в пределах текущей страницы
+- `smart_click`
+  - поля: `locator`; опционально `timeout_ms`, `poll_ms`, `stable_ms`
+  - ожидает готовность: элемент видим, стабилен, включён и получает события
 - `click_text`
   - поля: `text`, опционально `root_selector`, `near_last_context`
 - `fill`
   - поля: `selector`, `value`
+- `set_editable_text`
+  - старый вариант: `selector`, `value`
+  - агентный вариант: `locator`, `value`, опционально `timeout_ms`
 - `focus`
   - поля: `selector`
 - `extract_text`
@@ -186,6 +220,11 @@
   - поля: `selector`, `attribute`
 - `wait_selector`
   - поля: `selector`, опционально `timeout_ms`, `visible_only`
+- `wait_for`
+  - поля: `locator`, `state`
+  - состояния: `attached`, `detached`, `visible`, `hidden`, `enabled`,
+    `editable`, `stable`, `actionable`, `text`, `value`
+  - для `text`/`value`: `expected_text`/`expected_value`; опционально `exact`
 - `scroll`
   - или `selector`, или координаты `x`, `y`
 - `scroll_by`
@@ -205,7 +244,37 @@
 - `run_script`
   - поля: `script`, опционально `args`
 - `screenshot`
-  - без обязательных полей
+  - опционально: `full_page`
+  - возвращает снимок явно выбранной вкладки через CDP и поле `captureMode`
+
+## Контракт `locator`
+
+```json
+{
+  "strategy": "role",
+  "value": "button",
+  "name": "Сохранить",
+  "exact": true,
+  "nth": 0,
+  "root_selector": "main"
+}
+```
+
+Поддерживаемые `strategy`:
+
+- `css` — CSS, включая открытые Shadow DOM;
+- `ref` — ref из snapshot;
+- `role` — явная/неявная ARIA role, опционально с accessible `name`;
+- `text` — текст semantic element;
+- `label` — связанный `<label>` или `aria-label`;
+- `placeholder`;
+- `test_id` — `data-testid`, `data-test-id` или `data-test`.
+
+По умолчанию локатор строгий: неоднозначное совпадение является ошибкой.
+Используйте `exact`, `nth` или более узкий корень. Ссылка может восстановиться
+после повторной отрисовки DOM только при единственном совпадении отпечатка.
+После полной навигации нужен новый снимок. В схеме версии 1 локатор адресует
+верхний фрейм.
 
 ## Контракт результата
 Расширение возвращает:

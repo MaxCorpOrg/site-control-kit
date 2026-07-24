@@ -17,12 +17,16 @@ const BRIDGE_CAPABILITIES = {
     "click_text",
     "clear_editable",
     "click",
+    "smart_click",
     "fill",
+    "set_editable_text",
     "focus",
     "upload_file",
     "extract_text",
     "get_html",
     "get_attribute",
+    "snapshot",
+    "wait_for",
     "wait_selector",
     "scroll",
     "scroll_by",
@@ -32,8 +36,11 @@ const BRIDGE_CAPABILITIES = {
   ]
 };
 
+const RESULT_OUTBOX_KEY = "pendingCommandResults";
 let pollTimer = null;
 let heartbeatTimer = null;
+let pollInFlight = false;
+let heartbeatInFlight = false;
 
 function storageGet(keys) {
   return new Promise((resolve) => chrome.storage.local.get(keys, resolve));
@@ -216,7 +223,7 @@ async function sendCommandToTabWithAutoInject(tabId, command) {
       throw error;
     }
 
-    await tabsExecuteScript(tabId, ["content.js"]);
+    await tabsExecuteScript(tabId, ["agent_dom.js", "content.js"]);
     const retryResponse = await tabsSendMessage(tabId, {
       type: "site-control-command",
       command
@@ -236,6 +243,41 @@ function captureVisibleTab(windowId) {
       resolve(dataUrl);
     });
   });
+}
+
+async function captureTabScreenshot(tab, fullPage = false) {
+  await debuggerAttach(tab.id);
+  try {
+    await debuggerSendCommand(tab.id, "Page.enable");
+    const params = {
+      format: "png",
+      fromSurface: true,
+      captureBeyondViewport: Boolean(fullPage)
+    };
+    if (fullPage) {
+      const metrics = await debuggerSendCommand(tab.id, "Page.getLayoutMetrics");
+      const size = metrics?.cssContentSize || metrics?.contentSize;
+      if (size?.width && size?.height) {
+        params.clip = {
+          x: 0,
+          y: 0,
+          width: Math.max(1, Number(size.width)),
+          height: Math.max(1, Number(size.height)),
+          scale: 1
+        };
+      }
+    }
+    const result = await debuggerSendCommand(tab.id, "Page.captureScreenshot", params);
+    if (!result?.data) {
+      throw new Error("Chrome DevTools Protocol returned no screenshot data");
+    }
+    return {
+      imageDataUrl: `data:image/png;base64,${result.data}`,
+      captureMode: fullPage ? "cdp-full-page" : "cdp-viewport"
+    };
+  } finally {
+    await debuggerDetach(tab.id);
+  }
 }
 
 function debuggerAttach(tabId, protocolVersion = "1.3") {
@@ -395,24 +437,89 @@ async function sendHeartbeat(config) {
   });
 }
 
-async function postResult(config, commandId, result) {
-  const payload = {
+function buildResultPayload(config, result) {
+  return {
     client_id: config.clientId,
     ok: Boolean(result.ok),
     status: result.status || (result.ok ? "completed" : "failed"),
     data: result.data ?? null,
     error: result.error ?? null,
-    logs: result.logs || []
+    logs: result.logs || [],
+    finished_at: new Date().toISOString()
   };
+}
 
-  await apiRequest(config, `/api/commands/${encodeURIComponent(commandId)}/result`, "POST", payload);
+async function enqueuePendingResult(config, commandId, result) {
+  const stored = await storageGet([RESULT_OUTBOX_KEY]);
+  const outbox = stored[RESULT_OUTBOX_KEY] && typeof stored[RESULT_OUTBOX_KEY] === "object"
+    ? stored[RESULT_OUTBOX_KEY]
+    : {};
+  outbox[commandId] = {
+    commandId,
+    queuedAt: new Date().toISOString(),
+    attempts: Number(outbox[commandId]?.attempts || 0),
+    payload: buildResultPayload(config, result)
+  };
+  await storageSet({ [RESULT_OUTBOX_KEY]: outbox });
+}
 
-  await storageSet({
-    lastCommandId: commandId,
-    lastCommandAt: new Date().toISOString(),
-    lastCommandStatus: payload.status,
-    lastCommandError: payload.error ? JSON.stringify(payload.error) : ""
-  });
+async function flushPendingResults(config) {
+  const stored = await storageGet([RESULT_OUTBOX_KEY]);
+  const outbox = stored[RESULT_OUTBOX_KEY] && typeof stored[RESULT_OUTBOX_KEY] === "object"
+    ? stored[RESULT_OUTBOX_KEY]
+    : {};
+  const entries = Object.entries(outbox).sort(([, left], [, right]) =>
+    String(left?.queuedAt || "").localeCompare(String(right?.queuedAt || ""))
+  );
+  for (const [outboxKey, entry] of entries) {
+    const commandId = String(entry?.commandId || outboxKey || "");
+    if (!commandId || !entry.payload) {
+      delete outbox[outboxKey];
+      continue;
+    }
+    try {
+      await apiRequest(
+        config,
+        `/api/commands/${encodeURIComponent(commandId)}/result`,
+        "POST",
+        entry.payload
+      );
+      delete outbox[outboxKey];
+      await storageSet({
+        [RESULT_OUTBOX_KEY]: outbox,
+        lastCommandId: commandId,
+        lastCommandAt: new Date().toISOString(),
+        lastCommandStatus: entry.payload.status,
+        lastCommandError: entry.payload.error ? JSON.stringify(entry.payload.error) : ""
+      });
+    } catch (error) {
+      const errorMessage = String(error?.message || error);
+      if (errorMessage.includes("HTTP 400:") || errorMessage.includes("HTTP 404:")) {
+        delete outbox[outboxKey];
+        await storageSet({
+          [RESULT_OUTBOX_KEY]: outbox,
+          lastOrphanedCommandResult: {
+            commandId,
+            droppedAt: new Date().toISOString(),
+            reason: errorMessage
+          }
+        });
+        continue;
+      }
+      entry.attempts = Number(entry.attempts || 0) + 1;
+      entry.lastError = errorMessage;
+      entry.lastAttemptAt = new Date().toISOString();
+      outbox[outboxKey] = entry;
+      await storageSet({ [RESULT_OUTBOX_KEY]: outbox });
+      break;
+    }
+  }
+  return Object.keys(outbox).length;
+}
+
+async function persistAndPostResult(config, commandId, result) {
+  await enqueuePendingResult(config, commandId, result);
+  return flushPendingResults(config);
 }
 
 async function executeCommandEnvelope(envelope) {
@@ -463,16 +570,30 @@ async function executeCommandEnvelope(envelope) {
 
   if (type === "screenshot") {
     const tab = await resolveTargetTab(target);
-    if (!tab || !Number.isInteger(tab.windowId)) {
+    if (!tab || !Number.isInteger(tab.id)) {
       return { ok: false, status: "failed", error: { message: "No target tab for screenshot" } };
     }
-    const imageDataUrl = await captureVisibleTab(tab.windowId);
+    let screenshot;
+    try {
+      screenshot = await captureTabScreenshot(tab, Boolean(command.full_page));
+    } catch (error) {
+      if (!tab.active || !Number.isInteger(tab.windowId)) {
+        throw new Error(
+          `Unable to capture inactive target tab ${tab.id} through CDP: ${String(error?.message || error)}`
+        );
+      }
+      screenshot = {
+        imageDataUrl: await captureVisibleTab(tab.windowId),
+        captureMode: "visible-tab-fallback"
+      };
+    }
     return {
       ok: true,
       status: "completed",
       data: {
         tabId: tab.id,
-        imageDataUrl
+        imageDataUrl: screenshot.imageDataUrl,
+        captureMode: screenshot.captureMode
       }
     };
   }
@@ -559,17 +680,26 @@ async function executeCommandEnvelope(envelope) {
 }
 
 async function pollOnce(reason = "timer") {
-  const config = await getConfig();
-  if (!config.token) {
-    await storageSet({
-      lastPollAt: new Date().toISOString(),
-      lastPollError: "Не задан токен в настройках расширения",
-      lastPollReason: reason
-    });
+  if (pollInFlight) {
     return;
   }
-
+  pollInFlight = true;
   try {
+    const config = await getConfig();
+    if (!config.token) {
+      await storageSet({
+        lastPollAt: new Date().toISOString(),
+        lastPollError: "Не задан токен в настройках расширения",
+        lastPollReason: reason
+      });
+      return;
+    }
+
+    const pendingResults = await flushPendingResults(config);
+    if (pendingResults > 0) {
+      throw new Error(`Result outbox still has ${pendingResults} pending item(s)`);
+    }
+
     const query = new URLSearchParams({ client_id: config.clientId }).toString();
     const response = await apiRequest(config, `/api/commands/next?${query}`, "GET");
 
@@ -585,28 +715,33 @@ async function pollOnce(reason = "timer") {
     }
 
     const result = await executeCommandEnvelope(envelope);
-    await postResult(config, envelope.id, result);
+    await persistAndPostResult(config, envelope.id, result);
   } catch (error) {
     await storageSet({
       lastPollAt: new Date().toISOString(),
       lastPollError: String(error?.message || error),
       lastPollReason: reason
     });
+  } finally {
+    pollInFlight = false;
   }
 }
 
 async function heartbeatOnce(reason = "timer") {
-  const config = await getConfig();
-  if (!config.token) {
-    await storageSet({
-      lastHeartbeatAt: new Date().toISOString(),
-      lastHeartbeatError: "Не задан токен в настройках расширения",
-      lastHeartbeatReason: reason
-    });
+  if (heartbeatInFlight) {
     return;
   }
-
+  heartbeatInFlight = true;
   try {
+    const config = await getConfig();
+    if (!config.token) {
+      await storageSet({
+        lastHeartbeatAt: new Date().toISOString(),
+        lastHeartbeatError: "Не задан токен в настройках расширения",
+        lastHeartbeatReason: reason
+      });
+      return;
+    }
     await sendHeartbeat(config);
     await storageSet({
       lastHeartbeatAt: new Date().toISOString(),
@@ -619,6 +754,8 @@ async function heartbeatOnce(reason = "timer") {
       lastHeartbeatError: String(error?.message || error),
       lastHeartbeatReason: reason
     });
+  } finally {
+    heartbeatInFlight = false;
   }
 }
 

@@ -1,0 +1,18 @@
+{
+  "issued_by": "agent-example",
+  "timeout_ms": 20000,
+  "target": {
+    "client_id": "REPLACE_WITH_CLIENT_ID",
+    "tab_id": 123
+  },
+  "command": {
+    "type": "wait_for",
+    "locator": {
+      "strategy": "text",
+      "value": "Готово",
+      "exact": true
+    },
+    "state": "visible",
+    "timeout_ms": 10000
+  }
+}

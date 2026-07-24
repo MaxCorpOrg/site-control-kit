@@ -1,43 +1,43 @@
 # Центр управления Telegram
 
-Видимая папка Telegram control center внутри `site-control-kit`.
+Видимая папка центра управления Telegram внутри `site-control-kit`.
 
 Этот слой не заменяет существующие инструменты.
 Его задача другая:
-- держать registry подключённых инструментов;
+- держать реестр подключённых инструментов;
 - давать одну простую Telegram-точку входа для оператора и агента;
 - открывать простую русскую панель без перегруза лишними экранами;
-- позволять выбирать пользователя из списка portable-профилей и добавлять новых по `tdata.zip`.
+- позволять выбирать пользователя из списка переносимых профилей и добавлять новых по `tdata.zip`.
 
 ## Что Уже Подключено
 
 - `telegram_invite_manager` из текущего репозитория;
-- `telegram_portable_helper` как low-level embedded helper;
-- `telegram_export` как embedded export pipeline;
-- `telegram_session_runner` как wrapper вокруг embedded package `telegram_portable_session_tool`.
+- `telegram_portable_helper` как встроенный низкоуровневый помощник;
+- `telegram_export` как встроенный процесс экспорта;
+- `telegram_session_runner` как обёртка встроенного пакета `telegram_portable_session_tool`.
 
-Все workflow продолжают жить как отдельные единицы.
+Все рабочие сценарии продолжают жить как отдельные единицы.
 Панель поверх них специально упрощена под три основные операторские кнопки:
 - `Добавить контакты из TXT`
 - `Старт сессии`
 - `Совместный режим`
 
-Low-level helper и export остаются в registry и CLI, но не засоряют основной экран.
+Низкоуровневый помощник и экспорт остаются в реестре и командном интерфейсе, но не засоряют основной экран.
 
 ## Структура
 
-- `registry/tools.json` — список подключённых manifests;
-- `AGENT_GUIDE_RU.md` — как агенту развивать platform layer;
-- `docs/ARCHITECTURE_RU.md` — архитектура registry/panel;
+- `registry/tools.json` — список подключённых манифестов;
+- `AGENT_GUIDE_RU.md` — как агенту развивать платформенный слой;
+- `docs/ARCHITECTURE_RU.md` — архитектура реестра и панели;
 - `docs/INTEGRATION_GUIDE_RU.md` — как подключать новый инструмент;
-- `/home/max/site-control-kit/docs/TELEGRAM_CONTROL_CENTER_OPERATOR_RU.md` — канонический operator entry для панели;
-- `/home/max/site-control-kit/docs/TELEGRAM_CONTROL_CENTER_RUNBOOK_RU.md` — maintainer-runbook для repair/backfill и live recovery;
-- `/home/max/site-control-kit/docs/TELEGRAM_SUPERTOOL_ROADMAP_RU.md` — стратегический roadmap следующего этапа развития;
-- `/home/max/site-control-kit/tools/telegram/agent_pack/README_RU.md` — agent-layer и machine-readable checkpoint;
+- `/home/max/site-control-kit/docs/TELEGRAM_CONTROL_CENTER_OPERATOR_RU.md` — основная точка входа оператора;
+- `/home/max/site-control-kit/docs/TELEGRAM_CONTROL_CENTER_RUNBOOK_RU.md` — руководство сопровождающего для восстановления и живой диагностики;
+- `/home/max/site-control-kit/docs/TELEGRAM_SUPERTOOL_ROADMAP_RU.md` — стратегический план следующего этапа;
+- `/home/max/site-control-kit/tools/telegram/agent_pack/README_RU.md` — агентный слой и машиночитаемая контрольная точка;
 - `/home/max/site-control-kit/tools/telegram/agent_pack/VERIFICATION_MATRIX_RU.md` — матрица проверок по слоям;
-- `/home/max/site-control-kit/tools/telegram/agent_pack/agent_state.template.json` — versioned template machine-readable state;
-- `bin/tool-platform` — CLI доступа к catalog;
-- `bin/tool-platform-panel` — Tkinter GUI-панель.
+- `/home/max/site-control-kit/tools/telegram/agent_pack/agent_state.template.json` — версионированный шаблон машиночитаемого состояния;
+- `bin/tool-platform` — командный доступ к каталогу;
+- `bin/tool-platform-panel` — графическая панель Tkinter.
 
 ## Быстрый Старт
 
@@ -66,14 +66,14 @@ cd /home/max/site-control-kit/tools/telegram/platform
 ./bin/tool-platform-panel
 ```
 
-Канонический runtime root для control center теперь один:
+Основной корень среды выполнения центра управления теперь один:
 
 `/home/max/site-control-kit/runtime/telegram`
 
 Для обычного оператора начинать лучше с:
 - `/home/max/site-control-kit/docs/TELEGRAM_CONTROL_CENTER_OPERATOR_RU.md`
 
-Для support / maintenance:
+Для поддержки и сопровождения:
 - `/home/max/site-control-kit/docs/TELEGRAM_CONTROL_CENTER_RUNBOOK_RU.md`
 
 Что умеет панель сейчас:
@@ -249,7 +249,7 @@ cd /home/max/site-control-kit/tools/telegram/platform
 - длинный экран теперь можно прокручивать мышью вниз;
 - рендерит детали профиля и результаты в читаемых текстовых блоках, а не в тесных таблицах.
 
-## Что Даёт Registry
+## Что даёт реестр
 
 Каждый инструмент публикует `tool_manifest.json`, где описаны:
 - имя и `tool_id`;

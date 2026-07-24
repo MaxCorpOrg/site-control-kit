@@ -1,6 +1,6 @@
-# Components And Entrypoints
+# Компоненты и точки входа
 
-## Python Core
+## Ядро на Python
 ### `webcontrol/server.py`
 Главный HTTP hub.
 Отвечает за:
@@ -21,7 +21,7 @@ CLI и `sitectl browser`.
 - tab actions;
 - X11 fallback helpers.
 
-## Extension Layer
+## Слой расширения
 ### `extension/background.js`
 Делает:
 - heartbeat;
@@ -39,7 +39,7 @@ CLI и `sitectl browser`.
 - wheel/scroll commands;
 - Telegram-specific DOM building blocks.
 
-## Telegram Scripts
+## Сценарии Telegram
 ### `scripts/export_telegram_members_non_pii.py`
 Главный Telegram exporter.
 Самый сложный модуль проекта на текущий момент.
@@ -59,7 +59,7 @@ CLI и `sitectl browser`.
 - запуск exporter с нужными флагами.
 
 ### `scripts/collect_new_telegram_contacts.sh`
-Batch-wrapper.
+Обёртка пакетного запуска.
 Делает:
 - chat dir;
 - run dir;
@@ -69,7 +69,7 @@ Batch-wrapper.
 - run.json.
 
 ### `scripts/telegram_contact_chain.py`
-Chain-runner.
+Исполнитель цепочки запусков.
 Делает:
 - серию коротких прогонов;
 - stop conditions;
@@ -117,7 +117,7 @@ Execution-слой поверх Invite Manager.
 ### `scripts/telegram_contact_batches.py`
 Работа с numbered batch files, best snapshot promotion и related helpers.
 
-## Unified Tool Platform
+## Единая платформа инструментов
 ### `tool_platform/catalog.py`
 Registry и manifest loader.
 Делает:
@@ -126,7 +126,7 @@ Registry и manifest loader.
 - валидацию `tool_id` и `action_id`.
 
 ### `tool_platform/cli.py`
-CLI unified platform.
+Командный интерфейс единой платформы.
 Делает:
 - `list-tools`;
 - `show-tool`;
@@ -135,20 +135,20 @@ CLI unified platform.
 - `run-action`.
 
 ### `tool_platform/gui.py`
-Tkinter graphical control panel.
+Графическая панель управления на Tkinter.
 Делает:
 - единый каталог инструментов;
 - profile-first управление Telegram portable-пользователями;
 - показ docs, actions, artifacts и capability tags;
 - запуск безопасных зарегистрированных actions без хардкода конкретного инструмента.
 
-## GUI / Operator Layer
+## Графический и операторский слой
 ### `scripts/telegram_members_export_app.sh`
 Zenity-обёртка для более ручного экспорта.
 Теперь умеет выбирать profile.
 
 ### `scripts/telegram_members_export_gui.sh`
-Progress-oriented GUI wrapper.
+Графическая обёртка с отображением прогресса.
 Тоже умеет выбирать profile.
 
 ## Главные Точки Входа Для Реальной Работы

@@ -1,6 +1,6 @@
-# State And Artifacts
+# Состояние и артефакты
 
-## Базовый Chat Directory
+## Основной каталог чата
 Типовой каталог:
 
 ```text
@@ -13,7 +13,7 @@
 /home/max/telegram_contact_batches/chat_-2465948544/
 ```
 
-## Основные Файлы В Chat Dir
+## Основные файлы каталога чата
 ### `latest_full.md`
 Текущий raw markdown snapshot.
 
@@ -21,10 +21,10 @@
 Список raw usernames.
 
 ### `latest_safe.md`
-Safe markdown snapshot.
+Безопасный снимок в Markdown.
 
 ### `latest_safe.txt`
-Safe usernames.
+Безопасные имена пользователей.
 
 ### `identity_history.json`
 История соответствий `peer_id -> username`.
@@ -46,7 +46,7 @@ Safe usernames.
 ### `1.txt`, `2.txt`, `3.txt`, ...
 Numbered batches новых safe usernames.
 
-## Run Artifacts
+## Артефакты запуска
 Каждый run создаёт каталог:
 
 ```text
@@ -93,7 +93,7 @@ chat_<id>/runs/<timestamp>/
 - `history_backfilled_total`
 - `chat_stats`
 
-## Chain Artifacts
+## Артефакты цепочки запусков
 Для chain-runner есть отдельный каталог:
 
 ```text
@@ -106,7 +106,7 @@ chat_<id>/chains/<timestamp>/
 
 `chain.json` важен для сравнения профилей и stop logic.
 
-## Invite Manager Artifacts
+## Артефакты менеджера приглашений
 
 Для invite manager используется отдельный корень:
 

@@ -1,4 +1,4 @@
-# Project Status RU
+# Состояние проекта
 
 Последнее обновление: 2026-05-12
 
@@ -10,7 +10,7 @@
 
 ## Сделано
 
-### Базовый browser-control kit
+### Базовый набор управления браузером
 - Хаб `webcontrol` работает как единый источник правды по клиентам, очередям и результатам.
 - CLI и browser wrappers уже подходят для живого локального управления браузером.
 - Расширение исполняет tab-level и DOM-level команды.
@@ -18,12 +18,12 @@
 - Добавлена короткая root-entry точка `START_HERE_AGENT_RU.md`, чтобы новый агент сначала определял последнюю завершённую точку проекта, текущий риск и следующий приоритет, а не начинал работу с нуля.
 - `AGENTS.md` расширен до capability-map всего проекта: теперь новый агент видит не только правила, но и полную карту подсистем, текущих возможностей, операторских артефактов, документационных контуров и правильных файлов для каждого класса задач.
 
-### Telegram batch-flow
+### Пакетный сценарий Telegram
 - Есть рабочий сценарий пакетного сохранения новых контактов в `~/telegram_contact_batches/chat_<id>/1.txt`, `2.txt`, `3.txt` и далее.
 - Есть `latest_full.md/txt` и `latest_safe.md/txt`.
 - Есть numbered batch files и safe snapshots.
 
-### Telegram Invite Manager
+### Менеджер приглашений Telegram
 - Добавлена видимая папка инструмента:
   - `tools/telegram/invite_manager/`
   - `tools/telegram/invite_manager/AGENT_GUIDE_RU.md`
@@ -107,7 +107,7 @@
   - `tools/telegram/invite_manager/NEXT_CHAT_AGENT_PROMPT_RU.md`
   - он задаёт новому агенту стартовую точку, границы редактирования и обязательный порядок чтения.
 
-### Telegram Desktop portable helper
+### Помощник переносимого Telegram Desktop
 - Добавлен новый helper для Linux portable-профилей Telegram Desktop:
   - `scripts/telegram_portable.py`
   - `scripts/telegram_portable_gui.sh`
@@ -134,7 +134,7 @@
   - кликать по доступным Telegram Desktop controls через `accessibility-click`;
   - вводить ASCII-текст в accessibility-selected field через `accessibility-type-text`.
 
-### Unified tool platform
+### Единая платформа инструментов
 - Добавлен отдельный registry-driven platform layer:
   - `tool_platform/catalog.py`
   - `tool_platform/cli.py`
@@ -314,16 +314,16 @@
 - `run.json` дублирует ключевые метрики: `unique_members`, `members_with_username`, `deep_updated_total`, `history_backfilled_total`, `output_usernames_cleared_total`, `chat_scroll_steps_done`, `chat_jump_scrolls_done`, `chat_deep_priority_rounds`, `chat_deep_yield_stop`.
 - В `run.json` теперь есть и решение по latest-снимкам: `latest_full_promoted`, `latest_safe_promoted`, `latest_full_best_source`, `latest_safe_best_source`.
 
-### History backfill
+### Восстановление из истории
 - Экспортёр теперь умеет восстанавливать уже известные `peer_id -> @username` из `identity_history.json` прямо в текущий run.
 - Backfill выполняется до extra-deep, поэтому повторный прогон не начинается заново с пустого raw-слоя.
 
-### Защита latest-снимков
+### Защита последних лучших снимков
 - Wrapper больше не затирает `latest_full.*` и `latest_safe.*` слабым прогоном.
 - Если текущий run хуже, в chat-dir остаётся лучший known snapshot.
 - После прогона wrapper умеет поднять лучший raw/safe snapshot из `runs/*/snapshot*.md`, если именно там лежит более качественный результат.
 
-### Очистка raw output
+### Очистка необработанного результата
 - Перед записью markdown экспортер очищает конфликтные duplicate `@username` и может восстановить исторический username для конкретного `peer_id` в итоговом output.
 
 ### Усиление mention/deep-path
@@ -341,8 +341,15 @@
 - repeated failure peer теперь получают ещё и мягкий cooldown: если в текущем visible-layer есть альтернативы, deep сначала тратит батч на них, а не на заведомо тяжёлый peer.
 - Если текущий deep-step уже дал сильный результат и до конца runtime осталось мало, exporter может закончить run раньше и не тратить хвост времени на малополезный discovery.
 
-### Диагностика stale extension runtime
+### Диагностика устаревшей среды расширения
 - В heartbeat `meta` добавлены `capabilities` по background/content-командам.
+- На `2026-07-24` усилен `scripts/reload_bridge_extension.sh`:
+  - сохранённые `content_commands` без нового heartbeat больше не дают ложный успех;
+  - heartbeat должен появиться после начала reload и быть не старше
+    `SCB_MAX_HEARTBEAT_AGE_SEC` (по умолчанию 5 секунд);
+  - после неудачи обеих стратегий helper возвращает ненулевой код;
+  - `bash -n scripts/reload_bridge_extension.sh` и полный набор из 294 тестов
+    прошли успешно.
 - CLI теперь умеет помечать browser tab-level ошибки вида `Unsupported command type in content script ...` как вероятный stale runtime и подсказывает reload в `chrome://extensions`.
 - Telegram-экспортёр теперь делает preflight по `meta.capabilities` выбранного клиента:
   - если runtime не рекламирует `click_menu_text`, mention-deep не тратит попытки на неподдерживаемую DOM-команду;
@@ -1756,7 +1763,7 @@
         - `failed = 0`
         - queue можно продолжать дальше без ручного cleanup
 
-## Новый Tranche: Invite Progress Summary
+## Новый этап: сводка прогресса приглашений
 - Закрыт tranche по live progress summary для `invite_batch` на `AK3`:
   - `scripts/telegram_invite_executor.py`
     - `desktop-add-contact-batch` теперь заранее резервирует `execution_id` и run dir;
@@ -1848,7 +1855,7 @@
   - latest successful workflow:
     - `20260508T082436Z-0e9ac291`
 
-## Новый Tranche: Project-Local Runtime Root
+## Новый этап: локальный корень среды выполнения проекта
 - Закрыт tranche по поэтапному переводу Telegram control plane в одну понятную project-local директорию:
   - канонический runtime root теперь: `/home/max/site-control-kit/runtime/telegram`
   - новый central resolver реализован в `tool_platform/telegram_runtime.py`
@@ -2378,7 +2385,7 @@
 
 ## Следующий Приоритет
 
-### Must
+### Обязательно
 1. Если product scope остаётся `Linux-first + Windows installer`, закрыть Windows artifact на машине или runner с Wine + Windows Python + Inno Setup:
    - `./packaging/windows/build_windows_installer.sh 0.1.1 --check-tools`
    - `./packaging/windows/build_windows_installer.sh 0.1.1`
@@ -2390,7 +2397,7 @@
    - `AK5` и другие спорные профили не использовать live без `attach_status in {exact_window, title_match}`;
    - historical `repair-historical-artifacts --apply` не запускать без fresh preview и явного решения оператора.
 
-### Should
+### Желательно
 1. Если нужен настоящий Windows Telegram live workflow, делать отдельный adapter tranche:
    - launch/open-uri/focus/click/type/screenshot;
    - portable profile lifecycle;
@@ -2399,7 +2406,7 @@
 2. После release tranche возвращаться к deeper thinning `gui.py` / `telegram_gui_helpers.py`.
 3. Продолжать docs normalization и выравнивание operator/maintainer narrative вокруг standalone install, XDG runtime и canonical production paths.
 
-### Optional
+### Необязательно
 1. Вернуться к `AK5` Wayland/x11 как к отдельной диагностической задаче только если снова нужен именно этот профиль:
    - попробовать добить воспроизводимый safe reveal/open path;
    - либо оставить окончательно как `created + launchable + visible window not confirmed`.
@@ -2435,3 +2442,213 @@
    - последний `export.log`
    - `identity_history.json`
 7. Только потом делать правки.
+
+## Платформа браузерного агента, этап P0 — 2026-07-24
+
+### Последний завершённый блок
+
+По новой продуктовой цели усиления управления браузером для ИИ-агентов
+завершены исследование, полный аудит, целевая модульная архитектура, план и
+первый этап реализации P0.
+
+Исследование и проектные решения:
+
+- добавлен `docs/BROWSER_AGENT_AUDIT_RU.md`;
+- сопоставлены Playwright, Selenium/Grid/BiDi, Puppeteer, agent-browser,
+  Playwright MCP, Chrome DevTools MCP, Stagehand, browser-use, Webwright,
+  BrowserGym/AgentLab, WebArena, Steel/browserless, Skyvern и LaVague;
+- зафиксированы сильные стороны текущего проекта, архитектурные узкие места,
+  модель безопасности, метрики и план P0..P3 со сложностью и зависимостями.
+
+Реализовано:
+
+- новый модуль `extension/agent_dom.js`:
+  - семантический снимок с компактными строками и ссылками;
+  - строгие локаторы `css`, `ref`, `role + name`, `text`, `label`,
+    `placeholder`, `test_id`;
+  - открытые Shadow DOM;
+  - однозначное восстановление ссылки после повторной отрисовки;
+  - ожидания `attached/detached/visible/hidden/enabled/editable/stable/actionable/text/value`;
+  - проверка видимости, стабильности, доступности редактирования и получения событий;
+- контракт API агента:
+  - `webcontrol/browser_agent.py`;
+  - `GET /api/agent/schema`;
+  - `sitectl browser schema`;
+- командный интерфейс:
+  - `browser snapshot`;
+  - `browser smart-click`;
+  - `browser set-text`;
+  - `browser wait-for`;
+- усиление транспорта:
+  - взаимоисключение опроса и сигнала активности;
+  - долговечная очередь результатов в `chrome.storage.local`;
+  - следующая команда не берётся, пока очередь не подтверждена хабом;
+  - `finished_at` браузерного клиента отделён от `received_at` хаба;
+- усиление хаба:
+  - результат чужого клиента и неизвестный статус отклоняются;
+  - повторный конечный результат идемпотентен и не перезаписывает данные;
+  - BrokenPipe/connection reset больше не печатает traceback;
+- снимок экрана:
+  - явно выбранная фоновая вкладка снимается через CDP;
+  - добавлен `full_page`;
+  - результат содержит `captureMode`;
+- версия расширения поднята до `0.1.3`;
+- добавлены примеры данных агента и
+  `examples/agent-browser-smoke.html`;
+- обновлены `README.md`, `BROWSER_QUICKSTART.md`, `docs/API.md`,
+  `docs/ARCHITECTURE.md`, `docs/EXTENSION.md`,
+  `docs/AI_MAINTAINER_GUIDE.md`.
+
+### Доказательства проверки
+
+- `node --check extension/agent_dom.js extension/content.js extension/background.js`
+  → OK;
+- `python3 -m py_compile webcontrol/browser_agent.py webcontrol/cli.py webcontrol/server.py webcontrol/store.py`
+  → OK;
+- `PYTHONPATH="$PWD" python3 -m unittest discover -s tests -p 'test_*.py'`
+  → `303 OK`;
+- `PYTHONPATH="$PWD" python3 -m webcontrol --help` → OK;
+- `PYTHONPATH="$PWD" python3 -m webcontrol browser --help` → OK;
+- `bash -n scripts/reload_bridge_extension.sh` → OK;
+- `git diff --check` → OK.
+- `./scripts/package_extension.sh` → extension archive `0.1.3`;
+  - `dist/site-control-bridge-extension.zip`;
+  - итоговая sha256 после проверки Shadow DOM:
+    `52b547a0ca7be1622001ec86a291ac1ddecd45490423966ebd2236e726307b4d`.
+
+Живая проверка Chrome 150 и расширения `0.1.3`:
+
+- `browser schema`, `status`, `tabs` → OK;
+- тестовая страница `examples/agent-browser-smoke.html`:
+  - снимок вернул 5 семантических элементов;
+  - `set-text "Final smoke" --label "Имя агента"` → OK;
+  - `smart-click --role button --name "Сохранить"` → OK;
+  - `wait-for --text "Готово: Final smoke"` → OK;
+  - после реальной замены поля в DOM `set-text "Healed" --ref e2` вернул
+    `healed=true`;
+- после активации соседней вкладки снимок исходной фоновой вкладки:
+  - `captureMode=cdp-full-page`;
+  - PNG `/tmp/site-control-agent-final.png`, `2252x842`;
+- восстановление очереди результатов:
+  - команда `08e451e7-6551-4899-853e-6810c4760e66` была выдана;
+  - хаб остановлен до отправки результата;
+  - после запуска хаба очередь первым запросом отправила сохранённый результат,
+    доставка перешла в конечное состояние;
+- разделение времён подтверждено командой
+  `4234b8b0-0d7b-402f-9c8e-90b904912ee9`:
+  - `finished_at=2026-07-24T06:55:47.457Z`;
+  - `received_at=2026-07-24T06:55:47.459154+00:00`.
+
+Временная тестовая вкладка закрыта, локальный HTTP-сервер тестовой страницы остановлен. Хаб
+оставлен запущенным на `127.0.0.1:8765`.
+
+### Текущий риск
+
+Очередь закрывает потерю результата после выполнения, но выдача всё ещё не
+имеет аренды, подтверждения и повторной выдачи. Падение фонового процесса MV3
+между `GET /next` и сохранением результата может оставить доставку в
+`dispatched` до истечения срока. Автоматический повтор действий с побочным
+эффектом небезопасен без ключа идемпотентности и классификации команд.
+
+Также пока не закрыты:
+
+- владелец и блокировка сессии вкладки, проверка жизни клиента;
+- готовность навигации, покой DOM и сети, ссылки с учётом фреймов;
+- дописываемые события, трасса консоли и сети, автоматический сквозной тест Chrome;
+- ограниченные артефакты и видео, правила прокси и профиля;
+- исполнитель Playwright для изолированных Chromium, Firefox и WebKit.
+
+### Следующий приоритет
+
+1. Версионированная аренда доставки, явное подтверждение, номер попытки и ключ
+   идемпотентности: читающие команды можно выдать повторно, побочные эффекты —
+   только по правилу.
+2. Блокировки сессии и вкладки, владелец и проверка жизни клиента, чтобы параллельные агенты не
+   пересекались в одной вкладке.
+3. Автоматизировать текущую тестовую страницу как повторяемую сквозную проверку
+   Chrome и добавить управляемый тест прерывания хаба.
+4. Затем добавить готовность навигации и пакет доказательств ошибки:
+   снимок DOM, снимок экрана, URL, хвост консоли и сети.
+
+Полный порядок дальнейших блоков и зависимости:
+`docs/BROWSER_AGENT_AUDIT_RU.md`.
+
+## Полная сверка кода и русской документации — 2026-07-24
+
+### Последний завершённый блок
+
+После реализации браузерного этапа P0 выполнена отдельная полная сверка
+репозитория и документации:
+
+- инвентаризированы все 182 ранее отслеживаемых файла и новые файлы этапа P0;
+- просмотрены точки входа, классы, функции, команды, манифесты, сценарии
+  оболочки, тесты и структура документации;
+- сопоставлены реальные команды `webcontrol`, возможности расширения, схема
+  агента, примеры и описания API;
+- подтверждено, что за 24 июля до этого блока не было отдельного коммита:
+  реализация P0 находилась в рабочем дереве и теперь публикуется одним
+  согласованным изменением;
+- вся обычная пояснительная документация приведена к русскому языку;
+- английские имена продуктов, команды, пути, ключи JSON и идентификаторы
+  сохранены только там, где перевод сломал бы контракт;
+- добавлен `docs/TERMS_RU.md` с русскими объяснениями технических терминов;
+- добавлен `docs/AGENT_SIMPLE_GUIDE_RU.md` с коротким стартом, примерами,
+  сценариями и частыми вопросами;
+- добавлены локальные `AGENTS.md` во все рабочие каталоги: всего 33 инструкции
+  вместе с корневой;
+- обновлены документы API, архитектуры, расширения, безопасности, диагностики,
+  установки, выпуска, истории изменений, передачи контекста и Telegram;
+- из `docs/SERVER_BROWSER_ACCESS.md` удалены конкретный внешний IP и пример
+  пароля noVNC; удалённый доступ описан через локальное прослушивание и
+  защищённый туннель;
+- инструкция публикации больше не рекомендует `git add .` и требует явного
+  выбора файлов.
+- финальная сверка примеров с парсером исправила порядок аргументов `set-text`
+  и удалила несуществующий флаг `snapshot --interactive-only`;
+- проверка готовности теперь корректно проходит внутрь открытого Shadow DOM и
+  не считает флажки, файлы, кнопочные и похожие поля редактируемым текстом.
+
+### Доказательства проверки
+
+- `PYTHONPATH="$PWD" python3 -m unittest discover -s tests -p 'test_*.py'`
+  → `Ran 303 tests`, `OK`;
+- `python3 -m py_compile` для всех изменённых Python-файлов → OK;
+- `node --check` для `extension/agent_dom.js`, `content.js`,
+  `background.js` → OK;
+- `bash -n scripts/reload_bridge_extension.sh` → OK;
+- `python3 -m webcontrol --help` и `python3 -m webcontrol browser --help`
+  → OK;
+- все локальные ссылки Markdown разрешаются → OK;
+- все отслеживаемые и новые рабочие JSON-файлы читаются → OK;
+- в каждом каталоге с отслеживаемыми файлами есть ближайший `AGENTS.md` → OK;
+- `git diff --check` → OK;
+- живой `browser status` и `browser tabs` → OK;
+- Chrome 150 сообщает расширение `0.1.3` и актуальные команды
+  `snapshot`, `smart_click`, `set_editable_text`, `wait_for`.
+- повторная живая проверка после перезагрузки расширения:
+  - снимок тестовой страницы вернул 6 элементов, включая кнопку внутри
+    открытого Shadow DOM;
+  - `smart-click --role button --name "Кнопка в Shadow DOM" --exact`
+    вернул `receives_events=true` и `clicked=true`;
+  - `wait-for --text "Готово: Shadow DOM"` подтвердил конечное состояние;
+  - тестовая вкладка закрыта, локальный HTTP-сервер остановлен.
+
+### Текущий риск
+
+Русская документация теперь согласована с текущим кодом, но исторический
+`PROJECT_STATUS_RU.md` намеренно сохраняет старые англоязычные ключи,
+идентификаторы и дословные результаты там, где они являются доказательством
+запуска. Они не должны использоваться как образец нового текста.
+
+Технический риск браузерного контура не изменился: очередь результатов
+защищает уже выполненное действие, но выдача команды пока не имеет аренды,
+подтверждения и безопасной повторной доставки.
+
+### Следующий приоритет
+
+1. Ввести версионированную аренду доставки, подтверждение получения, номер
+   попытки и ключ идемпотентности.
+2. Добавить сессии и блокировки вкладок, владельца и проверку жизни клиента.
+3. Перенести живой браузерный сценарий в автоматическую сквозную проверку
+   Chrome с управляемым обрывом хаба.
+4. После этого реализовать готовность навигации и пакет доказательств ошибки.

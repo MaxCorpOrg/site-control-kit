@@ -1,4 +1,4 @@
-# Telegram Tools Hub
+# Единая точка входа в инструменты Telegram
 
 Это единая видимая папка Telegram-инструментов внутри `site-control-kit`.
 

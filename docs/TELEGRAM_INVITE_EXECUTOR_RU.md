@@ -1,4 +1,4 @@
-# Telegram Invite Executor RU
+# Исполнитель приглашений Telegram
 
 ## Что Это
 `Telegram Invite Executor` — новый безопасный execution-слой внутри `site-control-kit` для `Telegram Invite Manager`.
@@ -19,7 +19,7 @@
 Видимый operator entrypoint по-прежнему живёт в `tools/telegram/invite_manager/`, а подключение в unified panel идёт через `tools/telegram/invite_manager/tool_manifest.json`, без переноса самого executor-кода в platform-layer.
 Общий Telegram operator hub теперь живёт в `tools/telegram/`.
 
-## Как Он Связан С Invite Manager
+## Как он связан с менеджером приглашений
 `Invite Manager` остаётся источником истины по пользователям и статусам:
 - `invite_state.json`
 - `invite_run.json`
@@ -37,7 +37,7 @@
 - `record`
 - `report`
 
-## Что Хранится В State
+## Что хранится в состоянии
 В `invite_state.json` теперь может появляться секция:
 
 ```json
@@ -63,7 +63,7 @@
 }
 ```
 
-## Execution Артефакты
+## Артефакты выполнения
 По умолчанию execution-каталог:
 
 ```text
@@ -271,7 +271,7 @@ Portable-only no-API path для добавления одного username им
 - пишет `execution_record.json` и PNG-скриншоты до/после/verify;
 - не требует Telegram API и не работает массово сама по себе: один запуск = один username.
 
-Dry-run:
+Пробный запуск без изменений:
 
 ```bash
 cd /home/max/site-control-kit
@@ -357,7 +357,7 @@ python3 scripts/telegram_invite_executor.py inspect-chat \
 - live-режим теперь может сам снимать `inspect-chat`-снимки до и после клика `Add`;
 - без проверяемого сигнала вступления результат нужно считать `requested`, не `joined`.
 
-Dry-run:
+Пробный запуск без изменений:
 
 ```bash
 cd /home/max/site-control-kit
@@ -429,7 +429,7 @@ python3 scripts/telegram_invite_executor.py record \
 - последние execution-record;
 - preview следующей execution-пачки.
 
-## GUI Wrapper
+## Графическая обёртка
 Есть базовый wrapper:
 
 ```bash
@@ -478,7 +478,7 @@ GUI не заменяет CLI, но теперь закрывает обычны
 - optional operator checklist для реального Telegram UI;
 - затем живой smoke на поднятом browser bridge.
 
-## Live Notes
+## Заметки по живым проверкам
 
 ### `@Kamaz_master1` -> `Zhirotop_shop`
 
@@ -500,7 +500,7 @@ GUI не заменяет CLI, но теперь закрывает обычны
 
 Фактическая отправка сообщения пользователю не выполнялась.
 
-### Live Add `@Kamaz_master1` -> `Zhirotop_shop`
+### Живое добавление `@Kamaz_master1` → `Zhirotop_shop`
 
 Дата: `2026-04-25`
 
@@ -527,7 +527,7 @@ reason: live_add_members_confirmed_unverified_20260425
 /home/max/telegram_invite_jobs/chat_Zhirotop_shop/executions/20260425T052501Z/execution_record.json
 ```
 
-### Live Add `@olegoleg48` -> `Zhirotop_shop`
+### Живое добавление `@olegoleg48` → `Zhirotop_shop`
 
 Дата: `2026-04-25`
 
@@ -556,7 +556,7 @@ reason: live_add_members_confirmed_unverified
 /home/max/telegram_invite_jobs/chat_Zhirotop_shop/executions/20260425T061336Z/execution_record.json
 ```
 
-### Safe Smoke: `inspect-chat` после нормализации `t.me -> web.telegram`
+### Безопасная быстрая проверка: `inspect-chat` после нормализации `t.me` → `web.telegram`
 
 Дата: `2026-04-25`
 

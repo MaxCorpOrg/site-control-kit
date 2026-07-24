@@ -1,4 +1,4 @@
-# Telegram Session Runner Agent Guide RU
+# Руководство агента по планировщику сессий Telegram
 
 Этот файл нужен, если задача относится к Telegram Desktop session-runner внутри общего Telegram-хаба.
 

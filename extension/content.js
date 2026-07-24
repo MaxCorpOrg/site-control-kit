@@ -1,3 +1,8 @@
+(() => {
+if (globalThis.__siteControlContentListenerInstalled) {
+  return;
+}
+
 function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -56,6 +61,31 @@ function isVisible(element) {
 
 function dispatchInputEvents(element) {
   element.dispatchEvent(new Event("input", { bubbles: true }));
+  element.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+function replaceEditableValue(element, value) {
+  const elementSetter = Object.getOwnPropertyDescriptor(element, "value")?.set;
+  const prototype = Object.getPrototypeOf(element);
+  const prototypeSetter = Object.getOwnPropertyDescriptor(prototype || {}, "value")?.set;
+  if (prototypeSetter && prototypeSetter !== elementSetter) {
+    prototypeSetter.call(element, value);
+  } else if (elementSetter) {
+    elementSetter.call(element, value);
+  } else {
+    element.value = value;
+  }
+  try {
+    element.dispatchEvent(
+      new InputEvent("input", {
+        bubbles: true,
+        inputType: "insertText",
+        data: value
+      })
+    );
+  } catch {
+    element.dispatchEvent(new Event("input", { bubbles: true }));
+  }
   element.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
@@ -319,6 +349,34 @@ async function runCommand(command) {
   }
 
   switch (type) {
+    case "snapshot": {
+      const agentDom = globalThis.__siteControlAgentDom;
+      if (!agentDom) {
+        throw new Error("Agent DOM module is unavailable; reload the bridge extension");
+      }
+      return agentDom.snapshot({
+        root_selector: command.root_selector || "",
+        limit: command.limit,
+        include_hidden: Boolean(command.include_hidden)
+      });
+    }
+
+    case "wait_for": {
+      const agentDom = globalThis.__siteControlAgentDom;
+      if (!agentDom) {
+        throw new Error("Agent DOM module is unavailable; reload the bridge extension");
+      }
+      return agentDom.waitFor(command.locator, {
+        state: command.state || "visible",
+        timeout_ms: command.timeout_ms,
+        poll_ms: command.poll_ms,
+        stable_ms: command.stable_ms,
+        expected_text: command.expected_text,
+        expected_value: command.expected_value,
+        exact: Boolean(command.exact)
+      });
+    }
+
     case "back": {
       history.back();
       return { back: true };
@@ -412,6 +470,31 @@ async function runCommand(command) {
       return { selector: command.selector, clicked: true };
     }
 
+    case "smart_click": {
+      const agentDom = globalThis.__siteControlAgentDom;
+      if (!agentDom) {
+        throw new Error("Agent DOM module is unavailable; reload the bridge extension");
+      }
+      const waited = await agentDom.waitFor(command.locator, {
+        state: "actionable",
+        timeout_ms: command.timeout_ms,
+        poll_ms: command.poll_ms,
+        stable_ms: command.stable_ms
+      });
+      const resolved = agentDom.resolveLocator({ strategy: "ref", value: waited.ref });
+      const el = resolved.element;
+      focusElement(el);
+      el.click();
+      return {
+        ref: waited.ref,
+        role: agentDom.roleOf(el),
+        name: agentDom.accessibleName(el),
+        healed: Boolean(waited.healed || resolved.healed),
+        actionability: waited.actionability,
+        clicked: true
+      };
+    }
+
     case "fill": {
       const el = queryElement(command.selector);
       if (!("value" in el)) {
@@ -421,6 +504,48 @@ async function runCommand(command) {
       el.value = command.value ?? "";
       dispatchInputEvents(el);
       return { selector: command.selector, value: el.value };
+    }
+
+    case "set_editable_text": {
+      let el;
+      let locatorResult = null;
+      const agentDom = globalThis.__siteControlAgentDom;
+      if (command.locator) {
+        if (!agentDom) {
+          throw new Error("Agent DOM module is unavailable; reload the bridge extension");
+        }
+        locatorResult = await agentDom.waitFor(command.locator, {
+          state: "editable",
+          timeout_ms: command.timeout_ms,
+          poll_ms: command.poll_ms
+        });
+        el = agentDom.resolveLocator({ strategy: "ref", value: locatorResult.ref }).element;
+      } else {
+        el = queryElement(command.selector);
+      }
+      const value = String(command.value ?? "");
+      focusElement(el);
+      if (el.isContentEditable) {
+        el.innerHTML = "";
+        el.textContent = value;
+        dispatchInputEvents(el);
+        return {
+          selector: command.selector || null,
+          ref: locatorResult?.ref || null,
+          healed: Boolean(locatorResult?.healed),
+          value
+        };
+      }
+      if ("value" in el) {
+        replaceEditableValue(el, value);
+        return {
+          selector: command.selector || null,
+          ref: locatorResult?.ref || null,
+          healed: Boolean(locatorResult?.healed),
+          value: el.value
+        };
+      }
+      throw new Error("Target element does not support editable text");
     }
 
     case "focus": {
@@ -617,6 +742,7 @@ async function runCommand(command) {
   }
 }
 
+globalThis.__siteControlContentListenerInstalled = true;
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (!message || message.type !== "site-control-command") {
     return;
@@ -638,3 +764,4 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   return true;
 });
+})();

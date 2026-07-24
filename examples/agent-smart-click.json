@@ -1,0 +1,18 @@
+{
+  "issued_by": "agent-example",
+  "timeout_ms": 20000,
+  "target": {
+    "client_id": "REPLACE_WITH_CLIENT_ID",
+    "tab_id": 123
+  },
+  "command": {
+    "type": "smart_click",
+    "locator": {
+      "strategy": "role",
+      "value": "button",
+      "name": "Сохранить",
+      "exact": true
+    },
+    "timeout_ms": 10000
+  }
+}

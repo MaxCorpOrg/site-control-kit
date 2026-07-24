@@ -1,4 +1,4 @@
-# Agent Guide RU: Telegram Invite Manager
+# Руководство агента по менеджеру приглашений Telegram
 
 Этот файл — короткая инструкция для агента, который продолжает работу с invite-инструментом.
 
@@ -183,7 +183,7 @@ bash -n scripts/telegram_invite_manager_gui.sh scripts/telegram_invite_executor_
 
 Без этих двух значений агент может проверять только manager/executor/open-chat, но не факт отправки приглашения.
 
-## Live Test: `@Kamaz_master1` -> `Zhirotop_shop`
+## Живая проверка: `@Kamaz_master1` → `Zhirotop_shop`
 
 Дата: `2026-04-24`
 
@@ -227,7 +227,7 @@ https://t.me/Zhirotop_shop
 - статус пользователя был `invite_link_created`;
 - после ручной отправки ссылки нужно было вызвать `telegram-invite-executor record --status sent`.
 
-## Live Add Test: `@Kamaz_master1` -> `Zhirotop_shop`
+## Живая проверка добавления: `@Kamaz_master1` → `Zhirotop_shop`
 
 Дата: `2026-04-25`
 
@@ -270,7 +270,7 @@ https://t.me/Zhirotop_shop
 - итог Telegram Web неоднозначный, поэтому не писать `joined` без отдельной проверки в списке участников;
 - для повторения использовать новую команду `telegram-invite-executor add-contact`, но только по одному consented пользователю.
 
-## Live Add Test: `@olegoleg48` -> `Zhirotop_shop`
+## Живая проверка добавления: `@olegoleg48` → `Zhirotop_shop`
 
 Дата: `2026-04-25`
 
@@ -299,7 +299,7 @@ reason: live_add_members_confirmed_unverified
 - рост member count не подтверждён;
 - `inspect-chat` теперь нужен как обязательная проверка до и после live add.
 
-## Safe Smoke: `inspect-chat` после `t.me -> web.telegram`
+## Безопасная быстрая проверка: `inspect-chat` после `t.me` → `web.telegram`
 
 Дата: `2026-04-25`
 
@@ -318,7 +318,7 @@ reason: live_add_members_confirmed_unverified
 Следующий практический шаг:
 - подтвердить `joined` ещё и за пределами текущего видимого списка участников, если нужный peer не попадает в правую панель сразу.
 
-## Portable Actor: `@M_a_g_g_i_e`
+## Переносимый профиль-исполнитель: `@M_a_g_g_i_e`
 
 Дата: `2026-04-26`
 

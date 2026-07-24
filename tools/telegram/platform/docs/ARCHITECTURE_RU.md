@@ -1,4 +1,4 @@
-# Tool Platform Architecture RU
+# Архитектура платформы инструментов
 
 ## Цель
 
@@ -21,7 +21,7 @@
 - `tools/telegram/invite_manager`
 - `tools/telegram/session_runner`
 
-### 2. Manifest
+### 2. Манифест
 
 `tool_manifest.json` описывает:
 - идентификатор инструмента;
@@ -33,12 +33,12 @@
 
 Manifest — это контракт между инструментом и платформой.
 
-### 3. Registry
+### 3. Реестр
 
 `registry/tools.json` хранит список manifests.
 Registry может ссылаться и на локальные manifests, и на внешние absolute paths.
 
-### 4. Catalog Loader
+### 4. Загрузчик каталога
 
 `tool_platform/catalog.py`:
 - читает registry;
@@ -46,7 +46,7 @@ Registry может ссылаться и на локальные manifests, и 
 - загружает manifests;
 - валидирует `tool_id` и `action_id`.
 
-### 5. CLI
+### 5. Командный интерфейс
 
 `tool_platform/cli.py`:
 - показывает список инструментов;
@@ -54,7 +54,7 @@ Registry может ссылаться и на локальные manifests, и 
 - показывает конкретный tool card;
 - умеет безопасно preview/run зарегистрированных actions.
 
-### 6. GUI Panel
+### 6. Графическая панель
 
 `tool_platform/gui.py`:
 - показывает зарегистрированные инструменты;
@@ -69,7 +69,7 @@ Registry может ссылаться и на локальные manifests, и 
 То есть масштабирование выглядит так:
 
 ```text
-new tool
+новый инструмент
   -> tool_manifest.json
   -> registry/tools.json
   -> автоматически виден в CLI и GUI

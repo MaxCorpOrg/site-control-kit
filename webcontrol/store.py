@@ -17,6 +17,11 @@ TERMINAL_COMMAND_STATUSES = {
     "expired",
     "rejected",
 }
+CLIENT_RESULT_STATUSES = {"completed", "failed"}
+
+
+class ResultValidationError(ValueError):
+    """Raised when a browser client submits a result outside its delivery contract."""
 
 
 def _parse_iso(ts: str | None) -> datetime | None:
@@ -237,27 +242,48 @@ class ControlStore:
         data: Any,
         error: Any,
         logs: list[str] | None,
+        finished_at: str | None = None,
     ) -> dict[str, Any] | None:
         with self._lock:
             command = self._state["commands"].get(command_id)
             if not command:
                 return None
 
-            deliveries = command.setdefault("deliveries", {})
-            delivery = deliveries.setdefault(
-                client_id,
-                {"status": "pending", "updated_at": now_utc_iso(), "result": None},
-            )
+            normalized_status = str(status or ("completed" if ok else "failed")).strip().lower()
+            if normalized_status not in CLIENT_RESULT_STATUSES:
+                raise ResultValidationError(
+                    f"unsupported client result status: {normalized_status or '<empty>'}"
+                )
+            if (normalized_status == "completed") != bool(ok):
+                raise ResultValidationError(
+                    f"result ok={bool(ok)} conflicts with status={normalized_status}"
+                )
 
-            delivery["status"] = status or ("completed" if ok else "failed")
+            deliveries = command.setdefault("deliveries", {})
+            delivery = deliveries.get(client_id)
+            if not delivery:
+                raise ResultValidationError(
+                    f"client {client_id!r} is not a target of command {command_id}"
+                )
+
+            self._refresh_command_status(command)
+            if delivery.get("status") in TERMINAL_DELIVERY_STATUSES:
+                # Result posting is idempotent. A retried outbox item must not
+                # overwrite a terminal result, cancellation, or expiration.
+                self._save()
+                return command
+
+            delivery["status"] = normalized_status
             delivery["updated_at"] = now_utc_iso()
+            received_at = now_utc_iso()
             delivery["result"] = {
                 "ok": bool(ok),
                 "status": delivery["status"],
                 "data": data,
                 "error": error,
                 "logs": logs or [],
-                "finished_at": now_utc_iso(),
+                "finished_at": str(finished_at or received_at),
+                "received_at": received_at,
             }
 
             self._refresh_command_status(command)

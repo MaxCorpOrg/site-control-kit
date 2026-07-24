@@ -1,4 +1,4 @@
-# Telegram Control Center: Operator Guide
+# Центр управления Telegram: руководство оператора
 
 Этот документ — каноническая точка входа для оператора Telegram control center.
 
@@ -17,7 +17,7 @@
 
 Есть два поддерживаемых layout-режима: standalone production install и repo/dev mode.
 
-### Standalone Production Install (`.deb`)
+### Отдельная установка готового пакета `.deb`
 
 Установленное приложение живёт здесь:
 
@@ -35,7 +35,7 @@
 - cache:
   - `~/.cache/site-control-kit/telegram/`
 
-### Repo / Dev Mode
+### Запуск из репозитория для разработки
 
 Если панель запускается прямо из исходников, runtime root остаётся project-local:
 
@@ -54,13 +54,13 @@
 
 ## Как Запустить
 
-Standalone production install:
+Отдельная установленная версия:
 
 ```bash
 telegram-control-center
 ```
 
-Repo/dev mode:
+Режим разработки из репозитория:
 
 Из корня репозитория:
 
@@ -102,7 +102,7 @@ CLI-health для выбранного профиля в repo/dev mode:
 - рабочий steady-state storage всегда должен быть внутри `runtime/telegram/profiles/`.
 - для standalone production install это означает тот же Telegram runtime внутри `~/.local/share/site-control-kit/telegram/profiles/`.
 
-## Invite: Добавить Контакты Из TXT
+## Приглашения: добавить контакты из TXT
 
 Порядок:
 1. Выбрать профиль.
@@ -126,7 +126,7 @@ CLI-health для выбранного профиля в repo/dev mode:
 - `Уже добавлены`
 - `Живой статус и лог`
 
-## Session: Сессия И Сообщения
+## Сессия: посещение и сообщения
 
 Порядок:
 1. Выбрать session config.
@@ -144,7 +144,7 @@ CLI-health для выбранного профиля в repo/dev mode:
    - `Продолжить workflow`
    - `Стоп`
 
-## Combined: Добавить → Сессия
+## Объединённый сценарий: добавить → провести сессию
 
 Порядок:
 1. Выбрать файл контактов.

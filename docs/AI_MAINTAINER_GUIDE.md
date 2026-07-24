@@ -2,6 +2,8 @@
 
 Документ для агентов, которые используют, поддерживают и улучшают `site-control-kit`.
 
+Если проект открыт впервые, начните с `AGENT_SIMPLE_GUIDE_RU.md`. Значения технических терминов собраны в `TERMS_RU.md`. В каждой рабочей папке действует ближайший `AGENTS.md`.
+
 ## Что Это За Инструмент
 `site-control-kit` — локальный контур управления браузером.
 Он нужен, чтобы агент мог:
@@ -34,12 +36,12 @@
 - `webcontrol/store.py`
 
 Роль:
-- принимает heartbeat от клиентов;
+- принимает сигнал активности от клиентов;
 - хранит состояние и очередь;
 - маршрутизирует команды;
 - принимает результаты выполнения.
 
-### 2. CLI
+### 2. Интерфейс командной строки
 Файл:
 - `webcontrol/cli.py`
 
@@ -51,10 +53,13 @@
 ### 3. Расширение
 Файлы:
 - `extension/background.js`
+- `extension/agent_dom.js`
 - `extension/content.js`
 
 Роль:
-- `background.js` работает с вкладками, heartbeat, polling, скриншотами;
+- `background.js` работает с вкладками, сигналом активности, опросом и снимками экрана;
+- `agent_dom.js` строит семантический снимок, разрешает ссылки и локаторы и проверяет
+  готовность элемента;
 - `content.js` работает с DOM внутри страницы.
 
 ### 4. Обёртки Для Windows
@@ -71,33 +76,45 @@
 - удобство для пользователя и агента в реальной Windows-среде.
 
 ## Источники Правды
-- `START_HERE_AGENT_RU.md` — короткая root-entry точка для нового агента с правилом "сначала определить последнюю завершённую точку и только потом работать".
-- `docs/PROJECT_WORKFLOW_RU.md` — обязательный порядок работы, проверок и handoff.
+- `START_HERE_AGENT_RU.md` — короткая корневая точка входа для нового агента с правилом «сначала определить последнюю завершённую точку и только потом работать».
+- `docs/PROJECT_WORKFLOW_RU.md` — обязательный порядок работы, проверок и передачи контекста.
 - `docs/PROJECT_STATUS_RU.md` — текущее состояние проекта, завершённые задачи, открытые проблемы и следующий приоритет.
-- `docs/API.md` — типы команд, поля payload, контракт результата.
+- `docs/API.md` — типы команд, поля данных, контракт результата.
 - `docs/ARCHITECTURE.md` — поток команд и распределение ролей.
-- `docs/EXTENSION.md` — где реализованы browser-level и DOM-level действия.
-- `docs/TELEGRAM_PORTABLE_RU.md` — отдельный helper для Linux Telegram Desktop portable-профилей из `tdata.zip`.
+- `docs/EXTENSION.md` — где реализованы действия уровня браузера и DOM.
+- `docs/TELEGRAM_PORTABLE_RU.md` — отдельный помощник для переносимых профилей Telegram Desktop в Linux из `tdata.zip`.
 - `AGENTS.md` — политика поведения агентов внутри репозитория.
 - `BROWSER_QUICKSTART.md` — кратчайший практический маршрут.
 
 ## Рекомендуемый Порядок Работы Агента
 1. Прочитать `AGENTS.md`.
-2. Прочитать `START_HERE_AGENT_RU.md`.
-3. Прочитать `docs/PROJECT_WORKFLOW_RU.md`.
-4. Прочитать `docs/PROJECT_STATUS_RU.md`.
-5. Прочитать `BROWSER_QUICKSTART.md`.
-6. Прочитать `docs/API.md`.
+2. Прочитать `docs/AGENT_SIMPLE_GUIDE_RU.md`.
+3. Прочитать `START_HERE_AGENT_RU.md`.
+4. Прочитать `docs/PROJECT_WORKFLOW_RU.md`.
+5. Прочитать `docs/PROJECT_STATUS_RU.md`.
+6. Прочитать `BROWSER_QUICKSTART.md`.
+7. Прочитать `docs/API.md`.
 7. Проверить живой контур:
    - `browser.cmd status`
    - `browser.cmd tabs`
 8. Выполнить нужные действия через `browser.cmd` или `sitectl browser`.
 9. Если возможностей не хватает, расширить инструмент, а не плодить временные костыли.
 
+Для рабочего цикла агента после выбора вкладки:
+
+1. Взять `snapshot`.
+2. Предпочитать уникальный `ref` или роль с именем, затем подпись или `test-id`; CSS
+   использовать как запасной путь.
+3. Для действий с побочным эффектом применять `smart-click`/`set-text`.
+4. Ожидать проверяемое конечное состояние через `wait-for`.
+5. После навигации брать новый snapshot.
+
+Полный аудит и план: `docs/BROWSER_AGENT_AUDIT_RU.md`.
+
 Для desktop-задач Telegram на Linux действует отдельное правило:
 - если у пользователя уже есть `tdata.zip` и задача состоит в подъёме desktop-сессии, сначала использовать `scripts/telegram_portable.py`, а не собирать portable-папку вручную.
 
-## Базовый Smoke-Тест
+## Базовая быстрая проверка
 Минимальный живой сценарий:
 
 ```cmd
@@ -105,7 +122,8 @@ start-hub.cmd
 browser.cmd status
 browser.cmd tabs
 browser.cmd open https://example.com
-browser.cmd text h1
+browser.cmd snapshot
+browser.cmd wait-for --role heading --name "Example Domain" --state visible
 ```
 
 Ожидаемое поведение:
@@ -124,13 +142,14 @@ browser.cmd text h1
 - ожидание или навигация внутри страницы.
 
 Менять:
+- `extension/agent_dom.js`, если меняется observation/locator/actionability;
 - `extension/content.js`
 - при необходимости `webcontrol/cli.py`
 - `docs/API.md`
 - `docs/EXTENSION.md`
 - `examples/`
 
-### Если это tab-level или browser-level команда
+### Если это команда уровня вкладки или браузера
 Примеры:
 - новая операция с вкладкой;
 - screenshot;

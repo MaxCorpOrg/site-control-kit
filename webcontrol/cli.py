@@ -14,6 +14,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+from .browser_agent import WAIT_STATES, build_locator_from_args
 from .config import HubConfig
 from .server import run_server
 from .store import TERMINAL_COMMAND_STATUSES
@@ -1084,6 +1085,7 @@ def _print_browser_summary(
     if action == "screenshot" and isinstance(data, dict) and "imageDataUrl" in data:
         data = {
             "tabId": data.get("tabId"),
+            "captureMode": data.get("captureMode"),
             "imageDataUrl": "<omitted; use --output to save PNG>",
         }
     payload: dict[str, Any] = {
@@ -1102,6 +1104,16 @@ def _print_browser_summary(
 def cmd_browser(args: argparse.Namespace) -> int:
     try:
         server, token = _extract_runtime(args)
+
+        if args.browser_action == "schema":
+            response = _http_json(
+                server=server,
+                token=token,
+                method="GET",
+                path="/api/agent/schema",
+            )
+            _print_json(response)
+            return 0 if response.get("ok") else 1
 
         if args.browser_action == "clients":
             _print_json({"ok": True, "clients": _get_clients(server, token)})
@@ -1182,6 +1194,40 @@ def cmd_browser(args: argparse.Namespace) -> int:
             command = {"type": "navigate", "url": args.url}
         elif action == "new-tab":
             command = {"type": "new_tab", "url": args.url, "active": not args.background}
+        elif action == "snapshot":
+            command = {
+                "type": "snapshot",
+                "root_selector": args.root_selector,
+                "limit": args.limit,
+                "include_hidden": args.include_hidden,
+            }
+        elif action == "smart-click":
+            command = {
+                "type": "smart_click",
+                "locator": build_locator_from_args(args),
+                "timeout_ms": args.command_timeout_ms,
+            }
+        elif action == "set-text":
+            command = {
+                "type": "set_editable_text",
+                "locator": build_locator_from_args(args),
+                "value": args.value,
+                "timeout_ms": args.command_timeout_ms,
+            }
+        elif action == "wait-for":
+            if args.state == "text" and args.expected_text is None:
+                raise ValueError("--expected-text is required with --state text")
+            if args.state == "value" and args.expected_value is None:
+                raise ValueError("--expected-value is required with --state value")
+            command = {
+                "type": "wait_for",
+                "locator": build_locator_from_args(args),
+                "state": args.state,
+                "expected_text": args.expected_text,
+                "expected_value": args.expected_value,
+                "exact": args.exact_value,
+                "timeout_ms": args.command_timeout_ms,
+            }
         elif action == "click":
             command = {"type": "click", "selector": args.selector}
         elif action == "click-text":
@@ -1262,7 +1308,7 @@ def cmd_browser(args: argparse.Namespace) -> int:
             if args.script_args:
                 command["args"] = json.loads(args.script_args)
         elif action == "screenshot":
-            command = {"type": "screenshot"}
+            command = {"type": "screenshot", "full_page": args.full_page}
         else:
             raise ValueError(f"Unsupported browser action: {action}")
 
@@ -1466,6 +1512,21 @@ def cmd_cancel(args: argparse.Namespace) -> int:
     return 0 if response.get("ok") else 1
 
 
+def _add_agent_locator_options(parser: argparse.ArgumentParser) -> None:
+    locator = parser.add_mutually_exclusive_group(required=True)
+    locator.add_argument("--selector", help="CSS selector, including open shadow roots")
+    locator.add_argument("--ref", help="Stable page-lifetime ref returned by snapshot")
+    locator.add_argument("--role", help="ARIA/implicit role, for example button or textbox")
+    locator.add_argument("--text", dest="locator_text", help="Visible text on an interactive element")
+    locator.add_argument("--label", help="Associated label or aria-label")
+    locator.add_argument("--placeholder", help="Input placeholder")
+    locator.add_argument("--test-id", dest="test_id", help="data-testid/data-test-id/data-test value")
+    parser.add_argument("--name", help="Accessible name used together with --role")
+    parser.add_argument("--exact", action="store_true", help="Require exact text/name match")
+    parser.add_argument("--nth", type=int, help="Select a zero-based match when the locator is not unique")
+    parser.add_argument("--root-selector", help="Limit locator search to a CSS subtree")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="sitectl",
@@ -1581,6 +1642,9 @@ def build_parser() -> argparse.ArgumentParser:
     browser_tabs = browser_sub.add_parser("tabs", help="List tabs for the selected client")
     browser_tabs.set_defaults(func=cmd_browser)
 
+    browser_schema = browser_sub.add_parser("schema", help="Print the machine-readable browser-agent API schema")
+    browser_schema.set_defaults(func=cmd_browser)
+
     browser_open = browser_sub.add_parser("open", help="Open URL in the selected tab")
     browser_open.add_argument("url")
     browser_open.set_defaults(func=cmd_browser)
@@ -1589,6 +1653,45 @@ def build_parser() -> argparse.ArgumentParser:
     browser_new_tab.add_argument("url")
     browser_new_tab.add_argument("--background", action="store_true", help="Create the tab without focusing it")
     browser_new_tab.set_defaults(func=cmd_browser)
+
+    browser_snapshot = browser_sub.add_parser(
+        "snapshot",
+        help="Return a compact semantic page snapshot with stable element refs",
+    )
+    browser_snapshot.add_argument("--root-selector", help="Limit snapshot to a CSS subtree")
+    browser_snapshot.add_argument("--limit", type=int, default=200, help="Maximum elements (1..1000)")
+    browser_snapshot.add_argument("--include-hidden", action="store_true", help="Include hidden semantic elements")
+    browser_snapshot.set_defaults(func=cmd_browser)
+
+    browser_smart_click = browser_sub.add_parser(
+        "smart-click",
+        help="Wait for an actionable semantic locator and click it",
+    )
+    _add_agent_locator_options(browser_smart_click)
+    browser_smart_click.set_defaults(func=cmd_browser)
+
+    browser_set_text = browser_sub.add_parser(
+        "set-text",
+        help="Wait for an editable semantic locator and replace its text",
+    )
+    browser_set_text.add_argument("value")
+    _add_agent_locator_options(browser_set_text)
+    browser_set_text.set_defaults(func=cmd_browser)
+
+    browser_wait_for = browser_sub.add_parser(
+        "wait-for",
+        help="Wait for semantic locator state",
+    )
+    _add_agent_locator_options(browser_wait_for)
+    browser_wait_for.add_argument("--state", choices=WAIT_STATES, default="visible")
+    browser_wait_for.add_argument("--expected-text", help="Expected text for --state text")
+    browser_wait_for.add_argument("--expected-value", help="Expected value for --state value")
+    browser_wait_for.add_argument(
+        "--exact-value",
+        action="store_true",
+        help="Require an exact expected text/value match",
+    )
+    browser_wait_for.set_defaults(func=cmd_browser)
 
     browser_click = browser_sub.add_parser("click", help="Click element by CSS selector")
     browser_click.add_argument("selector")
@@ -1702,8 +1805,9 @@ def build_parser() -> argparse.ArgumentParser:
     browser_js.add_argument("--script-args", help="JSON args for run_script")
     browser_js.set_defaults(func=cmd_browser)
 
-    browser_screenshot = browser_sub.add_parser("screenshot", help="Capture screenshot of the visible tab")
+    browser_screenshot = browser_sub.add_parser("screenshot", help="Capture the explicitly targeted tab")
     browser_screenshot.add_argument("--output", help="Write PNG to a file")
+    browser_screenshot.add_argument("--full-page", action="store_true", help="Capture the full document through CDP")
     browser_screenshot.set_defaults(func=cmd_browser)
 
     return parser

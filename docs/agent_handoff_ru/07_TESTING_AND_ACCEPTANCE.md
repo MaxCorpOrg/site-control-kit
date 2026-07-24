@@ -1,4 +1,4 @@
-# Testing And Acceptance
+# Проверки и приёмка
 
 ## Базовое Обязательное Правило
 После каждой завершённой задачи запускать:
@@ -9,28 +9,28 @@ PYTHONPATH="$PWD" python3 -m unittest discover -s tests -p 'test_*.py'
 
 На текущем этапе полный suite должен быть зелёным.
 
-## Если Менялись Python Entry Points
+## Если менялись точки входа Python
 Дополнительно:
 
 ```bash
 python3 -m py_compile <изменённые python-файлы>
 ```
 
-## Если Менялись Shell Scripts
+## Если менялись сценарии оболочки
 Дополнительно:
 
 ```bash
 bash -n <изменённые shell-файлы>
 ```
 
-## Если Менялся Browser / Telegram Контур
+## Если менялся браузерный контур или Telegram
 Нужен живой smoke.
 Минимум должен существовать хотя бы один из наборов:
 - `run.json`
 - `export.log`
 - `export_stats.json`
 
-## Что Считать Приёмкой Для Telegram Шага
+## Что считать приёмкой шага Telegram
 Задача считается реально проверенной, если есть:
 1. зелёные unit tests;
 2. зелёный shell syntax / py_compile при необходимости;
@@ -45,14 +45,14 @@ bash -n <изменённые shell-файлы>
 - latest guard не затёр useful snapshot;
 - run не остановился на `expired no delivery` или bad redirect.
 
-## Acceptance Для Deep-Path Изменений
+## Приёмка изменений углублённого сбора
 Хорошая приёмка deep-изменения:
 - в `export.log` видно новый ход;
 - в `export_stats.json` меняется `deep_updated_total`;
 - в `run.json` видно итоговые изменения;
 - в status docs записан вывод, а не только путь к файлу.
 
-## Acceptance Для Shell / Orchestration Изменений
+## Приёмка изменений оболочки и оркестрации
 Хорошая приёмка orchestration-изменения:
 - тест на helper-функцию;
 - тест на `main()` если есть CLI/script wrapper;

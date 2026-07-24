@@ -1,4 +1,4 @@
-# Telegram Portable Helper
+# Помощник переносимого Telegram Desktop
 
 Видимая папка low-level Telegram Desktop portable helper внутри `tools/telegram/`.
 

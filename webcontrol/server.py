@@ -7,8 +7,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+from .browser_agent import agent_api_schema
 from .config import HubConfig
-from .store import ControlStore
+from .store import ControlStore, ResultValidationError
 
 LOGGER = logging.getLogger("webcontrol.server")
 
@@ -39,7 +40,10 @@ class HubRequestHandler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Access-Token")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            LOGGER.info("%s - response connection closed by client", self.client_address[0])
 
     def _read_json_body(self) -> dict[str, Any]:
         length = int(self.headers.get("Content-Length", "0") or "0")
@@ -105,6 +109,10 @@ class HubRequestHandler(BaseHTTPRequestHandler):
 
         if path == "/api/clients":
             self._send_json(HTTPStatus.OK, {"ok": True, "clients": self.hub.store.list_clients()})
+            return
+
+        if path == "/api/agent/schema":
+            self._send_json(HTTPStatus.OK, {"ok": True, "schema": agent_api_schema()})
             return
 
         if path == "/api/commands/next":
@@ -206,15 +214,20 @@ class HubRequestHandler(BaseHTTPRequestHandler):
                     self._send_json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": "client_id is required"})
                     return
 
-                command = self.hub.store.submit_result(
-                    command_id=command_id,
-                    client_id=client_id,
-                    ok=bool(payload.get("ok", False)),
-                    status=payload.get("status"),
-                    data=payload.get("data"),
-                    error=payload.get("error"),
-                    logs=payload.get("logs"),
-                )
+                try:
+                    command = self.hub.store.submit_result(
+                        command_id=command_id,
+                        client_id=client_id,
+                        ok=bool(payload.get("ok", False)),
+                        status=payload.get("status"),
+                        data=payload.get("data"),
+                        error=payload.get("error"),
+                        logs=payload.get("logs"),
+                        finished_at=payload.get("finished_at"),
+                    )
+                except ResultValidationError as exc:
+                    self._send_json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": str(exc)})
+                    return
                 if not command:
                     self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "error": "command not found"})
                     return

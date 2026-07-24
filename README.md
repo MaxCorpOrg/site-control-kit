@@ -1,4 +1,4 @@
-# Site Control Kit
+# Site Control Kit — локальное управление браузером
 
 Локальный набор инструментов для управления сайтами через браузерное расширение и локальный хаб-команд.
 
@@ -29,6 +29,8 @@ browser.cmd open https://example.com
 Что читать агенту:
 - [BROWSER_QUICKSTART.md](BROWSER_QUICKSTART.md) — короткий вход и рабочие команды.
 - [AGENTS.md](AGENTS.md) — правила и политика использования инструмента в репозитории.
+- [docs/AGENT_SIMPLE_GUIDE_RU.md](docs/AGENT_SIMPLE_GUIDE_RU.md) — простой путеводитель с примерами и частыми вопросами.
+- [docs/TERMS_RU.md](docs/TERMS_RU.md) — перевод и объяснение технических терминов.
 - [docs/AI_MAINTAINER_GUIDE.md](docs/AI_MAINTAINER_GUIDE.md) — как использовать, изменять и улучшать инструмент.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — поток команд и роли компонентов.
 - [docs/API.md](docs/API.md) — контракт команд и результатов.
@@ -46,7 +48,7 @@ browser.cmd open https://example.com
 - Управлять несколькими клиентами (браузерами) через `client_id`.
 - Выгружать `@username` из Telegram-чата и сохранять только новые контакты батчами.
 
-## Telegram Tools Hub
+## Единая точка входа в инструменты Telegram
 
 Все видимые Telegram entrypoints теперь собраны в:
 
@@ -136,7 +138,7 @@ cd /home/max/site-control-kit
 
 Вывод по факту: `deep` лучше добывает новые реальные `@username`, а `fast` лучше для короткого повторного прохода по уже известной истории.
 
-## Telegram Invite Manager
+## Менеджер приглашений Telegram
 
 Для аккуратной работы с пользователями, которые уже дали согласие на вступление в чат, добавлен отдельный manager/state слой:
 
@@ -255,7 +257,7 @@ cd /home/max/site-control-kit/tools/telegram/invite_manager
 `run.json` теперь дублирует ключевую телеметрию экспортёра: `unique_members`, `members_with_username`, `chat_scroll_steps_done`, `chat_jump_scrolls_done`, `deep_updated_total`, `history_backfilled_total`, `output_usernames_cleared_total`, `chat_deep_priority_rounds`, `chat_deep_yield_stop`, а полный сырой payload лежит в `export_stats.json`.
 Также в `run.json` есть признаки продвижения/сохранения latest-снимков: `latest_full_promoted`, `latest_safe_promoted`, `latest_full_best_source`, `latest_safe_best_source`.
 
-## Telegram Control Center
+## Центр управления Telegram
 
 Теперь в проекте есть отдельный registry-driven Telegram control layer:
 
@@ -310,7 +312,7 @@ cd /home/max/site-control-kit/tools/telegram/platform
 - принимать в управление уже существующую portable-папку;
 - показывать компактный список Telegram workflow и их actions.
 
-## Telegram Desktop Portable на Linux
+## Переносимый Telegram Desktop в Linux
 
 Отдельная подробная документация для агента и проекта:
 - `docs/TELEGRAM_PORTABLE_RU.md`
@@ -397,7 +399,7 @@ PYTHONPATH="$PWD" python3 -m webcontrol browser --tab-id 614278005 x11-click --x
 PYTHONPATH="$PWD" python3 -m webcontrol browser --tab-id 614278005 x11-keys --sequence Tab --sequence Return
 ```
 
-## Browser Observability: noVNC
+## Визуальное наблюдение за браузером через noVNC
 
 Для визуального контроля браузера и ручного recovery можно поднять локальный noVNC-слой поверх X11:
 
@@ -432,7 +434,7 @@ CLI (sitectl) <----HTTP----> Локальный хаб (Python) <----HTTP poll--
 
 ## Быстрый старт
 
-### Windows
+### В Windows
 
 1. Откройте PowerShell в корне проекта.
 2. Установите пакет в editable-режиме:
@@ -463,7 +465,7 @@ scripts\package_extension.cmd
 
 Готовый архив: `dist\site-control-bridge-extension.zip`
 
-### Linux/macOS
+### В Linux и macOS
 
 ## 1) Запуск хаба
 
@@ -520,6 +522,10 @@ scripts\browser.cmd open https://example.com
 scripts\browser.cmd click "button[type='submit']"
 scripts\browser.cmd fill "#email" "user@example.com"
 scripts\browser.cmd text main
+scripts\browser.cmd snapshot
+scripts\browser.cmd set-text "user@example.com" --label "Email" --exact
+scripts\browser.cmd smart-click --role button --name "Войти" --exact
+scripts\browser.cmd wait-for --text "Готово" --state visible
 scripts\browser.cmd screenshot --output .\shot.png
 ```
 
@@ -530,8 +536,17 @@ CLI внутри Python-пакета:
 ```bash
 sitectl browser status
 sitectl browser open https://example.com
+sitectl browser snapshot
+sitectl browser schema
 sitectl browser press Enter
 ```
+
+Для AI-агентов рекомендуется semantic loop `snapshot → ref/locator →
+smart-click|set-text → wait-for`. Snapshot возвращает компактную модель
+страницы с page-lifetime refs и не требует передавать агенту полный HTML.
+Поддерживаются role/name, text, label, placeholder, test-id, CSS и открытые
+Shadow DOM. Подробности и roadmap:
+[BROWSER_AGENT_AUDIT_RU.md](docs/BROWSER_AGENT_AUDIT_RU.md).
 
 ## 4) Примеры команд
 
@@ -566,7 +581,7 @@ python3 -m webcontrol send --type extract_text --client-id client-REPLACE_ME --s
 python3 -m webcontrol state
 ```
 
-## Установка CLI как команды `sitectl`
+## Установка интерфейса командной строки как `sitectl`
 
 ```bash
 cd /home/max/site-control-kit
@@ -600,32 +615,35 @@ sitectl send --type navigate --client-id client-... --url https://example.com --
 - Яндекс Браузер
 
 ## Документация
+- [AGENT_SIMPLE_GUIDE_RU.md](docs/AGENT_SIMPLE_GUIDE_RU.md) — самый простой путь для нового агента, примеры и частые вопросы.
+- [TERMS_RU.md](docs/TERMS_RU.md) — русские объяснения неизбежных технических терминов.
 - [CHANGES_RU.md](docs/CHANGES_RU.md) — полный перечень реализованных изменений.
-- [PRODUCTION_RELEASE_RU.md](docs/PRODUCTION_RELEASE_RU.md) — установка Telegram Control Center, `.deb`/Windows installer и release checklist.
+- [PRODUCTION_RELEASE_RU.md](docs/PRODUCTION_RELEASE_RU.md) — установка центра управления Telegram, пакеты Linux и Windows, проверка выпуска.
 - [ARCHITECTURE.md](docs/ARCHITECTURE.md) — архитектура и жизненный цикл команд.
 - [API.md](docs/API.md) — API и контракт команд.
 - [EXTENSION.md](docs/EXTENSION.md) — внутренняя логика расширения.
 - [SECURITY.md](docs/SECURITY.md) — безопасность и рекомендации.
 - [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) — диагностика проблем.
 - [AI_MAINTAINER_GUIDE.md](docs/AI_MAINTAINER_GUIDE.md) — как агенту использовать, изменять и улучшать инструмент.
+- [BROWSER_AGENT_AUDIT_RU.md](docs/BROWSER_AGENT_AUDIT_RU.md) — сравнение открытых решений, аудит, целевая архитектура и план браузерного слоя.
 - [AGENTS.md](AGENTS.md) — правила для ИИ-агентов и политика применения `site-control-kit` как основного браузерного инструмента.
 
 ## Структура проекта
 
 ```text
-webcontrol/         # Python: сервер, очередь, CLI
+webcontrol/         # Python: сервер, очередь, командный интерфейс
 extension/          # Расширение браузера (MV3)
 scripts/            # Вспомогательные скрипты запуска/упаковки/экспорта
-packaging/          # Production packaging: Linux .deb, Windows installer, release checks
+packaging/          # Сборка пакета Linux, установщика Windows и проверки выпуска
 docs/               # Полная документация
-examples/           # Примеры payload-команд
+examples/           # Примеры данных команд
 tests/              # Автотесты
 ```
 
 ## Важные ограничения
 - `run_script` может блокироваться CSP сайта (`unsafe-eval`), это нормально.
-- На служебных страницах (`chrome://*`) content script не работает.
-- Manifest V3 service worker может «засыпать», поэтому есть polling + alarms.
+- На служебных страницах (`chrome://*`) сценарий страницы не работает.
+- Фоновый процесс расширения MV3 может «засыпать», поэтому есть периодический опрос и будильники.
 
 ## Правовые границы
 Используйте инструмент только для сайтов и систем, где у вас есть разрешение на автоматизацию.
@@ -636,7 +654,8 @@ tests/              # Автотесты
 cd /home/max/site-control-kit
 git config user.name "Ваше имя в GitHub"
 git config user.email "ваш_email@example.com"
-git add .
+git status --short
+git add <ТОЛЬКО_ПРОВЕРЕННЫЕ_ФАЙЛЫ>
 git commit -m "Стартовая версия: локальный хаб, расширение и документация (RU)"
 git remote add origin https://github.com/<ВАШ_ЛОГИН>/site-control-kit.git
 git push -u origin main
@@ -645,3 +664,5 @@ git push -u origin main
 Если репозиторий `site-control-kit` ещё не создан в GitHub:
 1. Откройте GitHub и создайте пустой репозиторий `site-control-kit` без README/.gitignore.
 2. Выполните команды выше для первого push.
+
+Не используйте `git add .` в рабочем дереве с локальными сеансами или чужими изменениями. Перед коммитом просмотрите `git diff --cached --stat` и `git diff --cached`.

@@ -11,13 +11,15 @@ BUTTON_NUMBER="${SCB_RELOAD_BUTTON:-1}"
 OPEN_WAIT_SEC="${SCB_RELOAD_OPEN_WAIT_SEC:-1.5}"
 POST_CLICK_WAIT_SEC="${SCB_RELOAD_POST_CLICK_WAIT_SEC:-3}"
 VERIFY_WAIT_SEC="${SCB_RELOAD_VERIFY_WAIT_SEC:-12}"
+MAX_HEARTBEAT_AGE_SEC="${SCB_MAX_HEARTBEAT_AGE_SEC:-5}"
 RESTORE_ORIGINAL_URL="${SCB_RESTORE_ORIGINAL_URL:-1}"
 REQUESTED_CLIENT_ID="${SCB_CLIENT_ID:-}"
 REQUESTED_TAB_ID="${SCB_RELOAD_TAB_ID:-}"
 
 PYTHONPATH="${ROOT_DIR}:${PYTHONPATH:-}"
 export PYTHONPATH
-export SERVER_URL ACCESS_TOKEN REQUESTED_CLIENT_ID REQUESTED_TAB_ID VERIFY_WAIT_SEC CLIENT_ID
+export SERVER_URL ACCESS_TOKEN REQUESTED_CLIENT_ID REQUESTED_TAB_ID
+export VERIFY_WAIT_SEC MAX_HEARTBEAT_AGE_SEC CLIENT_ID VERIFY_STARTED_EPOCH
 
 TARGET_URL="chrome://extensions/?id=${EXTENSION_ID}"
 SELF_RELOAD_URL="chrome-extension://${EXTENSION_ID}/options.html?action=reload-self"
@@ -120,6 +122,7 @@ PY
 
 echo "INFO: reload helper client=${CLIENT_ID} tab=${TAB_ID} title=${ORIGINAL_TITLE:-unknown}"
 echo "INFO: try self-reload via ${SELF_RELOAD_URL}"
+VERIFY_STARTED_EPOCH="$(date +%s.%N)"
 python3 -m webcontrol browser \
   --server "${SERVER_URL}" \
   --token "${ACCESS_TOKEN}" \
@@ -135,13 +138,26 @@ import json
 import os
 import time
 import urllib.request
+from datetime import datetime
 
 server = os.environ["SERVER_URL"]
 token = os.environ["ACCESS_TOKEN"]
 client_id = os.environ["CLIENT_ID"]
 deadline = time.time() + float(os.environ["VERIFY_WAIT_SEC"])
+verify_started = float(os.environ["VERIFY_STARTED_EPOCH"])
+max_heartbeat_age = float(os.environ["MAX_HEARTBEAT_AGE_SEC"])
 last_seen = ""
 content_caps = None
+heartbeat_age = None
+fresh_heartbeat = False
+
+def parse_timestamp(value):
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
 
 while time.time() < deadline:
     req = urllib.request.Request(
@@ -159,12 +175,32 @@ while time.time() < deadline:
         capabilities = meta.get("capabilities") if isinstance(meta, dict) else None
         if isinstance(capabilities, dict):
             content_caps = capabilities.get("content_commands")
-        if isinstance(content_caps, list) and content_caps:
-            print(json.dumps({"ok": True, "last_seen": last_seen, "content_commands": content_caps}, ensure_ascii=False))
+        seen_epoch = parse_timestamp(last_seen)
+        now = time.time()
+        heartbeat_age = now - seen_epoch if seen_epoch is not None else None
+        fresh_heartbeat = bool(
+            seen_epoch is not None
+            and seen_epoch >= verify_started - 1.0
+            and heartbeat_age <= max_heartbeat_age
+        )
+        if isinstance(content_caps, list) and content_caps and fresh_heartbeat:
+            print(json.dumps({
+                "ok": True,
+                "last_seen": last_seen,
+                "heartbeat_age_sec": heartbeat_age,
+                "fresh_heartbeat": fresh_heartbeat,
+                "content_commands": content_caps,
+            }, ensure_ascii=False))
             raise SystemExit(0)
     time.sleep(0.8)
 
-print(json.dumps({"ok": False, "last_seen": last_seen, "content_commands": content_caps}, ensure_ascii=False))
+print(json.dumps({
+    "ok": False,
+    "last_seen": last_seen,
+    "heartbeat_age_sec": heartbeat_age,
+    "fresh_heartbeat": fresh_heartbeat,
+    "content_commands": content_caps,
+}, ensure_ascii=False))
 PY
 )"
 
@@ -182,6 +218,7 @@ if [[ "${verify_json}" == *'"ok": false'* ]]; then
   sleep "${OPEN_WAIT_SEC}"
 
   echo "INFO: x11 click ratio=(${RELOAD_X_RATIO}, ${RELOAD_Y_RATIO}) button=${BUTTON_NUMBER}"
+  VERIFY_STARTED_EPOCH="$(date +%s.%N)"
   python3 -m webcontrol browser \
     --server "${SERVER_URL}" \
     --token "${ACCESS_TOKEN}" \
@@ -200,13 +237,26 @@ import json
 import os
 import time
 import urllib.request
+from datetime import datetime
 
 server = os.environ["SERVER_URL"]
 token = os.environ["ACCESS_TOKEN"]
 client_id = os.environ["CLIENT_ID"]
 deadline = time.time() + float(os.environ["VERIFY_WAIT_SEC"])
+verify_started = float(os.environ["VERIFY_STARTED_EPOCH"])
+max_heartbeat_age = float(os.environ["MAX_HEARTBEAT_AGE_SEC"])
 last_seen = ""
 content_caps = None
+heartbeat_age = None
+fresh_heartbeat = False
+
+def parse_timestamp(value):
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
 
 while time.time() < deadline:
     req = urllib.request.Request(
@@ -224,15 +274,40 @@ while time.time() < deadline:
         capabilities = meta.get("capabilities") if isinstance(meta, dict) else None
         if isinstance(capabilities, dict):
             content_caps = capabilities.get("content_commands")
-        if isinstance(content_caps, list) and content_caps:
-            print(json.dumps({"ok": True, "last_seen": last_seen, "content_commands": content_caps}, ensure_ascii=False))
+        seen_epoch = parse_timestamp(last_seen)
+        now = time.time()
+        heartbeat_age = now - seen_epoch if seen_epoch is not None else None
+        fresh_heartbeat = bool(
+            seen_epoch is not None
+            and seen_epoch >= verify_started - 1.0
+            and heartbeat_age <= max_heartbeat_age
+        )
+        if isinstance(content_caps, list) and content_caps and fresh_heartbeat:
+            print(json.dumps({
+                "ok": True,
+                "last_seen": last_seen,
+                "heartbeat_age_sec": heartbeat_age,
+                "fresh_heartbeat": fresh_heartbeat,
+                "content_commands": content_caps,
+            }, ensure_ascii=False))
             raise SystemExit(0)
     time.sleep(0.8)
 
-print(json.dumps({"ok": False, "last_seen": last_seen, "content_commands": content_caps}, ensure_ascii=False))
+print(json.dumps({
+    "ok": False,
+    "last_seen": last_seen,
+    "heartbeat_age_sec": heartbeat_age,
+    "fresh_heartbeat": fresh_heartbeat,
+    "content_commands": content_caps,
+}, ensure_ascii=False))
 PY
   )"
   echo "INFO: verify after fallback ${verify_json}"
+fi
+
+if [[ "${verify_json}" == *'"ok": false'* ]]; then
+  echo "ERROR: extension reload did not produce a fresh heartbeat with content commands." >&2
+  exit 1
 fi
 
 if [[ "${RESTORE_ORIGINAL_URL}" == "1" ]] && [[ -n "${ORIGINAL_URL}" ]] && [[ "${ORIGINAL_URL}" != "${TARGET_URL}" ]]; then

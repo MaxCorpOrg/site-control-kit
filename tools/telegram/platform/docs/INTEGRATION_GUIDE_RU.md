@@ -1,4 +1,4 @@
-# Tool Platform Integration Guide RU
+# Подключение инструмента к общей платформе
 
 ## Как Подключить Новый Инструмент
 
@@ -34,7 +34,7 @@
 }
 ```
 
-### Шаг 2. Добавить manifest в registry
+### Шаг 2. Добавить манифест в реестр
 
 В `registry/tools.json`:
 
@@ -48,7 +48,7 @@
 
 Для отдельного runtime-репозитория допустим absolute path, но предпочтительнее visible wrapper внутри `tools/telegram/`, если инструмент должен быть виден оператору рядом с остальными Telegram workflow.
 
-### Шаг 3. Проверить platform layer
+### Шаг 3. Проверить платформенный слой
 
 ```bash
 cd /home/max/site-control-kit/tools/telegram/platform
@@ -67,11 +67,11 @@ cd /home/max/site-control-kit/tools/telegram/platform
 
 ## Текущие Примеры
 
-### Embedded Tool
+### Встроенный инструмент
 
 - `tools/telegram/invite_manager/tool_manifest.json`
 
-### Visible Wrapper Around Standalone Tool
+### Видимая обёртка отдельного инструмента
 
 - `tools/telegram/session_runner/tool_manifest.json`
 

@@ -1,0 +1,18 @@
+{
+  "issued_by": "agent-example",
+  "timeout_ms": 20000,
+  "target": {
+    "client_id": "REPLACE_WITH_CLIENT_ID",
+    "tab_id": 123
+  },
+  "command": {
+    "type": "set_editable_text",
+    "locator": {
+      "strategy": "label",
+      "value": "Email",
+      "exact": true
+    },
+    "value": "agent@example.com",
+    "timeout_ms": 10000
+  }
+}

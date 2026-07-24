@@ -1,6 +1,6 @@
-# Telegram Agent Playbook RU
+# Практические сценарии агента Telegram
 
-## 1. Если задача про live GUI bug
+## 1. Если задача про ошибку живого графического интерфейса
 
 - Сначала снять реальные логи и state.
 - Не считать panel-harness достаточным доказательством.
@@ -11,7 +11,7 @@
   - combined/session state;
   - subprocess lifecycle.
 
-## 2. Если задача про новую Telegram-фичу
+## 2. Если задача про новую возможность Telegram
 
 - Сначала спросить себя: это runtime tool или platform orchestration?
 - Runtime logic не тащить в `tool_platform/gui.py`.
@@ -21,7 +21,7 @@
   - docs;
   - только потом интеграцию в control center.
 
-## 3. Если задача про cross-platform
+## 3. Если задача про несколько платформ
 
 - Не обещать parity раньше adapter/capability layer.
 - Сначала сделать:
@@ -40,7 +40,7 @@
   - artifact paths;
   - profile lock discipline.
 
-## 5. Если задача про UI
+## 5. Если задача про пользовательский интерфейс
 
 - Панель должна быть thin client.
 - Если логика становится сложной, выносить её в workflow/job layer.

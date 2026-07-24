@@ -1,4 +1,4 @@
-# Telegram Export Agent Guide RU
+# Руководство агента по экспорту Telegram
 
 Этот guide нужен агенту, если задача относится к Telegram export pipeline.
 
@@ -24,4 +24,3 @@
 - не смешивать export-поток с invite manager;
 - не использовать export как direct-add/send инструмент;
 - если задача про Telegram Desktop portable, смотреть `portable_helper` или `invite_manager`.
-

@@ -5,7 +5,7 @@ import time
 import unittest
 from pathlib import Path
 
-from webcontrol.store import ControlStore
+from webcontrol.store import ControlStore, ResultValidationError
 
 
 class ControlStoreTests(unittest.TestCase):
@@ -107,6 +107,113 @@ class ControlStoreTests(unittest.TestCase):
         time.sleep(1.1)
         cmd = self.store.get_command(record["id"])
         self.assertIn(cmd["status"], {"expired", "pending", "in_progress", "partial"})
+
+    def test_result_from_non_target_client_is_rejected(self) -> None:
+        self.store.register_client(
+            client_id="c1",
+            tabs=[],
+            meta={},
+            user_agent="ua",
+            extension_version="0.1",
+        )
+        record = self.store.enqueue_command(
+            command={"type": "click", "selector": "button"},
+            target={"client_id": "c1"},
+            timeout_ms=5000,
+            issued_by="test",
+        )
+
+        with self.assertRaises(ResultValidationError):
+            self.store.submit_result(
+                command_id=record["id"],
+                client_id="foreign-client",
+                ok=True,
+                status="completed",
+                data={},
+                error=None,
+                logs=[],
+            )
+        stored = self.store.get_command(record["id"])
+        self.assertNotIn("foreign-client", stored["deliveries"])
+
+    def test_invalid_client_result_status_is_rejected(self) -> None:
+        self.store.register_client(
+            client_id="c1",
+            tabs=[],
+            meta={},
+            user_agent="ua",
+            extension_version="0.1",
+        )
+        record = self.store.enqueue_command(
+            command={"type": "click", "selector": "button"},
+            target={"client_id": "c1"},
+            timeout_ms=5000,
+            issued_by="test",
+        )
+
+        with self.assertRaises(ResultValidationError):
+            self.store.submit_result(
+                command_id=record["id"],
+                client_id="c1",
+                ok=True,
+                status="invented",
+                data={},
+                error=None,
+                logs=[],
+            )
+
+        with self.assertRaisesRegex(ResultValidationError, "conflicts"):
+            self.store.submit_result(
+                command_id=record["id"],
+                client_id="c1",
+                ok=False,
+                status="completed",
+                data={},
+                error=None,
+                logs=[],
+            )
+
+    def test_retried_result_is_idempotent_and_does_not_overwrite_terminal_data(self) -> None:
+        self.store.register_client(
+            client_id="c1",
+            tabs=[],
+            meta={},
+            user_agent="ua",
+            extension_version="0.1",
+        )
+        record = self.store.enqueue_command(
+            command={"type": "extract_text"},
+            target={"client_id": "c1"},
+            timeout_ms=5000,
+            issued_by="test",
+        )
+        self.store.pop_next_command("c1")
+        first = self.store.submit_result(
+            command_id=record["id"],
+            client_id="c1",
+            ok=True,
+            status="completed",
+            data={"text": "first"},
+            error=None,
+            logs=[],
+            finished_at="2026-07-24T06:00:00+00:00",
+        )
+        retried = self.store.submit_result(
+            command_id=record["id"],
+            client_id="c1",
+            ok=False,
+            status="failed",
+            data={"text": "replacement"},
+            error={"message": "late"},
+            logs=[],
+        )
+
+        self.assertEqual(first["status"], "completed")
+        result = retried["deliveries"]["c1"]["result"]
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["data"], {"text": "first"})
+        self.assertEqual(result["finished_at"], "2026-07-24T06:00:00+00:00")
+        self.assertIn("received_at", result)
 
 
 if __name__ == "__main__":

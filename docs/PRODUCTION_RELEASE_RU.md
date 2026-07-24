@@ -1,46 +1,41 @@
-# Production Release: Telegram Control Center
+# Выпуск центра управления Telegram
 
-Дата: 2026-05-12
+Дата актуализации: 2026-07-24.
 
-Этот документ фиксирует релизный контур для `Telegram Control Center`.
+Документ фиксирует выпускной контур приложения `Telegram Control Center` — центра управления Telegram.
 
-## Как Это Устанавливается По Отношению К `site-control-kit`
+## Как приложение связано с `site-control-kit`
 
-- `Telegram Control Center` собирается из репозитория `site-control-kit`, но устанавливается как отдельное операторское приложение.
-- Для обычного пользователя не нужен полный checkout репозитория: достаточно получить готовый `.deb` и установить его на целевую Linux-машину.
-- После установки приложение живёт отдельно от исходников:
-  - app bundle: `/opt/site-control-kit/app`
-  - запуск: `telegram-control-center`
-  - пользовательские config/data/logs/cache: XDG-папки в домашнем каталоге
-- Полный репозиторий `site-control-kit` нужен только для:
-  - разработки;
-  - локальной отладки;
-  - сборки `.deb` и Windows installer;
-  - выпуска новых версий и maintainer-проверок.
+- Центр управления собирается из репозитория `site-control-kit`, но устанавливается как отдельное операторское приложение.
+- Обычному пользователю не нужна копия репозитория: достаточно готового пакета `.deb`.
+- После установки код приложения находится в `/opt/site-control-kit/app`.
+- Команда запуска — `telegram-control-center`.
+- Настройки, данные, журналы и кэш пользователя хранятся в стандартных каталогах XDG.
+- Полный репозиторий нужен для разработки, диагностики, сборки и выпуска новых версий.
 
-## Release Matrix
+## Поддерживаемые варианты выпуска
 
-- Linux — основной production target: `.deb`, меню приложений, иконка, double-click launcher и полный live workflow при строгом attach gating.
-- Windows — installer/exe GUI target: приложение запускается двойным кликом, но Telegram Desktop live lanes в v1 считаются degraded до отдельного Windows adapter tranche.
+| Платформа | Состояние |
+|---|---|
+| Linux | Основная рабочая цель: пакет `.deb`, меню приложений, значок и полный живой сценарий при строгой проверке присоединения к окну. |
+| Windows | Цель для установщика и графического приложения. Живые действия Telegram Desktop в первой версии считаются ограниченными до отдельной реализации адаптера Windows. |
 
-## Что Попадает В Релиз
+## Что входит в выпуск
 
-- `Telegram Control Center` GUI.
-- Внутренние CLI/helper-компоненты, нужные панели.
-- Embedded `telegram_portable_session_tool` без `.git`, `runs`, `.state` и приватных конфигов.
-- Документация и registry/manifests.
+- графическая панель центра управления Telegram;
+- внутренние команды и помощники, нужные панели;
+- встроенный `telegram_portable_session_tool` без `.git`, запусков, состояния и личных настроек;
+- русская документация, реестр и манифесты.
 
-В релиз не попадают:
+Не входят:
 
-- `runtime/`
-- `telegram_ak/`
-- `TG_APP/`
-- `.codex/`
-- `tdata`, portable profiles, logs, job history, user secrets.
+- `runtime/`;
+- `telegram_ak/`;
+- `TG_APP/`;
+- `.codex/`;
+- `tdata`, переносимые профили, журналы заданий и пользовательские секреты.
 
-## Linux Install
-
-Если `.deb` уже перенесён на другую машину, репозиторий там не обязателен: можно устанавливать пакет напрямую как обычное приложение.
+## Установка в Linux
 
 Сборка:
 
@@ -48,25 +43,20 @@
 ./packaging/linux/build_deb.sh
 ```
 
-Установка на Ubuntu/Debian:
+Установка в Ubuntu или Debian:
 
 ```bash
 sudo apt install ./packaging/dist/linux/telegram-control-center_0.1.1_all.deb
 ```
 
-Запуск:
+Запуск и самопроверка:
 
 ```bash
 telegram-control-center
-```
-
-Self-test:
-
-```bash
 telegram-control-center --release-self-test
 ```
 
-Если нужен ярлык на рабочем столе:
+Создание ярлыка на рабочем столе:
 
 ```bash
 telegram-control-center-install-desktop-shortcut
@@ -78,83 +68,84 @@ telegram-control-center-install-desktop-shortcut
 sudo apt remove telegram-control-center
 ```
 
-Пользовательские data/config/logs при обычном удалении не удаляются.
-Если после acceptance нужно вернуть приложение на машину, просто повторно установите тот же `.deb`.
+Обычное удаление сохраняет пользовательские настройки, данные и журналы. Для возврата приложения установите тот же пакет повторно.
 
-## Runtime Folders
+## Каталоги среды выполнения
 
-Это production layout установленного приложения, а не dev-репозитория.
+Это схема установленного приложения, а не репозитория разработки.
 
-Linux production defaults:
+Linux:
 
-- config: `~/.config/site-control-kit`
-- data: `~/.local/share/site-control-kit`
-- logs: `~/.local/state/site-control-kit/logs`
-- cache: `~/.cache/site-control-kit`
+- настройки: `~/.config/site-control-kit`;
+- данные: `~/.local/share/site-control-kit`;
+- журналы: `~/.local/state/site-control-kit/logs`;
+- кэш: `~/.cache/site-control-kit`.
 
-Windows production defaults:
+Windows:
 
-- config: `%APPDATA%\\SiteControlKit\\config`
-- data: `%LOCALAPPDATA%\\SiteControlKit\\data`
-- logs: `%LOCALAPPDATA%\\SiteControlKit\\logs`
-- cache: `%LOCALAPPDATA%\\SiteControlKit\\cache`
+- настройки: `%APPDATA%\\SiteControlKit\\config`;
+- данные: `%LOCALAPPDATA%\\SiteControlKit\\data`;
+- журналы: `%LOCALAPPDATA%\\SiteControlKit\\logs`;
+- кэш: `%LOCALAPPDATA%\\SiteControlKit\\cache`.
 
-Overrides:
+Пути можно переопределить:
 
-- `SITE_CONTROL_KIT_CONFIG_DIR`
-- `SITE_CONTROL_KIT_DATA_DIR`
-- `SITE_CONTROL_KIT_LOG_DIR`
-- `SITE_CONTROL_KIT_CACHE_DIR`
-- `SITE_CONTROL_KIT_APP_ROOT`
+- `SITE_CONTROL_KIT_CONFIG_DIR`;
+- `SITE_CONTROL_KIT_DATA_DIR`;
+- `SITE_CONTROL_KIT_LOG_DIR`;
+- `SITE_CONTROL_KIT_CACHE_DIR`;
+- `SITE_CONTROL_KIT_APP_ROOT`.
 
-## Windows Build
+## Сборка для Windows
 
-Windows packaging из Linux требует Wine toolchain:
+Для сборки Windows-установщика в Linux нужны Wine и компилятор Inno Setup:
 
 ```bash
 ./packaging/windows/build_windows_installer.sh 0.1.1 --check-tools
 ./packaging/windows/build_windows_installer.sh 0.1.1
 ```
 
-Ожидаемый результат:
+Ожидаемый файл:
 
-- `packaging/dist/windows/TelegramControlCenterSetup-0.1.1.exe`
+```text
+packaging/dist/windows/TelegramControlCenterSetup-0.1.1.exe
+```
 
-Если `wine` или Inno Setup compiler отсутствуют, build script завершится диагностическим кодом и не будет имитировать успешный installer.
+Если Wine или компилятор Inno Setup недоступен, сценарий завершается с диагностической ошибкой и не имитирует успешную сборку.
 
-## Release Checklist
+## Проверка выпуска
 
-1. `git status --short --branch`.
-2. `python3 -m py_compile` для изменённых Python entrypoints.
-3. `PYTHONPATH="$PWD" python3 -m unittest tests.test_tool_platform tests.test_telegram_portable`.
-4. `PYTHONPATH="$PWD" python3 -m unittest discover -s tests -p 'test_*.py'`.
-5. `git diff --check`.
-6. `desktop-file-validate packaging/linux/telegram-control-center.desktop`.
-7. `bash -n` для shell packaging scripts.
-8. `./packaging/linux/build_deb.sh`.
-9. `python3 packaging/release/check_release_tree.py <extracted-app-root>`.
-10. Rootless clean install smoke через `dpkg-deb -x` и `telegram-control-center --release-self-test`.
-11. Linux live smoke только при safe attach: `attach_status in {exact_window, title_match}`.
-12. Windows installer smoke только при доступном Wine/Inno toolchain.
-13. `sha256sum` для release artifacts.
-14. Финальный commit/push.
+1. Проверить `git status --short --branch`.
+2. Запустить `python3 -m py_compile` для изменённых точек входа Python.
+3. Запустить `PYTHONPATH="$PWD" python3 -m unittest tests.test_tool_platform tests.test_telegram_portable`.
+4. Запустить полный набор: `PYTHONPATH="$PWD" python3 -m unittest discover -s tests -p 'test_*.py'`.
+5. Запустить `git diff --check`.
+6. Проверить файл меню: `desktop-file-validate packaging/linux/telegram-control-center.desktop`.
+7. Запустить `bash -n` для изменённых сценариев оболочки.
+8. Собрать пакет: `./packaging/linux/build_deb.sh`.
+9. Проверить извлечённое дерево: `python3 packaging/release/check_release_tree.py <корень-приложения>`.
+10. Выполнить установку без прав администратора через `dpkg-deb -x` и `telegram-control-center --release-self-test`.
+11. Живую проверку Linux выполнять только при безопасном присоединении: `attach_status` равен `exact_window` или `title_match`.
+12. Проверять Windows-установщик только при доступных Wine и Inno Setup.
+13. Посчитать `sha256sum` для выпускных файлов.
+14. Просмотреть точный состав коммита и отправить ветку.
 
-## Текущая Release Evidence
+## Последние подтверждения выпуска
 
-- Linux artifact: `packaging/dist/linux/telegram-control-center_0.1.1_all.deb`
-- Accepted artifact sha256 at Linux closeout: `1bb7315ccb2a03e5261604327e380a82cd77f51f0d3fa4500b5fd516c65f1f60`
-- Rootless clean install smoke: OK через `dpkg-deb -x`, release tree scan и `telegram-control-center --release-self-test`.
-- Rootful install acceptance: OK для `0.1.1`; self-test идёт из `/opt/site-control-kit/app`, XDG paths указывают в домашний каталог пользователя.
-- Product contract explicitly confirmed: операторский `.deb` можно ставить отдельно от исходного репозитория; repo нужен только для build/dev/maintainer work.
-- CLI/menu launch acceptance: OK; empty-state crash закрыт.
-- Rootful uninstall acceptance: OK; `apt remove` убирает system payload и сохраняет пользовательские XDG data.
-- User desktop shortcut remains a user-owned file across uninstall and may require обычный desktop trust policy среды.
-- Windows installer: not built on this Linux host, blocked by missing `wine`/`winepath`.
+- Пакет Linux: `packaging/dist/linux/telegram-control-center_0.1.1_all.deb`.
+- Контрольная сумма принятого пакета: `1bb7315ccb2a03e5261604327e380a82cd77f51f0d3fa4500b5fd516c65f1f60`.
+- Чистая установка без прав администратора прошла через `dpkg-deb -x`, проверку дерева и `telegram-control-center --release-self-test`.
+- Системная установка версии `0.1.1` прошла; приложение запускается из `/opt/site-control-kit/app`, а XDG-пути указывают в домашний каталог пользователя.
+- Подтверждено, что `.deb` устанавливается без исходного репозитория.
+- Запуск из командной строки и меню принят; падение пустого состояния устранено.
+- `apt remove` удаляет системную часть и сохраняет пользовательские XDG-данные.
+- Пользовательский ярлык остаётся после удаления и может требовать подтверждения доверия рабочим столом.
+- Windows-установщик на текущем Linux-хосте не собирался из-за отсутствия Wine и `winepath`.
 
-## Security Checklist
+## Проверка безопасности
 
-- Не коммитить и не паковать `runtime/`, `telegram_ak/`, `TG_APP/`, `.codex/`.
-- Не паковать `tdata`, portable profiles, job history и logs.
-- Не зашивать токены, пароли, bot tokens, API keys.
-- Не ослаблять Telegram attach gating.
-- AK5 на Wayland запускать через сохранённый `display_backend = x11` и только при safe attach.
+- Не коммитить и не упаковывать `runtime/`, `telegram_ak/`, `TG_APP/`, `.codex/`.
+- Не упаковывать `tdata`, переносимые профили, историю заданий и журналы.
+- Не вшивать токены, пароли, токены ботов и ключи API.
+- Не ослаблять проверку присоединения к окну Telegram.
+- Профиль AK5 в Wayland запускать с сохранённым `display_backend = x11` и только после безопасного присоединения.

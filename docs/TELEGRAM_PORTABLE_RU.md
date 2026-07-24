@@ -1,4 +1,4 @@
-# Telegram Portable RU
+# Переносимый Telegram Desktop
 
 ## Что Это
 `telegram_portable.py` — локальный helper внутри `site-control-kit` для Linux-профилей Telegram Desktop, когда у оператора уже есть `zip` с `tdata` и нужно быстро поднять отдельный portable-профиль без ручной раскладки файлов.
@@ -27,7 +27,7 @@ Session-runner consumer этого helper теперь встроен в `site-c
 - `scripts/telegram_portable_gui.sh`
 - `tests/test_telegram_portable.py`
 
-## Что Делает Helper
+## Что делает помощник
 ### `import-zip`
 Команда:
 - принимает путь к `zip` с `tdata`;
@@ -169,7 +169,7 @@ python3 scripts/telegram_portable.py launch \
   --profile-name "ak"
 ```
 
-### Повторный запуск на Wayland через XWayland-backed path
+### Повторный запуск в Wayland через путь на основе XWayland
 
 ```bash
 python3 scripts/telegram_portable.py launch \
@@ -200,7 +200,7 @@ python3 scripts/telegram_portable.py status \
 python3 scripts/telegram_portable.py list
 ```
 
-### Низкоуровневый Desktop URI / typing
+### Низкоуровневое открытие URI и ввод текста
 
 Обычно эти команды вызывает `telegram_invite_executor.py desktop-send-link`.
 Ручной запуск нужен только для диагностики:
@@ -234,7 +234,7 @@ python3 scripts/telegram_portable.py log-diagnose \
   --profile-dir "/home/max/TelegramPortableAK"
 ```
 
-### No-API Desktop UI primitives
+### Действия с интерфейсом рабочего стола без API
 
 Для кодового Desktop-flow без Telegram API:
 
@@ -271,7 +271,7 @@ python3 scripts/telegram_portable.py accessibility-type-text \
   --dry-run
 ```
 
-### GUI-режим
+### Графический режим
 
 ```bash
 cd /home/max/site-control-kit
@@ -322,7 +322,7 @@ Runtime cache лежит здесь:
 Если там есть строка вида:
 
 ```text
-Working dir: .../TelegramForcePortable/
+Рабочий каталог: `.../TelegramForcePortable/`
 ```
 
 значит профиль реально поднялся в portable-режиме, а не ушёл в домашний каталог пользователя.

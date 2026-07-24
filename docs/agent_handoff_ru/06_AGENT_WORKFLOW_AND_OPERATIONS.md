@@ -1,4 +1,4 @@
-# Agent Workflow And Operations
+# Работа агента и эксплуатация
 
 ## Обязательный Старт Любой Сессии
 ```bash
@@ -13,7 +13,7 @@ git log --oneline -n 15
 3. прочитать `docs/PROJECT_STATUS_RU.md`;
 4. только потом идти в код.
 
-## Telegram Старт
+## Начало работы с Telegram
 Перед Telegram-правками обязательно просмотреть:
 
 ```bash
@@ -28,13 +28,13 @@ find /home/max/telegram_contact_batches/chat_-2465948544/runs -maxdepth 2 -name 
 - `identity_history.json`
 - `discovery_state.json`
 
-## Browser Smoke Перед Реальной Работой
+## Быстрая проверка браузера перед реальной работой
 ```bash
 PYTHONPATH="$PWD" python3 -m webcontrol clients
 PYTHONPATH="$PWD" python3 -m webcontrol browser tabs
 ```
 
-## Telegram Invite Старт
+## Начало работы с приглашениями Telegram
 Перед invite-правками прочитать:
 
 ```bash
@@ -43,19 +43,19 @@ sed -n '1,260p' tools/telegram/invite_manager/ONE_USER_FLOW_RU.md
 sed -n '1,260p' docs/TELEGRAM_INVITE_EXECUTOR_RU.md
 ```
 
-Safe rule:
+Правило безопасности:
 - `add-contact` использовать только для одного пользователя из `invite_state.json` с `consent=yes`;
 - `inspect-chat` использовать до и после live add, чтобы сверять member count;
 - финальный Telegram `Add` выполнять только с явным `--confirm-add`;
 - если нет отдельного подтверждения `joined/added`, писать статус `requested`, а не `joined`.
 
 ## Базовые Полезные Команды
-### Один batch-run
+### Один пакетный запуск
 ```bash
 ./scripts/collect_new_telegram_contacts.sh "https://web.telegram.org/k/#-2465948544"
 ```
 
-### Chain-runner
+### Цепочка запусков
 ```bash
 ./scripts/collect_new_telegram_contacts_chain.sh \
   "https://web.telegram.org/k/#-2465948544" \
@@ -64,7 +64,7 @@ Safe rule:
   --runs 3
 ```
 
-### Явный forced tab
+### Явно заданная вкладка
 ```bash
 env CHAT_TAB_ID=614278127 ./scripts/collect_new_telegram_contacts_chain.sh \
   "https://web.telegram.org/k/#-2465948544" \
@@ -93,7 +93,7 @@ env CHAT_TAB_ID=614278127 ./scripts/collect_new_telegram_contacts_chain.sh \
 5. обновить status docs;
 6. только потом коммитить.
 
-## Что Считать Хорошим Handoff
+## Что считать хорошей передачей контекста
 Хороший handoff отвечает на вопросы:
 - что сделали;
 - что проверили;

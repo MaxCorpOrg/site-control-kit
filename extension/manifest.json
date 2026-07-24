@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Site Control Bridge",
   "description": "Локальный мост управления сайтами через Site Control Hub.",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "permissions": [
     "storage",
     "tabs",
@@ -28,7 +28,7 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["content.js"],
+      "js": ["agent_dom.js", "content.js"],
       "run_at": "document_idle"
     }
   ]

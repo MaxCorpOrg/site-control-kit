@@ -20,7 +20,7 @@
 
 ## 3. Установка проекта на новое устройство
 
-### Windows
+### В Windows
 
 ```powershell
 git clone <URL_вашего_репозитория> site-control-kit
@@ -28,13 +28,13 @@ cd site-control-kit
 python -m pip install -e .
 ```
 
-Проверка CLI:
+Проверка командного интерфейса:
 
 ```powershell
 sitectl --help
 ```
 
-### Linux / macOS
+### В Linux и macOS
 
 ```bash
 cd ~
@@ -43,7 +43,7 @@ cd site-control-kit
 python3 -m pip install -e .
 ```
 
-Проверка CLI:
+Проверка командного интерфейса:
 
 ```bash
 sitectl --help
@@ -51,7 +51,7 @@ sitectl --help
 
 ## 4. Запуск хаба
 
-### Windows
+### В Windows
 
 ```cmd
 cd C:\site-control-kit
@@ -65,7 +65,7 @@ $env:SITECTL_TOKEN = "очень-длинный-случайный-токен"
 .\scripts\start_hub.ps1
 ```
 
-### Linux / macOS
+### В Linux и macOS
 
 ### 4.1 Локальный быстрый режим
 
@@ -101,8 +101,10 @@ export SITECTL_TOKEN='очень-длинный-случайный-токен'
 - `http://192.168.1.50:8765`
 
 Важно:
-- откройте порт в firewall только для доверенной сети;
-- не публикуйте хаб в интернет без TLS и дополнительной auth-защиты.
+- предпочтите SSH-туннель и оставьте хаб на `127.0.0.1`;
+- если нужен прямой доступ, откройте порт в межсетевом экране только для доверенной сети;
+- не публикуйте хаб в интернет без TLS и дополнительной проверки доступа;
+- текущая версия рассчитана на одного доверенного оператора, а не на общий многопользовательский сервер.
 
 ## 5. Установка расширения в браузер
 
@@ -113,11 +115,11 @@ export SITECTL_TOKEN='очень-длинный-случайный-токен'
 - Edge: `edge://extensions`
 - Opera: `opera://extensions`
 - Яндекс: `browser://extensions`
-2. Включите режим разработчика (`Developer mode`).
-3. Нажмите `Load unpacked` (или аналог).
+2. Включите режим разработчика (`Developer mode`, то есть режим загрузки локальных расширений).
+3. Нажмите `Load unpacked` («Загрузить распакованное расширение») или аналог.
 4. Выберите папку `.../site-control-kit/extension`.
 
-### Windows
+### В Windows
 
 Для Windows путь такой же, только выбирайте папку `C:\site-control-kit\extension`.
 
@@ -126,18 +128,18 @@ export SITECTL_TOKEN='очень-длинный-случайный-токен'
 
 ## 6. Настройка расширения
 
-Откройте `Options` у расширения и заполните:
-- `Server URL`:
+Откройте настройки (`Options`) расширения и заполните:
+- адрес сервера (`Server URL`):
   - локально: `http://127.0.0.1:8765`
   - удалённый хаб: `http://<IP_ХАБА>:8765`
 - `Токен доступа`: такой же, как `SITECTL_TOKEN` у хаба.
-- `ID клиента`: можно оставить авто-генерацию.
+- идентификатор клиента (`ID клиента`): можно оставить автоматическую генерацию.
 
 Нажмите `Сохранить`.
 
 ## 7. Проверка подключения
 
-На машине с CLI:
+На машине с командным интерфейсом:
 
 ```bash
 cd ~/site-control-kit
@@ -145,7 +147,7 @@ sitectl health
 sitectl clients
 ```
 
-В `clients` должен появиться `client_id` расширения.
+В списке клиентов должен появиться `client_id` расширения.
 
 Тест команды:
 
@@ -163,7 +165,7 @@ sitectl send --type navigate --client-id client-REPLACE_ME --url https://example
 
 ## 9. Обновление проекта на устройствах
 
-### Windows
+### В Windows
 
 ```powershell
 cd C:\site-control-kit
@@ -173,9 +175,9 @@ python -m pip install -e .
 
 Если менялся код расширения:
 - откройте страницу расширений браузера;
-- нажмите `Reload` для `Site Control Bridge`.
+- нажмите `Reload` («Перезагрузить») для `Site Control Bridge`.
 
-### Linux / macOS
+### В Linux и macOS
 
 ```bash
 cd ~/site-control-kit
@@ -185,7 +187,7 @@ python3 -m pip install -e .
 
 Если менялся код расширения:
 - откройте страницу расширений;
-- нажмите `Reload` для `Site Control Bridge`.
+- нажмите `Reload` («Перезагрузить») для `Site Control Bridge`.
 
 ## 10. Частые проблемы
 

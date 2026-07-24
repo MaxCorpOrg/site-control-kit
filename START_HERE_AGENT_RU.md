@@ -1,4 +1,4 @@
-# START HERE: Agent Entry Point
+# С чего начать агенту
 
 Этот файл — короткая входная точка для любого нового агента, который впервые заходит в репозиторий `site-control-kit` или начинает новый чат без контекста.
 
@@ -9,11 +9,11 @@
 
 Внутри проекта:
 - Python-хаб `webcontrol`;
-- CLI `sitectl` / `python3 -m webcontrol`;
-- MV3 browser extension;
-- Telegram automation scripts;
-- Telegram registry-driven control center;
-- отдельные operator tools и handoff-документация.
+- интерфейс командной строки `sitectl` / `python3 -m webcontrol`;
+- браузерное расширение MV3;
+- сценарии автоматизации Telegram;
+- центр управления Telegram на основе реестра;
+- отдельные операторские инструменты и документация передачи контекста.
 
 Проект уже не находится на стадии "просто прототипа".
 Нельзя заходить в него как в пустую папку и начинать работу с нуля.
@@ -35,22 +35,23 @@
 Читай в таком порядке:
 
 1. `AGENTS.md`
-2. `START_HERE_AGENT_RU.md`
-3. `docs/agent_handoff_ru/00_START_HERE.md`
-4. весь пакет `docs/agent_handoff_ru/` по порядку `00..10`
-5. `docs/PROJECT_WORKFLOW_RU.md`
-6. `docs/PROJECT_STATUS_RU.md`
-7. `BROWSER_QUICKSTART.md`
-8. `docs/AI_MAINTAINER_GUIDE.md`
-9. `docs/API.md`
-10. `docs/ARCHITECTURE.md`
-11. `docs/EXTENSION.md`
-12. если задача про Telegram roadmap/export: `docs/TELEGRAM_CLIENT_ROADMAP_RU.md`
-13. если задача про Linux Telegram Desktop profile из `tdata.zip`: `docs/TELEGRAM_PORTABLE_RU.md`
-14. если задача про Telegram control center или подключение новых инструментов: `tools/telegram/platform/README_RU.md` и `tools/telegram/platform/AGENT_GUIDE_RU.md`
-15. если задача вообще про Telegram operator layer: `tools/telegram/NEXT_CHAT_AGENT_PROMPT_RU.md`, потом `tools/telegram/README_RU.md` и `tools/telegram/AGENT_GUIDE_RU.md`
-16. если задача про текущий Telegram control plane: `tools/telegram/agent_pack/README_RU.md`, `tools/telegram/agent_pack/VERIFICATION_MATRIX_RU.md`, `tools/telegram/agent_pack/agent_state.template.json`, затем `~/.site-control-kit/telegram/agent/agent_state.json`
-17. если нужен самый короткий machine-readable handoff по текущему Telegram workspace: `~/.site-control-kit/telegram/agent/workspace_checkpoint.json`
+2. `docs/AGENT_SIMPLE_GUIDE_RU.md`
+3. `START_HERE_AGENT_RU.md`
+4. `docs/agent_handoff_ru/00_START_HERE.md`
+5. весь пакет `docs/agent_handoff_ru/` по порядку `00..10`
+6. `docs/PROJECT_WORKFLOW_RU.md`
+7. `docs/PROJECT_STATUS_RU.md`
+8. `BROWSER_QUICKSTART.md`
+9. `docs/AI_MAINTAINER_GUIDE.md`
+10. `docs/API.md`
+11. `docs/ARCHITECTURE.md`
+12. `docs/EXTENSION.md`
+13. если задача про развитие или экспорт Telegram: `docs/TELEGRAM_CLIENT_ROADMAP_RU.md`
+14. если задача про профиль Telegram Desktop из `tdata.zip`: `docs/TELEGRAM_PORTABLE_RU.md`
+15. если задача про центр управления Telegram или подключение новых инструментов: `tools/telegram/platform/README_RU.md` и `tools/telegram/platform/AGENT_GUIDE_RU.md`
+16. если задача вообще про операторский слой Telegram: `tools/telegram/NEXT_CHAT_AGENT_PROMPT_RU.md`, потом `tools/telegram/README_RU.md` и `tools/telegram/AGENT_GUIDE_RU.md`
+17. если задача про текущий слой управления Telegram: `tools/telegram/agent_pack/README_RU.md`, `tools/telegram/agent_pack/VERIFICATION_MATRIX_RU.md`, `tools/telegram/agent_pack/agent_state.template.json`, затем `~/.site-control-kit/telegram/agent/agent_state.json`
+18. если нужна самая короткая машиночитаемая передача текущего рабочего состояния Telegram: `~/.site-control-kit/telegram/agent/workspace_checkpoint.json`
 
 ## Что Нужно Понять До Любых Правок
 До правок ты обязан ответить себе на четыре вопроса:
@@ -61,8 +62,8 @@
 2. Где проект остановился в последний раз?
 Источник истины: секции `Текущие Проблемы`, `Следующий Приоритет`, `Последний Подтверждённый Полезный Результат` в `docs/PROJECT_STATUS_RU.md`
 
-На текущей контрольной точке Telegram control center зафиксирован commit:
-- `241a903` — `Усилить timeline и artifact center Telegram панели`
+Последняя зафиксированная контрольная точка ветки:
+- `c0516e1` — `Уточнить must should optional для следующего этапа`
 
 Если нужно быстро восстановить именно эту рабочую точку без перечитывания длинных логов, используй:
 - `tools/telegram/NEXT_CHAT_AGENT_PROMPT_RU.md`
@@ -107,7 +108,7 @@ git log --oneline -n 15
 - определить следующий приоритет;
 - только после этого идти в код.
 
-## Если Задача Про Browser Bridge
+## Если задача про браузерный мост
 Сначала проверить живой контур:
 
 ```bash
@@ -115,8 +116,8 @@ PYTHONPATH="$PWD" python3 -m webcontrol clients
 PYTHONPATH="$PWD" python3 -m webcontrol browser tabs
 ```
 
-## Если Задача Про Telegram
-До изменения кода сначала смотреть не только документацию, но и артефакты последнего run:
+## Если задача про Telegram
+До изменения кода сначала смотреть не только документацию, но и артефакты последнего запуска:
 - `latest_full.md`
 - `latest_safe.md`
 - последний `run.json`
@@ -125,7 +126,7 @@ PYTHONPATH="$PWD" python3 -m webcontrol browser tabs
 - `identity_history.json`
 - `discovery_state.json`
 
-## Если Задача Про Telegram Desktop Portable
+## Если задача про переносимый Telegram Desktop
 Не собирать профиль вручную, если уже есть `tdata.zip`.
 Сначала использовать:
 - `scripts/telegram_portable.py`

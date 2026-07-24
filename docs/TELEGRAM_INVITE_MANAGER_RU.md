@@ -1,4 +1,4 @@
-# Telegram Invite Manager RU
+# Менеджер приглашений Telegram
 
 ## Что Это
 `Telegram Invite Manager` — новый безопасный инструмент внутри `site-control-kit` для точечной работы с пользователями, которые уже дали согласие на вступление в чат.
@@ -73,7 +73,7 @@
 - `skipped` — запись не должна обрабатываться, например нет consent
 - `failed` — обработка не удалась
 
-## Команды CLI
+## Команды интерфейса командной строки
 ### `init`
 Создаёт новый job и `invite_state.json`.
 
@@ -153,7 +153,7 @@ python3 scripts/telegram_invite_manager.py mark \
   --reason manual_send
 ```
 
-## GUI Wrapper
+## Графическая обёртка
 Есть базовый GUI wrapper:
 
 ```bash

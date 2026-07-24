@@ -1,4 +1,4 @@
-# Telegram Control Center: Maintainer Runbook
+# Центр управления Telegram: руководство сопровождающего
 
 Этот документ для поддерживающего агента или техоператора.
 
@@ -15,7 +15,7 @@
 
 ## Канонические Пути
 
-Runtime root:
+Корень среды выполнения:
 
 `/home/max/site-control-kit/runtime/telegram`
 
@@ -45,15 +45,15 @@ cd /home/max/site-control-kit
 ./tools/telegram/platform/bin/tool-platform profile-health --profile-name AK3 --profile-dir /home/max/site-control-kit/runtime/telegram/profiles/TelegramPortable-AK3
 ```
 
-## Explicit Repair: Invite
+## Явное восстановление приглашений
 
-Preview:
+Предварительный просмотр:
 
 ```bash
 ./tools/telegram/platform/bin/tool-platform repair-invite-artifacts --profile-name AK3 --profile-dir /home/max/site-control-kit/runtime/telegram/profiles/TelegramPortable-AK3
 ```
 
-Apply:
+Применение:
 
 ```bash
 ./tools/telegram/platform/bin/tool-platform repair-invite-artifacts --profile-name AK3 --profile-dir /home/max/site-control-kit/runtime/telegram/profiles/TelegramPortable-AK3 --apply
@@ -65,21 +65,21 @@ Apply:
 - backfill missing invite `artifact_paths`;
 - сохраняет явный operator-controlled repair path вместо скрытой автоперезаписи.
 
-## Explicit Repair: Session
+## Явное восстановление сессии
 
-Preview:
+Предварительный просмотр:
 
 ```bash
 ./tools/telegram/platform/bin/tool-platform repair-session-artifacts --profile-name AK3 --profile-dir /home/max/site-control-kit/runtime/telegram/profiles/TelegramPortable-AK3
 ```
 
-Apply:
+Применение:
 
 ```bash
 ./tools/telegram/platform/bin/tool-platform repair-session-artifacts --profile-name AK3 --profile-dir /home/max/site-control-kit/runtime/telegram/profiles/TelegramPortable-AK3 --apply
 ```
 
-## Recovery: Профиль Запущен, Но Окна Нет
+## Восстановление: профиль запущен, но окна нет
 
 Если `profile-health` показывает:
 - `running = true`
@@ -93,7 +93,7 @@ Apply:
 3. убедиться, что `attach_status = exact_window`;
 4. только потом делать live invite/session/combined.
 
-## Recovery: История Или Артефакты Указывают На Legacy Path
+## Восстановление: история или артефакты указывают на старый путь
 
 Порядок:
 1. сначала `show-job`;
@@ -103,7 +103,7 @@ Apply:
 
 Нельзя молча перезаписывать history просто при readback.
 
-## Что Считать Release Gate
+## Что считать условием допуска выпуска
 
 Для текущего product-grade цикла release gate такой:
 - оператор понимает, где импортировать, запускать, скрывать и удалять профиль;

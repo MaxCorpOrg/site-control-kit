@@ -1,11 +1,11 @@
-# Browser Quickstart
+# Быстрый запуск управления браузером
 
 Короткий вход в `site-control-kit` как в локальный инструмент управления браузером.
 
 ## Что Это
 Инструмент состоит из трёх частей:
 - локальный Python-хаб, который принимает и раздаёт команды;
-- CLI и Windows-обёртки, через которые агент или оператор работает с браузером;
+- интерфейс командной строки и Windows-обёртки, через которые агент или оператор работает с браузером;
 - браузерное расширение, которое исполняет команды во вкладках.
 
 Если репозиторий открыт в рабочей папке, считайте этот инструмент основным способом управления браузером.
@@ -52,7 +52,24 @@ browser.cmd page-url
 browser.cmd text body
 browser.cmd html main
 browser.cmd attr "a.login" href
+browser.cmd snapshot
 ```
+
+Для ИИ-агента предпочтителен `snapshot`: он возвращает компактные строки и
+устойчивые ссылки вида `e1`, `e2` вместо полного HTML. После снимка можно
+действовать по ссылке или семантике:
+
+```cmd
+browser.cmd smart-click --role button --name "Войти" --exact
+browser.cmd set-text "user@example.com" --label "Email" --exact
+browser.cmd wait-for --text "Готово" --state visible
+browser.cmd smart-click --ref e7
+```
+
+Доступные локаторы: `--selector`, `--ref`, `--role` с опциональным `--name`,
+`--text`, `--label`, `--placeholder`, `--test-id`. Если совпадение не
+единственное, уточните локатор через `--exact`, `--nth` или
+`--root-selector`.
 
 Ожидание и прокрутка:
 
@@ -62,7 +79,7 @@ browser.cmd scroll --selector "#footer"
 browser.cmd scroll-by --dy 1200
 ```
 
-X11 fallback для системных страниц и окон без content script:
+Запасной путь X11 для системных страниц и окон без сценария страницы:
 
 ```cmd
 browser.cmd --tab-id 150000238 x11-click --x-ratio 0.93 --y-ratio 0.17
@@ -73,6 +90,7 @@ browser.cmd --tab-id 150000238 x11-keys --sequence Tab --sequence Return
 
 ```cmd
 browser.cmd screenshot --output .\dist\shot.png
+browser.cmd --tab-id 150000238 screenshot --full-page --output .\dist\full.png
 ```
 
 Запуск JavaScript на странице:
@@ -113,14 +131,32 @@ browser.cmd --client-id client-REPLACE tabs
 3. Проверить `browser.cmd tabs`.
 4. Только после этого выполнять рабочие действия.
 
+Рекомендуемый цикл агента:
+
+1. Зафиксировать `client_id` и `tab_id`.
+2. Выполнить `browser.cmd snapshot`.
+3. Выбрать уникальную ссылку или семантический локатор.
+4. Использовать `smart-click` / `set-text` / `wait-for`.
+5. После перехода на новый документ взять новый снимок.
+
+Машиночитаемый контракт доступен через:
+
+```cmd
+browser.cmd schema
+```
+
 Если что-то не работает:
 1. Перезагрузить расширение.
 2. Снова проверить `browser.cmd status`.
 3. Проверить, что токен и URL в настройках расширения совпадают с хабом.
 
-Для reload unpacked extension на Linux теперь есть helper с двумя стратегиями:
-- сначала self-reload через `chrome-extension://.../options.html?action=reload-self`;
-- если это не помогло, fallback через `chrome://extensions` и `x11-click`.
+Для перезагрузки распакованного расширения в Linux есть помощник с двумя стратегиями:
+- сначала самостоятельная перезагрузка через `chrome-extension://.../options.html?action=reload-self`;
+- если это не помогло, запасной путь через `chrome://extensions` и `x11-click`.
+- успех засчитывается только после нового сигнала активности, полученного после перезагрузки, с
+  непустым `content_commands`;
+- старые возможности из сохранённого состояния хаба больше не считаются
+  подтверждением успешной перезагрузки.
 
 Запуск:
 
@@ -129,34 +165,47 @@ cd /home/max/site-control-kit
 ./scripts/reload_bridge_extension.sh
 ```
 
-Если fallback-кнопка Reload в вашей сборке Chrome сдвинута, можно подстроить координаты:
+Если запасная кнопка `Reload` («Перезагрузить») в вашей сборке Chrome сдвинута, можно подстроить координаты:
 
 ```bash
 SCB_RELOAD_X_RATIO=0.93 SCB_RELOAD_Y_RATIO=0.17 ./scripts/reload_bridge_extension.sh
 ```
 
+Допустимый возраст подтверждающего сигнала активности по умолчанию равен 5 секундам.
+Для медленной машины его можно увеличить явно:
+
+```bash
+SCB_MAX_HEARTBEAT_AGE_SEC=10 ./scripts/reload_bridge_extension.sh
+```
+
+Если ни самостоятельная перезагрузка, ни запасной путь не дали свежий сигнал активности, помощник завершается с
+ненулевым кодом.
+
 ## Ограничения
-- `chrome://*` и похожие системные страницы недоступны для content script.
+- `chrome://*` и похожие системные страницы недоступны для сценария страницы.
 - `run_script` может блокироваться CSP конкретного сайта.
+- ссылки живут в пределах текущего документа; после навигации нужен новый снимок.
+- схема версии 1 работает в верхнем фрейме и видит открытые Shadow DOM; ссылки
+  с учётом фреймов запланированы отдельно.
 - После обновления расширения всегда сначала делайте `browser.cmd status`.
 
 ## Что Обновлять При Изменениях
-- `docs/API.md` — если меняется протокол или payload команд.
-- `docs/EXTENSION.md` — если меняются background/content возможности.
+- `docs/API.md` — если меняется протокол или данные команд.
+- `docs/EXTENSION.md` — если меняются возможности фонового процесса или сценария страницы.
 - `docs/ARCHITECTURE.md` — если меняется поток команд или маршрутизация.
 - `examples/` — если добавляются новые команды.
-- `AGENTS.md` и `docs/AI_MAINTAINER_GUIDE.md` — если меняется агентный workflow.
+- `AGENTS.md` и `docs/AI_MAINTAINER_GUIDE.md` — если меняется работа агента.
 
-## Связанный Telegram Helper
+## Связанный помощник Telegram
 
-Для Linux-профилей Telegram Desktop с `tdata.zip` есть отдельный helper:
+Для профилей Telegram Desktop в Linux с `tdata.zip` есть отдельный помощник:
 
 ```bash
 cd /home/max/site-control-kit
 python3 scripts/telegram_portable.py import-zip --zip "/path/to/tdata.zip" --profile-name "ak" --launch
 ```
 
-Есть и GUI-обёртка:
+Есть и графическая обёртка:
 
 ```bash
 cd /home/max/site-control-kit
@@ -185,7 +234,7 @@ python3 scripts/telegram_portable.py accessibility-dump \
   --visible-only
 ```
 
-Для consent-based invite-flow через этот portable-профиль используйте executor, а не ручную сборку команд:
+Для приглашений согласованных пользователей через этот переносимый профиль используйте исполнитель, а не ручную сборку команд:
 
 ```bash
 python3 scripts/telegram_invite_executor.py ensure-portable \
@@ -218,11 +267,11 @@ python3 scripts/telegram_portable.py window-screenshot \
   --output /tmp/tg_window.png
 ```
 
-Реальная отправка через Telegram Desktop portable требует отдельного `--confirm-send`; запись статуса `sent` требует `--record-result`.
+Реальная отправка через переносимый Telegram Desktop требует отдельного `--confirm-send`; запись статуса `sent` требует `--record-result`.
 
-## Unified Tool Platform
+## Единая платформа инструментов
 
-Если нужно увидеть и встроенные, и внешние Telegram-инструменты в одном месте, используйте registry-driven platform layer:
+Если нужно увидеть встроенные и внешние инструменты Telegram в одном месте, используйте платформенный слой на основе реестра:
 
 ```bash
 cd /home/max/site-control-kit/tools/telegram

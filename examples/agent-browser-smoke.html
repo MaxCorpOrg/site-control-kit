@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <title>Site Control Agent Smoke</title>
+    <style>
+      body { font: 16px system-ui, sans-serif; max-width: 720px; margin: 48px auto; }
+      label, input, button, output { display: block; margin: 16px 0; }
+      input { min-width: 320px; padding: 8px; }
+      button { padding: 8px 16px; }
+    </style>
+  </head>
+  <body>
+    <h1>Site Control Agent Smoke</h1>
+    <label for="agent-name">Имя агента</label>
+    <input id="agent-name" data-testid="agent-name" placeholder="Введите имя">
+    <button id="save" type="button">Сохранить</button>
+    <button id="rerender" type="button">Перерисовать поле</button>
+    <output id="status" aria-live="polite">Ожидание</output>
+    <div id="shadow-host"></div>
+    <script>
+      document.querySelector("#save").addEventListener("click", () => {
+        const name = document.querySelector("#agent-name").value || "без имени";
+        document.querySelector("#status").textContent = `Готово: ${name}`;
+      });
+      document.querySelector("#rerender").addEventListener("click", () => {
+        const oldInput = document.querySelector("#agent-name");
+        const replacement = oldInput.cloneNode(true);
+        oldInput.replaceWith(replacement);
+      });
+      const shadowRoot = document.querySelector("#shadow-host").attachShadow({ mode: "open" });
+      shadowRoot.innerHTML = '<button id="shadow-action">Кнопка в Shadow DOM</button>';
+      shadowRoot.querySelector("#shadow-action").addEventListener("click", () => {
+        document.querySelector("#status").textContent = "Готово: Shadow DOM";
+      });
+    </script>
+  </body>
+</html>

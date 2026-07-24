@@ -1,4 +1,4 @@
-# Verification Matrix RU
+# Матрица проверок
 
 Этот файл нужен следующему агенту как короткая матрица проверок по слоям Telegram supertool.
 
@@ -7,7 +7,7 @@
 1. `PYTHONPATH="$PWD" python3 -m unittest discover -s tests -p 'test_*.py'`
 2. `git diff --check`
 
-## Если менялись foundation-модули control plane
+## Если менялись базовые модули слоя управления
 
 Файлы:
 - `tool_platform/jobs.py`
@@ -24,7 +24,7 @@
 4. `./tools/telegram/platform/bin/tool-platform doctor`
 5. `./tools/telegram/platform/bin/tool-platform capabilities`
 
-## Если менялись GUI/orchestration слои панели
+## Если менялись графический интерфейс или оркестрация панели
 
 Файлы:
 - `tool_platform/gui.py`
@@ -36,7 +36,7 @@
 3. `./tools/telegram/platform/bin/tool-platform-panel`
 4. Для smoke на Linux подтвердить окно через `wmctrl -lx` или `xwininfo`
 
-## Если менялись Invite/Desktop flows
+## Если менялись приглашения или сценарии рабочего стола
 
 Файлы:
 - `scripts/telegram_invite_executor.py`
@@ -48,7 +48,7 @@
 2. `PYTHONPATH="$PWD" python3 -m unittest tests.test_telegram_invite_executor tests.test_telegram_invite_manager`
 3. `bash -n tools/telegram/invite_manager/bin/telegram-invite-manager tools/telegram/invite_manager/bin/telegram-invite-executor`
 
-## Если менялись portable/session flows
+## Если менялись переносимые профили или сессии
 
 Файлы:
 - `scripts/telegram_portable.py`
@@ -62,7 +62,7 @@
    - `python3 -m py_compile telegram_portable_session_tool/*.py`
    - `PYTHONPATH=/home/max/telegram-portable-session-tool python3 -m unittest discover -s tests -p 'test_*.py'`
 
-## Если менялись manifests/platform metadata
+## Если менялись манифесты или метаданные платформы
 
 Файлы:
 - `tools/telegram/*/tool_manifest.json`
@@ -73,7 +73,7 @@
 2. `./tools/telegram/platform/bin/tool-platform list-tools`
 3. `./tools/telegram/platform/bin/tool-platform show-tool --tool-id <tool_id>`
 
-## Если менялся cross-platform adapter layer
+## Если менялся слой платформенных адаптеров
 
 Файлы:
 - `tool_platform/platform_adapters/*`
@@ -84,7 +84,7 @@
 3. `./tools/telegram/platform/bin/tool-platform doctor`
 4. `./tools/telegram/platform/bin/tool-platform capabilities`
 
-## Live Telegram smoke
+## Живая быстрая проверка Telegram
 
 Делать только если изменение затрагивает реальный operator lane.
 

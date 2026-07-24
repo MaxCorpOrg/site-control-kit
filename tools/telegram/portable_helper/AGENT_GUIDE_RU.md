@@ -1,4 +1,4 @@
-# Telegram Portable Helper Agent Guide RU
+# Руководство агента по переносимому Telegram Desktop
 
 Этот guide нужен агенту, если задача относится к low-level Telegram Desktop portable layer.
 
