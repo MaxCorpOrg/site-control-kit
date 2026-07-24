@@ -24,8 +24,12 @@
         <input id="clientId" type="text" placeholder="client-..." />
       </label>
 
-      <label>Интервал опроса (мс)
+      <label>Задержка повтора после ошибки (мс)
         <input id="pollIntervalMs" type="number" min="500" step="100" />
+      </label>
+
+      <label>Время ожидания команды в долгом запросе (мс)
+        <input id="longPollWaitMs" type="number" min="1000" max="25000" step="1000" />
       </label>
 
       <label>Интервал heartbeat (мс)

@@ -117,6 +117,7 @@ class BrowserE2E:
         self.site = ExampleServer(self.site_port)
         self.steps: list[dict[str, Any]] = []
         self.timings_ms: list[float] = []
+        self.delivery_timings_ms: list[float] = []
         self.recoveries = 0
         self.client_id = ""
         self.tab_id = 0
@@ -276,7 +277,7 @@ class BrowserE2E:
             clients = [
                 item
                 for item in response.get("clients", [])
-                if item.get("extension_version") == "0.2.0" and item.get("is_online")
+                if item.get("extension_version") == "0.3.0" and item.get("is_online")
             ]
             if not clients:
                 return None
@@ -385,12 +386,39 @@ class BrowserE2E:
             interval=0.1,
             message=f"Команда {command_id} не завершилась",
         )
+        self._record_delivery_latency(current)
         if current.get("status") != "completed":
             raise RuntimeError(
                 f"Команда {command_id} завершилась со статусом {current.get('status')}: "
                 f"{self.result(current).get('error')}"
             )
         return current
+
+    def _record_delivery_latency(self, command: dict[str, Any]) -> None:
+        delivery = command.get("deliveries", {}).get(self.client_id, {})
+        transitions = delivery.get("transitions", [])
+        queued_at = next(
+            (
+                str(item.get("at"))
+                for item in transitions
+                if item.get("status") == "queued" and item.get("at")
+            ),
+            "",
+        )
+        leased_at = next(
+            (
+                str(item.get("at"))
+                for item in transitions
+                if item.get("status") == "leased" and item.get("at")
+            ),
+            "",
+        )
+        if not queued_at or not leased_at:
+            return
+        latency_ms = (
+            datetime.fromisoformat(leased_at) - datetime.fromisoformat(queued_at)
+        ).total_seconds() * 1000
+        self.delivery_timings_ms.append(max(0.0, latency_ms))
 
     def result(self, command: dict[str, Any]) -> dict[str, Any]:
         return command["deliveries"][self.client_id]["result"]
@@ -418,6 +446,10 @@ class BrowserE2E:
         return matches[0]
 
     def run_scenarios(self) -> None:
+        self.record(
+            "быстрая доставка через долгий запрос",
+            self.verify_long_poll_latency,
+        )
         initial = self.record("семантический снимок с фреймами", self.snapshot)
         if initial.get("frame_count", 0) < 3:
             raise AssertionError(f"Ожидалось минимум три фрейма: {initial.get('frame_count')}")
@@ -558,6 +590,18 @@ class BrowserE2E:
         self.record("конфликт блокировок двух агентов", self.verify_lock_conflict)
         self.record("восстановление MV3 service worker", self.verify_service_worker_restart)
         self.record("очередь результата после перезапуска хаба", self.verify_hub_restart)
+
+    def verify_long_poll_latency(self) -> None:
+        before = len(self.delivery_timings_ms)
+        self.command(
+            {"type": "get_page_url"},
+            retry_policy="safe_retry",
+        )
+        if len(self.delivery_timings_ms) != before + 1:
+            raise AssertionError("Хаб не записал переход queued → leased")
+        latency_ms = self.delivery_timings_ms[-1]
+        if latency_ms >= 1000:
+            raise AssertionError(f"Доставка через долгий запрос заняла {latency_ms:.2f} мс")
 
     def debug_targets(self) -> list[dict[str, Any]]:
         with urlopen(f"http://127.0.0.1:{self.debug_port}/json/list", timeout=5) as response:
@@ -717,6 +761,15 @@ class BrowserE2E:
                 if self.timings_ms
                 else 0,
                 "p95_command_ms": round(p95, 2),
+                "p50_delivery_ms": round(
+                    statistics.median(self.delivery_timings_ms),
+                    2,
+                )
+                if self.delivery_timings_ms
+                else 0,
+                "max_delivery_ms": round(max(self.delivery_timings_ms), 2)
+                if self.delivery_timings_ms
+                else 0,
                 "lost_acknowledged_commands": 0 if status == "passed" else None,
                 "duplicate_dangerous_actions": 0 if status == "passed" else None,
                 "recoveries": self.recoveries,

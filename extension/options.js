@@ -3,6 +3,7 @@ const DEFAULTS = {
   token: "local-bridge-quickstart-2026",
   clientId: "",
   pollIntervalMs: 2000,
+  longPollWaitMs: 25000,
   heartbeatIntervalMs: 8000
 };
 
@@ -30,6 +31,7 @@ async function load() {
   $("token").value = cfg.token;
   $("clientId").value = cfg.clientId;
   $("pollIntervalMs").value = cfg.pollIntervalMs;
+  $("longPollWaitMs").value = cfg.longPollWaitMs;
   $("heartbeatIntervalMs").value = cfg.heartbeatIntervalMs;
 }
 
@@ -39,6 +41,7 @@ async function save() {
     token: $("token").value.trim() || DEFAULTS.token,
     clientId: $("clientId").value.trim() || `client-${crypto.randomUUID()}`,
     pollIntervalMs: Number($("pollIntervalMs").value || DEFAULTS.pollIntervalMs),
+    longPollWaitMs: Number($("longPollWaitMs").value || DEFAULTS.longPollWaitMs),
     heartbeatIntervalMs: Number($("heartbeatIntervalMs").value || DEFAULTS.heartbeatIntervalMs)
   };
 

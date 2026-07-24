@@ -13,6 +13,7 @@ from urllib.parse import parse_qs, urlparse
 from .browser_agent import agent_api_schema
 from .config import HubConfig
 from .runtime_logging import RuntimeEventLogger
+from .services import MAX_LONG_POLL_WAIT_MS, HubServices
 from .settings import load_runtime_settings
 from .store import (
     ControlStore,
@@ -29,10 +30,18 @@ LOGGER = logging.getLogger("webcontrol.server")
 
 
 class HubHTTPServer(ThreadingHTTPServer):
-    def __init__(self, host: str, port: int, config: HubConfig, store: ControlStore):
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        config: HubConfig,
+        store: ControlStore,
+        services: HubServices | None = None,
+    ):
         super().__init__((host, port), HubRequestHandler)
         self.config = config
         self.store = store
+        self.services = services or HubServices.from_store(store)
 
 
 class HubRequestHandler(BaseHTTPRequestHandler):
@@ -136,7 +145,9 @@ class HubRequestHandler(BaseHTTPRequestHandler):
             },
         )
 
-    def _extract_telegram_from_user(self, payload: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
+    def _extract_telegram_from_user(
+        self, payload: dict[str, Any]
+    ) -> tuple[dict[str, Any] | None, str | None]:
         for source_key in ("message", "callback_query"):
             source = payload.get(source_key)
             if not isinstance(source, dict):
@@ -173,7 +184,9 @@ class HubRequestHandler(BaseHTTPRequestHandler):
             )
             return
         if path == "/health":
-            self._send_json(HTTPStatus.OK, {"ok": True, "service": "site-control-hub", "version": "0.1"})
+            self._send_json(
+                HTTPStatus.OK, {"ok": True, "service": "site-control-hub", "version": "0.1"}
+            )
             return
 
         if "token" in query:
@@ -190,11 +203,17 @@ class HubRequestHandler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/state":
-            self._send_json(HTTPStatus.OK, {"ok": True, "state": self.hub.store.snapshot()})
+            self._send_json(
+                HTTPStatus.OK,
+                {"ok": True, "state": self.hub.services.state.snapshot()},
+            )
             return
 
         if path == "/api/clients":
-            self._send_json(HTTPStatus.OK, {"ok": True, "clients": self.hub.store.list_clients()})
+            self._send_json(
+                HTTPStatus.OK,
+                {"ok": True, "clients": self.hub.services.clients.list_clients()},
+            )
             return
 
         if path == "/api/agent/schema":
@@ -204,7 +223,7 @@ class HubRequestHandler(BaseHTTPRequestHandler):
         if path == "/api/sessions":
             self._send_json(
                 HTTPStatus.OK,
-                {"ok": True, "sessions": self.hub.store.list_sessions()},
+                {"ok": True, "sessions": self.hub.services.sessions.list_sessions()},
             )
             return
 
@@ -220,26 +239,68 @@ class HubRequestHandler(BaseHTTPRequestHandler):
                 return
             self._send_json(
                 HTTPStatus.OK,
-                {"ok": True, "events": self.hub.store.journal_tail(limit)},
+                {"ok": True, "events": self.hub.services.state.journal_tail(limit)},
             )
             return
 
         if path == "/api/commands/next":
             client_id = query.get("client_id", [""])[0].strip()
             if not client_id:
-                self._send_json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": "client_id is required"})
+                self._send_json(
+                    HTTPStatus.BAD_REQUEST, {"ok": False, "error": "client_id is required"}
+                )
                 return
-            command = self.hub.store.pop_next_command(client_id)
-            self._send_json(HTTPStatus.OK, {"ok": True, "command": command})
+            wait_raw = query.get("wait_ms", ["0"])[0]
+            try:
+                wait_ms = int(wait_raw)
+            except ValueError:
+                self._send_json(
+                    HTTPStatus.BAD_REQUEST,
+                    {
+                        "ok": False,
+                        "error": "wait_ms must be an integer",
+                        "error_code": "invalid_wait_ms",
+                    },
+                )
+                return
+            if wait_ms < 0:
+                self._send_json(
+                    HTTPStatus.BAD_REQUEST,
+                    {
+                        "ok": False,
+                        "error": "wait_ms must be zero or greater",
+                        "error_code": "invalid_wait_ms",
+                    },
+                )
+                return
+            result = self.hub.services.commands.next_command(
+                client_id,
+                wait_ms=min(wait_ms, MAX_LONG_POLL_WAIT_MS),
+            )
+            self._send_json(
+                HTTPStatus.OK,
+                {
+                    "ok": True,
+                    "command": result.command,
+                    "poll": {
+                        "mode": result.mode,
+                        "wait_ms": result.wait_ms,
+                        "waited_ms": result.waited_ms,
+                        "timed_out": result.timed_out,
+                    },
+                },
+            )
             return
 
         if path.startswith("/api/commands/"):
             chunks = [chunk for chunk in path.split("/") if chunk]
             if len(chunks) == 3:
                 command_id = chunks[2]
-                command = self.hub.store.get_command(command_id)
+                command = self.hub.services.commands.get_command(command_id)
                 if not command:
-                    self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "error": "command not found"})
+                    self._send_json(
+                        HTTPStatus.NOT_FOUND, {"ok": False, "error": "command not found"}
+                    )
                     return
                 self._send_json(HTTPStatus.OK, {"ok": True, "command": command})
                 return
@@ -247,7 +308,7 @@ class HubRequestHandler(BaseHTTPRequestHandler):
         if path.startswith("/api/sessions/"):
             chunks = [chunk for chunk in path.split("/") if chunk]
             if len(chunks) == 3:
-                session = self.hub.store.get_session(chunks[2])
+                session = self.hub.services.sessions.get_session(chunks[2])
                 if not session:
                     self._send_json(
                         HTTPStatus.NOT_FOUND,
@@ -286,7 +347,9 @@ class HubRequestHandler(BaseHTTPRequestHandler):
         if path == "/api/clients/heartbeat":
             client_id = str(payload.get("client_id", "")).strip()
             if not client_id:
-                self._send_json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": "client_id is required"})
+                self._send_json(
+                    HTTPStatus.BAD_REQUEST, {"ok": False, "error": "client_id is required"}
+                )
                 return
 
             tabs = payload.get("tabs")
@@ -297,7 +360,7 @@ class HubRequestHandler(BaseHTTPRequestHandler):
             if not isinstance(meta, dict):
                 meta = {}
 
-            client = self.hub.store.register_client(
+            client = self.hub.services.clients.register_client(
                 client_id=client_id,
                 tabs=tabs,
                 meta=meta,
@@ -312,7 +375,7 @@ class HubRequestHandler(BaseHTTPRequestHandler):
             if not isinstance(policy, dict):
                 policy = {}
             try:
-                session = self.hub.store.create_session(
+                session = self.hub.services.sessions.create_session(
                     owner_id=str(payload.get("owner_id") or ""),
                     client_id=str(payload.get("client_id") or "") or None,
                     ttl_seconds=int(payload.get("ttl_seconds", 300)),
@@ -334,7 +397,7 @@ class HubRequestHandler(BaseHTTPRequestHandler):
         if path == "/api/storage/backup":
             destination_raw = str(payload.get("destination") or "").strip()
             destination = Path(destination_raw).expanduser() if destination_raw else None
-            backup = self.hub.store.backup(destination)
+            backup = self.hub.services.state.backup(destination)
             self._send_json(
                 HTTPStatus.OK,
                 {"ok": True, "backup_file": str(backup)},
@@ -347,30 +410,30 @@ class HubRequestHandler(BaseHTTPRequestHandler):
                 session_id = chunks[2]
                 try:
                     if len(chunks) == 4 and chunks[3] == "heartbeat":
-                        session = self.hub.store.heartbeat_session(session_id)
+                        session = self.hub.services.sessions.heartbeat_session(session_id)
                         self._send_json(HTTPStatus.OK, {"ok": True, "session": session})
                         return
                     if len(chunks) == 4 and chunks[3] == "close":
-                        session = self.hub.store.close_session(
+                        session = self.hub.services.sessions.close_session(
                             session_id,
                             reason=str(payload.get("reason") or "closed_by_owner"),
                         )
                         self._send_json(HTTPStatus.OK, {"ok": True, "session": session})
                         return
                     if len(chunks) == 4 and chunks[3] == "locks":
-                        lock = self.hub.store.acquire_tab_lock(
+                        lock = self.hub.services.sessions.acquire_tab_lock(
                             session_id=session_id,
                             client_id=str(payload.get("client_id") or ""),
-                            tab_id=int(payload.get("tab_id")),
+                            tab_id=int(str(payload.get("tab_id") or "")),
                             lock_mode=str(payload.get("lock_mode") or "exclusive"),
                         )
                         self._send_json(HTTPStatus.OK, {"ok": True, "lock": lock})
                         return
                     if len(chunks) == 5 and chunks[3:] == ["locks", "release"]:
-                        released = self.hub.store.release_tab_lock(
+                        released = self.hub.services.sessions.release_tab_lock(
                             session_id=session_id,
                             client_id=str(payload.get("client_id") or ""),
-                            tab_id=int(payload.get("tab_id")),
+                            tab_id=int(str(payload.get("tab_id") or "")),
                         )
                         self._send_json(HTTPStatus.OK, {"ok": True, "released": released})
                         return
@@ -387,7 +450,9 @@ class HubRequestHandler(BaseHTTPRequestHandler):
         if path == "/api/telegram/webhook":
             from_user, source = self._extract_telegram_from_user(payload)
             if not from_user or from_user.get("id") is None:
-                self._send_json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": "telegram from.id is required"})
+                self._send_json(
+                    HTTPStatus.BAD_REQUEST, {"ok": False, "error": "telegram from.id is required"}
+                )
                 return
 
             username_raw = str(from_user.get("username", "")).strip()
@@ -409,10 +474,14 @@ class HubRequestHandler(BaseHTTPRequestHandler):
         if path == "/api/commands":
             command = payload.get("command")
             if not isinstance(command, dict):
-                self._send_json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": "command must be an object"})
+                self._send_json(
+                    HTTPStatus.BAD_REQUEST, {"ok": False, "error": "command must be an object"}
+                )
                 return
             if not command.get("type"):
-                self._send_json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": "command.type is required"})
+                self._send_json(
+                    HTTPStatus.BAD_REQUEST, {"ok": False, "error": "command.type is required"}
+                )
                 return
 
             target = payload.get("target")
@@ -435,7 +504,7 @@ class HubRequestHandler(BaseHTTPRequestHandler):
             if not isinstance(confirmation, dict):
                 confirmation = {}
             try:
-                record = self.hub.store.enqueue_command(
+                record = self.hub.services.commands.enqueue_command(
                     command=command,
                     target=target,
                     timeout_ms=timeout_ms,
@@ -476,7 +545,7 @@ class HubRequestHandler(BaseHTTPRequestHandler):
             if len(chunks) == 4 and chunks[3] == "ack":
                 command_id = chunks[2]
                 try:
-                    command = self.hub.store.acknowledge_delivery(
+                    command = self.hub.services.commands.acknowledge_delivery(
                         command_id=command_id,
                         client_id=str(payload.get("client_id") or ""),
                         delivery_id=str(payload.get("delivery_id") or ""),
@@ -491,7 +560,7 @@ class HubRequestHandler(BaseHTTPRequestHandler):
             if len(chunks) == 4 and chunks[3] == "status":
                 command_id = chunks[2]
                 try:
-                    command = self.hub.store.update_delivery_status(
+                    command = self.hub.services.commands.update_delivery_status(
                         command_id=command_id,
                         client_id=str(payload.get("client_id") or ""),
                         delivery_id=str(payload.get("delivery_id") or ""),
@@ -509,14 +578,16 @@ class HubRequestHandler(BaseHTTPRequestHandler):
                 command_id = chunks[2]
                 client_id = str(payload.get("client_id", "")).strip()
                 if not client_id:
-                    self._send_json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": "client_id is required"})
+                    self._send_json(
+                        HTTPStatus.BAD_REQUEST, {"ok": False, "error": "client_id is required"}
+                    )
                     return
 
                 diagnostics = payload.get("diagnostics")
                 if not isinstance(diagnostics, dict):
                     diagnostics = {}
                 try:
-                    command = self.hub.store.submit_result(
+                    command = self.hub.services.commands.submit_result(
                         command_id=command_id,
                         client_id=client_id,
                         ok=bool(payload.get("ok", False)),
@@ -534,16 +605,20 @@ class HubRequestHandler(BaseHTTPRequestHandler):
                     self._send_store_error(exc)
                     return
                 if not command:
-                    self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "error": "command not found"})
+                    self._send_json(
+                        HTTPStatus.NOT_FOUND, {"ok": False, "error": "command not found"}
+                    )
                     return
                 self._send_json(HTTPStatus.OK, {"ok": True, "command": command})
                 return
 
             if len(chunks) == 4 and chunks[3] == "cancel":
                 command_id = chunks[2]
-                command = self.hub.store.cancel_command(command_id)
+                command = self.hub.services.commands.cancel_command(command_id)
                 if not command:
-                    self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "error": "command not found"})
+                    self._send_json(
+                        HTTPStatus.NOT_FOUND, {"ok": False, "error": "command not found"}
+                    )
                     return
                 self._send_json(HTTPStatus.OK, {"ok": True, "command": command})
                 return

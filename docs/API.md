@@ -2,11 +2,11 @@
 
 Базовый адрес по умолчанию: `http://127.0.0.1:8765`.
 
-Версия протокола: `2.0`.
+Версия протокола: `2.1`.
 
 Версия агентного API: `1.1`.
 
-Версия расширения: `0.2.0`.
+Версия расширения: `0.3.0`.
 
 Версия CLI: `0.1.0`.
 
@@ -144,7 +144,7 @@ queued -> leased -> acknowledged -> running
 ```json
 {
   "client_id": "client-123",
-  "extension_version": "0.2.0",
+  "extension_version": "0.3.0",
   "user_agent": "Mozilla/5.0 ...",
   "tabs": [
     {
@@ -157,8 +157,11 @@ queued -> leased -> acknowledged -> running
   ],
   "meta": {
     "extension": "site-control-bridge",
-    "protocol_version": "2.0",
-    "capabilities": ["delivery_ack", "sessions", "iframes", "semantic_snapshot"]
+    "protocol_version": "2.1",
+    "capabilities": {
+      "delivery_acknowledgement": true,
+      "long_poll": true
+    }
   }
 }
 ```
@@ -211,9 +214,19 @@ queued -> leased -> acknowledged -> running
 команду и `idempotency_reused: true`. Другой payload с тем же ключом получает
 HTTP `409` и `idempotency_conflict`.
 
-### `GET /api/commands/next?client_id=<id>`
+### `GET /api/commands/next?client_id=<id>&wait_ms=<0..25000>`
 
-Расширение получает аренду следующей команды:
+Расширение получает аренду следующей команды. Необязательный `wait_ms` задаёт
+долгий запрос:
+
+- `0` или отсутствие параметра — немедленный совместимый ответ;
+- `1..25000` — хаб ждёт команду, но не дольше указанного времени;
+- значение больше `25000` ограничивается до `25000`;
+- отрицательное или нецелое значение получает `400 invalid_wait_ms`.
+
+Хаб будит ожидающий запрос сразу после постановки команды через
+`CommandService`. Ожидание не меняет аренду: `lease_token` создаётся только
+когда команда действительно выдана.
 
 ```json
 {
@@ -232,11 +245,19 @@ HTTP `409` и `idempotency_conflict`.
     "command": {
       "type": "snapshot"
     }
+  },
+  "poll": {
+    "mode": "long_poll",
+    "wait_ms": 25000,
+    "waited_ms": 14,
+    "timed_out": false
   }
 }
 ```
 
-Пустая очередь возвращает `"command": null`.
+Пустая очередь после истечения ожидания возвращает `"command": null` и
+`"timed_out": true`. Старый клиент может продолжать вызывать маршрут без
+`wait_ms`; структура `command` не изменилась.
 
 ### `POST /api/commands/{command_id}/ack`
 
@@ -551,4 +572,6 @@ DOM-команды недоступен.
 - закрытый Shadow DOM не доступен через DOM API;
 - автоматический повтор опасного действия после начала выполнения запрещён;
 - старые клиенты без ack поддерживаются только как переходный режим и не дают
-  полной гарантии протокола 2.0.
+  полной гарантии протокола `2.x`;
+- каждый долгий запрос занимает один поток локального HTTP-сервера до команды
+  или тайм-аута; время ограничено 25 секундами.

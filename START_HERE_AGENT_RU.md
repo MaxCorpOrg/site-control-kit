@@ -35,7 +35,9 @@ PYTHONPATH="$PWD" python3 -m unittest discover -s tests -p 'test_*.py'
 
 Определи подсистему:
 
-- HTTP, auth, доставка, сессии — `webcontrol/`;
+- HTTP и auth — `webcontrol/server.py`;
+- доставка и ожидание команды — `webcontrol/services.py`;
+- транзакционные переходы и сессии — `webcontrol/store.py`;
 - вкладки, iframe, CDP — `extension/background.js`;
 - DOM, локаторы, ожидания — `extension/agent_dom.js` и `content.js`;
 - короткие команды — `webcontrol/cli.py`;
@@ -102,7 +104,8 @@ sitectl browser set-text --label "Имя" "Анна"
 
 ### Почему команда зависла в `queued`?
 
-Нет онлайн‑клиента, выбрана неверная цель или расширение не опрашивает хаб.
+Нет онлайн‑клиента, выбрана неверная цель или расширение не держит долгий
+запрос к хабу.
 Проверь `browser status`, `clients` и `tabs`.
 
 ### Почему старая команда получила `stale_lease`?

@@ -125,7 +125,8 @@ def agent_api_schema() -> dict[str, Any]:
         "protocol_version": HUB_PROTOCOL_VERSION,
         "transport": {
             "enqueue": "POST /api/commands",
-            "lease": "GET /api/commands/next?client_id=...",
+            "lease": "GET /api/commands/next?client_id=...&wait_ms=25000",
+            "long_poll_wait_ms": "optional 0..25000; zero keeps immediate mode",
             "acknowledge": "POST /api/commands/{command_id}/ack",
             "running": "POST /api/commands/{command_id}/status",
             "result": "POST /api/commands/{command_id}/result",

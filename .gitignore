@@ -12,6 +12,7 @@ __pycache__/
 !.env.example
 .codex
 .codex/
+.cache/
 TG_CONTACT/
 node_modules/
 .site-control-kit/

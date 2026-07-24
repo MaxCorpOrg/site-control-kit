@@ -6,8 +6,9 @@ MV3‑расширение получает аренды и управляет �
 
 ## Основные файлы
 
-`background.js` — transport, outbox, Tab/Frame/CDP; `agent_dom.js` — локаторы;
-`content.js` — действия; `manifest.json` — разрешения и версия.
+`transport.js` — чистые правила долгого запроса; `background.js` — цикл,
+outbox, Tab/Frame/CDP; `agent_dom.js` — локаторы; `content.js` — действия;
+`manifest.json` — разрешения и версия.
 
 ## Разрешено и запрещено
 
@@ -22,7 +23,7 @@ iframe, `chrome://`, CSP и два CDP attach одной вкладки.
 
 ## Проверка
 
-`node --check` для трёх JS‑файлов, `node --test tests/js/agent_dom.test.mjs` и
+`node --check` для четырёх JS‑файлов, `node --test tests/js/*.test.mjs` и
 Chrome E2E.
 
 ## Что обновить
