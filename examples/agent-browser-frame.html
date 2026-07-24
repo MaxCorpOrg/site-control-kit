@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>Тестовый фрейм</title>
+</head>
+<body>
+  <h2>Первый фрейм</h2>
+  <label for="frame-value">Значение во фрейме</label>
+  <input id="frame-value" placeholder="Текст фрейма">
+  <button id="frame-save" type="button">Сохранить во фрейме</button>
+  <output id="frame-status">Фрейм ожидает</output>
+  <iframe
+    id="nested-frame"
+    name="nested-frame"
+    src="agent-browser-nested-frame.html"
+  ></iframe>
+  <script>
+    document.querySelector("#frame-save").onclick = () => {
+      const value = document.querySelector("#frame-value").value;
+      document.querySelector("#frame-status").textContent = `Фрейм: ${value}`;
+    };
+  </script>
+</body>
+</html>

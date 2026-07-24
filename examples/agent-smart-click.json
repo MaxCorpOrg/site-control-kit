@@ -1,0 +1,26 @@
+{
+  "issued_by": "example-agent",
+  "timeout_ms": 20000,
+  "idempotency_key": "example-save-click-1",
+  "retry_policy": "never_retry",
+  "confirmation": {
+    "confirmed": true
+  },
+  "target": {
+    "client_id": "REPLACE_CLIENT_ID",
+    "tab_id": 1
+  },
+  "command": {
+    "type": "smart_click",
+    "locator": {
+      "strategy": "role",
+      "value": "button",
+      "name": "Сохранить",
+      "exact": true
+    },
+    "proof": {
+      "expected_text": "Готово:",
+      "timeout_ms": 5000
+    }
+  }
+}
