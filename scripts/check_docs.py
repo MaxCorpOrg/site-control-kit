@@ -134,11 +134,7 @@ def _git_paths(*args: str) -> list[str]:
         check=True,
         stdout=subprocess.PIPE,
     )
-    return [
-        item.decode("utf-8", errors="strict")
-        for item in result.stdout.split(b"\0")
-        if item
-    ]
+    return [item.decode("utf-8", errors="strict") for item in result.stdout.split(b"\0") if item]
 
 
 def markdown_files(base: str | None) -> list[Path]:
@@ -156,16 +152,12 @@ def markdown_files(base: str | None) -> list[Path]:
         except subprocess.CalledProcessError:
             names.update(_git_paths("ls-files", "*.md"))
         names.update(_git_paths("diff", "--name-only", "--diff-filter=ACMR"))
-        names.update(
-            _git_paths("diff", "--cached", "--name-only", "--diff-filter=ACMR")
-        )
+        names.update(_git_paths("diff", "--cached", "--name-only", "--diff-filter=ACMR"))
     else:
         names.update(_git_paths("ls-files", "*.md"))
     names.update(_git_paths("ls-files", "--others", "--exclude-standard", "*.md"))
     return [
-        ROOT / name
-        for name in sorted(names)
-        if name.endswith(".md") and (ROOT / name).is_file()
+        ROOT / name for name in sorted(names) if name.endswith(".md") and (ROOT / name).is_file()
     ]
 
 
@@ -230,9 +222,7 @@ def check_agent_instructions() -> list[dict[str, str | int]]:
         instruction = ROOT / directory / "AGENTS.md"
         relative = instruction.relative_to(ROOT).as_posix()
         if not instruction.is_file():
-            findings.append(
-                finding(relative, "missing_agent_instruction", target=relative)
-            )
+            findings.append(finding(relative, "missing_agent_instruction", target=relative))
             continue
         text = instruction.read_text(encoding="utf-8")
         lowered = text.lower()
@@ -273,9 +263,7 @@ def check_versions() -> list[dict[str, str | int]]:
         STORAGE_SCHEMA_VERSION,
     )
 
-    manifest = json.loads(
-        (ROOT / "extension" / "manifest.json").read_text(encoding="utf-8")
-    )
+    manifest = json.loads((ROOT / "extension" / "manifest.json").read_text(encoding="utf-8"))
     project_text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     project_match = PROJECT_VERSION_RE.search(project_text)
     project_version = project_match.group(1) if project_match else ""
@@ -286,13 +274,9 @@ def check_versions() -> list[dict[str, str | int]]:
     markers = {
         "protocol_version_mismatch": f"Версия протокола: `{HUB_PROTOCOL_VERSION}`",
         "agent_api_version_mismatch": f"Версия агентного API: `{AGENT_API_VERSION}`",
-        "extension_version_mismatch": (
-            f"Версия расширения: `{manifest['version']}`"
-        ),
+        "extension_version_mismatch": (f"Версия расширения: `{manifest['version']}`"),
         "cli_version_mismatch": f"Версия CLI: `{project_version}`",
-        "storage_schema_version_mismatch": (
-            f"Версия схемы хранилища: `{STORAGE_SCHEMA_VERSION}`"
-        ),
+        "storage_schema_version_mismatch": (f"Версия схемы хранилища: `{STORAGE_SCHEMA_VERSION}`"),
     }
     return [
         finding("docs/API.md", kind, target=marker)
@@ -387,8 +371,9 @@ def check_documented_cli_syntax() -> list[dict[str, str | int]]:
             args = _cli_args_from_line(line)
             if args is None:
                 continue
-            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
-                io.StringIO()
+            with (
+                contextlib.redirect_stdout(io.StringIO()),
+                contextlib.redirect_stderr(io.StringIO()),
             ):
                 try:
                     parser.parse_args(args)

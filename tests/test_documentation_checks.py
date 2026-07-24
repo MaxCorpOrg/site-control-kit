@@ -30,15 +30,13 @@ class DocumentationChecksTests(unittest.TestCase):
         self.assertEqual(
             ["browser", "set-text", "--label", "Имя", "Анна"],
             check_docs._cli_args_from_line(
-                'PYTHONPATH="$PWD" python3 -m webcontrol '
-                'browser set-text --label "Имя" "Анна"'
+                'PYTHONPATH="$PWD" python3 -m webcontrol browser set-text --label "Имя" "Анна"'
             ),
         )
         self.assertEqual(
             ["session", "lock", "значение", "--tab-id", "1", "--client-id", "значение"],
             check_docs._cli_args_from_line(
-                "sitectl session lock <session-id> "
-                "--tab-id <tab-id> --client-id <client-id>"
+                "sitectl session lock <session-id> --tab-id <tab-id> --client-id <client-id>"
             ),
         )
 
@@ -55,9 +53,7 @@ class DocumentationChecksTests(unittest.TestCase):
                 patch.object(check_docs, "WORKING_DIRECTORIES", ("code",)),
             ):
                 findings = check_docs.check_agent_instructions()
-        self.assertTrue(
-            any(item["kind"] == "missing_agent_instruction" for item in findings)
-        )
+        self.assertTrue(any(item["kind"] == "missing_agent_instruction" for item in findings))
 
 
 if __name__ == "__main__":
