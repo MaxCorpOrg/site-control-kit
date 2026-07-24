@@ -30,6 +30,9 @@
 Отчёт:
 `docs/reports/LONG_POLL_ACCEPTANCE_2026-07-24_RU.md`.
 
+Воспроизводимая контрольная точка:
+`docs/checkpoints/CHECKPOINT_2026-07-24_SERVICES_LONG_POLL_RU.md`.
+
 Черновой P1-PR:
 `https://github.com/MaxCorpOrg/site-control-kit/pull/4`.
 
