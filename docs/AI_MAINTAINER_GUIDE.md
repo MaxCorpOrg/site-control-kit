@@ -15,7 +15,9 @@
 
 ## Выбор слоя
 
-- HTTP, auth, состояния доставки — `webcontrol/server.py` и `protocol.py`;
+- HTTP и auth — `webcontrol/server.py`;
+- границы сервисов и ожидание команды — `webcontrol/services.py`;
+- состояния доставки — `webcontrol/store.py` и `protocol.py`;
 - транзакции, очереди, сессии — `store.py` и `state_backend.py`;
 - агентная схема — `browser_agent.py`;
 - DOM‑поиск — `extension/agent_dom.js`;
@@ -63,6 +65,8 @@
 
 - добавлять второй механизм локаторов в `content.js`;
 - хранить критическое состояние только в service worker;
+- вызывать `ControlStore.enqueue_command` из HTTP в обход `CommandService`,
+  из-за чего ожидающий клиент не получит уведомление;
 - принимать результат без проверки активной аренды;
 - разрешать сессионной команде неявную вкладку;
 - подключать CDP без `finally`;
@@ -79,6 +83,7 @@ python3 scripts/check_repository.py --base origin/main
 node --check extension/agent_dom.js
 node --check extension/content.js
 node --check extension/background.js
+node --check extension/transport.js
 git diff --check
 ```
 

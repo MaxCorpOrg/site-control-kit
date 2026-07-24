@@ -47,20 +47,24 @@ jobs:
             webcontrol/artifacts.py \
             webcontrol/browser_agent.py \
             webcontrol/protocol.py \
+            webcontrol/services.py \
             webcontrol/state_backend.py \
             scripts/browser_e2e.py \
             scripts/install_chrome_for_testing.py
           ruff check webcontrol scripts/browser_e2e.py scripts/check_docs.py \
             scripts/check_repository.py scripts/install_chrome_for_testing.py \
             tests/test_agent_sessions.py tests/test_browser_agent.py \
-            tests/test_reliable_delivery.py tests/test_server_api.py tests/test_store.py
+            tests/test_reliable_delivery.py tests/test_server_api.py \
+            tests/test_services.py tests/test_store.py
           ruff format --check webcontrol/artifacts.py webcontrol/browser_agent.py \
-            webcontrol/protocol.py webcontrol/state_backend.py scripts/browser_e2e.py \
+            webcontrol/protocol.py webcontrol/services.py webcontrol/state_backend.py \
+            scripts/browser_e2e.py \
             scripts/check_docs.py scripts/check_repository.py \
             scripts/install_chrome_for_testing.py tests/test_agent_sessions.py \
-            tests/test_browser_agent.py tests/test_reliable_delivery.py
+            tests/test_browser_agent.py tests/test_reliable_delivery.py \
+            tests/test_services.py
           mypy webcontrol/artifacts.py webcontrol/browser_agent.py webcontrol/protocol.py \
-            webcontrol/state_backend.py scripts/browser_e2e.py \
+            webcontrol/services.py webcontrol/state_backend.py scripts/browser_e2e.py \
             scripts/check_docs.py scripts/check_repository.py \
             scripts/install_chrome_for_testing.py
 
@@ -69,7 +73,8 @@ jobs:
           node --check extension/agent_dom.js
           node --check extension/content.js
           node --check extension/background.js
-          node --test tests/js/agent_dom.test.mjs
+          node --check extension/transport.js
+          node --test tests/js/agent_dom.test.mjs tests/js/transport.test.mjs
           python -m json.tool extension/manifest.json >/dev/null
           for file in examples/*.json; do python -m json.tool "$file" >/dev/null; done
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
 from urllib.error import HTTPError
@@ -125,7 +126,7 @@ class ServerApiTests(unittest.TestCase):
     def test_agent_schema_reports_protocol_and_extension_contract(self) -> None:
         status, payload = self._request("/api/agent/schema")
         self.assertEqual(status, 200)
-        self.assertEqual(payload["schema"]["protocol_version"], "2.0")
+        self.assertEqual(payload["schema"]["protocol_version"], "2.1")
         self.assertIn("smart_click", payload["schema"]["commands"])
         self.assertIn("stable_refs", payload["schema"]["compatibility"])
 
@@ -227,6 +228,46 @@ class ServerApiTests(unittest.TestCase):
         )
         self.assertEqual(status, 200)
         self.assertEqual(payload["command"]["status"], "completed")
+
+    def test_long_poll_wakes_when_command_is_enqueued(self) -> None:
+        self._heartbeat("c1")
+        response: list[tuple[int, dict]] = []
+        started = time.monotonic()
+        waiter = threading.Thread(
+            target=lambda: response.append(
+                self._request("/api/commands/next?client_id=c1&wait_ms=2000")
+            )
+        )
+        waiter.start()
+        time.sleep(0.05)
+
+        status, payload = self._request(
+            "/api/commands",
+            method="POST",
+            payload={
+                "issued_by": "test",
+                "timeout_ms": 5000,
+                "target": {"client_id": "c1"},
+                "command": {"type": "extract_text", "selector": "body"},
+            },
+        )
+        self.assertEqual(status, 200)
+
+        waiter.join(timeout=1)
+        self.assertFalse(waiter.is_alive())
+        self.assertEqual(response[0][0], 200)
+        self.assertEqual(response[0][1]["command"]["id"], payload["command_id"])
+        self.assertEqual(response[0][1]["poll"]["mode"], "long_poll")
+        self.assertFalse(response[0][1]["poll"]["timed_out"])
+        self.assertLess((time.monotonic() - started) * 1000, 500)
+
+    def test_long_poll_rejects_invalid_wait(self) -> None:
+        self._heartbeat("c1")
+
+        status, payload = self._request("/api/commands/next?client_id=c1&wait_ms=not-a-number")
+
+        self.assertEqual(status, 400)
+        self.assertEqual(payload["error_code"], "invalid_wait_ms")
 
     def test_command_is_rejected_when_multiple_online_clients_and_no_target(self) -> None:
         self._heartbeat("c1")

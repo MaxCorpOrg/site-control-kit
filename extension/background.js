@@ -1,12 +1,19 @@
+import {
+  buildNextCommandPath,
+  nextPollDelayMs,
+  normalizeLongPollWaitMs
+} from "./transport.js";
+
 const DEFAULT_CONFIG = {
   serverUrl: "http://127.0.0.1:8765",
   token: "local-bridge-quickstart-2026",
   clientId: "",
   pollIntervalMs: 2000,
+  longPollWaitMs: 25000,
   heartbeatIntervalMs: 8000
 };
 
-const PROTOCOL_VERSION = "2.0";
+const PROTOCOL_VERSION = "2.1";
 const RESULT_OUTBOX_KEY = "pendingCommandResultsV2";
 const BRIDGE_CAPABILITIES = {
   protocol_version: PROTOCOL_VERSION,
@@ -49,13 +56,16 @@ const BRIDGE_CAPABILITIES = {
   frames: ["frame_id", "url", "name", "css", "nested"],
   shadow_dom: ["open"],
   result_outbox: true,
-  delivery_acknowledgement: true
+  delivery_acknowledgement: true,
+  long_poll: true
 };
 
 let pollTimer = null;
 let heartbeatTimer = null;
 let pollInFlight = false;
 let heartbeatInFlight = false;
+let pollLoopActive = false;
+let pollRetryDelayMs = DEFAULT_CONFIG.pollIntervalMs;
 const cdpAttachedTabs = new Set();
 
 class ApiError extends Error {
@@ -771,6 +781,7 @@ async function sendHeartbeat(config) {
     meta: {
       extension: "site-control-bridge",
       platform: navigator.platform,
+      protocol_version: PROTOCOL_VERSION,
       capabilities: BRIDGE_CAPABILITIES
     }
   };
@@ -1187,8 +1198,8 @@ async function executeCommandEnvelope(envelope) {
   }
 }
 
-async function pollOnce(reason = "timer") {
-  if (pollInFlight) return;
+async function pollOnce(reason = "timer", waitForCommand = false) {
+  if (pollInFlight) return "busy";
   pollInFlight = true;
   try {
     const config = await getConfig();
@@ -1198,21 +1209,26 @@ async function pollOnce(reason = "timer") {
         lastPollError: "Не задан токен в настройках расширения",
         lastPollReason: reason
       });
-      return;
+      return "error";
     }
     const pendingResults = await flushPendingResults(config);
     if (pendingResults > 0) {
       throw new Error(`В очереди результатов осталось записей: ${pendingResults}`);
     }
-    const query = new URLSearchParams({ client_id: config.clientId }).toString();
-    const response = await apiRequest(config, `/api/commands/next?${query}`, "GET");
+    const path = waitForCommand
+      ? buildNextCommandPath(
+          config.clientId,
+          normalizeLongPollWaitMs(config.longPollWaitMs)
+        )
+      : `/api/commands/next?${new URLSearchParams({ client_id: config.clientId })}`;
+    const response = await apiRequest(config, path, "GET");
     await storageSet({
       lastPollAt: new Date().toISOString(),
       lastPollError: "",
       lastPollReason: reason
     });
     const envelope = response.command;
-    if (!envelope) return;
+    if (!envelope) return "ok";
     if (!envelope.delivery_id || !envelope.lease_token) {
       throw new Error("Хаб вернул команду без идентификаторов аренды");
     }
@@ -1221,12 +1237,14 @@ async function pollOnce(reason = "timer") {
     const result = await executeCommandEnvelope(envelope);
     await enqueuePendingResult(config, envelope, result);
     await flushPendingResults(config);
+    return "ok";
   } catch (error) {
     await storageSet({
       lastPollAt: new Date().toISOString(),
       lastPollError: String(error?.message || error),
       lastPollReason: reason
     });
+    return "error";
   } finally {
     pollInFlight = false;
   }
@@ -1264,16 +1282,16 @@ async function heartbeatOnce(reason = "timer") {
 
 async function startTimers() {
   const config = await getConfig();
-  const pollIntervalMs = Math.max(500, Number(config.pollIntervalMs || DEFAULT_CONFIG.pollIntervalMs));
+  pollRetryDelayMs = Math.max(
+    500,
+    Number(config.pollIntervalMs || DEFAULT_CONFIG.pollIntervalMs)
+  );
   const heartbeatIntervalMs = Math.max(
     1000,
     Number(config.heartbeatIntervalMs || DEFAULT_CONFIG.heartbeatIntervalMs)
   );
-  if (!pollTimer) {
-    pollTimer = setInterval(() => {
-      pollOnce("setInterval").catch(() => {});
-    }, pollIntervalMs);
-  }
+  pollLoopActive = true;
+  schedulePollLoop(0);
   if (!heartbeatTimer) {
     heartbeatTimer = setInterval(() => {
       heartbeatOnce("setInterval").catch(() => {});
@@ -1282,9 +1300,19 @@ async function startTimers() {
   chrome.alarms.create("site-control-poll", { periodInMinutes: 1 });
 }
 
+function schedulePollLoop(delayMs) {
+  if (!pollLoopActive || pollTimer) return;
+  pollTimer = setTimeout(async () => {
+    pollTimer = null;
+    const outcome = await pollOnce("longPoll", true);
+    schedulePollLoop(nextPollDelayMs(outcome, pollRetryDelayMs));
+  }, Math.max(0, Number(delayMs) || 0));
+}
+
 function stopTimers() {
+  pollLoopActive = false;
   if (pollTimer) {
-    clearInterval(pollTimer);
+    clearTimeout(pollTimer);
     pollTimer = null;
   }
   if (heartbeatTimer) {

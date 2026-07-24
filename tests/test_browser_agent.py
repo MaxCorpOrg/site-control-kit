@@ -17,7 +17,8 @@ class BrowserAgentContractTests(unittest.TestCase):
 
     def test_schema_describes_reliable_delivery_and_frames(self) -> None:
         schema = agent_api_schema()
-        self.assertEqual(schema["protocol_version"], "2.0")
+        self.assertEqual(schema["protocol_version"], "2.1")
+        self.assertIn("wait_ms", schema["transport"]["lease"])
         self.assertIn("dead_letter", schema["delivery"]["states"])
         self.assertIn("delivery_id", schema["delivery"]["identifiers"])
         self.assertIn("frame_id", schema["frames"]["strategies"])

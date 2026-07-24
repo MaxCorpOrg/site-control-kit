@@ -2,9 +2,10 @@
 
 | Задача | Куда идти | Что проверить |
 | --- | --- | --- |
-| Доставка команды | `webcontrol/store.py`, `protocol.py` | аренда, stale lease, идемпотентность |
+| Доставка команды | `webcontrol/services.py`, `store.py`, `protocol.py` | долгий запрос, аренда, stale lease, идемпотентность |
 | HTTP и токен | `webcontrol/server.py` | заголовок, Origin, совместимость |
 | Команда CLI | `webcontrol/cli.py` | `--help`, старый синтаксис |
+| Транспорт расширения | `extension/transport.js`, `background.js` | один запрос, backoff, пробуждение |
 | Вкладка или CDP | `extension/background.js` | detach в `finally`, outbox |
 | DOM и локатор | `extension/agent_dom.js` | strict, iframe, Shadow DOM |
 | Сквозная проверка | `scripts/browser_e2e.py` | настоящий Chrome |

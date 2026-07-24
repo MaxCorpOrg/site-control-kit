@@ -4,7 +4,7 @@ import hashlib
 import json
 from typing import Any
 
-HUB_PROTOCOL_VERSION = "2.0"
+HUB_PROTOCOL_VERSION = "2.1"
 AGENT_API_VERSION = "1.1"
 STORAGE_SCHEMA_VERSION = 2
 
