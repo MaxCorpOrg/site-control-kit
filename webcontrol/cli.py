@@ -15,9 +15,16 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+from .browser_agent import WAIT_STATES, build_locator_from_args
 from .config import HubConfig
+from .protocol import RETRY_POLICIES
 from .server import run_server
-from .settings import format_runtime_env, load_runtime_settings, resolve_hub_token, resolve_hub_token_with_source
+from .settings import (
+    format_runtime_env,
+    load_runtime_settings,
+    resolve_hub_token,
+    resolve_hub_token_with_source,
+)
 from .store import TERMINAL_COMMAND_STATUSES
 from .utils import compact
 
@@ -389,6 +396,38 @@ def _browser_target(args: argparse.Namespace, client_id: str) -> dict[str, Any]:
     )
 
 
+def _frame_from_args(args: argparse.Namespace) -> dict[str, Any] | None:
+    choices = (
+        ("frame_id", getattr(args, "frame_id", None)),
+        ("url", getattr(args, "frame_url", None)),
+        ("name", getattr(args, "frame_name", None)),
+        ("css", getattr(args, "frame_css", None)),
+    )
+    selected = [(key, value) for key, value in choices if value is not None and str(value).strip()]
+    if not selected:
+        return None
+    key, value = selected[0]
+    return {key: int(value) if key == "frame_id" else str(value)}
+
+
+def _proof_from_args(args: argparse.Namespace) -> dict[str, Any] | None:
+    proof = compact(
+        {
+            "url_changed": bool(getattr(args, "proof_url_changed", False)) or None,
+            "text_changed": bool(getattr(args, "proof_text_changed", False)) or None,
+            "value_changed": bool(getattr(args, "proof_value_changed", False)) or None,
+            "expected_url": getattr(args, "proof_expected_url", None),
+            "expected_text": getattr(args, "proof_expected_text", None),
+            "expected_value": getattr(args, "proof_expected_value", None),
+            "selector_appears": getattr(args, "proof_selector_appears", None),
+            "selector_disappears": getattr(args, "proof_selector_disappears", None),
+            "new_tab": bool(getattr(args, "proof_new_tab", False)) or None,
+            "timeout_ms": getattr(args, "proof_timeout_ms", None),
+        }
+    )
+    return proof or None
+
+
 def _browser_send_command(
     *,
     server: str,
@@ -399,6 +438,10 @@ def _browser_send_command(
     timeout_ms: int,
     wait_sec: int,
     poll_interval: float,
+    session_id: str | None = None,
+    idempotency_key: str | None = None,
+    retry_policy: str | None = None,
+    confirm_dangerous: bool = False,
 ) -> dict[str, Any]:
     response = _http_json(
         server=server,
@@ -410,6 +453,10 @@ def _browser_send_command(
             "timeout_ms": timeout_ms,
             "target": target,
             "command": command,
+            "session_id": session_id,
+            "idempotency_key": idempotency_key,
+            "retry_policy": retry_policy,
+            "confirmation": {"confirmed": True} if confirm_dangerous else {},
         },
     )
     if not response.get("ok"):
@@ -462,6 +509,16 @@ def _print_browser_summary(
 def cmd_browser(args: argparse.Namespace) -> int:
     try:
         server, token = _extract_runtime(args)
+
+        if args.browser_action == "schema":
+            response = _http_json(
+                server=server,
+                token=token,
+                method="GET",
+                path="/api/agent/schema",
+            )
+            _print_json(response)
+            return 0
 
         if args.browser_action == "clients":
             _print_json({"ok": True, "clients": _get_clients(server, token)})
@@ -518,42 +575,103 @@ def cmd_browser(args: argparse.Namespace) -> int:
             )
             return 0 if command_record.get("status") == "completed" else 1
 
+        frame = _frame_from_args(args)
         if action == "open":
-            command = {"type": "navigate", "url": args.url}
+            command = {
+                "type": "navigate",
+                "url": args.url,
+                "wait_until": args.wait_until,
+                "expected_url": args.expected_url,
+                "expected_title": args.expected_title,
+                "timeout_ms": args.command_timeout_ms,
+                "allow_redirects": args.allow_redirects,
+                "quiet_ms": args.quiet_ms,
+                "loading_selector": args.loading_selector,
+            }
         elif action == "new-tab":
-            command = {"type": "new_tab", "url": args.url, "active": not args.background}
+            command = {
+                "type": "new_tab",
+                "url": args.url,
+                "active": not args.background,
+                "wait_until": args.wait_until,
+                "expected_url": args.expected_url,
+                "expected_title": args.expected_title,
+                "timeout_ms": args.command_timeout_ms,
+                "quiet_ms": args.quiet_ms,
+                "loading_selector": args.loading_selector,
+            }
+        elif action == "snapshot":
+            command = {
+                "type": "snapshot",
+                "root_selector": args.root_selector,
+                "limit": args.limit,
+                "include_hidden": args.include_hidden,
+                "include_frames": args.include_frames,
+            }
+        elif action == "smart-click":
+            command = {
+                "type": "smart_click",
+                "locator": build_locator_from_args(args),
+                "timeout_ms": args.command_timeout_ms,
+                "proof": _proof_from_args(args),
+            }
+        elif action == "set-text":
+            command = {
+                "type": "set_editable_text",
+                "locator": build_locator_from_args(args),
+                "value": args.value,
+                "timeout_ms": args.command_timeout_ms,
+                "proof": _proof_from_args(args),
+            }
+        elif action == "wait-for":
+            command = {
+                "type": "wait_for",
+                "locator": build_locator_from_args(args),
+                "state": args.state,
+                "expected_text": args.expected_text,
+                "expected_value": args.expected_value,
+                "exact": args.exact_value,
+                "timeout_ms": args.command_timeout_ms,
+            }
         elif action == "click":
-            command = {"type": "click", "selector": args.selector}
+            command = {"type": "click", "selector": args.selector, "frame": frame}
         elif action == "context-click":
-            command = {"type": "context_click", "selector": args.selector}
+            command = {"type": "context_click", "selector": args.selector, "frame": frame}
         elif action == "click-text":
             command = {
                 "type": "click_text",
                 "text": args.text,
                 "root_selector": args.root_selector,
                 "near_last_context": args.near_last_context,
+                "frame": frame,
             }
         elif action == "clear":
-            command = {"type": "clear_editable", "selectors": args.selectors}
+            command = {"type": "clear_editable", "selectors": args.selectors, "frame": frame}
         elif action == "fill":
-            command = {"type": "fill", "selector": args.selector, "value": args.value}
+            command = {"type": "fill", "selector": args.selector, "value": args.value, "frame": frame}
         elif action == "focus":
-            command = {"type": "focus", "selector": args.selector}
+            command = {"type": "focus", "selector": args.selector, "frame": frame}
         elif action == "wait":
             command = {
                 "type": "wait_selector",
                 "selector": args.selector,
                 "timeout_ms": args.command_timeout_ms,
                 "visible_only": args.visible_only,
+                "frame": frame,
             }
         elif action == "text":
-            command = {"type": "extract_text", "selector": args.selector}
+            command = {"type": "extract_text", "selector": args.selector, "frame": frame}
         elif action == "html":
-            command = {"type": "get_html", "selector": args.selector}
+            command = {"type": "get_html", "selector": args.selector, "frame": frame}
         elif action == "attr":
-            command = {"type": "get_attribute", "selector": args.selector, "attribute": args.attribute}
+            command = {
+                "type": "get_attribute",
+                "selector": args.selector,
+                "attribute": args.attribute,
+                "frame": frame,
+            }
         elif action == "page-url":
-            command = {"type": "get_page_url"}
+            command = {"type": "get_page_url", "frame": frame}
         elif action == "back":
             command = {"type": "back"}
         elif action == "forward":
@@ -565,9 +683,21 @@ def cmd_browser(args: argparse.Namespace) -> int:
         elif action == "close-tab":
             command = {"type": "close_tab"}
         elif action == "scroll":
-            command = {"type": "scroll", "selector": args.selector, "x": args.x, "y": args.y}
+            command = {
+                "type": "scroll",
+                "selector": args.selector,
+                "x": args.x,
+                "y": args.y,
+                "frame": frame,
+            }
         elif action == "scroll-by":
-            command = {"type": "scroll_by", "selector": args.selector, "delta_x": args.dx, "delta_y": args.dy}
+            command = {
+                "type": "scroll_by",
+                "selector": args.selector,
+                "delta_x": args.dx,
+                "delta_y": args.dy,
+                "frame": frame,
+            }
         elif action == "press":
             command = {
                 "type": "press_key",
@@ -577,13 +707,14 @@ def cmd_browser(args: argparse.Namespace) -> int:
                 "alt": args.alt,
                 "shift": args.shift,
                 "meta": args.meta,
+                "frame": frame,
             }
         elif action == "js":
-            command = {"type": "run_script", "script": args.script}
+            command = {"type": "run_script", "script": args.script, "frame": frame}
             if args.script_args:
                 command["args"] = json.loads(args.script_args)
         elif action == "screenshot":
-            command = {"type": "screenshot"}
+            command = {"type": "screenshot", "full_page": args.full_page}
         else:
             raise ValueError(f"Unsupported browser action: {action}")
 
@@ -596,6 +727,10 @@ def cmd_browser(args: argparse.Namespace) -> int:
             timeout_ms=args.timeout_ms,
             wait_sec=args.wait,
             poll_interval=args.poll_interval,
+            session_id=args.session_id,
+            idempotency_key=args.idempotency_key,
+            retry_policy=args.retry_policy,
+            confirm_dangerous=args.confirm_dangerous,
         )
 
         if action == "screenshot" and args.output:
@@ -629,6 +764,9 @@ def cmd_serve(args: argparse.Namespace) -> int:
         port=port,
         token=token,
         state_file=state_file,
+        lease_duration_ms=args.lease_duration_ms,
+        max_attempts=args.max_attempts,
+        artifacts_root=Path(args.artifacts_root).expanduser() if args.artifacts_root else None,
     )
     run_server(config, log_path=str(settings.hub_log_file))
     return 0
@@ -731,6 +869,12 @@ def _build_command_payload(args: argparse.Namespace) -> dict[str, Any]:
         "timeout_ms": args.timeout_ms,
         "target": target,
         "command": command,
+        "session_id": args.session_id,
+        "idempotency_key": args.idempotency_key,
+        "retry_policy": args.retry_policy,
+        "lease_duration_ms": args.lease_duration_ms,
+        "max_attempts": args.max_attempts,
+        "confirmation": {"confirmed": True} if args.confirm_dangerous else {},
     }
     return payload
 
@@ -803,6 +947,148 @@ def cmd_cancel(args: argparse.Namespace) -> int:
     return 0 if response.get("ok") else 1
 
 
+def cmd_session(args: argparse.Namespace) -> int:
+    try:
+        server, token = _extract_runtime(args)
+        action = args.session_action
+        if action == "list":
+            response = _http_json(
+                server=server,
+                token=token,
+                method="GET",
+                path="/api/sessions",
+            )
+        elif action == "show":
+            response = _http_json(
+                server=server,
+                token=token,
+                method="GET",
+                path=f"/api/sessions/{args.session_id}",
+            )
+        elif action == "create":
+            policy: dict[str, Any] = {}
+            if args.policy_file:
+                policy = _load_json_file(args.policy_file)
+            if args.policy_json:
+                inline = json.loads(args.policy_json)
+                if not isinstance(inline, dict):
+                    raise ValueError("--policy-json must contain a JSON object")
+                policy.update(inline)
+            response = _http_json(
+                server=server,
+                token=token,
+                method="POST",
+                path="/api/sessions",
+                payload={
+                    "owner_id": args.owner_id,
+                    "client_id": args.client_id,
+                    "ttl_seconds": args.ttl_seconds,
+                    "policy": policy,
+                },
+            )
+        elif action == "heartbeat":
+            response = _http_json(
+                server=server,
+                token=token,
+                method="POST",
+                path=f"/api/sessions/{args.session_id}/heartbeat",
+                payload={},
+            )
+        elif action == "close":
+            response = _http_json(
+                server=server,
+                token=token,
+                method="POST",
+                path=f"/api/sessions/{args.session_id}/close",
+                payload={"reason": args.reason},
+            )
+        elif action == "lock":
+            response = _http_json(
+                server=server,
+                token=token,
+                method="POST",
+                path=f"/api/sessions/{args.session_id}/locks",
+                payload={
+                    "client_id": args.client_id,
+                    "tab_id": args.tab_id,
+                    "lock_mode": args.mode,
+                },
+            )
+        elif action == "unlock":
+            response = _http_json(
+                server=server,
+                token=token,
+                method="POST",
+                path=f"/api/sessions/{args.session_id}/locks/release",
+                payload={
+                    "client_id": args.client_id,
+                    "tab_id": args.tab_id,
+                },
+            )
+        else:
+            raise ValueError(f"Unsupported session action: {action}")
+    except (RuntimeError, ValueError, json.JSONDecodeError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    _print_json(response)
+    return 0 if response.get("ok") else 1
+
+
+def cmd_storage(args: argparse.Namespace) -> int:
+    try:
+        server, token = _extract_runtime(args)
+        if args.storage_action == "backup":
+            response = _http_json(
+                server=server,
+                token=token,
+                method="POST",
+                path="/api/storage/backup",
+                payload={"destination": args.destination},
+            )
+        elif args.storage_action == "journal":
+            response = _http_json(
+                server=server,
+                token=token,
+                method="GET",
+                path=f"/api/storage/journal?{urlencode({'limit': args.limit})}",
+            )
+        else:
+            raise ValueError(f"Unsupported storage action: {args.storage_action}")
+    except (RuntimeError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    _print_json(response)
+    return 0 if response.get("ok") else 1
+
+
+def _add_agent_locator_options(parser: argparse.ArgumentParser) -> None:
+    locator = parser.add_mutually_exclusive_group(required=True)
+    locator.add_argument("--selector", help="CSS selector, including open shadow roots")
+    locator.add_argument("--ref", help="Frame-scoped ref returned by snapshot")
+    locator.add_argument("--role", help="ARIA or implicit role, for example button")
+    locator.add_argument("--text", dest="locator_text", help="Visible text")
+    locator.add_argument("--label", help="Associated label or aria-label")
+    locator.add_argument("--placeholder", help="Input placeholder")
+    locator.add_argument("--test-id", dest="test_id", help="data-testid/data-test-id/data-test")
+    parser.add_argument("--name", help="Accessible name used with --role")
+    parser.add_argument("--exact", action="store_true", help="Require exact text/name match")
+    parser.add_argument("--nth", type=int, help="Explicit zero-based match index")
+    parser.add_argument("--root-selector", help="Limit search to a CSS subtree")
+
+
+def _add_action_proof_options(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--proof-url-changed", action="store_true")
+    parser.add_argument("--proof-text-changed", action="store_true")
+    parser.add_argument("--proof-value-changed", action="store_true")
+    parser.add_argument("--proof-expected-url")
+    parser.add_argument("--proof-expected-text")
+    parser.add_argument("--proof-expected-value")
+    parser.add_argument("--proof-selector-appears")
+    parser.add_argument("--proof-selector-disappears")
+    parser.add_argument("--proof-new-tab", action="store_true")
+    parser.add_argument("--proof-timeout-ms", type=int, default=5000)
+
+
 def build_parser() -> argparse.ArgumentParser:
     settings = load_runtime_settings(mutate=False)
     default_server = settings.server_url
@@ -832,6 +1118,9 @@ def build_parser() -> argparse.ArgumentParser:
         default="",
         help=f"Path to persistent state file (default: {settings.hub_state_file})",
     )
+    serve.add_argument("--lease-duration-ms", type=int, default=60_000)
+    serve.add_argument("--max-attempts", type=int, default=3)
+    serve.add_argument("--artifacts-root", default="")
     serve.set_defaults(func=cmd_serve)
 
     runtime_env = sub.add_parser("runtime-env", help="Print resolved runtime environment for shell wrappers")
@@ -905,6 +1194,12 @@ def build_parser() -> argparse.ArgumentParser:
     send.add_argument("--command-timeout-ms", type=int, default=10000, help="Command-level timeout in extension")
 
     send.add_argument("--timeout-ms", type=int, default=20000, help="Hub queue timeout for command")
+    send.add_argument("--lease-duration-ms", type=int, default=60_000)
+    send.add_argument("--max-attempts", type=int, default=3)
+    send.add_argument("--idempotency-key")
+    send.add_argument("--retry-policy", choices=sorted(RETRY_POLICIES))
+    send.add_argument("--session-id")
+    send.add_argument("--confirm-dangerous", action="store_true")
     send.add_argument("--wait", type=int, default=0, help="Wait up to N seconds for terminal command state")
     send.add_argument("--poll-interval", type=float, default=1.0, help="Polling interval for --wait")
     send.set_defaults(func=cmd_send)
@@ -922,6 +1217,61 @@ def build_parser() -> argparse.ArgumentParser:
     cancel.add_argument("--reason", default="manual cancel")
     cancel.set_defaults(func=cmd_cancel)
 
+    session = sub.add_parser("session", help="Manage agent sessions and tab locks")
+    add_runtime_options(session)
+    session_sub = session.add_subparsers(dest="session_action", required=True)
+
+    session_list = session_sub.add_parser("list", help="List sessions")
+    session_list.set_defaults(func=cmd_session)
+
+    session_show = session_sub.add_parser("show", help="Show one session")
+    session_show.add_argument("session_id")
+    session_show.set_defaults(func=cmd_session)
+
+    session_create = session_sub.add_parser("create", help="Create an agent session")
+    session_create.add_argument("--owner-id", required=True)
+    session_create.add_argument("--client-id")
+    session_create.add_argument("--ttl-seconds", type=int, default=300)
+    session_create.add_argument("--policy-file")
+    session_create.add_argument("--policy-json")
+    session_create.set_defaults(func=cmd_session)
+
+    session_heartbeat = session_sub.add_parser("heartbeat", help="Renew a session TTL")
+    session_heartbeat.add_argument("session_id")
+    session_heartbeat.set_defaults(func=cmd_session)
+
+    session_close = session_sub.add_parser("close", help="Close a session and release locks")
+    session_close.add_argument("session_id")
+    session_close.add_argument("--reason", default="closed_by_owner")
+    session_close.set_defaults(func=cmd_session)
+
+    session_lock = session_sub.add_parser("lock", help="Acquire a tab lock")
+    session_lock.add_argument("session_id")
+    session_lock.add_argument("--client-id", required=True)
+    session_lock.add_argument("--tab-id", required=True, type=int)
+    session_lock.add_argument(
+        "--mode",
+        choices=("exclusive", "shared_read", "operator_override"),
+        default="exclusive",
+    )
+    session_lock.set_defaults(func=cmd_session)
+
+    session_unlock = session_sub.add_parser("unlock", help="Release a tab lock")
+    session_unlock.add_argument("session_id")
+    session_unlock.add_argument("--client-id", required=True)
+    session_unlock.add_argument("--tab-id", required=True, type=int)
+    session_unlock.set_defaults(func=cmd_session)
+
+    storage = sub.add_parser("storage", help="Inspect and back up transactional storage")
+    add_runtime_options(storage)
+    storage_sub = storage.add_subparsers(dest="storage_action", required=True)
+    storage_backup = storage_sub.add_parser("backup", help="Create an online SQLite backup")
+    storage_backup.add_argument("--destination", default="")
+    storage_backup.set_defaults(func=cmd_storage)
+    storage_journal = storage_sub.add_parser("journal", help="Print the append-only journal tail")
+    storage_journal.add_argument("--limit", type=int, default=100)
+    storage_journal.set_defaults(func=cmd_storage)
+
     browser = sub.add_parser("browser", help="Simple browser control wrapper")
     add_runtime_options(browser)
     browser.add_argument("--client-id", help="Target one browser client; by default the freshest client is used")
@@ -938,6 +1288,15 @@ def build_parser() -> argparse.ArgumentParser:
     browser.add_argument("--wait", type=int, default=20, help="Wait up to N seconds for a result")
     browser.add_argument("--poll-interval", type=float, default=0.5, help="Polling interval while waiting")
     browser.add_argument("--raw", action="store_true", help="Print full raw command state")
+    browser.add_argument("--session-id", help="Agent session that owns the target tab")
+    browser.add_argument("--idempotency-key", help="Stable key for safe command resubmission")
+    browser.add_argument("--retry-policy", choices=sorted(RETRY_POLICIES))
+    browser.add_argument("--confirm-dangerous", action="store_true")
+    frame = browser.add_mutually_exclusive_group()
+    frame.add_argument("--frame-id", type=int)
+    frame.add_argument("--frame-url")
+    frame.add_argument("--frame-name")
+    frame.add_argument("--frame-css")
     browser_sub = browser.add_subparsers(dest="browser_action", required=True)
 
     browser_status = browser_sub.add_parser("status", help="Show selected client and current hub-visible state")
@@ -949,14 +1308,82 @@ def build_parser() -> argparse.ArgumentParser:
     browser_tabs = browser_sub.add_parser("tabs", help="List tabs for the selected client")
     browser_tabs.set_defaults(func=cmd_browser)
 
+    browser_schema = browser_sub.add_parser("schema", help="Print the browser-agent API schema")
+    browser_schema.set_defaults(func=cmd_browser)
+
     browser_open = browser_sub.add_parser("open", help="Open URL in the selected tab")
     browser_open.add_argument("url")
+    browser_open.add_argument(
+        "--wait-until",
+        choices=("document_loaded", "url_changed", "dom_quiet", "network_idle", "loading_gone"),
+        default="document_loaded",
+    )
+    browser_open.add_argument("--expected-url")
+    browser_open.add_argument("--expected-title")
+    browser_open.add_argument("--quiet-ms", type=int, default=500)
+    browser_open.add_argument("--loading-selector")
+    browser_open.add_argument(
+        "--allow-redirects",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
     browser_open.set_defaults(func=cmd_browser)
 
     browser_new_tab = browser_sub.add_parser("new-tab", help="Create a new browser tab")
     browser_new_tab.add_argument("url")
     browser_new_tab.add_argument("--background", action="store_true", help="Create the tab without focusing it")
+    browser_new_tab.add_argument(
+        "--wait-until",
+        choices=("document_loaded", "url_changed", "dom_quiet", "network_idle", "loading_gone"),
+        default="document_loaded",
+    )
+    browser_new_tab.add_argument("--expected-url")
+    browser_new_tab.add_argument("--expected-title")
+    browser_new_tab.add_argument("--quiet-ms", type=int, default=500)
+    browser_new_tab.add_argument("--loading-selector")
     browser_new_tab.set_defaults(func=cmd_browser)
+
+    browser_snapshot = browser_sub.add_parser(
+        "snapshot",
+        help="Return a semantic snapshot with frame-scoped refs",
+    )
+    browser_snapshot.add_argument("--root-selector")
+    browser_snapshot.add_argument("--limit", type=int, default=200)
+    browser_snapshot.add_argument("--include-hidden", action="store_true")
+    browser_snapshot.add_argument(
+        "--include-frames",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
+    browser_snapshot.set_defaults(func=cmd_browser)
+
+    browser_smart_click = browser_sub.add_parser(
+        "smart-click",
+        help="Wait for one actionable semantic locator and click",
+    )
+    _add_agent_locator_options(browser_smart_click)
+    _add_action_proof_options(browser_smart_click)
+    browser_smart_click.set_defaults(func=cmd_browser)
+
+    browser_set_text = browser_sub.add_parser(
+        "set-text",
+        help="Wait for one editable semantic locator and replace text",
+    )
+    browser_set_text.add_argument("value")
+    _add_agent_locator_options(browser_set_text)
+    _add_action_proof_options(browser_set_text)
+    browser_set_text.set_defaults(func=cmd_browser)
+
+    browser_wait_for = browser_sub.add_parser(
+        "wait-for",
+        help="Wait for a semantic locator state",
+    )
+    _add_agent_locator_options(browser_wait_for)
+    browser_wait_for.add_argument("--state", choices=WAIT_STATES, default="visible")
+    browser_wait_for.add_argument("--expected-text")
+    browser_wait_for.add_argument("--expected-value")
+    browser_wait_for.add_argument("--exact-value", action="store_true")
+    browser_wait_for.set_defaults(func=cmd_browser)
 
     browser_click = browser_sub.add_parser("click", help="Click element by CSS selector")
     browser_click.add_argument("selector")
@@ -1054,8 +1481,9 @@ def build_parser() -> argparse.ArgumentParser:
     browser_js.add_argument("--script-args", help="JSON args for run_script")
     browser_js.set_defaults(func=cmd_browser)
 
-    browser_screenshot = browser_sub.add_parser("screenshot", help="Capture screenshot of the visible tab")
+    browser_screenshot = browser_sub.add_parser("screenshot", help="Capture the explicitly targeted tab")
     browser_screenshot.add_argument("--output", help="Write PNG to a file")
+    browser_screenshot.add_argument("--full-page", action="store_true")
     browser_screenshot.set_defaults(func=cmd_browser)
 
     return parser

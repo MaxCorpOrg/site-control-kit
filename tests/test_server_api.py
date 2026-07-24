@@ -17,11 +17,15 @@ class ServerApiTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
         self.state_file = Path(self.tmp.name) / "state.json"
-        self.config = HubConfig(host="127.0.0.1", port=0, token="test-token", state_file=self.state_file)
+        self.config = HubConfig(
+            host="127.0.0.1", port=0, token="test-token", state_file=self.state_file
+        )
         self.store = ControlStore(self.state_file)
         self.server = HubHTTPServer(self.config.host, self.config.port, self.config, self.store)
         self.port = self.server.server_port
-        self.thread = threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True)
+        self.thread = threading.Thread(
+            target=self.server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True
+        )
         self.thread.start()
 
     def tearDown(self) -> None:
@@ -41,10 +45,12 @@ class ServerApiTests(unittest.TestCase):
         method: str = "GET",
         payload: dict | None = None,
         token: str | None = "test-token",
+        extra_headers: dict[str, str] | None = None,
     ) -> tuple[int, dict]:
         headers = {"Accept": "application/json"}
         if token is not None:
             headers["X-Access-Token"] = token
+        headers.update(extra_headers or {})
         body = None
         if payload is not None:
             body = json.dumps(payload).encode("utf-8")
@@ -65,7 +71,15 @@ class ServerApiTests(unittest.TestCase):
                 "client_id": client_id,
                 "extension_version": "0.1.0",
                 "user_agent": "test-agent",
-                "tabs": [{"id": 1, "windowId": 1, "active": True, "title": client_id, "url": "https://example.com"}],
+                "tabs": [
+                    {
+                        "id": 1,
+                        "windowId": 1,
+                        "active": True,
+                        "title": client_id,
+                        "url": "https://example.com",
+                    }
+                ],
                 "meta": {"extension": "site-control-bridge"},
             },
         )
@@ -77,6 +91,43 @@ class ServerApiTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["service"], "site-control-hub")
+
+    def test_token_in_url_or_body_is_rejected(self) -> None:
+        status, payload = self._request("/api/clients?token=test-token", token=None)
+        self.assertEqual(status, 400)
+        self.assertEqual(payload["error_code"], "token_in_url_forbidden")
+
+        status, payload = self._request(
+            "/api/clients/heartbeat",
+            method="POST",
+            payload={"token": "test-token", "client_id": "c1"},
+            token=None,
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(payload["error_code"], "token_in_body_forbidden")
+
+    def test_disallowed_origin_is_rejected_and_bearer_auth_works(self) -> None:
+        status, payload = self._request(
+            "/api/clients",
+            extra_headers={"Origin": "https://untrusted.example"},
+        )
+        self.assertEqual(status, 403)
+        self.assertEqual(payload["error_code"], "origin_denied")
+
+        status, payload = self._request(
+            "/api/clients",
+            token=None,
+            extra_headers={"Authorization": "Bearer test-token"},
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(payload["ok"])
+
+    def test_agent_schema_reports_protocol_and_extension_contract(self) -> None:
+        status, payload = self._request("/api/agent/schema")
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["schema"]["protocol_version"], "2.0")
+        self.assertIn("smart_click", payload["schema"]["commands"])
+        self.assertIn("stable_refs", payload["schema"]["compatibility"])
 
     def test_heartbeat_and_clients_endpoint_show_online_client(self) -> None:
         self._heartbeat("c1")
@@ -152,7 +203,7 @@ class ServerApiTests(unittest.TestCase):
         )
         self.assertEqual(status, 200)
         self.assertTrue(payload["ok"])
-        self.assertEqual(payload["status"], "pending")
+        self.assertEqual(payload["status"], "queued")
         self.assertEqual(payload["target_client_ids"], ["c1"])
         self.assertIsNone(payload["error"])
 

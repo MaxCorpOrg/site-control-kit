@@ -1,0 +1,23 @@
+{
+  "allowed_domains": [
+    "127.0.0.1",
+    "localhost"
+  ],
+  "denied_domains": [],
+  "read_only": false,
+  "allow_input": true,
+  "allow_file_upload": false,
+  "allow_form_submit": false,
+  "allow_download": false,
+  "allow_cdp": true,
+  "max_tabs": 2,
+  "max_session_duration_seconds": 900,
+  "require_dangerous_confirmation": true,
+  "capture_screenshots": true,
+  "capture_console": true,
+  "capture_network": true,
+  "capture_har": false,
+  "capture_trace": false,
+  "capture_video": false,
+  "secrets": []
+}

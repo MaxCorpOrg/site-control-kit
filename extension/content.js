@@ -1,3 +1,8 @@
+(() => {
+if (globalThis.__siteControlContentListenerInstalled) {
+  return;
+}
+
 function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -629,6 +634,141 @@ async function waitForSelector(selector, timeoutMs = 10000, visibleOnly = false)
   throw new Error(`Timeout waiting for selector: ${selector}`);
 }
 
+async function waitForPageState(command) {
+  const state = String(command.state || "dom_quiet");
+  const timeoutMs = Math.max(100, Number(command.timeout_ms || 10000));
+  if (state === "loading_gone") {
+    const selector = String(command.selector || "");
+    if (!selector) {
+      throw new Error("loading_gone requires selector");
+    }
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() <= deadline) {
+      const element = document.querySelector(selector);
+      if (!element || !isVisible(element)) {
+        return { state, selector, ready: true };
+      }
+      await wait(100);
+    }
+    throw new Error(`Loading indicator did not disappear within ${timeoutMs}ms`);
+  }
+  if (state !== "dom_quiet") {
+    throw new Error(`Unsupported page wait state: ${state}`);
+  }
+  const quietMs = Math.max(50, Number(command.quiet_ms || 500));
+  return new Promise((resolve, reject) => {
+    let lastMutationAt = Date.now();
+    let settled = false;
+    const observer = new MutationObserver(() => {
+      lastMutationAt = Date.now();
+    });
+    const cleanup = () => {
+      observer.disconnect();
+      clearInterval(interval);
+      clearTimeout(timeout);
+    };
+    observer.observe(document.documentElement, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      characterData: true
+    });
+    const interval = setInterval(() => {
+      if (!settled && Date.now() - lastMutationAt >= quietMs) {
+        settled = true;
+        cleanup();
+        resolve({ state, ready: true, quiet_ms: quietMs });
+      }
+    }, Math.min(100, quietMs));
+    const timeout = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(new Error(`DOM did not become quiet within ${timeoutMs}ms`));
+    }, timeoutMs);
+  });
+}
+
+function requireAgentDom() {
+  const agent = globalThis.__siteControlAgentDom;
+  if (!agent) {
+    throw new Error("Agent DOM module is not loaded");
+  }
+  return agent;
+}
+
+function setNativeValue(element, value) {
+  if (element.isContentEditable) {
+    element.textContent = String(value ?? "");
+    dispatchInputEvents(element);
+    return element.textContent;
+  }
+  if (!("value" in element)) {
+    throw new Error("Target element does not support editable text");
+  }
+  const prototype = Object.getPrototypeOf(element);
+  const descriptor = Object.getOwnPropertyDescriptor(prototype, "value");
+  if (descriptor?.set) {
+    descriptor.set.call(element, String(value ?? ""));
+  } else {
+    element.value = String(value ?? "");
+  }
+  dispatchInputEvents(element);
+  return element.value;
+}
+
+async function verifyActionProof(proof, before, element) {
+  if (!proof || typeof proof !== "object" || !Object.keys(proof).length) {
+    return {
+      requested: false,
+      verified: null,
+      reason: "no_postcondition_requested"
+    };
+  }
+  const timeoutMs = Math.max(100, Number(proof.timeout_ms || 5000));
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() <= deadline) {
+    const currentUrl = String(location.href);
+    const currentText = String(element?.innerText ?? element?.textContent ?? "");
+    const currentValue = "value" in (element || {}) ? String(element.value ?? "") : "";
+    let verified = true;
+    if (proof.url_changed) verified = verified && currentUrl !== before.url;
+    if (proof.expected_url) {
+      verified = verified && (
+        proof.exact_url
+          ? currentUrl === String(proof.expected_url)
+          : currentUrl.includes(String(proof.expected_url))
+      );
+    }
+    if (proof.text_changed) verified = verified && currentText !== before.text;
+    if (proof.value_changed) verified = verified && currentValue !== before.value;
+    if (proof.expected_text) {
+      verified = verified && (
+        document.body?.innerText || ""
+      ).includes(String(proof.expected_text));
+    }
+    if (proof.expected_value !== undefined) {
+      verified = verified && currentValue === String(proof.expected_value);
+    }
+    if (proof.selector_appears) {
+      verified = verified && Boolean(document.querySelector(String(proof.selector_appears)));
+    }
+    if (proof.selector_disappears) {
+      verified = verified && !document.querySelector(String(proof.selector_disappears));
+    }
+    if (verified) {
+      return {
+        requested: true,
+        verified: true,
+        url_before: before.url,
+        url_after: currentUrl
+      };
+    }
+    await wait(100);
+  }
+  throw new Error(`Action postcondition was not satisfied within ${timeoutMs}ms`);
+}
+
 async function runCommand(command) {
   const type = command?.type;
   if (!type) {
@@ -648,6 +788,116 @@ async function runCommand(command) {
 
     case "get_page_url": {
       return { url: String(window.location.href || "") };
+    }
+
+    case "describe_frame": {
+      return {
+        url: String(window.location.href || ""),
+        name: String(window.name || ""),
+        is_top: window === window.top,
+        title: String(document.title || "")
+      };
+    }
+
+    case "describe_frame_element": {
+      const frame = queryElement(command.selector);
+      if (!["iframe", "frame"].includes(String(frame.tagName || "").toLowerCase())) {
+        throw new Error("Frame CSS selector must point to iframe or frame");
+      }
+      return {
+        selector: command.selector,
+        name: String(frame.name || frame.getAttribute("name") || ""),
+        src: String(frame.src || frame.getAttribute("src") || ""),
+        title: String(frame.title || frame.getAttribute("title") || "")
+      };
+    }
+
+    case "wait_page_state": {
+      return waitForPageState(command);
+    }
+
+    case "snapshot": {
+      return requireAgentDom().snapshot(command);
+    }
+
+    case "wait_for": {
+      return requireAgentDom().waitFor(command.locator, {
+        state: command.state,
+        expected_text: command.expected_text,
+        expected_value: command.expected_value,
+        exact: command.exact,
+        timeout_ms: command.timeout_ms,
+        poll_ms: command.poll_ms,
+        stable_ms: command.stable_ms
+      });
+    }
+
+    case "smart_click": {
+      const agent = requireAgentDom();
+      const ready = await agent.waitFor(command.locator, {
+        state: "actionable",
+        timeout_ms: command.timeout_ms,
+        poll_ms: command.poll_ms,
+        stable_ms: command.stable_ms
+      });
+      const resolved = agent.resolveLocator(command.locator);
+      const element = resolved.element;
+      const before = {
+        url: String(location.href),
+        text: String(element.innerText ?? element.textContent ?? ""),
+        value: "value" in element ? String(element.value ?? "") : ""
+      };
+      dispatchMouseClickSequence(element);
+      const proof = await verifyActionProof(command.proof, before, element);
+      return {
+        clicked: true,
+        ref: resolved.ref,
+        healed: Boolean(ready.healed || resolved.healed),
+        match_count: resolved.match_count,
+        candidates: resolved.candidates,
+        role: agent.roleOf(element),
+        name: agent.accessibleName(element),
+        actionability: ready.actionability,
+        proof
+      };
+    }
+
+    case "set_editable_text": {
+      const agent = requireAgentDom();
+      const ready = await agent.waitFor(command.locator, {
+        state: "editable",
+        timeout_ms: command.timeout_ms,
+        poll_ms: command.poll_ms
+      });
+      const resolved = agent.resolveLocator(command.locator);
+      const element = resolved.element;
+      focusElement(element);
+      const before = {
+        url: String(location.href),
+        text: String(element.innerText ?? element.textContent ?? ""),
+        value: "value" in element ? String(element.value ?? "") : ""
+      };
+      const value = setNativeValue(element, command.value ?? "");
+      const defaultProof = element.isContentEditable
+        ? { expected_text: String(command.value ?? ""), timeout_ms: 1000 }
+        : { expected_value: String(command.value ?? ""), timeout_ms: 1000 };
+      const proof = await verifyActionProof(
+        command.proof || defaultProof,
+        before,
+        element
+      );
+      return {
+        changed: true,
+        value,
+        ref: resolved.ref,
+        healed: Boolean(ready.healed || resolved.healed),
+        match_count: resolved.match_count,
+        candidates: resolved.candidates,
+        role: agent.roleOf(element),
+        name: agent.accessibleName(element),
+        actionability: ready.actionability,
+        proof
+      };
     }
 
     case "context_click": {
@@ -880,10 +1130,17 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         ok: false,
         error: {
           message: String(error?.message || error),
-          stack: error?.stack || ""
+          stack: error?.stack || "",
+          code: error?.code || "content_command_failed",
+          candidate_count: Number(error?.candidate_count || 0),
+          candidates: Array.isArray(error?.candidates) ? error.candidates : [],
+          last_locator_error: error?.last_locator_error || null
         }
       });
     });
 
   return true;
 });
+
+globalThis.__siteControlContentListenerInstalled = true;
+})();

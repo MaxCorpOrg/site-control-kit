@@ -1,0 +1,159 @@
+name: Браузерное ядро
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: browser-core-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Код и модульные тесты
+    runs-on: ubuntu-latest
+    steps:
+      - name: Получить исходный код
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Настроить Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Настроить Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      - name: Установить инструменты проверки
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --no-deps -e .
+          python -m pip install PyYAML==6.0.2 python-dotenv==1.2.2 mypy ruff
+
+      - name: Проверить Python
+        run: |
+          python -m unittest discover -s tests -p 'test_*.py'
+          python -m py_compile \
+            webcontrol/artifacts.py \
+            webcontrol/browser_agent.py \
+            webcontrol/protocol.py \
+            webcontrol/state_backend.py \
+            scripts/browser_e2e.py \
+            scripts/install_chrome_for_testing.py
+          ruff check webcontrol scripts/browser_e2e.py scripts/check_docs.py \
+            scripts/check_repository.py scripts/install_chrome_for_testing.py \
+            tests/test_agent_sessions.py tests/test_browser_agent.py \
+            tests/test_reliable_delivery.py tests/test_server_api.py tests/test_store.py
+          ruff format --check webcontrol/artifacts.py webcontrol/browser_agent.py \
+            webcontrol/protocol.py webcontrol/state_backend.py scripts/browser_e2e.py \
+            scripts/check_docs.py scripts/check_repository.py \
+            scripts/install_chrome_for_testing.py tests/test_agent_sessions.py \
+            tests/test_browser_agent.py tests/test_reliable_delivery.py
+          mypy webcontrol/artifacts.py webcontrol/browser_agent.py webcontrol/protocol.py \
+            webcontrol/state_backend.py scripts/browser_e2e.py \
+            scripts/check_docs.py scripts/check_repository.py \
+            scripts/install_chrome_for_testing.py
+
+      - name: Проверить JavaScript и JSON
+        run: |
+          node --check extension/agent_dom.js
+          node --check extension/content.js
+          node --check extension/background.js
+          node --test tests/js/agent_dom.test.mjs
+          python -m json.tool extension/manifest.json >/dev/null
+          for file in examples/*.json; do python -m json.tool "$file" >/dev/null; done
+
+      - name: Проверить документацию и состав репозитория
+        run: |
+          python scripts/check_docs.py \
+            --base "${{ github.event.pull_request.base.sha || 'HEAD^' }}"
+          python scripts/check_repository.py \
+            --base "${{ github.event.pull_request.base.sha || 'HEAD^' }}"
+          git diff --check
+
+  browser-e2e:
+    name: Реальный Chrome и расширение
+    runs-on: ubuntu-latest
+    steps:
+      - name: Получить исходный код
+        uses: actions/checkout@v7
+
+      - name: Настроить Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Установить минимальное окружение
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --no-deps -e .
+          python -m pip install PyYAML==6.0.2 python-dotenv==1.2.2
+
+      - name: Установить официальный Chrome for Testing
+        id: chrome
+        run: |
+          chrome_path="$(python scripts/install_chrome_for_testing.py \
+            --destination "$RUNNER_TEMP/chrome-for-testing")"
+          echo "path=$chrome_path" >> "$GITHUB_OUTPUT"
+
+      - name: Проверить браузерное ядро
+        env:
+          SITE_CONTROL_BASE_MAIN_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
+        run: |
+          xvfb-run -a python scripts/browser_e2e.py \
+            --headed \
+            --chrome "${{ steps.chrome.outputs.path }}" \
+            --output artifacts/e2e
+
+      - name: Сохранить отчёт и диагностику
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: browser-e2e-${{ github.run_id }}
+          path: artifacts/e2e
+          if-no-files-found: warn
+          retention-days: 14
+
+  dependencies:
+    name: Зависимости и лицензии
+    runs-on: ubuntu-latest
+    steps:
+      - name: Получить исходный код
+        uses: actions/checkout@v7
+
+      - name: Настроить Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Установить аудиторы
+        run: python -m pip install pip-audit pip-licenses
+
+      - name: Проверить известные уязвимости
+        run: pip-audit --requirement requirements.txt --progress-spinner off
+
+      - name: Сформировать перечень лицензий
+        run: |
+          python -m pip install -r requirements.txt
+          pip-licenses --format=json --output-file=licenses.json
+
+      - name: Сохранить перечень лицензий
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: dependency-licenses-${{ github.run_id }}
+          path: licenses.json
+          if-no-files-found: warn
+          retention-days: 14

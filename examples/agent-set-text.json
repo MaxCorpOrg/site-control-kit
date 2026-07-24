@@ -1,0 +1,19 @@
+{
+  "issued_by": "example-agent",
+  "timeout_ms": 20000,
+  "idempotency_key": "example-set-name-1",
+  "retry_policy": "retry_if_not_started",
+  "target": {
+    "client_id": "REPLACE_CLIENT_ID",
+    "tab_id": 1
+  },
+  "command": {
+    "type": "set_editable_text",
+    "locator": {
+      "strategy": "label",
+      "value": "Имя агента",
+      "exact": true
+    },
+    "value": "Тестовый агент"
+  }
+}

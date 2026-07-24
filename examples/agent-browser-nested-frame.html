@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>Вложенный фрейм</title>
+</head>
+<body>
+  <h3>Вложенный фрейм</h3>
+  <button id="nested-action" type="button">Действие во вложенном фрейме</button>
+  <output id="nested-status">Вложенный фрейм ожидает</output>
+  <script>
+    document.querySelector("#nested-action").onclick = () => {
+      document.querySelector("#nested-status").textContent = "Вложенное действие выполнено";
+    };
+  </script>
+</body>
+</html>

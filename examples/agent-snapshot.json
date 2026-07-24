@@ -1,0 +1,16 @@
+{
+  "issued_by": "example-agent",
+  "timeout_ms": 20000,
+  "idempotency_key": "example-snapshot-1",
+  "retry_policy": "safe_retry",
+  "target": {
+    "client_id": "REPLACE_CLIENT_ID",
+    "tab_id": 1
+  },
+  "command": {
+    "type": "snapshot",
+    "limit": 200,
+    "include_hidden": false,
+    "include_frames": true
+  }
+}
